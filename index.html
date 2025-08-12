@@ -187,7 +187,20 @@
               <h3>School Information</h3>
               <div class="grid-two-cols">
                 <div><label for="schoolName">School Name *</label><input type="text" id="schoolName" name="schoolName" placeholder="School Name" required class="border p-2 rounded" /></div>
-                <div><label for="classLevel">Class Level *</label><input type="text" id="classLevel" name="classLevel" placeholder="e.g., Class 4" required class="border p-2 rounded" /></div>
+                <div>
+                  <label for="classLevel">Class Level *</label>
+                  <select id="classLevel" name="classLevel" required class="border p-2 rounded">
+                    <option value="" disabled selected>Select class</option>
+                    <option value="Baby Class">Baby Class</option>
+                    <option value="Class 1">Class 1</option>
+                    <option value="Class 2">Class 2</option>
+                    <option value="Class 3">Class 3</option>
+                    <option value="Class 4">Class 4</option>
+                    <option value="Class 5">Class 5</option>
+                    <option value="Class 6">Class 6</option>
+                    <option value="Class 7">Class 7</option>
+                  </select>
+                </div>
                 <div><label for="stream">Stream</label><input type="text" id="stream" name="stream" placeholder="e.g., 4B" class="border p-2 rounded" /></div>
                 <div><label for="academicYear">Current Academic Year *</label><input type="text" id="academicYear" name="academicYear" placeholder="e.g., 2024" required class="border p-2 rounded" /></div>
                 <div><label for="academicTrack">Academic Track</label><input type="text" id="academicTrack" name="academicTrack" placeholder="e.g., NECTA / SFNA" class="border p-2 rounded" /></div>
@@ -230,16 +243,8 @@
         <!-- Students List -->
         <div class="card">
           <h3 class="text-xl font-semibold text-blue-600">Students</h3>
-          <div class="small">Add students (saved to <code>/students</code> in your Realtime Database).</div>
-          <div class="form-row">
-            <input id="stuName" type="text" placeholder="Full name (e.g. Amina Yusuf)" class="border p-2 rounded flex-1" />
-            <input id="stuForm" type="text" placeholder="Form (e.g. Form 2)" style="width:130px" class="border p-2 rounded" />
-            <button id="addStudentBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white">Add</button>
-          </div>
           <div class="mt-4 flex gap-2">
             <button id="exportCsvBtn" class="ghost px-4 py-2">Export CSV</button>
-            <button id="seedBtn" class="ghost px-4 py-2">Seed sample</button>
-            <button id="clearDbStudentsBtn" class="ghost px-4 py-2 text-red-600 border-red-200" title="Danger">Delete DB students</button>
           </div>
           <div class="students-list mt-4" id="studentsList" aria-live="polite"></div>
         </div>
@@ -328,12 +333,7 @@
     function initApp(db, storage) {
       // DOM Elements
       const registrationForm = document.getElementById('registrationForm');
-      const stuName = document.getElementById('stuName');
-      const stuForm = document.getElementById('stuForm');
-      const addStudentBtn = document.getElementById('addStudentBtn');
       const studentsList = document.getElementById('studentsList');
-      const seedBtn = document.getElementById('seedBtn');
-      const clearDbStudentsBtn = document.getElementById('clearDbStudentsBtn');
       const exportCsvBtn = document.getElementById('exportCsvBtn');
       const chatEl = document.getElementById('chat');
       const myName = document.getElementById('myName');
@@ -371,7 +371,7 @@
         const gender = registrationForm.gender.value;
         const dob = registrationForm.dob.value;
         const schoolName = registrationForm.schoolName.value.trim();
-        const classLevel = registrationForm.classLevel.value.trim();
+        const classLevel = registrationForm.classLevel.value;
         const academicYear = registrationForm.academicYear.value.trim();
         const boardingStatus = registrationForm.boardingStatus.value;
         const primaryParentName = registrationForm.primaryParentName.value.trim();
@@ -450,37 +450,6 @@
         }
       });
 
-      // Students List Management
-      addStudentBtn.addEventListener('click', () => {
-        const name = (stuName.value || '').trim();
-        const form = (stuForm.value || '').trim() || 'N/A';
-        if (!name) { alert('Enter student name'); return; }
-        const payload = {
-          basicInfo: {
-            firstName: name.split(' ')[0] || 'Unknown',
-            lastName: name.split(' ').slice(1).join(' ') || '',
-            admissionNumber: 'ADM' + Date.now(),
-            feesDue: 0
-          },
-          schoolInfo: {
-            classLevel: form,
-            schoolName: 'Socrates Pre & Primary',
-            academicYear: '2025',
-            admissionDate: new Date().toISOString().split('T')[0]
-          },
-          parentGuardian: {},
-          attachments: {},
-          scores: {},
-          attendance: { '2025': { totalDays: 0, present: 0 } },
-          createdAt: Date.now()
-        };
-        addStudentBtn.disabled = true;
-        db.ref('students').push(payload)
-          .then(() => { stuName.value = ''; stuForm.value = ''; })
-          .catch(err => alert('Save failed: ' + err.message))
-          .finally(() => addStudentBtn.disabled = false);
-      });
-
       db.ref('students').on('value', snap => {
         studentsList.innerHTML = '';
         const data = snap.val() || {};
@@ -511,7 +480,7 @@
         const key = e.target.dataset.key;
         db.ref('students/' + key).once('value').then(snap => {
           const s = snap.val();
-          alert(`Name: ${s.basicInfo.firstName} ${s.basicInfo.lastName}\nClass: ${s.schoolInfo.classLevel}\nFees Due: ${s.basicInfo.feesDue || 0}\nAdmission Date: ${s.schoolInfo.admissionDate || 'N/A'}`);
+          alert(`Name: ${s.basicInfo.firstName} ${s.basicInfo.lastName}\nClass: ${s.schoolInfo.classLevel}\nFees Due: ${s.basicInfo.feesDue || 0}\nAdmission Date: ${s.schoolInfo.admissionDate || 'N/A'}\nDate of Birth: ${s.basicInfo.dob || 'N/A'}\nParent's Name: ${s.parentGuardian.primaryParentName || 'N/A'}\nParent's Contact: ${s.parentGuardian.primaryParentContact || 'N/A'}`);
         });
       };
 
@@ -524,14 +493,15 @@
       exportCsvBtn.addEventListener('click', () => {
         db.ref('students').once('value').then(snap => {
           const data = snap.val() || {};
-          const rows = [['First Name', 'Last Name', 'Class', 'Admission Number', 'Admission Date', 'Fees Due']];
+          const rows = [['Name', 'Administration Number', 'Class', 'Date of Registration', 'Date of Birth', 'Parents Contact', 'Parent\'s Name']];
           Object.values(data).forEach(s => rows.push([
-            s.basicInfo.firstName || '',
-            s.basicInfo.lastName || '',
-            s.schoolInfo.classLevel || '',
-            s.basicInfo.admissionNumber || '',
-            s.schoolInfo.admissionDate || '',
-            s.basicInfo.feesDue || 0
+            s.basicInfo.firstName + ' ' + s.basicInfo.lastName,
+            s.basicInfo.admissionNumber,
+            s.schoolInfo.classLevel,
+            new Date(s.createdAt).toLocaleDateString(),
+            s.basicInfo.dob,
+            s.parentGuardian.primaryParentContact,
+            s.parentGuardian.primaryParentName
           ]));
           const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
           const blob = new Blob([csv], { type: 'text/csv' });
@@ -542,45 +512,6 @@
           a.click();
           URL.revokeObjectURL(url);
         });
-      });
-
-      seedBtn.addEventListener('click', async () => {
-        if (!confirm('Seed sample students?')) return;
-        const sample = [
-          {
-            basicInfo: { firstName: 'Amina', lastName: 'Yusuf', admissionNumber: 'ADM' + Date.now(), gender: 'Female', dob: '2014-05-12', birthCertNumber: 'BC-12345', religion: 'Christian', tribe: 'Kikuyu', feesDue: 0 },
-            schoolInfo: { schoolName: 'Socrates Pre & Primary', classLevel: 'Class 4', stream: '4B', academicYear: '2025', academicTrack: 'NECTA', boardingStatus: 'Day', admissionDate: '2022-01-10' },
-            parentGuardian: { primaryParentName: 'Mrs Yusuf', primaryParentContact: '+255700111222', relationshipToStudent: 'Mother', residentialAddress: 'Kijitonyama, Dar es Salaam', employmentStatus: 'Employed' },
-            attachments: {},
-            scores: { '2025-03': { Math: 85, English: 90, Kiswahili: 88 } },
-            attendance: { '2025': { totalDays: 22, present: 20 } },
-            createdAt: Date.now()
-          },
-          {
-            basicInfo: { firstName: 'Peter', lastName: 'Kamau', admissionNumber: 'ADM' + (Date.now() + 1), gender: 'Male', dob: '2012-11-03', birthCertNumber: 'BC-23456', religion: 'Muslim', tribe: 'Kamba', feesDue: 12000 },
-            schoolInfo: { schoolName: 'Socrates Pre & Primary', classLevel: 'Class 6', stream: '6A', academicYear: '2025', academicTrack: 'NECTA', boardingStatus: 'Day', admissionDate: '2020-03-01' },
-            parentGuardian: { primaryParentName: 'Mr Kamau', primaryParentContact: '+255700222333', relationshipToStudent: 'Father', residentialAddress: 'Msasani, Dar es Salaam', employmentStatus: 'Self-employed' },
-            attachments: {},
-            scores: { '2025-03': { Math: 78, English: 82, Kiswahili: 80 } },
-            attendance: { '2025': { totalDays: 22, present: 19 } },
-            createdAt: Date.now()
-          }
-        ];
-        try {
-          for (const s of sample) {
-            await db.ref('students').push(s);
-          }
-          alert('Sample students added');
-        } catch (err) {
-          alert('Seeding failed: ' + err.message);
-        }
-      });
-
-      clearDbStudentsBtn.addEventListener('click', () => {
-        if (!confirm('Delete ALL students in DB? This is permanent.')) return;
-        db.ref('students').remove()
-          .then(() => alert('All students removed'))
-          .catch(err => alert('Delete failed: ' + err.message));
       });
 
       // Chat Functionality
@@ -625,8 +556,7 @@
       // Academic Module React
       const { useState, useEffect } = React;
       const CURRICULUM_TEMPLATES = {
-        'Baby': ['Arithmetic', 'Communication', 'Arts'],
-        'Preunit': ['Arithmetic', 'Communication', 'Arts'],
+        'Baby Class': ['Arithmetic', 'Communication', 'Arts'],
         'Class 1': ['Writing Skills', 'Arithmetic', 'Kusoma', 'Listening'],
         'Class 2': ['Writing Skills', 'Arithmetic', 'Kusoma', 'Listening'],
         'Class 3': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts'],
@@ -682,7 +612,8 @@
               employmentStatus: s.parentGuardian.employmentStatus,
               attachments: s.attachments || {},
               scores: s.scores || {},
-              attendance: s.attendance || { '2025': { totalDays: 0, present: 0 } }
+              attendance: s.attendance || { '2025': { totalDays: 0, present: 0 } },
+              createdAt: s.createdAt
             }));
             setProfiles(students);
           });
@@ -771,48 +702,6 @@
           return metrics;
         }
 
-        function seedSampleData() {
-          if (!confirm('Seed sample student?')) return;
-          const p = {
-            basicInfo: {
-              firstName: 'New',
-              lastName: 'Student',
-              admissionNumber: 'ADM-' + Math.floor(1000 + Math.random() * 9000),
-              gender: 'Female',
-              dob: '2016-01-01',
-              birthCertNumber: '',
-              religion: '',
-              tribe: '',
-              feesDue: 0
-            },
-            schoolInfo: {
-              schoolName: 'Socrates Pre & Primary',
-              classLevel: 'Class 4',
-              stream: '4A',
-              academicYear: '2025',
-              academicTrack: 'NECTA',
-              boardingStatus: 'Day',
-              admissionDate: '2023-01-01',
-              shiftedFrom: ''
-            },
-            parentGuardian: {
-              primaryParentName: 'Parent',
-              primaryParentContact: '+255700000000',
-              relationshipToStudent: 'Parent',
-              secondaryGuardian: '',
-              residentialAddress: 'Dar es Salaam',
-              employmentStatus: ''
-            },
-            attachments: {},
-            scores: {},
-            attendance: { '2025': { totalDays: 0, present: 0 } },
-            createdAt: Date.now()
-          };
-          db.ref('students').push(p)
-            .then(() => alert('Seeded one sample student.'))
-            .catch(err => alert('Seeding failed: ' + err.message));
-        }
-
         return React.createElement('div', null,
           React.createElement('div', { className: 'flex items-start justify-between gap-4 mb-4' },
             React.createElement('div', null,
@@ -840,15 +729,11 @@
               React.createElement('button', {
                 className: 'ghost px-3 py-2 border rounded',
                 onClick: () => {
-                  const rows = [['Full Name', 'Class', 'Admission Date', 'Admission Number', 'Fees Due']];
-                  profiles.forEach(p => rows.push([p.fullName, p.classLevel, p.admissionDate || '', p.admissionNumber, p.feesDue || 0]));
-                  downloadCSV(rows, 'somap_profiles_overview.csv');
+                  const rows = [['Name', 'Administration Number', 'Class', 'Date of Registration', 'Date of Birth', 'Parents Contact', 'Parent\'s Name']];
+                  profiles.forEach(p => rows.push([p.fullName, p.admissionNumber, p.classLevel, new Date(p.createdAt).toLocaleDateString(), p.dob, p.guardianPrimary.mobile, p.guardianPrimary.name]));
+                  downloadCSV(rows, 'somap_students.csv');
                 }
-              }, 'Export Overview CSV'),
-              React.createElement('button', {
-                className: 'ghost px-3 py-2 border rounded',
-                onClick: seedSampleData
-              }, 'Seed Sample')
+              }, 'Export Overview CSV')
             )
           ),
           React.createElement('table', { className: 'min-w-full text-left' },
@@ -930,6 +815,25 @@
                     React.createElement('div', { className: 'small' }, 'Top: ' + top.map(t => `${t.fullName} (${Math.round(t.avg)})`).join(' • '))
                   );
                 })
+              )
+            ),
+            React.createElement('div', { className: 'card mt-4' },
+              React.createElement('h3', { className: 'font-semibold text-blue-600' }, 'Utilities'),
+              React.createElement('div', { className: 'mt-2 flex flex-col gap-2' },
+                React.createElement('button', { className: 'border rounded p-2', onClick: () => {
+                  const rows = [['AdmissionNo','FullName','Class','Subject','Score','Average']];
+                  profiles.forEach(p => {
+                    const subjObj = (p.scores[currentMonth] || {});
+                    const subjKeys = Object.keys(subjObj);
+                    const avg = subjKeys.length ? (Object.values(subjObj).reduce((a,b)=>a+b,0)/subjKeys.length) : '';
+                    if (subjKeys.length) {
+                      subjKeys.forEach(sj => rows.push([p.admissionNumber, p.fullName, p.classLevel, sj, subjObj[sj], avg]));
+                    } else {
+                      rows.push([p.admissionNumber, p.fullName, p.classLevel, '', '', '']);
+                    }
+                  });
+                  downloadCSV(rows, 'somap_scores_' + currentMonth + '.csv');
+                } }, 'Export Scores CSV (month)')
               )
             )
           ),

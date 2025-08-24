@@ -20,14 +20,13 @@
     .modal-content {
       position: relative;
       background-color: white;
-      margin: 0 auto;
+      margin: 5% auto;
       padding: 20px;
       border-radius: 8px;
       width: 90%;
       max-width: 800px;
-      height: 90vh;
+      height: 80vh;
       overflow-y: auto;
-      margin-top: 20px;
     }
     .close {
       position: absolute;
@@ -46,6 +45,10 @@
       display: block;
       margin-bottom: 0.5rem;
       color: #6b7280;
+    }
+    #registerBtn:disabled {
+      background-color: #a3bffa;
+      cursor: not-allowed;
     }
   </style>
   <script src="firebase.js"></script>
@@ -115,7 +118,7 @@
               </div>
               <div class="form-group"><label for="dob">Date of Birth *</label><input type="date" id="dob" name="dob" required class="border p-2 rounded w-full"></div>
               <div class="form-group"><label for="admissionNumber">Admission Number (Auto-generated)</label><input type="text" id="admissionNumber" name="admissionNumber" disabled class="border p-2 rounded w-full"></div>
-              <div class="form-group"><label for="feePerYear">Fee Per Year (Tsh)</label><input type="number" id="feePerYear" name="feePerYear" class="border p-2 rounded w-full" placeholder="e.g., 600000" required></div>
+              <div class="form-group"><label for="feePerYear">Fee Per Year (Tsh)</label><input type="number" id="feePerYear" name="feePerYear" placeholder="e.g., 600000" required class="border p-2 rounded w-full"></div>
               <div class="form-group">
                 <label for="paymentPlan">Payment Plan</label>
                 <select id="paymentPlan" name="paymentPlan" class="border p-2 rounded w-full" required>
@@ -210,6 +213,7 @@
       if (openModalBtn && closeModalBtn && modal) {
         openModalBtn.addEventListener('click', () => {
           modal.style.display = 'block';
+          checkFormValidity(); // Check validation on open
         });
 
         closeModalBtn.addEventListener('click', () => {
@@ -241,7 +245,9 @@
           return input && input.files.length > 0;
         });
 
-        if (registerBtn) registerBtn.disabled = !(allFieldsValid && allFilesValid);
+        if (registerBtn) {
+          registerBtn.disabled = !(allFieldsValid && allFilesValid);
+        }
       }
 
       requiredFields.forEach(field => {
@@ -254,19 +260,18 @@
         if (input) input.addEventListener('change', checkFormValidity);
       });
 
-      // Use firebase.js initialized db
-      if (!window.db) {
-        console.error('Firebase database not initialized. Ensure firebase.js is loaded and configured.');
-        return;
-      }
-      const db = window.db;
-      const storage = firebase.storage();
-
-      // Form submission
-      if (form) {
+      // Firebase submission logic with fallback
+      if (form && typeof firebase !== 'undefined') {
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
           if (registerBtn) registerBtn.disabled = true;
+
+          if (!window.db) {
+            console.error('Firebase database not initialized. Check firebase.js');
+            alert('Firebase is not connected. Please check the console for details.');
+            registerBtn.disabled = false;
+            return;
+          }
 
           const formData = new FormData(form);
           const studentData = {
@@ -302,7 +307,7 @@
           };
 
           try {
-            const checkRef = db.ref('students');
+            const checkRef = window.db.ref('students');
             const snapshot = await checkRef.once('value');
             let isDuplicate = false;
             snapshot.forEach(childSnapshot => {
@@ -318,14 +323,15 @@
             });
             if (isDuplicate) {
               alert('MNYORE DOESN\'T LIKE DUPLICATES');
-              if (registerBtn) registerBtn.disabled = false;
+              registerBtn.disabled = false;
               return;
             }
 
-            const dbRef = db.ref('students');
+            const dbRef = window.db.ref('students');
             const newStudentRef = dbRef.push();
             await newStudentRef.set(studentData);
 
+            const storage = firebase.storage();
             const uploadPromises = requiredFiles.map(async fileId => {
               const fileInput = document.getElementById(fileId);
               if (fileInput && fileInput.files.length > 0) {
@@ -342,10 +348,10 @@
             const uploadData = Object.assign({}, ...uploadResults);
             await newStudentRef.update(uploadData);
 
-            alert('Student registered successfully! Data is now available for download in Student List.');
+            alert('Student registered successfully! Data is available for download in Student List.');
             modal.style.display = 'none';
             form.reset();
-            if (registerBtn) registerBtn.disabled = true;
+            registerBtn.disabled = true;
           } catch (error) {
             console.error('Registration error:', error);
             alert('Error registering student: ' + error.message);
@@ -353,6 +359,9 @@
             if (registerBtn) registerBtn.disabled = false;
           }
         });
+      } else {
+        console.error('Form or Firebase not loaded');
+        alert('Form or Firebase initialization failed. Check console for details.');
       }
     });
   </script>

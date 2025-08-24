@@ -3592,129 +3592,14 @@ function downloadStudentsCSV() {
     moduleContent.innerHTML = '<p>Loading...</p>'; // Temporary loading message
     modulePanel.classList.add('active');
 
-    // Fetch downloads content from downloads.html with error handling
+    // Fetch downloads content from downloads.html
     fetch('downloads.html')
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.text();
-      })
+      .then(response => response.text())
       .then(data => {
-        moduleContent.innerHTML = data; // Insert the fetched HTML
-
-        // Initialize Firebase
-        const firebaseConfig = {
-          apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-          authDomain: "somaptestt.firebaseapp.com",
-          databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-          projectId: "somaptestt",
-          storageBucket: "somaptestt.firebasestorage.app",
-          messagingSenderId: "105526245138",
-          appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
-          measurementId: "G-4HKX7KN6Q3"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-
-        // Tab Switching
-        const tabs = moduleContent.querySelectorAll('.download-tab');
-        tabs.forEach(tab => {
-          tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('border-b-2', 'border-indigo-500', 'text-indigo-600'));
-            tab.classList.add('border-b-2', 'border-indigo-500', 'text-indigo-600');
-            moduleContent.querySelectorAll('.download-tab-content').forEach(content => content.classList.remove('active'));
-            moduleContent.querySelector(`.download-tab-content[data-tab="${tab.dataset.tab}"]`).classList.add('active');
-            loadData(tab.dataset.tab);
-          });
-        });
-
-        // Fetch data from Firebase and populate tables
-        async function loadData(tab) {
-          const snapshot = await db.ref('students').once('value');
-          const students = snapshot.val() || {};
-          const studentArray = Object.values(students);
-
-          let filteredStudents = studentArray; // Default to all
-
-          const tableBody = moduleContent.querySelector(`#${tab}-table tbody`);
-          tableBody.innerHTML = '';
-          if (studentArray.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="8" class="p-2 border text-center">No students registered yet.</td></tr>';
-          } else {
-            filteredStudents.forEach(student => {
-              const row = document.createElement('tr');
-              row.innerHTML = `
-                <td class="p-2 border">${student.admissionNumber || ''}</td>
-                <td class="p-2 border">${student.firstName} ${student.lastName || ''}</td>
-                <td class="p-2 border">${student.classLevel || ''}</td>
-                <td class="p-2 border">${student.primaryParentContact || ''}</td>
-                <td class="p-2 border">${student.feePerYear || '$0'}</td>
-                <td class="p-2 border">${student.paymentPlan || 'N/A'}</td>
-                <td class="p-2 border">${student.paidAmount || '$0'}</td>
-                <td class="p-2 border">${(parseFloat(student.feePerYear || 0) - parseFloat(student.paidAmount || 0)).toFixed(2) || '$0'}</td>
-              `;
-              tableBody.appendChild(row);
-            });
-          }
-        }
-
-        // Download CSV
-        window.downloadCSV = function(tab) {
-          db.ref('students').once('value').then(snap => {
-            const data = snap.val() || {};
-            const students = Object.values(data);
-            const ws = XLSX.utils.json_to_sheet(students.length > 0 ? students.map((s, i) => ({
-              '#': i + 1,
-              'Admission No': s.admissionNumber || '',
-              'Full Name': s.firstName + ' ' + (s.lastName || ''),
-              'Class': s.classLevel || '',
-              'Parents Contact': s.primaryParentContact || '',
-              'Fee Per Year': s.feePerYear || '$0',
-              'Paid Amount': s.paidAmount || '$0',
-              'Debt': (parseFloat(s.feePerYear || 0) - parseFloat(s.paidAmount || 0)).toFixed(2) || '$0'
-            })) : [{ '#': 1, 'Admission No': '', 'Full Name': '', 'Class': '', 'Parents Contact': '', 'Fee Per Year': '$0', 'Paid Amount': '$0', 'Debt': '$0' }]);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Data');
-            XLSX.writeFile(wb, tab + '.xlsx');
-          }).catch(err => alert('Error downloading CSV: ' + err.message));
-        };
-
-        // Download PDF
-        window.downloadPDF = function(tab) {
-          db.ref('students').once('value').then(snap => {
-            const data = snap.val() || {};
-            const students = Object.values(data);
-            const doc = new window.jspdf.jsPDF({ orientation: 'landscape' });
-            doc.text(tab.charAt(0).toUpperCase() + tab.slice(1) + ' Report', 10, 10);
-            let rows = students.length > 0 ? students.map((s, i) => [
-              i + 1,
-              s.admissionNumber || '',
-              s.firstName + ' ' + (s.lastName || ''),
-              s.classLevel || '',
-              s.primaryParentContact || '',
-              s.feePerYear || '$0',
-              s.paidAmount || '$0',
-              (parseFloat(s.feePerYear || 0) - parseFloat(s.paidAmount || 0)).toFixed(2) || '$0'
-            ]) : [[1, '', '', '', '', '$0', '$0', '$0']];
-            doc.autoTable({
-              head: [['#', 'Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
-              body: rows,
-              startY: 15,
-              styles: { fontSize: 8 }
-            });
-            doc.save(tab + '.pdf');
-          }).catch(err => alert('Error downloading PDF: ' + err.message));
-        };
-
-        // Load data for the initial tab
-        if (tabs.length > 0) {
-          tabs[0].click();
-        }
+        moduleContent.innerHTML = data; // Insert the downloads content into the panel
       })
       .catch(error => {
-        moduleContent.innerHTML = `<p>Error loading Downloads: ${error.message}. Please ensure downloads.html exists and is accessible.</p>`;
-        console.error('Fetch error:', error);
+        moduleContent.innerHTML = '<p>Error loading Downloads: ' + error.message + '</p>';
       });
   });
 </script>

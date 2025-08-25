@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>School ERP</title>
+
+  <!-- Icons + Tailwind -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    .modal { display:none; position:fixed; inset:0; width:100%; height:100%;
+      background-color: rgba(0,0,0,0.5); z-index:1000; }
+    .modal-content { position:relative; background:#fff; margin:0 auto; padding:20px;
+      border-radius:8px; width:90%; max-width:800px; height:90vh; overflow-y:auto; margin-top:20px; }
+    .close { position:absolute; top:10px; right:20px; font-size:24px; cursor:pointer; }
+    .section h3 { font-weight:600; color:#374151; margin:0.5rem 0 0.35rem; }
+  </style>
+
+  <!-- Firebase v8 (matches firebase.database() style used below) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
+  <!-- (analytics optional) <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-analytics.js"></script> -->
+</head>
+
+<body class="bg-gray-50 p-4">
+  <div class="mb-4">
+    <div class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm mb-4">
+      Manage all academic and administrative aspects of your school with our comprehensive ERP system.
+    </div>
+
+    <!-- Top Tabs -->
+    <div class="flex border-b mb-4 space-x-4">
+      <button class="erp-tab px-4 py-2 font-medium border-b-2 border-indigo-500 text-indigo-600 active"
+              data-tab="admissions">Admissions</button>
+
+      <!-- Academics card (link to academic.html) -->
+      <a href="academic.html"
+         class="block bg-white shadow rounded-lg px-4 py-2 hover:bg-gray-50 transition">
+        <div class="text-left">
+          <h2 class="text-lg font-semibold text-gray-700">Academics</h2>
+          <p class="text-gray-500 text-sm">Manage exams, results, and reports.</p>
+        </div>
+      </a>
+
+      <button class="erp-tab px-4 py-2 font-medium text-gray-500 hover:text-gray-700"
+              data-tab="attendance">Attendance</button>
+      <button class="erp-tab px-4 py-2 font-medium text-gray-500 hover:text-gray-700"
+              data-tab="discipline">Discipline</button>
+    </div>
+
+    <!-- Admissions tab -->
+    <div class="erp-tab-content active" data-tab="admissions">
+      <div class="space-y-3">
+        <div class="bg-white rounded-lg shadow p-4">
+          <h3 class="font-medium text-gray-800">New Applications</h3>
+          <p class="text-sm text-gray-500 mb-3">Review and process new student applications</p>
+          <div class="flex justify-between">
+            <span class="text-sm font-medium text-green-600">12 new applications</span>
+            <a href="javascript:void(0)" class="text-sm text-indigo-600 hover:underline">View all</a>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-4">
+          <h3 class="font-medium text-gray-800">Quick Admission</h3>
+          <p class="text-sm text-gray-500 mb-3">Register a new student directly</p>
+          <button id="openRegistrationModal"
+                  class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+            Create New Admission
+          </button>
+        </div>
+
+        <div class="bg-white rounded-lg shadow p-4">
+          <h3 class="font-medium text-gray-800">Transfer Requests</h3>
+          <p class="text-sm text-gray-500 mb-2">Students requesting transfer in/out</p>
+          <div class="flex justify-between">
+            <span class="text-sm font-medium text-yellow-600">3 pending requests</span>
+            <a href="javascript:void(0)" class="text-sm text-indigo-600 hover:underline">View all</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- (Placeholder) Attendance tab -->
+    <div class="erp-tab-content hidden" data-tab="attendance">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-medium text-gray-800 mb-2">Attendance</h3>
+        <p class="text-sm text-gray-500">Coming soon.</p>
+      </div>
+    </div>
+
+    <!-- (Placeholder) Discipline tab -->
+    <div class="erp-tab-content hidden" data-tab="discipline">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-medium text-gray-800 mb-2">Discipline</h3>
+        <p class="text-sm text-gray-500">Coming soon.</p>
+      </div>
+    </div>
+
+    <!-- Registration Modal -->
+    <div id="registrationModal" class="modal">
+      <div class="modal-content">
+        <span id="closeModal" class="close">&times;</span>
+        <h2 class="text-2xl font-semibold text-indigo-600 mb-4">Student Registration</h2>
+
+        <form id="registrationForm" enctype="multipart/form-data" novalidate class="space-y-4">
+          <!-- BASIC INFO -->
+          <div class="section">
+            <h3>Basic Information</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="firstName" class="block text-sm text-gray-600">First Name *</label>
+                <input type="text" id="firstName" name="firstName" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="middleName" class="block text-sm text-gray-600">Middle Name</label>
+                <input type="text" id="middleName" name="middleName" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="lastName" class="block text-sm text-gray-600">Last Name *</label>
+                <input type="text" id="lastName" name="lastName" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="gender" class="block text-sm text-gray-600">Gender *</label>
+                <select id="gender" name="gender" required class="border p-2 rounded w-full">
+                  <option value="" disabled selected>Select gender</option>
+                  <option>Male</option>
+                  <option>Female</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div>
+                <label for="dob" class="block text-sm text-gray-600">Date of Birth *</label>
+                <input type="date" id="dob" name="dob" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="admissionNumber" class="block text-sm text-gray-600">Admission Number (Auto-generated)</label>
+                <input type="text" id="admissionNumber" name="admissionNumber" readonly class="border p-2 rounded w-full"/>
+              </div>
+
+              <!-- Fee fields -->
+              <div>
+                <label for="feePerYear" class="block text-sm text-gray-600">Fee Per Year (Tsh) *</label>
+                <input type="number" id="feePerYear" name="feePerYear" placeholder="e.g., 600000" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="paymentPlan" class="block text-sm text-gray-600">Payment Plan *</label>
+                <select id="paymentPlan" name="paymentPlan" required class="border p-2 rounded w-full">
+                  <option value="">-- Select Payment Plan --</option>
+                  <option value="monthly">Monthly (Jan–Oct)</option>
+                  <option value="6-instalments">6 Instalments</option>
+                  <option value="2-instalments">2 Instalments</option>
+                  <option value="yearly">Full Year at Once</option>
+                  <option value="other">Other (as agreed)</option>
+                </select>
+              </div>
+
+              <div>
+                <label for="pupilId" class="block text-sm text-gray-600">Pupil’s ID</label>
+                <input type="text" id="pupilId" name="pupilId" placeholder="Pupil's ID" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="birthCertNumber" class="block text-sm text-gray-600">Birth Certificate Number</label>
+                <input type="text" id="birthCertNumber" name="birthCertNumber" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="religion" class="block text-sm text-gray-600">Religion</label>
+                <input type="text" id="religion" name="religion" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="tribe" class="block text-sm text-gray-600">Tribe / Ethnicity</label>
+                <input type="text" id="tribe" name="tribe" class="border p-2 rounded w-full"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCHOOL INFO -->
+          <div class="section">
+            <h3>School Information</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="schoolName" class="block text-sm text-gray-600">School Name *</label>
+                <input type="text" id="schoolName" name="schoolName" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="classLevel" class="block text-sm text-gray-600">Class Level *</label>
+                <select id="classLevel" name="classLevel" required class="border p-2 rounded w-full">
+                  <option value="" disabled selected>Select class</option>
+                  <option>Baby Class</option>
+                  <option>Class 1</option>
+                  <option>Class 2</option>
+                  <option>Class 3</option>
+                  <option>Class 4</option>
+                  <option>Class 5</option>
+                  <option>Class 6</option>
+                  <option>Class 7</option>
+                </select>
+              </div>
+              <div>
+                <label for="stream" class="block text-sm text-gray-600">Stream</label>
+                <input type="text" id="stream" name="stream" placeholder="e.g., 4B" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="academicYear" class="block text-sm text-gray-600">Current Academic Year *</label>
+                <input type="text" id="academicYear" name="academicYear" placeholder="e.g., 2025" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="academicTrack" class="block text-sm text-gray-600">Academic Track</label>
+                <input type="text" id="academicTrack" name="academicTrack" placeholder="e.g., NECTA / SFNA" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="boardingStatus" class="block text-sm text-gray-600">Boarding or Day Scholar *</label>
+                <select id="boardingStatus" name="boardingStatus" required class="border p-2 rounded w-full">
+                  <option value="" disabled selected>Select status</option>
+                  <option>Boarding</option>
+                  <option>Day Scholar</option>
+                </select>
+              </div>
+              <div>
+                <label for="shiftedFrom" class="block text-sm text-gray-600">Shifted From (for transfer-ins)</label>
+                <input type="text" id="shiftedFrom" name="shiftedFrom" class="border p-2 rounded w-full"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- PARENT/GUARDIAN -->
+          <div class="section">
+            <h3>Parent / Guardian Details</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="primaryParentName" class="block text-sm text-gray-600">Primary Parent Name *</label>
+                <input type="text" id="primaryParentName" name="primaryParentName" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="primaryParentContact" class="block text-sm text-gray-600">Primary Parent Contact *</label>
+                <input type="text" id="primaryParentContact" name="primaryParentContact" placeholder="+255 7xx xxx xxx"
+                  required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="secondaryGuardian" class="block text-sm text-gray-600">Secondary Guardian (if any)</label>
+                <input type="text" id="secondaryGuardian" name="secondaryGuardian" class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="relationshipToStudent" class="block text-sm text-gray-600">Relationship to Student</label>
+                <input type="text" id="relationshipToStudent" name="relationshipToStudent" class="border p-2 rounded w-full"/>
+              </div>
+              <div class="md:col-span-2">
+                <label for="residentialAddress" class="block text-sm text-gray-600">Residential Address *</label>
+                <textarea id="residentialAddress" name="residentialAddress" required class="border p-2 rounded w-full"></textarea>
+              </div>
+              <div class="md:col-span-2">
+                <label for="employmentStatus" class="block text-sm text-gray-600">Employment Status (if needed)</label>
+                <input type="text" id="employmentStatus" name="employmentStatus" class="border p-2 rounded w-full"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- FILES -->
+          <div class="section">
+            <h3>Photos & Attachments</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="passportPhoto" class="block text-sm text-gray-600">Passport Photo Upload *</label>
+                <input type="file" id="passportPhoto" name="passportPhoto" accept="image/*" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="birthCertUpload" class="block text-sm text-gray-600">Birth Certificate Upload *</label>
+                <input type="file" id="birthCertUpload" name="birthCertUpload" accept="image/*,application/pdf" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="reportCardUpload" class="block text-sm text-gray-600">Report Card (First Term, Ongoing) *</label>
+                <input type="file" id="reportCardUpload" name="reportCardUpload" accept="image/*,application/pdf" required class="border p-2 rounded w-full"/>
+              </div>
+              <div>
+                <label for="joiningLetterUpload" class="block text-sm text-gray-600">Joining or Transfer Letter (PDF/Image) *</label>
+                <input type="file" id="joiningLetterUpload" name="joiningLetterUpload" accept="image/*,application/pdf" required class="border p-2 rounded w-full"/>
+              </div>
+              <div class="md:col-span-2">
+                <label for="medicalDocsUpload" class="block text-sm text-gray-600">Medical Documents (if applicable)</label>
+                <input type="file" id="medicalDocsUpload" name="medicalDocsUpload" accept="image/*,application/pdf" class="border p-2 rounded w-full"/>
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" id="registerBtn"
+                  class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+            Register Student
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Page logic + Firebase init -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Tabs show/hide (kept simple)
+      document.querySelectorAll('.erp-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.erp-tab').forEach(b => b.classList.remove('border-indigo-500','text-indigo-600','active'));
+          btn.classList.add('border-indigo-500','text-indigo-600','active');
+          const tab = btn.getAttribute('data-tab');
+          document.querySelectorAll('.erp-tab-content').forEach(sec => {
+            if (sec.getAttribute('data-tab') === tab) {
+              sec.classList.remove('hidden'); sec.classList.add('block');
+            } else if (sec.classList.contains('erp-tab-content')) {
+              sec.classList.add('hidden'); sec.classList.remove('block');
+            }
+          });
+        });
+      });
+
+      const openModalBtn = document.getElementById('openRegistrationModal');
+      const closeModalBtn = document.getElementById('closeModal');
+      const modal = document.getElementById('registrationModal');
+      const form = document.getElementById('registrationForm');
+      const registerBtn = document.getElementById('registerBtn');
+
+      // Show/Hide modal
+      if (openModalBtn && closeModalBtn && modal) {
+        openModalBtn.addEventListener('click', () => {
+          // Pre-fill admission number preview
+          const adm = document.getElementById('admissionNumber');
+          if (adm) adm.value = `AUTO-${Date.now()}`;
+          modal.style.display = 'block';
+        });
+        closeModalBtn.addEventListener('click', () => {
+          modal.style.display = 'none';
+          form.reset();
+        });
+        window.addEventListener('click', (e) => {
+          if (e.target === modal) {
+            modal.style.display = 'none';
+            form.reset();
+          }
+        });
+      }
+
+      // Firebase config & init (ONE source of truth)
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",      // ✅ corrected
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+      };
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      const db = firebase.database();
+      const storage = firebase.storage();
+
+      // Quick sanity test
+      db.ref('z_test_write').set({ ok: true, ts: Date.now() })
+        .then(() => console.log('DB test write OK'))
+        .catch(err => console.error('DB test write FAILED:', err));
+
+      // Required fields & files for enabling the button
+      const requiredFields = [
+        'firstName', 'lastName', 'gender', 'dob',
+        'schoolName', 'classLevel', 'academicYear', 'boardingStatus',
+        'primaryParentName', 'primaryParentContact', 'residentialAddress',
+        'feePerYear', 'paymentPlan'
+      ];
+      const requiredFiles = ['passportPhoto', 'birthCertUpload', 'reportCardUpload', 'joiningLetterUpload'];
+
+      function checkFormValidity() {
+        const fieldsOk = requiredFields.every(id => {
+          const el = document.getElementById(id);
+          return el && String(el.value || '').trim() !== '';
+        });
+        const filesOk = requiredFiles.every(id => {
+          const el = document.getElementById(id);
+          return el && el.files && el.files.length > 0;
+        });
+        registerBtn.disabled = !(fieldsOk && filesOk);
+      }
+      requiredFields.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', checkFormValidity);
+      });
+      requiredFiles.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', checkFormValidity);
+      });
+      // Start disabled until valid
+      registerBtn.disabled = true;
+
+      // Submit
+      if (form) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          registerBtn.disabled = true;
+
+          const fd = new FormData(form);
+          const studentData = {
+            firstName: fd.get('firstName'),
+            middleName: fd.get('middleName') || '',
+            lastName: fd.get('lastName'),
+            gender: fd.get('gender'),
+            dob: fd.get('dob'),
+            admissionNumber: `AUTO-${Date.now()}`,
+            pupilId: fd.get('pupilId') || '',
+            birthCertNumber: fd.get('birthCertNumber') || '',
+            religion: fd.get('religion') || '',
+            tribe: fd.get('tribe') || '',
+            schoolName: fd.get('schoolName'),
+            classLevel: fd.get('classLevel'),
+            stream: fd.get('stream') || '',
+            academicYear: fd.get('academicYear'),
+            academicTrack: fd.get('academicTrack') || '',
+            boardingStatus: fd.get('boardingStatus'),
+            shiftedFrom: fd.get('shiftedFrom') || '',
+            primaryParentName: fd.get('primaryParentName'),
+            primaryParentContact: fd.get('primaryParentContact'),
+            secondaryGuardian: fd.get('secondaryGuardian') || '',
+            relationshipToStudent: fd.get('relationshipToStudent') || '',
+            residentialAddress: fd.get('residentialAddress'),
+            employmentStatus: fd.get('employmentStatus') || '',
+            feePerYear: Number(fd.get('feePerYear') || 0),
+            paymentPlan: fd.get('paymentPlan'),
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+          };
+
+          try {
+            // Optional duplicate check (exact match on key fields)
+            const snap = await db.ref('students').orderByChild('primaryParentContact')
+              .equalTo(studentData.primaryParentContact).once('value');
+            let duplicate = false;
+            snap.forEach(child => {
+              const s = child.val();
+              if (
+                s.firstName === studentData.firstName &&
+                s.lastName === studentData.lastName &&
+                s.dob === studentData.dob &&
+                s.classLevel === studentData.classLevel
+              ) duplicate = true;
+            });
+            if (duplicate) {
+              alert("Duplicate student detected (same name, DOB, class & parent contact).");
+              registerBtn.disabled = false;
+              return;
+            }
+
+            // Create record first
+            const newRef = db.ref('students').push();
+            await newRef.set(studentData);
+
+            // Upload required files
+            const fileIds = ['passportPhoto','birthCertUpload','reportCardUpload','joiningLetterUpload','medicalDocsUpload'];
+            const uploads = [];
+            for (const id of fileIds) {
+              const el = document.getElementById(id);
+              if (el && el.files && el.files.length > 0) {
+                const file = el.files[0];
+                const path = `students/${newRef.key}/${id}/${file.name}`;
+                const sref = storage.ref(path);
+                await sref.put(file);
+                const url = await sref.getDownloadURL();
+                uploads.push({ [id]: url });
+              }
+            }
+            if (uploads.length) {
+              const updateData = Object.assign({}, ...uploads);
+              await newRef.update(updateData);
+            }
+
+            alert('✅ Student registered successfully!');
+            modal.style.display = 'none';
+            form.reset();
+            // refresh admission number preview next time
+            const adm = document.getElementById('admissionNumber');
+            if (adm) adm.value = '';
+          } catch (err) {
+            console.error(err);
+            alert('❌ Error registering student: ' + err.message);
+          } finally {
+            registerBtn.disabled = true; // keep disabled until form valid again
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,25 +1,26 @@
-// firebase.js
+<!-- Put these SDKs in your HTML HEAD once per page that talks to Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
 
-// This file assumes you load Firebase compat SDK scripts in your HTML:
-// <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
-// <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-database-compat.js"></script>
-
-// Your Firebase config (with databaseURL added)
-var firebaseConfig = {
-  apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+<script>
+// One canonical config for all your pages
+const firebaseConfig = {
+  apiKey: "AIzaSyDqU_zl2K4SKV-Ty0yd1KIaFkjpLs6KlYo",
   authDomain: "somaptestt.firebaseapp.com",
   databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
   projectId: "somaptestt",
-  storageBucket: "somaptestt.firebasestorage.app",
-  messagingSenderId: "105526245138",
-  appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
-  measurementId: "G-4HKX7KN6Q3"
+  storageBucket: "somaptestt.appspot.com", // ✅ FIXED
+  messagingSenderId: "48563861599",
+  appId: "1:48563861599:web:27c9dff2c9ab6de67b7c24",
+  measurementId: ""
 };
 
-// Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-
-// Optional: Enable analytics if you want
-if (typeof firebase.analytics === "function") {
-  firebase.analytics();
+// Initialize once
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
+window.db = firebase.database();
+window.storage = firebase.storage();
+</script>

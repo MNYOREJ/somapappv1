@@ -74,27 +74,8 @@
       background-color: #f2f2f2;
     }
   </style>
-  <!-- Use the same Firebase v9 compat scripts as your setup -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-  <script>
-    // Use the existing global Firebase config
-    if (!firebase.apps.length) {
-      const firebaseConfig = {
-        apiKey: "AIzaSyDqU_zl2K4SKV-Ty0yd1KIaFkjpLs6KlYo",
-        authDomain: "somaptestt.firebaseapp.com",
-        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-        projectId: "somaptestt",
-        storageBucket: "somaptestt.appspot.com",
-        messagingSenderId: "48563861599",
-        appId: "1:48563861599:web:27c9dff2c9ab6de67b7c24",
-        measurementId: ""
-      };
-      firebase.initializeApp(firebaseConfig);
-    }
-    const db = firebase.database();
-  </script>
+  <!-- Include existing firebase.js -->
+  <script src="firebase.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -273,201 +254,219 @@
   </div>
 
   <script>
-    // Use the global db from Firebase initialization
-    const db = window.db;
+    // Wait for window.db to be available
+    function init() {
+      if (!window.db) {
+        console.error('Firebase database not initialized. Check firebase.js inclusion.');
+        return;
+      }
 
-    // Tab Switching
-    const tabs = document.querySelectorAll('.download-tab');
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('border-b-2', 'border-indigo-500', 'text-indigo-600'));
-        tab.classList.add('border-b-2', 'border-indigo-500', 'text-indigo-600');
-        document.querySelectorAll('.download-tab-content').forEach(content => content.classList.remove('active'));
-        document.querySelector(`.download-tab-content[data-tab="${tab.dataset.tab}"]`).classList.add('active');
-        loadData(tab.dataset.tab); // Load data for the selected tab
+      const db = window.db;
+
+      // Tab Switching
+      const tabs = document.querySelectorAll('.download-tab');
+      tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          tabs.forEach(t => t.classList.remove('border-b-2', 'border-indigo-500', 'text-indigo-600'));
+          tab.classList.add('border-b-2', 'border-indigo-500', 'text-indigo-600');
+          document.querySelectorAll('.download-tab-content').forEach(content => content.classList.remove('active'));
+          document.querySelector(`.download-tab-content[data-tab="${tab.dataset.tab}"]`).classList.add('active');
+          loadData(tab.dataset.tab);
+        });
       });
-    });
 
-    // Fetch data from Firebase and populate tables
-    async function loadData(tab) {
-      const snapshot = await db.ref('students').once('value');
-      const students = snapshot.val() || {};
-      const studentArray = Object.values(students);
+      // Fetch data from Firebase and populate tables
+      async function loadData(tab) {
+        try {
+          const snapshot = await db.ref('students').once('value');
+          const students = snapshot.val() || {};
+          const studentArray = Object.values(students);
 
-      // Filter data based on tab if needed (e.g., per class for student-list)
-      let filteredStudents = studentArray;
-      if (tab === 'student-list') {
-        const classFilter = document.getElementById('student-list-class').value;
-        if (classFilter) {
-          filteredStudents = studentArray.filter(student => student.classLevel === classFilter);
+          let filteredStudents = studentArray;
+          if (tab === 'student-list') {
+            const classFilter = document.getElementById('student-list-class').value;
+            if (classFilter) {
+              filteredStudents = studentArray.filter(student => student.classLevel === classFilter);
+            }
+          }
+
+          const tableBody = document.querySelector(`#${tab}-table tbody`);
+          tableBody.innerHTML = '';
+          filteredStudents.forEach(student => {
+            if (tab === 'student-list') {
+              const row = document.createElement('tr');
+              row.innerHTML = `
+                <td class="p-2 border">${student.admissionNumber || 'N/A'}</td>
+                <td class="p-2 border">${(student.firstName || '') + ' ' + (student.middleName || '') + ' ' + (student.lastName || '')}</td>
+                <td class="p-2 border">${student.classLevel || 'N/A'}</td>
+                <td class="p-2 border">${student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A'}</td>
+                <td class="p-2 border"><img src="${student.passportPhoto || 'https://via.placeholder.com/50'}" alt="Photo" style="width: 50px; height: 50px;"></td>
+                <td class="p-2 border">${student.primaryParentContact || 'N/A'}</td>
+                <td class="p-2 border">${student.feePerYear || '0'}</td>
+                <td class="p-2 border">${student.paymentPlan || 'N/A'}</td>
+                <td class="p-2 border"><i class="fas fa-eye cursor-pointer" onclick="viewDetails('${Object.keys(students).find(key => students[key] === student)}')"></i></td>
+              `;
+              tableBody.appendChild(row);
+            } else {
+              const row = document.createElement('tr');
+              row.innerHTML = `
+                <td class="p-2 border">${student.admissionNumber || 'N/A'}</td>
+                <td class="p-2 border">${(student.firstName || '') + ' ' + (student.lastName || '')}</td>
+                <td class="p-2 border">${student.classLevel || 'N/A'}</td>
+                <td class="p-2 border">${student.primaryParentContact || 'N/A'}</td>
+                <td class="p-2 border">${student.feePerYear || '$0'}</td>
+                <td class="p-2 border">${student.paidAmount || '$0'}</td>
+                <td class="p-2 border">${student.debt || '$0'}</td>
+              `;
+              tableBody.appendChild(row);
+            }
+          });
+        } catch (error) {
+          console.error('Error loading data:', error);
         }
       }
 
-      // Populate table for the current tab
-      const tableBody = document.querySelector(`#${tab}-table tbody`);
-      tableBody.innerHTML = '';
-      filteredStudents.forEach(student => {
-        if (tab === 'student-list') {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td class="p-2 border">${student.admissionNumber || ''}</td>
-            <td class="p-2 border">${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}</td>
-            <td class="p-2 border">${student.classLevel || 'N/A'}</td>
-            <td class="p-2 border">${student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A'}</td>
-            <td class="p-2 border"><img src="${student.passportPhoto || 'https://via.placeholder.com/50'}" alt="Photo" style="width: 50px; height: 50px;"></td>
-            <td class="p-2 border">${student.primaryParentContact || 'N/A'}</td>
-            <td class="p-2 border">${student.feePerYear || '0'}</td>
-            <td class="p-2 border">${student.paymentPlan || 'N/A'}</td>
-            <td class="p-2 border"><i class="fas fa-eye cursor-pointer" onclick="viewDetails('${Object.keys(students).find(key => students[key] === student)}')"></i></td>
-          `;
-          tableBody.appendChild(row);
-        } else {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td class="p-2 border">${student.admissionNumber || ''}</td>
-            <td class="p-2 border">${student.firstName || ''} ${student.lastName || ''}</td>
-            <td class="p-2 border">${student.classLevel || ''}</td>
-            <td class="p-2 border">${student.primaryParentContact || ''}</td>
-            <td class="p-2 border">${student.feePerYear || '$0'}</td>
-            <td class="p-2 border">${student.paidAmount || '$0'}</td>
-            <td class="p-2 border">${student.debt || '$0'}</td>
-          `;
-          tableBody.appendChild(row);
-        }
+      // Class Filter for Student List
+      document.getElementById('student-list-class').addEventListener('change', () => {
+        loadData('student-list');
       });
-    }
 
-    // Class Filter for Student List
-    document.getElementById('student-list-class').addEventListener('change', () => {
+      // View Details Modal
+      function viewDetails(id) {
+        db.ref('students/' + id).once('value').then((snapshot) => {
+          const student = snapshot.val() || {};
+          const details = document.getElementById('studentDetails');
+          details.innerHTML = `
+            <p><strong>Full Name:</strong> ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}</p>
+            <p><strong>Class:</strong> ${student.classLevel || 'N/A'}</p>
+            <p><strong>Date of Registration:</strong> ${student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A'}</p>
+            <p><strong>Passport Photo:</strong> <img src="${student.passportPhoto || 'https://via.placeholder.com/100'}" alt="Photo" style="width: 100px; height: 100px;"></p>
+            <p><strong>Parent Contact:</strong> ${student.primaryParentContact || 'N/A'}</p>
+            <p><strong>Fee Total:</strong> ${student.feePerYear || '0'}</p>
+            <p><strong>Payment Plan:</strong> ${student.paymentPlan || 'N/A'}</p>
+            <p><strong>Residential Address:</strong> ${student.residentialAddress || 'N/A'}</p>
+            <p><strong>Admission Number:</strong> ${student.admissionNumber || 'N/A'}</p>
+          `;
+          document.getElementById('generateIDCard').onclick = () => generateIDCard(student);
+          document.getElementById('detailsModal').style.display = 'block';
+        }).catch(error => console.error('Error fetching details:', error));
+      }
+
+      document.getElementById('closeDetailsModal').addEventListener('click', () => {
+        document.getElementById('detailsModal').style.display = 'none';
+      });
+
+      // Generate ID Card PDF
+      function generateIDCard(student) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.addImage('images/somap-logo.png.jpg', 'PNG', 10, 10, 50, 50);
+        doc.setFontSize(16);
+        doc.text('Student ID Card', 70, 20);
+        doc.setFontSize(12);
+        doc.text(`Full Name: ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`, 10, 70);
+        doc.text(`Admission Number: ${student.admissionNumber || 'N/A'}`, 10, 80);
+        doc.text(`Class: ${student.classLevel || 'N/A'}`, 10, 90);
+        doc.text(`Parent Contact: ${student.primaryParentContact || 'N/A'}`, 10, 100);
+        doc.text(`School Contact: +255686828732`, 10, 110);
+        doc.text(`Residential Address: ${student.residentialAddress || 'N/A'}`, 10, 120);
+        if (student.passportPhoto) {
+          doc.addImage(student.passportPhoto, 'JPEG', 10, 130, 50, 50);
+        }
+        doc.save('student-id-card.pdf');
+      }
+
+      // Download CSV
+      async function downloadCSV(tab) {
+        try {
+          const snapshot = await db.ref('students').once('value');
+          const students = snapshot.val() || {};
+          let data = [];
+          if (tab === 'student-list') {
+            data = Object.values(students).map(student => ({
+              'Admission No': student.admissionNumber || 'N/A',
+              'Full Name': `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+              'Class': student.classLevel || 'N/A',
+              'Date of Registration': student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
+              'Passport Photo': student.passportPhoto || 'N/A',
+              'Parent Contact': student.primaryParentContact || 'N/A',
+              'Fee Total': student.feePerYear || '0',
+              'Payment Plan': student.paymentPlan || 'N/A'
+            }));
+          } else {
+            data = Object.values(students).map(student => ({
+              'Admission No': student.admissionNumber || 'N/A',
+              'Full Name': `${student.firstName || ''} ${student.lastName || ''}`,
+              'Class': student.classLevel || 'N/A',
+              'Parents Contact': student.primaryParentContact || 'N/A',
+              'Fee Per Year': student.feePerYear || '$0',
+              'Paid Amount': student.paidAmount || '$0',
+              'Debt': student.debt || '$0'
+            }));
+          }
+          if (data.length === 0) throw new Error('No data to download');
+          const ws = XLSX.utils.json_to_sheet(data);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, tab.replace('-', ' '));
+          XLSX.writeFile(wb, `${tab}.xlsx`);
+        } catch (error) {
+          console.error('Error downloading CSV:', error);
+        }
+      }
+
+      // Download PDF
+      async function downloadPDF(tab) {
+        try {
+          const snapshot = await db.ref('students').once('value');
+          const students = snapshot.val() || {};
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ orientation: 'landscape' });
+          doc.setFontSize(16);
+          doc.text(`${tab.charAt(0).toUpperCase() + tab.slice(1)} Report`, 10, 10);
+          let rows = [];
+          if (tab === 'student-list') {
+            rows = Object.values(students).map(student => [
+              student.admissionNumber || 'N/A',
+              `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+              student.classLevel || 'N/A',
+              student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
+              student.passportPhoto || 'N/A',
+              student.primaryParentContact || 'N/A',
+              student.feePerYear || '0',
+              student.paymentPlan || 'N/A'
+            ]);
+          } else {
+            rows = Object.values(students).map(student => [
+              student.admissionNumber || 'N/A',
+              `${student.firstName || ''} ${student.lastName || ''}`,
+              student.classLevel || 'N/A',
+              student.primaryParentContact || 'N/A',
+              student.feePerYear || '$0',
+              student.paidAmount || '$0',
+              student.debt || '$0'
+            ]);
+          }
+          if (rows.length === 0) throw new Error('No data to download');
+          doc.autoTable({
+            head: tab === 'student-list'
+              ? [['Admission No', 'Full Name', 'Class', 'Date of Registration', 'Passport Photo', 'Parent Contact', 'Fee Total', 'Payment Plan']]
+              : [['Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
+            body: rows,
+            startY: 15,
+            styles: { fontSize: 8 }
+          });
+          doc.save(`${tab}.pdf`);
+        } catch (error) {
+          console.error('Error downloading PDF:', error);
+        }
+      }
+
+      // Load data for the initial tab
       loadData('student-list');
-    });
-
-    // View Details Modal
-    function viewDetails(id) {
-      db.ref('students/' + id).once('value').then((snapshot) => {
-        const student = snapshot.val() || {};
-        const details = document.getElementById('studentDetails');
-        details.innerHTML = `
-          <p><strong>Full Name:</strong> ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}</p>
-          <p><strong>Class:</strong> ${student.classLevel || 'N/A'}</p>
-          <p><strong>Date of Registration:</strong> ${student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A'}</p>
-          <p><strong>Passport Photo:</strong> <img src="${student.passportPhoto || 'https://via.placeholder.com/100'}" alt="Photo" style="width: 100px; height: 100px;"></p>
-          <p><strong>Parent Contact:</strong> ${student.primaryParentContact || 'N/A'}</p>
-          <p><strong>Fee Total:</strong> ${student.feePerYear || '0'}</p>
-          <p><strong>Payment Plan:</strong> ${student.paymentPlan || 'N/A'}</p>
-          <p><strong>Residential Address:</strong> ${student.residentialAddress || 'N/A'}</p>
-          <p><strong>Admission Number:</strong> ${student.admissionNumber || 'N/A'}</p>
-        `;
-        document.getElementById('generateIDCard').onclick = () => generateIDCard(student);
-        document.getElementById('detailsModal').style.display = 'block';
-      });
     }
 
-    document.getElementById('closeDetailsModal').addEventListener('click', () => {
-      document.getElementById('detailsModal').style.display = 'none';
-    });
-
-    // Generate ID Card PDF
-    function generateIDCard(student) {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      doc.addImage('images/somap-logo.png.jpg', 'PNG', 10, 10, 50, 50); // Ensure logo is in /images folder
-      doc.setFontSize(16);
-      doc.text('Student ID Card', 70, 20);
-      doc.setFontSize(12);
-      doc.text(`Full Name: ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`, 10, 70);
-      doc.text(`Admission Number: ${student.admissionNumber || 'N/A'}`, 10, 80);
-      doc.text(`Class: ${student.classLevel || 'N/A'}`, 10, 90);
-      doc.text(`Parent Contact: ${student.primaryParentContact || 'N/A'}`, 10, 100);
-      doc.text(`School Contact: +255686828732`, 10, 110);
-      doc.text(`Residential Address: ${student.residentialAddress || 'N/A'}`, 10, 120);
-      if (student.passportPhoto) {
-        doc.addImage(student.passportPhoto, 'JPEG', 10, 130, 50, 50);
-      }
-      doc.save('student-id-card.pdf');
-    }
-
-    // Download CSV
-    async function downloadCSV(tab) {
-      const snapshot = await db.ref('students').once('value');
-      const students = snapshot.val() || {};
-      let data = [];
-      if (tab === 'student-list') {
-        data = Object.values(students).map(student => ({
-          'Admission No': student.admissionNumber || '',
-          'Full Name': `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
-          'Class': student.classLevel || 'N/A',
-          'Date of Registration': student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
-          'Passport Photo': student.passportPhoto || 'N/A',
-          'Parent Contact': student.primaryParentContact || 'N/A',
-          'Fee Total': student.feePerYear || '0',
-          'Payment Plan': student.paymentPlan || 'N/A'
-        }));
-      } else {
-        data = Object.values(students).map(student => ({
-          'Admission No': student.admissionNumber || '',
-          'Full Name': `${student.firstName || ''} ${student.lastName || ''}`,
-          'Class': student.classLevel || '',
-          'Parents Contact': student.primaryParentContact || '',
-          'Fee Per Year': student.feePerYear || '$0',
-          'Paid Amount': student.paidAmount || '$0',
-          'Debt': student.debt || '$0'
-        }));
-      }
-      const ws = XLSX.utils.json_to_sheet(data);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, tab.replace('-', ' '));
-      XLSX.writeFile(wb, `${tab}.xlsx`);
-    }
-
-    // Download PDF
-    async function downloadPDF(tab) {
-      const snapshot = await db.ref('students').once('value');
-      const students = snapshot.val() || {};
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: 'landscape' });
-      doc.setFontSize(16);
-      doc.text(`${tab.charAt(0).toUpperCase() + tab.slice(1)} Report`, 10, 10);
-      let rows = [];
-      if (tab === 'student-list') {
-        rows = Object.values(students).map(student => [
-          student.admissionNumber || '',
-          `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
-          student.classLevel || 'N/A',
-          student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
-          student.passportPhoto || 'N/A',
-          student.primaryParentContact || 'N/A',
-          student.feePerYear || '0',
-          student.paymentPlan || 'N/A'
-        ]);
-        doc.autoTable({
-          head: [['Admission No', 'Full Name', 'Class', 'Date of Registration', 'Passport Photo', 'Parent Contact', 'Fee Total', 'Payment Plan']],
-          body: rows,
-          startY: 15,
-          styles: { fontSize: 8 }
-        });
-      } else {
-        rows = Object.values(students).map(student => [
-          student.admissionNumber || '',
-          `${student.firstName || ''} ${student.lastName || ''}`,
-          student.classLevel || '',
-          student.primaryParentContact || '',
-          student.feePerYear || '$0',
-          student.paidAmount || '$0',
-          student.debt || '$0'
-        ]);
-        doc.autoTable({
-          head: [['Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
-          body: rows,
-          startY: 15,
-          styles: { fontSize: 8 }
-        });
-      }
-      doc.save(`${tab}.pdf`);
-    }
-
-    // Load data for the initial tab
-    loadData('student-list');
+    // Run initialization when the DOM is fully loaded
+    document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>
 </html>

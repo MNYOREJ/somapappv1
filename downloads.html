@@ -33,13 +33,50 @@
     .section-header {
       color: #1f2937;
     }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+    }
+    .modal-content {
+      position: relative;
+      background-color: white;
+      margin: 5% auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 600px;
+      height: 80vh;
+      overflow-y: auto;
+    }
+    .close {
+      position: absolute;
+      top: 10px;
+      right: 20px;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #f2f2f2;
+    }
   </style>
-  <script src="firebase.js"></script> <!-- Same firebase.js as in index.html -->
-  <!-- jsPDF for PDF export -->
+  <script src="firebase.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <!-- jsPDF autotable plugin -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
-  <!-- SheetJS for Excel/CSV export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body class="bg-gray-50 p-4">
@@ -47,7 +84,6 @@
     <div class="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg text-sm mb-4 section-header">
       Download reports, lists, and receipts for students, fees, and more.
     </div>
-    <!-- Tabs for different download types -->
     <div class="flex border-b mb-4">
       <button class="download-tab tab-button px-4 py-2 font-medium border-b-2 border-indigo-500 text-indigo-600 active" data-tab="student-list">Student List</button>
       <button class="download-tab tab-button px-4 py-2 font-medium text-gray-500 hover:text-indigo-700" data-tab="school-reports">School Reports</button>
@@ -55,33 +91,33 @@
       <button class="download-tab tab-button px-4 py-2 font-medium text-gray-500 hover:text-indigo-700" data-tab="report-forms">Report Forms</button>
       <button class="download-tab tab-button px-4 py-2 font-medium text-gray-500 hover:text-indigo-700" data-tab="receipts">Receipts</button>
     </div>
-    <!-- Tab content -->
     <div class="download-tab-content active" data-tab="student-list">
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="font-medium text-gray-800 section-header">Student List</h3>
-        <p class="text-sm text-gray-500 mb-3">Download list of all students with key details.</p>
+        <p class="text-sm text-gray-500 mb-3">Download list of all students with key details. Filter by class.</p>
         <select id="student-list-class" class="w-full p-2 border rounded-lg mb-3">
-          <option>All Classes</option>
-          <option>Baby Class</option>
-          <option>Class 1</option>
-          <option>Class 2</option>
-          <option>Class 3</option>
-          <option>Class 4</option>
-          <option>Class 5</option>
-          <option>Class 6</option>
-          <option>Class 7</option>
+          <option value="">All Classes</option>
+          <option value="Baby Class">Baby Class</option>
+          <option value="Class 1">Class 1</option>
+          <option value="Class 2">Class 2</option>
+          <option value="Class 3">Class 3</option>
+          <option value="Class 4">Class 4</option>
+          <option value="Class 5">Class 5</option>
+          <option value="Class 6">Class 6</option>
+          <option value="Class 7">Class 7</option>
         </select>
         <table id="student-list-table" class="w-full text-sm border-collapse">
           <thead>
             <tr class="table-header bg-indigo-100">
               <th class="p-2 border">Admission No</th>
-              <th class="p-2 border">Full Name</th>
+              <th class="p-2 border">Full Name (First, Middle, Last)</th>
               <th class="p-2 border">Class</th>
-              <th class="p-2 border">Parents Contact</th>
-              <th class="p-2 border">Fee Per Year</th>
+              <th class="p-2 border">Date of Registration</th>
+              <th class="p-2 border">Passport Photo</th>
+              <th class="p-2 border">Parent Contact</th>
+              <th class="p-2 border">Fee Total</th>
               <th class="p-2 border">Payment Plan</th>
-              <th class="p-2 border">Paid Amount</th>
-              <th class="p-2 border">Debt</th>
+              <th class="p-2 border">View Details</th>
             </tr>
           </thead>
           <tbody class="table-row"></tbody>
@@ -206,6 +242,16 @@
     </div>
   </div>
 
+  <!-- Details Modal -->
+  <div id="detailsModal" class="modal">
+    <div class="modal-content">
+      <span id="closeDetailsModal" class="close">&times;</span>
+      <h2 class="text-2xl font-semibold text-indigo-600 mb-4">Student Details</h2>
+      <div id="studentDetails"></div>
+      <button id="generateIDCard" class="mt-4 py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Generate ID Card</button>
+    </div>
+  </div>
+
   <script>
     // Firebase Initialization
     const firebaseConfig = {
@@ -239,73 +285,177 @@
       const students = snapshot.val() || {};
       const studentArray = Object.values(students);
 
-      // Filter data based on tab if needed (e.g., per class, per month)
-      let filteredStudents = studentArray; // Default to all
+      // Filter data based on tab if needed (e.g., per class for student-list)
+      let filteredStudents = studentArray;
+      if (tab === 'student-list') {
+        const classFilter = document.getElementById('student-list-class').value;
+        if (classFilter) {
+          filteredStudents = studentArray.filter(student => student.classLevel === classFilter);
+        }
+      }
 
       // Populate table for the current tab
       const tableBody = document.querySelector(`#${tab}-table tbody`);
       tableBody.innerHTML = '';
       filteredStudents.forEach(student => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td class="p-2 border">${student.admissionNumber || ''}</td>
-          <td class="p-2 border">${student.firstName} ${student.lastName}</td>
-          <td class="p-2 border">${student.classLevel || ''}</td>
-          <td class="p-2 border">${student.primaryParentContact || ''}</td>
-          <td class="p-2 border">${student.feePerYear || '$0'}</td>
-          <td class="p-2 border">${student.paymentPlan || 'N/A'}</td>
-          <td class="p-2 border">${student.paidAmount || '$0'}</td>
-          <td class="p-2 border">${student.debt || '$0'}</td>
-        `;
-        tableBody.appendChild(row);
+        if (tab === 'student-list') {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="p-2 border">${student.admissionNumber || ''}</td>
+            <td class="p-2 border">${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}</td>
+            <td class="p-2 border">${student.classLevel || 'N/A'}</td>
+            <td class="p-2 border">${student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A'}</td>
+            <td class="p-2 border"><img src="${student.passportPhoto || 'https://via.placeholder.com/50'}" alt="Photo" style="width: 50px; height: 50px;"></td>
+            <td class="p-2 border">${student.primaryParentContact || 'N/A'}</td>
+            <td class="p-2 border">${student.feePerYear || '0'}</td>
+            <td class="p-2 border">${student.paymentPlan || 'N/A'}</td>
+            <td class="p-2 border"><i class="fas fa-eye cursor-pointer" onclick="viewDetails('${Object.keys(students).find(key => students[key] === student)}')"></i></td>
+          `;
+          tableBody.appendChild(row);
+        } else {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="p-2 border">${student.admissionNumber || ''}</td>
+            <td class="p-2 border">${student.firstName || ''} ${student.lastName || ''}</td>
+            <td class="p-2 border">${student.classLevel || ''}</td>
+            <td class="p-2 border">${student.primaryParentContact || ''}</td>
+            <td class="p-2 border">${student.feePerYear || '$0'}</td>
+            <td class="p-2 border">${student.paidAmount || '$0'}</td>
+            <td class="p-2 border">${student.debt || '$0'}</td>
+          `;
+          tableBody.appendChild(row);
+        }
       });
+    }
+
+    // Class Filter for Student List
+    document.getElementById('student-list-class').addEventListener('change', () => {
+      loadData('student-list');
+    });
+
+    // View Details Modal
+    function viewDetails(id) {
+      db.ref('students/' + id).once('value').then((snapshot) => {
+        const student = snapshot.val() || {};
+        const details = document.getElementById('studentDetails');
+        details.innerHTML = `
+          <p><strong>Full Name:</strong> ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}</p>
+          <p><strong>Class:</strong> ${student.classLevel || 'N/A'}</p>
+          <p><strong>Date of Registration:</strong> ${student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A'}</p>
+          <p><strong>Passport Photo:</strong> <img src="${student.passportPhoto || 'https://via.placeholder.com/100'}" alt="Photo" style="width: 100px; height: 100px;"></p>
+          <p><strong>Parent Contact:</strong> ${student.primaryParentContact || 'N/A'}</p>
+          <p><strong>Fee Total:</strong> ${student.feePerYear || '0'}</p>
+          <p><strong>Payment Plan:</strong> ${student.paymentPlan || 'N/A'}</p>
+          <p><strong>Residential Address:</strong> ${student.residentialAddress || 'N/A'}</p>
+          <p><strong>Admission Number:</strong> ${student.admissionNumber || 'N/A'}</p>
+        `;
+        document.getElementById('generateIDCard').onclick = () => generateIDCard(student);
+        document.getElementById('detailsModal').style.display = 'block';
+      });
+    }
+
+    document.getElementById('closeDetailsModal').addEventListener('click', () => {
+      document.getElementById('detailsModal').style.display = 'none';
+    });
+
+    // Generate ID Card PDF
+    function generateIDCard(student) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.addImage('images/somap-logo.png.jpg', 'PNG', 10, 10, 50, 50); // Ensure logo is in /images folder
+      doc.setFontSize(16);
+      doc.text('Student ID Card', 70, 20);
+      doc.setFontSize(12);
+      doc.text(`Full Name: ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`, 10, 70);
+      doc.text(`Admission Number: ${student.admissionNumber || 'N/A'}`, 10, 80);
+      doc.text(`Class: ${student.classLevel || 'N/A'}`, 10, 90);
+      doc.text(`Parent Contact: ${student.primaryParentContact || 'N/A'}`, 10, 100);
+      doc.text(`School Contact: +255686828732`, 10, 110);
+      doc.text(`Residential Address: ${student.residentialAddress || 'N/A'}`, 10, 120);
+      if (student.passportPhoto) {
+        doc.addImage(student.passportPhoto, 'JPEG', 10, 130, 50, 50);
+      }
+      doc.save('student-id-card.pdf');
     }
 
     // Download CSV
     function downloadCSV(tab) {
-      const snapshot = db.ref('students').once('value').then(snap => {
-        const data = snap.val() || {};
-        const students = Object.values(data);
-        const ws = XLSX.utils.json_to_sheet(students.map((s, i) => ({
-          '#': i + 1,
-          'Admission No': s.admissionNumber || '',
-          'Full Name': s.firstName + ' ' + s.lastName,
-          'Class': s.classLevel || '',
-          'Parents Contact': s.primaryParentContact || '',
-          'Fee Per Year': s.feePerYear || '$0',
-          'Paid Amount': s.paidAmount || '$0',
-          'Debt': s.debt || '$0'
-        })));
+      db.ref('students').once('value').then(snapshot => {
+        const students = snapshot.val() || {};
+        let data = [];
+        if (tab === 'student-list') {
+          data = Object.values(students).map(student => ({
+            'Admission No': student.admissionNumber || '',
+            'Full Name': `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+            'Class': student.classLevel || 'N/A',
+            'Date of Registration': student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
+            'Passport Photo': student.passportPhoto || 'N/A',
+            'Parent Contact': student.primaryParentContact || 'N/A',
+            'Fee Total': student.feePerYear || '0',
+            'Payment Plan': student.paymentPlan || 'N/A'
+          }));
+        } else {
+          data = Object.values(students).map(student => ({
+            'Admission No': student.admissionNumber || '',
+            'Full Name': `${student.firstName || ''} ${student.lastName || ''}`,
+            'Class': student.classLevel || '',
+            'Parents Contact': student.primaryParentContact || '',
+            'Fee Per Year': student.feePerYear || '$0',
+            'Paid Amount': student.paidAmount || '$0',
+            'Debt': student.debt || '$0'
+          }));
+        }
+        const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Data');
-        XLSX.writeFile(wb, tab + '.xlsx');
+        XLSX.utils.book_append_sheet(wb, ws, tab.replace('-', ' '));
+        XLSX.writeFile(wb, `${tab}.xlsx`);
       });
     }
 
     // Download PDF
     function downloadPDF(tab) {
-      const snapshot = db.ref('students').once('value').then(snap => {
-        const data = snap.val() || {};
-        const students = Object.values(data);
-        const doc = new window.jspdf.jsPDF({orientation: 'landscape'});
-        doc.text(tab.charAt(0).toUpperCase() + tab.slice(1) + ' Report', 10, 10);
-        let rows = students.map((s, i) => [
-          i + 1,
-          s.admissionNumber || '',
-          s.firstName + ' ' + s.lastName,
-          s.classLevel || '',
-          s.primaryParentContact || '',
-          s.feePerYear || '$0',
-          s.paidAmount || '$0',
-          s.debt || '$0'
-        ]);
-        doc.autoTable({
-          head: [['#', 'Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
-          body: rows,
-          startY: 15,
-          styles: { fontSize: 8 }
-        });
-        doc.save(tab + '.pdf');
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape' });
+      doc.setFontSize(16);
+      doc.text(`${tab.charAt(0).toUpperCase() + tab.slice(1)} Report`, 10, 10);
+      db.ref('students').once('value').then(snapshot => {
+        const students = snapshot.val() || {};
+        let rows = [];
+        if (tab === 'student-list') {
+          rows = Object.values(students).map(student => [
+            student.admissionNumber || '',
+            `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+            student.classLevel || 'N/A',
+            student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
+            student.passportPhoto || 'N/A',
+            student.primaryParentContact || 'N/A',
+            student.feePerYear || '0',
+            student.paymentPlan || 'N/A'
+          ]);
+          doc.autoTable({
+            head: [['Admission No', 'Full Name', 'Class', 'Date of Registration', 'Passport Photo', 'Parent Contact', 'Fee Total', 'Payment Plan']],
+            body: rows,
+            startY: 15,
+            styles: { fontSize: 8 }
+          });
+        } else {
+          rows = Object.values(students).map(student => [
+            student.admissionNumber || '',
+            `${student.firstName || ''} ${student.lastName || ''}`,
+            student.classLevel || '',
+            student.primaryParentContact || '',
+            student.feePerYear || '$0',
+            student.paidAmount || '$0',
+            student.debt || '$0'
+          ]);
+          doc.autoTable({
+            head: [['Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
+            body: rows,
+            startY: 15,
+            styles: { fontSize: 8 }
+          });
+        }
+        doc.save(`${tab}.pdf`);
       });
     }
 

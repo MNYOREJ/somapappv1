@@ -74,7 +74,27 @@
       background-color: #f2f2f2;
     }
   </style>
-  <script src="firebase.js"></script>
+  <!-- Use the same Firebase v9 compat scripts as your setup -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script>
+    // Use the existing global Firebase config
+    if (!firebase.apps.length) {
+      const firebaseConfig = {
+        apiKey: "AIzaSyDqU_zl2K4SKV-Ty0yd1KIaFkjpLs6KlYo",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "48563861599",
+        appId: "1:48563861599:web:27c9dff2c9ab6de67b7c24",
+        measurementId: ""
+      };
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -253,19 +273,8 @@
   </div>
 
   <script>
-    // Firebase Initialization
-    const firebaseConfig = {
-      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-      authDomain: "somaptestt.firebaseapp.com",
-      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-      projectId: "somaptestt",
-      storageBucket: "somaptestt.firebasestorage.app",
-      messagingSenderId: "105526245138",
-      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
-      measurementId: "G-4HKX7KN6Q3"
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
+    // Use the global db from Firebase initialization
+    const db = window.db;
 
     // Tab Switching
     const tabs = document.querySelectorAll('.download-tab');
@@ -379,84 +388,82 @@
     }
 
     // Download CSV
-    function downloadCSV(tab) {
-      db.ref('students').once('value').then(snapshot => {
-        const students = snapshot.val() || {};
-        let data = [];
-        if (tab === 'student-list') {
-          data = Object.values(students).map(student => ({
-            'Admission No': student.admissionNumber || '',
-            'Full Name': `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
-            'Class': student.classLevel || 'N/A',
-            'Date of Registration': student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
-            'Passport Photo': student.passportPhoto || 'N/A',
-            'Parent Contact': student.primaryParentContact || 'N/A',
-            'Fee Total': student.feePerYear || '0',
-            'Payment Plan': student.paymentPlan || 'N/A'
-          }));
-        } else {
-          data = Object.values(students).map(student => ({
-            'Admission No': student.admissionNumber || '',
-            'Full Name': `${student.firstName || ''} ${student.lastName || ''}`,
-            'Class': student.classLevel || '',
-            'Parents Contact': student.primaryParentContact || '',
-            'Fee Per Year': student.feePerYear || '$0',
-            'Paid Amount': student.paidAmount || '$0',
-            'Debt': student.debt || '$0'
-          }));
-        }
-        const ws = XLSX.utils.json_to_sheet(data);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, tab.replace('-', ' '));
-        XLSX.writeFile(wb, `${tab}.xlsx`);
-      });
+    async function downloadCSV(tab) {
+      const snapshot = await db.ref('students').once('value');
+      const students = snapshot.val() || {};
+      let data = [];
+      if (tab === 'student-list') {
+        data = Object.values(students).map(student => ({
+          'Admission No': student.admissionNumber || '',
+          'Full Name': `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+          'Class': student.classLevel || 'N/A',
+          'Date of Registration': student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
+          'Passport Photo': student.passportPhoto || 'N/A',
+          'Parent Contact': student.primaryParentContact || 'N/A',
+          'Fee Total': student.feePerYear || '0',
+          'Payment Plan': student.paymentPlan || 'N/A'
+        }));
+      } else {
+        data = Object.values(students).map(student => ({
+          'Admission No': student.admissionNumber || '',
+          'Full Name': `${student.firstName || ''} ${student.lastName || ''}`,
+          'Class': student.classLevel || '',
+          'Parents Contact': student.primaryParentContact || '',
+          'Fee Per Year': student.feePerYear || '$0',
+          'Paid Amount': student.paidAmount || '$0',
+          'Debt': student.debt || '$0'
+        }));
+      }
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, tab.replace('-', ' '));
+      XLSX.writeFile(wb, `${tab}.xlsx`);
     }
 
     // Download PDF
-    function downloadPDF(tab) {
+    async function downloadPDF(tab) {
+      const snapshot = await db.ref('students').once('value');
+      const students = snapshot.val() || {};
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation: 'landscape' });
       doc.setFontSize(16);
       doc.text(`${tab.charAt(0).toUpperCase() + tab.slice(1)} Report`, 10, 10);
-      db.ref('students').once('value').then(snapshot => {
-        const students = snapshot.val() || {};
-        let rows = [];
-        if (tab === 'student-list') {
-          rows = Object.values(students).map(student => [
-            student.admissionNumber || '',
-            `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
-            student.classLevel || 'N/A',
-            student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
-            student.passportPhoto || 'N/A',
-            student.primaryParentContact || 'N/A',
-            student.feePerYear || '0',
-            student.paymentPlan || 'N/A'
-          ]);
-          doc.autoTable({
-            head: [['Admission No', 'Full Name', 'Class', 'Date of Registration', 'Passport Photo', 'Parent Contact', 'Fee Total', 'Payment Plan']],
-            body: rows,
-            startY: 15,
-            styles: { fontSize: 8 }
-          });
-        } else {
-          rows = Object.values(students).map(student => [
-            student.admissionNumber || '',
-            `${student.firstName || ''} ${student.lastName || ''}`,
-            student.classLevel || '',
-            student.primaryParentContact || '',
-            student.feePerYear || '$0',
-            student.paidAmount || '$0',
-            student.debt || '$0'
-          ]);
-          doc.autoTable({
-            head: [['Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
-            body: rows,
-            startY: 15,
-            styles: { fontSize: 8 }
-          });
-        }
-        doc.save(`${tab}.pdf`);
-      });
+      let rows = [];
+      if (tab === 'student-list') {
+        rows = Object.values(students).map(student => [
+          student.admissionNumber || '',
+          `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+          student.classLevel || 'N/A',
+          student.timestamp ? new Date(student.timestamp).toLocaleDateString() : 'N/A',
+          student.passportPhoto || 'N/A',
+          student.primaryParentContact || 'N/A',
+          student.feePerYear || '0',
+          student.paymentPlan || 'N/A'
+        ]);
+        doc.autoTable({
+          head: [['Admission No', 'Full Name', 'Class', 'Date of Registration', 'Passport Photo', 'Parent Contact', 'Fee Total', 'Payment Plan']],
+          body: rows,
+          startY: 15,
+          styles: { fontSize: 8 }
+        });
+      } else {
+        rows = Object.values(students).map(student => [
+          student.admissionNumber || '',
+          `${student.firstName || ''} ${student.lastName || ''}`,
+          student.classLevel || '',
+          student.primaryParentContact || '',
+          student.feePerYear || '$0',
+          student.paidAmount || '$0',
+          student.debt || '$0'
+        ]);
+        doc.autoTable({
+          head: [['Admission No', 'Full Name', 'Class', 'Parents Contact', 'Fee Per Year', 'Paid Amount', 'Debt']],
+          body: rows,
+          startY: 15,
+          styles: { fontSize: 8 }
+        });
+      }
+      doc.save(`${tab}.pdf`);
     }
 
     // Load data for the initial tab

@@ -307,7 +307,7 @@
             <i class="fas fa-money-bill-wave text-xl"></i>
             <span class="sidebar-tooltip">Finance</span>
             <span class="sidebar-expanded hidden ml-3 text-sm font-medium">Finance</span>
-          </button>      
+          </button>   
           <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-gray-500 mx-auto" data-module="library">
             <i class="fas fa-book text-xl"></i>
             <span class="sidebar-tooltip">Digital Library</span>
@@ -3385,6 +3385,190 @@
 <script>
 // Initialize Firebase references
 const db = firebase.database();
+
+// Registration form logic
+document.addEventListener('DOMContentLoaded', function() {
+  // Attach submit event to registration form (modal)
+  document.body.addEventListener('submit', async function(e) {
+    if (e.target && e.target.id === 'registrationForm') {
+      e.preventDefault();
+
+      // Collect form data
+      const form = e.target;
+      const formData = new FormData(form);
+      const student = {};
+      formData.forEach((value, key) => student[key] = value);
+
+      // Generate admission number
+      student.admissionNumber = 'ADM' + Date.now();
+      form.admissionNumber.value = student.admissionNumber;
+
+      // Save to Firebase
+      try {
+        await db.ref('students').push(student);
+        alert('Student registered successfully!');
+        form.reset();
+        form.admissionNumber.value = '';
+        document.getElementById('registrationModal').classList.add('hidden');
+        loadStudentsList(); // Refresh list
+      } catch (err) {
+        alert('Registration failed: ' + err.message);
+      }
+    }
+  });
+  // Load students list on page load
+  loadStudentsList();
+});
+// Display students in a simple list under Quick Admission
+function loadStudentsList() {
+  // Find the admissions tab content
+  const admissionsTab = document.querySelector('.erp-tab-content[data-tab="admissions"]');
+  if (!admissionsTab) return;
+  let list = admissionsTab.querySelector('#studentsList');
+  if (!list) {
+    list = document.createElement('div');
+    list.id = 'studentsList';
+    admissionsTab.appendChild(list);
+  }
+  db.ref('students').once('value').then(snap => {
+    const data = snap.val() || {};
+    let html = '<h4 class="font-medium mt-4 mb-2">Registered Students</h4>';
+    if (Object.keys(data).length === 0) {
+      html += '<div class="text-gray-500 text-sm">No students registered yet.</div>';
+    } else {
+      html += '<ul class="space-y-1">';
+      Object.values(data).forEach(s => {
+        html += `<li class="p-2 bg-gray-50 rounded mb-1">${s.firstName || ''} ${s.lastName || ''} <span class="text-xs text-gray-400">(${s.admissionNumber || ''})</span></li>`;
+      });
+      html += '</ul>';
+    }
+    list.innerHTML = html;
+  });
+}
+// Show/hide registered students table
+document.addEventListener('click', function(e) {
+  // Toggle students table
+  if (e.target && e.target.id === 'showStudentsBtn') {
+    const panel = document.getElementById('module-panel');
+    const studentsListPanel = panel.querySelector('#studentsListPanel');
+    if (studentsListPanel.classList.contains('hidden')) {
+      loadStudentsTable();
+      studentsListPanel.classList.remove('hidden');
+      e.target.textContent = 'Hide Registered Students';
+    } else {
+      studentsListPanel.classList.add('hidden');
+      e.target.textContent = 'See Registered Students';
+    }
+  }
+  // Toggle download dropdown
+  if (e.target && e.target.id === 'downloadBtn') {
+    const dd = document.getElementById('downloadDropdown');
+    dd.classList.toggle('hidden');
+  }
+  // Download PDF or CSV
+  if (e.target && e.target.parentElement && e.target.parentElement.id === 'downloadDropdown') {
+    const type = e.target.getAttribute('data-type');
+    if (type === 'pdf') downloadStudentsPDF();
+    if (type === 'csv') downloadStudentsCSV();
+    document.getElementById('downloadDropdown').classList.add('hidden');
+  }
+});
+
+// Load students and show in a table
+function loadStudentsTable() {
+  const panel = document.getElementById('module-panel');
+  const studentsListPanel = panel.querySelector('#studentsListPanel');
+  db.ref('students').once('value').then(snap => {
+    const data = snap.val() || {};
+    let html = '<h4 class="font-medium mb-2">Registered Students</h4>';
+    if (Object.keys(data).length === 0) {
+      html += '<div class="text-gray-500 text-sm">No students registered yet.</div>';
+    } else {
+      html += `<div class="overflow-x-auto"><table class="min-w-full text-xs sm:text-sm border">
+        <thead>
+          <tr class="bg-gray-100">
+            <th class="p-2 border">#</th>
+            <th class="p-2 border">First Name</th>
+            <th class="p-2 border">Last Name</th>
+            <th class="p-2 border">Class</th>
+            <th class="p-2 border">Gender</th>
+            <th class="p-2 border">DOB</th>
+            <th class="p-2 border">Admission No.</th>
+            <th class="p-2 border">Parent</th>
+            <th class="p-2 border">Contact</th>
+          </tr>
+        </thead>
+        <tbody>`;
+      let i = 1;
+      Object.values(data).forEach(s => {
+        html += `<tr>
+          <td class="p-2 border">${i++}</td>
+          <td class="p-2 border">${s.firstName || ''}</td>
+          <td class="p-2 border">${s.lastName || ''}</td>
+          <td class="p-2 border">${s.classLevel || ''}</td>
+          <td class="p-2 border">${s.gender || ''}</td>
+          <td class="p-2 border">${s.dob || ''}</td>
+          <td class="p-2 border">${s.admissionNumber || ''}</td>
+          <td class="p-2 border">${s.primaryParentName || ''}</td>
+          <td class="p-2 border">${s.primaryParentContact || ''}</td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+    studentsListPanel.innerHTML = html;
+  });
+}
+
+// Download students as PDF
+function downloadStudentsPDF() {
+  db.ref('students').once('value').then(snap => {
+    const data = snap.val() || {};
+    const students = Object.values(data);
+    const doc = new window.jspdf.jsPDF({orientation: 'landscape'});
+    doc.text('Registered Students', 10, 10);
+    let rows = students.map((s, i) => [
+      i + 1,
+      s.firstName || '',
+      s.lastName || '',
+      s.classLevel || '',
+      s.gender || '',
+      s.dob || '',
+      s.admissionNumber || '',
+      s.primaryParentName || '',
+      s.primaryParentContact || ''
+    ]);
+    doc.autoTable({
+      head: [['#','First Name','Last Name','Class','Gender','DOB','Admission No.','Parent','Contact']],
+      body: rows,
+      startY: 15,
+      styles: { fontSize: 8 }
+    });
+    doc.save('students.pdf');
+  });
+}
+
+// Download students as Excel/CSV
+function downloadStudentsCSV() {
+  db.ref('students').once('value').then(snap => {
+    const data = snap.val() || {};
+    const students = Object.values(data);
+    const ws = XLSX.utils.json_to_sheet(students.map((s, i) => ({
+      '#': i + 1,
+      'First Name': s.firstName || '',
+      'Last Name': s.lastName || '',
+      'Class': s.classLevel || '',
+      'Gender': s.gender || '',
+      'DOB': s.dob || '',
+      'Admission No.': s.admissionNumber || '',
+      'Parent': s.primaryParentName || '',
+      'Contact': s.primaryParentContact || ''
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Students');
+    XLSX.writeFile(wb, 'students.xlsx');
+  });
+}
+</script>
 <script>
   document.querySelector('[data-module="erp"]').addEventListener('click', () => {
     window.location.href = 'schoolerp.html';

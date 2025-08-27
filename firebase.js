@@ -1,26 +1,19 @@
-<!-- Put these SDKs in your HTML HEAD once per page that talks to Firebase -->
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+// firebase.js
+// SDKs are loaded in index.html (firebase-app-compat.js, firebase-database-compat.js, etc.)
 
-<script>
-// One canonical config for all your pages
+// Firebase config (your real config here)
 const firebaseConfig = {
-  apiKey: "AIzaSyDqU_zl2K4SKV-Ty0yd1KIaFkjpLs6KlYo",
+  apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
   authDomain: "somaptestt.firebaseapp.com",
   databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
   projectId: "somaptestt",
-  storageBucket: "somaptestt.appspot.com", // ✅ FIXED
-  messagingSenderId: "48563861599",
-  appId: "1:48563861599:web:27c9dff2c9ab6de67b7c24",
-  measurementId: ""
+  storageBucket: "somaptestt.appspot.com",
+  messagingSenderId: "105526245138",
+  appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
 };
 
-// Initialize once
+// Initialize Firebase once
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
-window.db = firebase.database();
-window.storage = firebase.storage();
-</script>
+const db = firebase.database();

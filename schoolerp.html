@@ -546,15 +546,25 @@
         return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
       }
 
-      async function uploadIfPresent(inputId, destFolder, newKey) {
-        const el = document.getElementById(inputId);
-        if (!el || !el.files || el.files.length === 0 || !storage) return null;
-        const file = el.files[0];
-        const path = `students/${newKey}/${destFolder}/${Date.now()}_${file.name}`;
-        const sref = storage.ref(path);
-        await sref.put(file);
-        return sref.getDownloadURL();
-      }
+     async function uploadIfPresent(inputId, folder, newKey) {
+  // Skip entirely if Storage handle is missing
+  if (!storage) return null;
+
+  const el = document.getElementById(inputId);
+  if (!el || !el.files || el.files.length === 0) return null;
+
+  try {
+    const file = el.files[0];
+    const path = `students/${newKey}/${folder}/${Date.now()}_${file.name}`;
+    const sref = storage.ref(path);
+    await sref.put(file);
+    const url = await sref.getDownloadURL();
+    return url;
+  } catch (err) {
+    console.warn(`[Storage] Skipping ${inputId} upload:`, err);
+    return null; // <— IMPORTANT: do not throw, keep registration flowing
+  }
+}
 
       // ---- Registration submit ----
       if (form) {
@@ -617,20 +627,28 @@
               return;
             }
 
-            // Create record with push key
-            const newRef = db.ref('students').push();
-            const newKey = newRef.key;
+           // 1) Create DB record FIRST (so we never lose the student)
+const newRef = db.ref('students').push();
+const newKey = newRef.key;
 
-            // Upload files (if storage configured)
-            const urls = {};
-            urls.passportPhotoURL   = await uploadIfPresent('passportPhoto','passport', newKey);
-            urls.birthCertURL       = await uploadIfPresent('birthCertUpload','birth-cert', newKey);
-            urls.reportCardURL      = await uploadIfPresent('reportCardUpload','report-card', newKey);
-            urls.joiningLetterURL   = await uploadIfPresent('joiningLetterUpload','joining-letter', newKey);
-            urls.medicalDocsURL     = await uploadIfPresent('medicalDocsUpload','medical-docs', newKey);
+await newRef.set({
+  createdAt: firebase.database.ServerValue.TIMESTAMP,
+  ...studentData
+});
 
-            await newRef.set(Object.assign({ createdAt: firebase.database.ServerValue.TIMESTAMP }, studentData, urls));
+// 2) Try uploads AFTER — never fail registration if Storage errors
+const urls = {};
+urls.passportPhotoURL = await uploadIfPresent('passportPhoto','passport', newKey);
+urls.birthCertURL     = await uploadIfPresent('birthCertUpload','birth-cert', newKey);
+urls.reportCardURL    = await uploadIfPresent('reportCardUpload','report-card', newKey);
+urls.joiningLetterURL = await uploadIfPresent('joiningLetterUpload','joining-letter', newKey);
+urls.medicalDocsURL   = await uploadIfPresent('medicalDocsUpload','medical-docs', newKey);
 
+// Only write non-null URLs
+const clean = Object.fromEntries(Object.entries(urls).filter(([,v]) => !!v));
+if (Object.keys(clean).length) {
+  await newRef.update(clean);
+}
             alert('✅ Student registered successfully!');
             closeRegistrationModal();
             renderAllTables(); // refresh if Students tab open

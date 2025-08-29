@@ -1,7 +1,4 @@
-// firebase.js
-// SDKs are loaded in index.html (firebase-app-compat.js, firebase-database-compat.js, etc.)
-
-// Firebase config (your real config here)
+// --- Firebase Config ---
 const firebaseConfig = {
   apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
   authDomain: "somaptestt.firebaseapp.com",
@@ -12,10 +9,16 @@ const firebaseConfig = {
   appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
 };
 
-// Initialize Firebase once
+// --- Initialize Firebase once ---
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
+
+// --- Export handles globally so HTML pages can use them ---
 const db = firebase.database();
-window.db = db; // make sure schoolerp.html sees it
+const storage = firebase.storage();
+
+window.db = db;
+window.storage = storage;
+
 console.log("✅ Firebase initialized, DB ready:", db);

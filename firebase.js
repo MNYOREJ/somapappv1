@@ -17,3 +17,5 @@ if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.database();
+window.db = db; // make sure schoolerp.html sees it
+console.log("✅ Firebase initialized, DB ready:", db);

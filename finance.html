@@ -1,627 +1,434 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SoMAP — Finance</title>
-
-  <!-- Tailwind for quick styling -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp - Finance Management</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .small { font-size: 0.85rem; }
-    .muted { color: #6b7280; }
-    .pill { padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; }
+    /* Enhanced styling for attractiveness */
+    .tab-button {
+      transition: all 0.3s ease;
+    }
+    .tab-button.active {
+      color: #4f46e5;
+      border-bottom-color: #4f46e5;
+    }
+    .table-header {
+      background-color: #f3f4f6;
+      color: #4b5563;
+    }
+    .table-row:nth-child(even) {
+      background-color: #f9fafb;
+    }
+    .download-btn {
+      background-color: #4f46e5;
+      color: white;
+      transition: all 0.3s ease;
+    }
+    .download-btn:hover {
+      background-color: #4338ca;
+    }
+    .section-header {
+      color: #1f2937;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+    }
+    .modal-content {
+      position: relative;
+      background-color: white;
+      margin: 5% auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 600px;
+      height: 80vh;
+      overflow-y: auto;
+    }
+    .close {
+      position: absolute;
+      top: 10px;
+      right: 20px;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #f2f2f2;
+    }
   </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="firebase.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
-<body class="bg-gray-50 min-h-screen p-6">
-  <div class="max-w-6xl mx-auto">
-    <header class="mb-6">
-      <h1 class="text-2xl font-bold text-indigo-700">SoMAP — Fee Management</h1>
-      <p class="text-gray-600 small mt-1">Record payments, allocate to installments, and export reports. Works even when Storage/billing is unavailable.</p>
-    </header>
-
-    <div class="grid md:grid-cols-3 gap-4">
-      <!-- Left: Students list + filter -->
-      <div class="col-span-1 bg-white rounded shadow p-4">
-        <h2 class="font-semibold mb-2">Students</h2>
-        <input id="filterInput" placeholder="Search by name / admission / class" class="w-full p-2 border rounded mb-3" />
-        <select id="classFilter" class="w-full p-2 border rounded mb-3">
-          <option value="">-- Filter by class (All) --</option>
-          <option>Baby Class</option>
-          <option>Class 1</option>
-          <option>Class 2</option>
-          <option>Class 3</option>
-          <option>Class 4</option>
-          <option>Class 5</option>
-          <option>Class 6</option>
-          <option>Class 7</option>
+<body class="bg-gray-50 p-4">
+  <div class="max-w-4xl mx-auto bg-white rounded-lg shadow p-6">
+    <h2 class="text-2xl font-bold mb-4">Finance Management</h2>
+    <p class="text-sm text-gray-500 mb-4">Manage fees, payments, expenses, and reports.</p>
+    <!-- Tabs for different sections -->
+    <div class="flex border-b mb-4">
+      <button class="finance-tab px-4 py-2 font-medium border-b-2 border-indigo-500 text-indigo-600 active" data-tab="fee-collection">Fee Collection</button>
+      <button class="finance-tab px-4 py-2 font-medium text-gray-500 hover:text-indigo-700" data-tab="expenses">Expenses</button>
+      <button class="finance-tab px-4 py-2 font-medium text-gray-500 hover:text-indigo-700" data-tab="reports">Reports</button>
+    </div>
+    <!-- Fee Collection Tab -->
+    <div class="finance-tab-content active" data-tab="fee-collection">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-medium text-gray-800">Fee Collection Overview</h3>
+        <p class="text-sm text-gray-500 mb-3">View and manage student fees.</p>
+        <select id="student-search" class="w-full p-2 border rounded-lg mb-3">
+          <option>Select Student</option>
         </select>
-
-        <div id="studentsList" class="max-h-[60vh] overflow-y-auto space-y-2"></div>
+        <table id="student-finance-table" class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="table-header bg-indigo-100">
+              <th class="p-2 border">Admission No</th>
+              <th class="p-2 border">Full Name</th>
+              <th class="p-2 border">Class</th>
+              <th class="p-2 border">Total Fee</th>
+              <th class="p-2 border">Payment Plan</th>
+              <th class="p-2 border">Paid</th>
+              <th class="p-2 border">Balance</th>
+              <th class="p-2 border">Debt</th>
+              <th class="p-2 border">Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <!-- Payment Form -->
+        <div class="mt-4">
+          <h4 class="font-medium text-gray-800 mb-2">Record Payment</h4>
+          <form id="paymentForm" class="space-y-4">
+            <select id="studentSelect" required class="w-full p-2 border rounded-lg">
+              <option>Select Student</option>
+            </select>
+            <input type="number" id="paymentAmount" placeholder="Payment Amount" required class="w-full p-2 border rounded-lg">
+            <select id="paymentMethod" required class="w-full p-2 border rounded-lg">
+              <option>Select Payment Method</option>
+              <option>M-Pesa</option>
+              <option>Airtel Money</option>
+              <option>TigoPesa</option>
+              <option>Bank Transfer</option>
+              <option>Cash</option>
+            </select>
+            <button type="submit" class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Record Payment</button>
+          </form>
+        </div>
       </div>
-
-      <!-- Middle: Finance Profile -->
-      <div class="col-span-2 bg-white rounded shadow p-4">
-        <div id="emptyHint" class="text-center py-12 text-gray-500">
-          Select a student on the left to view their finance profile.
-        </div>
-
-        <div id="profileArea" class="hidden">
-          <div class="flex items-start justify-between">
-            <div>
-              <h2 id="profileName" class="text-xl font-semibold"></h2>
-              <div class="muted small" id="profileMeta"></div>
-            </div>
-            <div class="text-right">
-              <div>Fee per year: <strong id="feePerYearDisplay">0</strong> TZS</div>
-              <div>Plan: <span id="planDisplay" class="pill bg-indigo-50 text-indigo-700"></span></div>
-              <div class="mt-2 small muted">Balance: <strong id="balanceDisplay">0</strong> TZS</div>
-            </div>
-          </div>
-
-          <hr class="my-3" />
-
-          <div class="grid md:grid-cols-2 gap-4">
-            <!-- Installments table -->
-            <div>
-              <h3 class="font-medium">Installment Schedule</h3>
-              <div class="text-sm muted mb-2">Amounts and due dates calculated from registration plan.</div>
-              <div class="overflow-x-auto">
-                <table class="min-w-full text-sm border">
-                  <thead class="bg-gray-100">
-                    <tr>
-                      <th class="p-2 border">#</th>
-                      <th class="p-2 border">Due Date</th>
-                      <th class="p-2 border">Expected (TZS)</th>
-                      <th class="p-2 border">Paid (TZS)</th>
-                      <th class="p-2 border">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="installmentsTable"></tbody>
-                </table>
-              </div>
-            </div>
-
-            <!-- Payments & Record -->
-            <div>
-              <h3 class="font-medium">Payments</h3>
-              <div class="text-sm muted mb-2">Record payments here. The allocation logic applies to oldest unpaid installments first.</div>
-
-              <form id="paymentForm" class="space-y-3 bg-gray-50 p-3 rounded">
-                <div>
-                  <label class="block small">Amount (TZS)</label>
-                  <input id="paymentAmount" type="number" min="1" required class="w-full p-2 border rounded" />
-                </div>
-                <div>
-                  <label class="block small">Method</label>
-                  <select id="paymentMethod" class="w-full p-2 border rounded">
-                    <option>Cash</option>
-                    <option>Mpesa</option>
-                    <option>Bank Transfer</option>
-                    <option>Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block small">Note</label>
-                  <input id="paymentNote" class="w-full p-2 border rounded" placeholder="Receipt number / details (optional)" />
-                </div>
-
-                <div class="flex gap-2">
-                  <button id="recordPaymentBtn" type="submit" class="bg-indigo-600 text-white px-3 py-2 rounded">Record Payment</button>
-                  <button id="refreshBtn" type="button" class="bg-gray-200 text-gray-700 px-3 py-2 rounded">Refresh</button>
-                </div>
-              </form>
-
-              <hr class="my-3" />
-              <h4 class="font-medium">Payment History</h4>
-              <div id="paymentsHistory" class="max-h-64 overflow-y-auto text-sm mt-2"></div>
-            </div>
-          </div>
-
-          <hr class="my-3" />
-          <div class="flex justify-between items-center">
-            <div class="small muted">Records live: data stored in Realtime Database under <code>/payments</code> and uses students data under <code>/students</code>.</div>
-            <div>
-              <button id="downloadStudentCSV" class="px-3 py-1 bg-green-600 text-white rounded small">Export Student CSV</button>
-              <button id="downloadStudentPDF" class="px-3 py-1 bg-blue-600 text-white rounded small">Export Student PDF</button>
-            </div>
-          </div>
-        </div>
-
+    </div>
+    <!-- Expenses Tab -->
+    <div class="finance-tab-content" data-tab="expenses">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-medium text-gray-800">Expenses Management</h3>
+        <p class="text-sm text-gray-500 mb-3">Record and track school expenses.</p>
+        <form id="expenseForm" class="space-y-4">
+          <select id="expenseCategory" required class="w-full p-2 border rounded-lg">
+            <option>Select Category</option>
+            <option>FOOD</option>
+            <option>SALARIES</option>
+            <option>OFFICE</option>
+            <option>EDUCATION</option>
+            <option>WATER & ELECTRICITY</option>
+            <option>SANITATION</option>
+            <option>ENVIRONMENT</option>
+            <option>HEALTH</option>
+            <option>SECURITY</option>
+            <option>CLOTHING</option>
+            <option>SHELTER</option>
+            <option>RECREATION</option>
+            <option>PROJECTS</option>
+            <option>TRANSPORT</option>
+            <option>PURCHASES</option>
+            <option>SIL</option>
+            <option>MAINTENANCE</option>
+            <option>BOOKS</option>
+            <option>EMERGENCY</option>
+            <option>MISCELLANEOUS</option>
+          </select>
+          <input type="text" id="expenseDescription" placeholder="Description" required class="w-full p-2 border rounded-lg">
+          <input type="number" id="expenseAmount" placeholder="Amount" required class="w-full p-2 border rounded-lg">
+          <button type="submit" class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Record Expense</button>
+        </form>
+        <table id="expense-table" class="w-full text-sm border-collapse mt-4">
+          <thead>
+            <tr class="table-header bg-indigo-100">
+              <th class="p-2 border">Category</th>
+              <th class="p-2 border">Description</th>
+              <th class="p-2 border">Amount</th>
+              <th class="p-2 border">Date</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <!-- Reports Tab -->
+    <div class="finance-tab-content" data-tab="reports">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-medium text-gray-800">Financial Reports</h3>
+        <p class="text-sm text-gray-500 mb-3">Generate and download reports.</p>
+        <button onclick="generateFeeReport('csv')" class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 mb-2">Download Fee Report (CSV)</button>
+        <button onclick="generateFeeReport('pdf')" class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 mb-2">Download Fee Report (PDF)</button>
+        <button onclick="generateExpenseReport('csv')" class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 mb-2">Download Expense Report (CSV)</button>
+        <button onclick="generateExpenseReport('pdf')" class="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Download Expense Report (PDF)</button>
       </div>
     </div>
   </div>
 
-  <!-- Dependencies (SheetJS + jspdf + autotable) -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
-
-  <!-- Your firebase.js MUST be present in same folder and set window.db = firebase.database() -->
-  <script src="firebase.js"></script>
-
   <script>
-  (function(){
-    // Safe access to DB
-    const db = window.db || (window.firebase && firebase.database && firebase.database());
-    if (!db) {
-      document.body.innerHTML = '<div class="p-8 text-red-600">Firebase DB not initialized. Ensure firebase.js is included and sets window.db.</div>';
-      return;
+    // Firebase Initialization
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const storage = firebase.storage();
+
+    // Tab Switching
+    const tabs = document.querySelectorAll('.finance-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('border-b-2', 'border-indigo-500', 'text-indigo-600'));
+        tab.classList.add('border-b-2', 'border-indigo-500', 'text-indigo-600');
+        document.querySelectorAll('.finance-tab-content').forEach(content => content.classList.remove('active'));
+        document.querySelector(`.finance-tab-content[data-tab="${tab.dataset.tab}"]`).classList.add('active');
+        if (tab.dataset.tab === 'fee-collection') loadStudentFinances();
+        if (tab.dataset.tab === 'expenses') loadExpenses();
+      });
+    });
+
+    // Load Student Finances
+    async function loadStudentFinances() {
+      const snapshot = await db.ref('students').once('value');
+      const students = snapshot.val() || {};
+      const studentArray = Object.values(students);
+      const tableBody = document.querySelector('#student-finance-table tbody');
+      tableBody.innerHTML = '';
+      studentArray.forEach(student => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td class="p-2 border">${student.admissionNumber || ''}</td>
+          <td class="p-2 border">${student.firstName} ${student.middleName || ''} ${student.lastName}</td>
+          <td class="p-2 border">${student.classLevel || ''}</td>
+          <td class="p-2 border">${student.feePerYear || '$0'}</td>
+          <td class="p-2 border">${student.paymentPlan || 'N/A'}</td>
+          <td class="p-2 border">${student.paidAmount || '$0'}</td>
+          <td class="p-2 border">${student.balance || '$0'}</td>
+          <td class="p-2 border">${student.debt || '$0'}</td>
+          <td class="p-2 border"><i class="fas fa-eye cursor-pointer" onclick="viewStudentDetails('${student.id}')"></i></td>
+        `;
+        tableBody.appendChild(row);
+      });
     }
 
-    // UI elements
-    const studentsListEl = document.getElementById('studentsList');
-    const filterInput = document.getElementById('filterInput');
-    const classFilter = document.getElementById('classFilter');
-    const profileArea = document.getElementById('profileArea');
-    const emptyHint = document.getElementById('emptyHint');
-    const profileName = document.getElementById('profileName');
-    const profileMeta = document.getElementById('profileMeta');
-    const feePerYearDisplay = document.getElementById('feePerYearDisplay');
-    const planDisplay = document.getElementById('planDisplay');
-    const balanceDisplay = document.getElementById('balanceDisplay');
-    const installmentsTable = document.getElementById('installmentsTable');
-    const paymentsHistory = document.getElementById('paymentsHistory');
-    const paymentForm = document.getElementById('paymentForm');
-    const paymentAmount = document.getElementById('paymentAmount');
-    const paymentMethod = document.getElementById('paymentMethod');
-    const paymentNote = document.getElementById('paymentNote');
-    const recordPaymentBtn = document.getElementById('recordPaymentBtn');
-    const refreshBtn = document.getElementById('refreshBtn');
-    const downloadStudentCSV = document.getElementById('downloadStudentCSV');
-    const downloadStudentPDF = document.getElementById('downloadStudentPDF');
+    // Record Payment
+    document.getElementById('paymentForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const studentId = document.getElementById('studentSelect').value;
+      const amount = parseFloat(document.getElementById('paymentAmount').value);
+      const method = document.getElementById('paymentMethod').value;
 
-    // Local cache
-    let studentsCache = []; // array of { key, ...data }
-    let selectedStudent = null; // { key, ...data }
-    let paymentsCache = {}; // map studentKey => array of payments
-
-    // Utility helpers (careful arithmetic)
-    function toNumber(v){ const n = Number(v); return Number.isNaN(n) ? 0 : Math.round(n); } // shillings integer
-    function formatTZS(n){ return (toNumber(n)).toLocaleString('en-US'); }
-    function dateStr(ts){ if(!ts) return 'N/A'; const d = new Date(Number(ts)); return d.toLocaleDateString(); }
-
-    // Plans logic: return array of installments [{index, dueDate(ms), expected}]
-    function buildInstallments(feePerYear, plan, academicYearStr){
-      const fee = toNumber(feePerYear);
-      const nowYear = new Date().getFullYear();
-      // use academicYear or fallback to now
-      const year = (academicYearStr && /^\d{4}$/.test(academicYearStr)) ? Number(academicYearStr) : nowYear;
-      const installments = [];
-
-      if (!plan || plan === 'yearly' || plan.toLowerCase() === 'full-year' || plan.toLowerCase() === 'full year' ) {
-        // Full-year single installment before Jan 10 of year
-        const due = new Date(year, 0, 10).getTime(); // Jan 10
-        installments.push({ index: 1, due, expected: fee });
-        return installments;
-      }
-
-      if (plan === '6-instalments' || plan.toLowerCase().includes('6')) {
-        // Approx: divide by 6, but if not divisible, put remainder in last
-        // Use specific due windows from your spec:
-        const windows = [
-          [11, 1, 10],  // Dec 1 (previous year) - Jan 10 => treat as Jan 10 of year (we'll use Jan 10)
-          [2, 3, 15],   // March 1-15 -> use Mar 15
-          [3, 4, 15],   // Apr 1-15 -> Apr 15
-          [4, 5, 15],   // May 1-15 -> May 15
-          [6, 7, 15],   // July 1-15 -> Jul 15
-          [8, 9, 15]    // Sep 1-15 -> Sep 15
-        ];
-        // seconds: mapping windows months - but Jan window: use Jan 10 of "year"
-        const baseAmounts = Array(6).fill(Math.floor(fee / 6));
-        let remainder = fee - baseAmounts.reduce((a,b)=>a+b,0);
-        for (let i=0;i<remainder;i++) baseAmounts[baseAmounts.length-1-i]++;
-
-        for (let i=0;i<6;i++){
-          let due;
-          if (i === 0) {
-            // use Jan 10 of year
-            due = new Date(year, 0, 10).getTime();
-          } else if (i === 1) {
-            due = new Date(year, 2, 15).getTime(); // Mar 15
-          } else if (i === 2) {
-            due = new Date(year, 3, 15).getTime(); // Apr 15
-          } else if (i === 3) {
-            due = new Date(year, 4, 15).getTime(); // May 15
-          } else if (i === 4) {
-            due = new Date(year, 6, 15).getTime(); // Jul 15
-          } else {
-            due = new Date(year, 8, 15).getTime(); // Sep 15
-          }
-          installments.push({ index: i+1, due, expected: baseAmounts[i] });
-        }
-        return installments;
-      }
-
-      if (plan === 'monthly' || plan.toLowerCase().includes('monthly')) {
-        // Jan and July cover two months each, Jan-Oct months only (10 months)
-        // We'll construct months: Jan(0), Feb(1), Mar(2), Apr(3), May(4), Jun(5), Jul(6), Aug(7), Sep(8), Oct(9)
-        // Make Jan and Jul double amounts (2 months).
-        // Distribute fee: monthsCount = 10, but Jan/Jul double - so weight Jan and Jul = 2, rest =1 => total weight = 12? Wait: The spec says Jan & Jul cover two months meaning effectively Jan and Jul receive double.
-        // Approach: expected per "month-slot" = fee / 10, then Jan & Jul are 2*slot (so total 12 slots), but the spec example uses Jan 80k when yearly 480k => per slot 48k? To match the spec simpler: we'll follow described example: Jan+Jul are double.
-        // To keep correct totals: compute base = fee / 10; Jan = base*2, Feb..Jun = base, Jul=base*2, Aug-Oct=base => total = base*12 ??? That would exceed fee.
-        // Instead, interpret spec as: Jan and Jul each cover two months (so they each equal (fee/10)*2, but the total months = 10, so sums to fee. Implementation: base = fee / 10; Jan = base*2, Feb=base, ... Jul = base*2, etc. This sums to base*(2 +1*8 +2)=base*12 — indeed not equal to fee. The spec example likely assumed "double month amounts" but used different base. To keep simple and correct we will:
-        // Simpler correct approach: distribute into 10 buckets proportionally, but when showing months, Jan & Jul will be labelled 'Jan (2 months)' and 'Jul (2 months)'. Ergo we compute slot = fee / 10; Jan expected = slot*2, Feb = slot, ..., Jul = slot*2, ... Oct = slot. That yields sum = slot*(2+1+1+1+1+1+2+1+1+1) = slot*12 -> mismatch. So we must adopt a consistent definition:
-        // We'll implement popular approach: split fee into 10 equal amounts, but when showing schedule, show Jan and Jul as covering two months each by combining two slots: Jan = slot*2, Feb = slot, Mar=slot,... Jul=slot*2, etc. To avoid mismatch, slot = fee / 12 (12 "month slots"). Then Jan and Jul are 2*slot, others 1*slot, total = fee. This matches the sample numbers.
-        const slots = 12;
-        const slotAmount = Math.floor(fee / slots);
-        let remainder = fee - slotAmount * slots;
-        // Build months list (Jan-Oct), with Jan and Jul double
-        const monthIndices = [
-          { m:0, mult:2 }, // Jan = 2 slots
-          { m:1, mult:1 }, // Feb
-          { m:2, mult:1 }, // Mar
-          { m:3, mult:1 }, // Apr
-          { m:4, mult:1 }, // May
-          { m:5, mult:1 }, // Jun
-          { m:6, mult:2 }, // Jul = 2
-          { m:7, mult:1 }, // Aug
-          { m:8, mult:1 }, // Sep
-          { m:9, mult:1 }  // Oct
-        ];
-        // allocate
-        for (let i=0;i<monthIndices.length;i++){
-          const mult = monthIndices[i].mult;
-          let expected = slotAmount * mult;
-          if (remainder > 0) { expected += 1; remainder -= 1; } // sprinkle remainders
-          const month = monthIndices[i].m;
-          const due = new Date(year, month, 15).getTime(); // due mid-month
-          installments.push({ index: i+1, due, expected: Math.round(expected) });
-        }
-        return installments;
-      }
-
-      if (plan === '2-instalments' || plan.toLowerCase().includes('2')) {
-        // Two installments: first before Jan10 (48%), second before Jul5 (48%) — sample says 48% each and remainder? We'll compute:
-        const p1 = Math.round(fee * 0.48);
-        const p2 = Math.round(fee * 0.48);
-        const remainderAmt = fee - (p1 + p2);
-        const firstDue = new Date(year, 0, 10).getTime();
-        const secondDue = new Date(year, 6, 5).getTime();
-        installments.push({ index: 1, due: firstDue, expected: p1 });
-        installments.push({ index: 2, due: secondDue, expected: p2 + remainderAmt }); // put remainder on second
-        return installments;
-      }
-
-      // Default fallback: single full-year
-      installments.push({ index: 1, due: new Date(year,0,10).getTime(), expected: fee });
-      return installments;
-    }
-
-    // Allocation algorithm: allocate amount to installments array (mutates)
-    // installments is array { index, expected, paid } where expected/present are integers
-    function allocatePaymentToInstallments(installments, amount){
-      let remaining = toNumber(amount);
-      const allocations = []; // {index, amountAllocated}
-      // Ensure paid fields exist:
-      installments.forEach(i => { i.paid = i.paid || 0; });
-      for (let ins of installments) {
-        const need = Math.max(0, ins.expected - ins.paid);
-        if (need <= 0) continue;
-        const take = Math.min(need, remaining);
-        if (take > 0) {
-          ins.paid += take;
-          allocations.push({ index: ins.index, amount: take });
-          remaining -= take;
-        }
-        if (remaining <= 0) break;
-      }
-      // If remaining > 0 => surplus, return as credit (allocation to index 0)
-      if (remaining > 0) {
-        allocations.push({ index: 0, amount: remaining });
-        // no installment to modify; caller may store credit
-      }
-      return { allocations, leftover: remaining };
-    }
-
-    // Render helpers
-    function renderStudentsList(students){
-      studentsListEl.innerHTML = '';
-      if (!students || !students.length) {
-        studentsListEl.innerHTML = '<div class="text-gray-500 small">No students found.</div>';
+      if (!studentId || isNaN(amount) || amount <= 0) {
+        alert('Invalid input');
         return;
       }
-      students.forEach(s => {
-        const fee = toNumber(s.feePerYear || 0);
-        const div = document.createElement('div');
-        div.className = 'p-2 border rounded hover:bg-indigo-50 cursor-pointer flex justify-between items-center';
-        div.innerHTML = `
-          <div>
-            <div class="font-medium">${(s.firstName||'') + ' ' + (s.middleName||'') + ' ' + (s.lastName||'')}</div>
-            <div class="muted small">${s.admissionNumber || 'N/A'} • ${s.classLevel || 'N/A'}</div>
-          </div>
-          <div class="text-right small">
-            <div>${formatTZS(fee)}</div>
-            <div class="muted">${s.paymentPlan || 'Plan N/A'}</div>
-          </div>
-        `;
-        div.addEventListener('click', () => selectStudent(s));
-        studentsListEl.appendChild(div);
-      });
-    }
-
-    // Select student, load details & payments
-    async function selectStudent(s){
-      selectedStudent = s;
-      // Show profile
-      emptyHint.classList.add('hidden');
-      profileArea.classList.remove('hidden');
-
-      profileName.textContent = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`;
-      profileMeta.textContent = `Admission No: ${s.admissionNumber || 'N/A'} • Class: ${s.classLevel || 'N/A'} • ID: ${s.pupilId || '-'}`;
-      feePerYearDisplay.textContent = formatTZS(s.feePerYear || 0);
-      planDisplay.textContent = (s.paymentPlan || 'Not set').toString();
-      planDisplay.className = 'pill bg-indigo-50 text-indigo-700';
-
-      // Build installments using plan + fee + academicYear
-      const installmentsDef = buildInstallments(s.feePerYear || 0, (s.paymentPlan || '').toString(), s.academicYear || '');
-      // Fill paid amounts by reading payments for student, or get stored per-student fields
-      // We'll compute paid from /payments/{studentKey}
-      const paymentsSnap = await db.ref('payments/' + s.key).once('value');
-      const paymentsObj = paymentsSnap.val() || {};
-      const paymentsArr = Object.entries(paymentsObj).map(([k,v]) => ({ id:k, ...v }));
-
-      // prepare installments with current paid sums
-      // Build local copy with paid = 0 initially
-      const installments = installmentsDef.map(i => ({ index: i.index, due: i.due, expected: toNumber(i.expected), paid: 0 }));
-
-      // Sum payments allocations if payment records have allocations; if not, we allocate using algorithm to produce current state.
-      // We'll check paymentsArr entries: if they include allocations, use them to set paid. Otherwise, simulate by running allocation on amounts in chronological order.
-      let allocationsFound = paymentsArr.some(p=>p.allocations && Array.isArray(p.allocations));
-      if (allocationsFound) {
-        // zero then accumulate
-        for (let p of paymentsArr) {
-          if (Array.isArray(p.allocations)) {
-            for (let a of p.allocations) {
-              if (a.index > 0) {
-                const ins = installments.find(x=>x.index === a.index);
-                if (ins) ins.paid += toNumber(a.amount);
-              } else {
-                // credit or leftover - ignore for now
-              }
-            }
-          } else {
-            // legacy payment without allocations -> will be allocated below
-          }
-        }
-        // Also handle any payments without allocations by allocating them now
-        for (let p of paymentsArr) {
-          if (!Array.isArray(p.allocations)) {
-            // allocate in chronological order
-            allocatePaymentToInstallments(installments, toNumber(p.amount));
-            p.allocations = []; // not saved here, but will be created when recording new payments only
-          }
-        }
-      } else {
-        // No allocations stored — simulate allocations in chronological order to compute current paid numbers
-        paymentsArr.sort((a,b)=> (a.timestamp || 0) - (b.timestamp || 0));
-        for (let p of paymentsArr) {
-          allocatePaymentToInstallments(installments, toNumber(p.amount));
-        }
-      }
-
-      // compute balance
-      const totalExpected = installments.reduce((a,b)=>a + b.expected, 0);
-      const totalPaid = installments.reduce((a,b)=>a + (b.paid || 0), 0);
-      const balance = Math.max(0, totalExpected - totalPaid);
-      balanceDisplay.textContent = formatTZS(balance);
-
-      // Render installments table
-      installmentsTable.innerHTML = '';
-      installments.forEach(ins => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="p-2 border text-center">${ins.index}</td>
-          <td class="p-2 border">${dateStr(ins.due)}</td>
-          <td class="p-2 border text-right">${formatTZS(ins.expected)}</td>
-          <td class="p-2 border text-right">${formatTZS(ins.paid || 0)}</td>
-          <td class="p-2 border">${ins.paid >= ins.expected ? '<span class="pill bg-green-100 text-green-700">Cleared</span>' : (ins.paid > 0 ? '<span class="pill bg-yellow-100 text-yellow-800">Partially</span>' : '<span class="pill bg-red-100 text-red-700">Open</span>')}</td>
-        `;
-        installmentsTable.appendChild(tr);
-      });
-
-      // Render payment history
-      paymentsHistory.innerHTML = '';
-      (paymentsArr.sort((a,b)=> (b.timestamp || 0) - (a.timestamp || 0))).forEach(p => {
-        const div = document.createElement('div');
-        const t = p.timestamp ? dateStr(p.timestamp) : dateStr(p.date);
-        div.className = 'p-2 border rounded mb-2 bg-white';
-        const allocs = Array.isArray(p.allocations) ? p.allocations.map(a => (a.index === 0 ? `Credit:${formatTZS(a.amount)}` : `Inst ${a.index}:${formatTZS(a.amount)}`)).join(', ') : 'N/A';
-        div.innerHTML = `<div><strong>${formatTZS(p.amount || 0)} TZS</strong> <span class="muted small">• ${p.method || 'N/A'} • ${t}</span></div>
-        <div class="small muted">Allocations: ${allocs}</div>
-        <div class="small muted">Note: ${p.note || ''}</div>
-        `;
-        paymentsHistory.appendChild(div);
-      });
-
-      // attach to global caches
-      paymentsCache[s.key] = paymentsArr;
-      // store installments for later (so when recording a payment we can re-run allocation)
-      selectedStudent.installments = installments;
-      selectedStudent.totalExpected = totalExpected;
-      selectedStudent.totalPaid = totalPaid;
-      selectedStudent.balance = balance;
-    }
-
-    // Record payment handler
-    paymentForm.addEventListener('submit', async function(evt){
-      evt.preventDefault();
-      if (!selectedStudent || !selectedStudent.key) { alert('Select a student first'); return; }
-      let amount = toNumber(paymentAmount.value);
-      if (!amount || amount <= 0) { alert('Enter a valid amount'); return; }
-      const method = paymentMethod.value || 'Cash';
-      const note = paymentNote.value || '';
-      const studentKey = selectedStudent.key;
-      recordPaymentBtn.disabled = true;
 
       try {
-        // 1) Create a payments ref and push
-        const paymentsRef = db.ref('payments/' + studentKey);
-        const newPaymentRef = paymentsRef.push();
-        const paymentId = newPaymentRef.key;
-        const timestamp = Date.now();
+        const studentRef = db.ref('students/' + studentId);
+        const snapshot = await studentRef.once('value');
+        let student = snapshot.val();
+        if (!student) return;
 
-        // 2) Reconstruct current installments (fresh) using latest student data
-        const s = selectedStudent;
-        const installmentsDef = buildInstallments(s.feePerYear || 0, s.paymentPlan || '', s.academicYear || '');
-        // build local installments with current paid amounts by reading payments from DB
-        const paymentsSnap = await db.ref('payments/' + studentKey).once('value');
-        const paymentsObj = paymentsSnap.val() || {};
-        const paymentsList = Object.entries(paymentsObj).map(([k,v])=>({ id:k, ...v }));
-        // Build installments array:
-        const installments = installmentsDef.map(i => ({ index: i.index, due: i.due, expected: toNumber(i.expected), paid: 0 }));
-        // allocate existing payments chronologically
-        paymentsList.sort((a,b)=> (a.timestamp || 0) - (b.timestamp || 0));
-        for (let p of paymentsList) {
-          allocatePaymentToInstallments(installments, toNumber(p.amount));
+        // Allocate payment
+        let remaining = amount;
+        // Apply to debt first
+        if (student.debt > 0) {
+          const debtReduction = Math.min(remaining, student.debt);
+          student.debt -= debtReduction;
+          remaining -= debtReduction;
         }
 
-        // 3) Now allocate THIS new payment using allocation algorithm
-        const { allocations, leftover } = allocatePaymentToInstallments(installments, amount);
-        // allocations is an array of {index, amount}
-        // leftover maybe >0 -> credit
+        // Apply to balance
+        if (remaining > 0 && student.balance > 0) {
+          const balanceReduction = Math.min(remaining, student.balance);
+          student.balance -= balanceReduction;
+          student.paidAmount = (student.paidAmount || 0) + balanceReduction;
+          remaining -= balanceReduction;
+        }
 
-        // 4) Save payment record with allocations
-        const paymentRecord = {
-          amount,
-          method,
-          note,
-          timestamp,
-          allocations, // store allocations for traceability
-        };
-        await newPaymentRef.set(paymentRecord);
+        // Carry over to next installment if remaining
+        if (remaining > 0) {
+          student.credit = (student.credit || 0) + remaining;
+        }
 
-        // 5) Optionally update student's aggregated paid & balance fields (helpful for quick UI)
-        // compute totals
-        const totalExpected = installments.reduce((a,b)=>a + b.expected, 0);
-        const totalPaid = installments.reduce((a,b)=>a + (b.paid || 0), 0);
-        const balance = Math.max(0, totalExpected - totalPaid);
+        // Update student in Firebase
+        await studentRef.update(student);
 
-        // Keep a small derived snapshot inside student record (optional but useful)
-        await db.ref('students/' + studentKey + '/financeSummary').set({
-          totalExpected,
-          totalPaid,
-          balance,
-          lastPaymentAt: timestamp
-        });
-
-        // 6) UI updates
-        alert('Payment recorded and allocated successfully!');
-        // refresh student view
-        paymentAmount.value = '';
-        paymentNote.value = '';
-        await selectStudent(selectedStudent); // reload for fresh state
+        alert('Payment recorded successfully!');
+        document.getElementById('paymentForm').reset();
+        loadStudentFinances();
       } catch (err) {
-        console.error(err);
-        alert('Error recording payment: ' + (err && err.message ? err.message : err));
-      } finally {
-        recordPaymentBtn.disabled = false;
+        alert('Error recording payment: ' + err.message);
       }
     });
 
-    // Refresh button
-    refreshBtn.addEventListener('click', () => {
-      if (selectedStudent) selectStudent(selectedStudent);
-      else loadStudents();
-    });
-
-    // Load students from DB, keep local cache
-    async function loadStudents(){
-      const snap = await db.ref('students').once('value');
-      const obj = snap.val() || {};
-      // Convert to array with key
-      studentsCache = Object.entries(obj).map(([k,v]) => ({ key: k, ...v }));
-      // allow filtering in UI
-      renderStudentsList(applyFilters(studentsCache));
-    }
-
-    function applyFilters(list){
-      const f = filterInput.value.trim().toLowerCase();
-      const cls = classFilter.value;
-      return list.filter(s => {
-        let ok = true;
-        if (cls) ok = ok && (s.classLevel === cls);
-        if (f) {
-          const hay = ((s.firstName||'') + ' ' + (s.middleName||'') + ' ' + (s.lastName||'') + ' ' + (s.admissionNumber||'') + ' ' + (s.classLevel||'')).toLowerCase();
-          ok = ok && hay.indexOf(f) !== -1;
-        }
-        return ok;
+    // Load Expenses
+    async function loadExpenses() {
+      const snapshot = await db.ref('expenses').once('value');
+      const expenses = snapshot.val() || {};
+      const expenseArray = Object.values(expenses);
+      const tableBody = document.querySelector('#expense-table tbody');
+      tableBody.innerHTML = '';
+      expenseArray.forEach(expense => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td class="p-2 border">${expense.category || ''}</td>
+          <td class="p-2 border">${expense.description || ''}</td>
+          <td class="p-2 border">${expense.amount || ''}</td>
+          <td class="p-2 border">${expense.timestamp ? new Date(expense.timestamp).toLocaleDateString() : 'N/A'}</td>
+        `;
+        tableBody.appendChild(row);
       });
     }
 
-    filterInput.addEventListener('input', () => {
-      renderStudentsList(applyFilters(studentsCache));
-    });
-    classFilter.addEventListener('change', () => {
-      renderStudentsList(applyFilters(studentsCache));
+    // Record Expense
+    document.getElementById('expenseForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const category = document.getElementById('expenseCategory').value;
+      const description = document.getElementById('expenseDescription').value;
+      const amount = parseFloat(document.getElementById('expenseAmount').value);
+
+      if (!category || !description || isNaN(amount) || amount <= 0) {
+        alert('Invalid input');
+        return;
+      }
+
+      try {
+        await db.ref('expenses').push({
+          category,
+          description,
+          amount,
+          timestamp: Date.now()
+        });
+        alert('Expense recorded successfully!');
+        document.getElementById('expenseForm').reset();
+        loadExpenses();
+      } catch (err) {
+        alert('Error recording expense: ' + err.message);
+      }
     });
 
-    // Export helpers (CSV & PDF) - exports current selected student's summary
-    downloadStudentCSV.addEventListener('click', async () => {
-      if (!selectedStudent) { alert('Select a student first'); return; }
-      // Collect data
-      const s = selectedStudent;
-      const paymentsSnap = await db.ref('payments/' + s.key).once('value');
-      const payments = paymentsSnap.val() || {};
-      const rows = Object.values(payments).map(p => ({
-        timestamp: new Date(p.timestamp || Date.now()).toLocaleString(),
-        amount: p.amount || 0,
-        method: p.method || '',
-        note: p.note || '',
-        allocations: Array.isArray(p.allocations) ? p.allocations.map(a => `Ins${a.index}:${a.amount}`).join('; ') : ''
+    // Generate Fee Report
+    async function generateFeeReport(type) {
+      const snapshot = await db.ref('students').once('value');
+      const students = snapshot.val() || {};
+      const data = Object.values(students).map(student => ({
+        'Admission No': student.admissionNumber || '',
+        'Full Name': `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`,
+        'Class': student.classLevel || '',
+        'Total Fee': student.feePerYear || '0',
+        'Payment Plan': student.paymentPlan || 'N/A',
+        'Paid': student.paidAmount || '0',
+        'Balance': student.balance || '0',
+        'Debt': student.debt || '0'
       }));
-      if (!rows.length) { alert('No payments to export.'); return; }
-      // convert to XLSX
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'payments');
-      XLSX.writeFile(wb, `${s.admissionNumber || s.key}_payments.xlsx`);
-    });
 
-    downloadStudentPDF.addEventListener('click', async () => {
-      if (!selectedStudent) { alert('Select a student first'); return; }
-      const s = selectedStudent;
-      const paymentsSnap = await db.ref('payments/' + s.key).once('value');
-      const payments = paymentsSnap.val() || {};
-      const arr = Object.values(payments).map(p => [
-        new Date(p.timestamp || Date.now()).toLocaleString(),
-        p.amount || 0,
-        p.method || '',
-        p.note || '',
-        Array.isArray(p.allocations) ? p.allocations.map(a=>`Ins${a.index}:${a.amount}`).join(', ') : ''
-      ]);
-      if (!arr.length) { alert('No payments to export.'); return; }
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({orientation:'portrait'});
-      doc.setFontSize(14);
-      doc.text(`Payments for ${s.firstName} ${s.lastName} (${s.admissionNumber || ''})`, 10, 12);
-      doc.autoTable({
-        head: [['Date','Amount','Method','Note','Allocations']],
-        body: arr,
-        startY: 20,
-        styles: { fontSize: 8 }
-      });
-      doc.save(`${s.admissionNumber || s.key}_payments.pdf`);
-    });
-
-    // When page loads, load students
-    loadStudents();
-
-    // Keep live listener for students so new registrations appear automatically
-    db.ref('students').on('value', snapshot => {
-      const obj = snapshot.val() || {};
-      studentsCache = Object.entries(obj).map(([k,v]) => ({ key:k, ...v }));
-      renderStudentsList(applyFilters(studentsCache));
-      // if currently selected student changed or was updated, refresh view
-      if (selectedStudent && selectedStudent.key) {
-        const fresh = studentsCache.find(x => x.key === selectedStudent.key);
-        if (fresh) selectStudent(fresh);
+      if (type === 'csv') {
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Fee Report');
+        XLSX.writeFile(wb, 'fee-report.xlsx');
+      } else if (type === 'pdf') {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'landscape' });
+        doc.text('Fee Report', 10, 10);
+        doc.autoTable({
+          head: [['Admission No', 'Full Name', 'Class', 'Total Fee', 'Payment Plan', 'Paid', 'Balance', 'Debt']],
+          body: data.map(d => Object.values(d)),
+          startY: 15,
+          styles: { fontSize: 8 }
+        });
+        doc.save('fee-report.pdf');
       }
-    });
+    }
 
-  })();
+    // Generate Expense Report
+    async function generateExpenseReport(type) {
+      const snapshot = await db.ref('expenses').once('value');
+      const expenses = snapshot.val() || {};
+      const data = Object.values(expenses).map(expense => ({
+        'Category': expense.category || '',
+        'Description': expense.description || '',
+        'Amount': expense.amount || '0',
+        'Date': expense.timestamp ? new Date(expense.timestamp).toLocaleDateString() : 'N/A'
+      }));
+
+      if (type === 'csv') {
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Expense Report');
+        XLSX.writeFile(wb, 'expense-report.xlsx');
+      } else if (type === 'pdf') {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'landscape' });
+        doc.text('Expense Report', 10, 10);
+        doc.autoTable({
+          head: [['Category', 'Description', 'Amount', 'Date']],
+          body: data.map(d => Object.values(d)),
+          startY: 15,
+          styles: { fontSize: 8 }
+        });
+        doc.save('expense-report.pdf');
+      }
+    }
+
+    // Load students for payment dropdown
+    async function loadStudentSelect() {
+      const snapshot = await db.ref('students').once('value');
+      const students = snapshot.val() || {};
+      const select = document.getElementById('studentSelect');
+      select.innerHTML = '<option>Select Student</option>';
+      Object.entries(students).forEach(([id, student]) => {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = `${student.firstName} ${student.middleName || ''} ${student.lastName} (${student.admissionNumber})`;
+        select.appendChild(option);
+      });
+    }
+
+    loadStudentFinances();
+    loadExpenses();
+    loadStudentSelect();
   </script>
 </body>
 </html>

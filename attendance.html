@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Attendance</title>
+
+  <!-- Tailwind via CDN for quick, mobile-first styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Firebase SDKs (v9 compat as requested) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+
+  <!-- jsPDF for exports -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <!-- Your Firebase config wrapper (must exist next to this file or adjust path) -->
+  <script src="firebase.js"></script>
+
+  <style>
+    :root { --card: #ffffff; --muted:#f8fafc; }
+    * { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .sticky-footer { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e5e7eb; }
+    .status-pill { padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+    .grid-auto { display:grid; grid-template-columns: 1fr; gap: 0.75rem; }
+    @media (min-width: 768px){ .grid-auto{ grid-template-columns: repeat(2,1fr);} }
+    @media (min-width: 1024px){ .grid-auto{ grid-template-columns: repeat(3,1fr);} }
+    .tap { min-height: 44px; }
+    .scroll-x { overflow-x: auto; }
+    .table { width: 100%; border-collapse: collapse; }
+    .table th, .table td { border-bottom:1px solid #e5e7eb; padding: 8px; white-space: nowrap; }
+    .table th { background: #f8fafc; font-weight:600; position: sticky; top: 0; z-index: 1; }
+  </style>
+</head>
+
+<body class="bg-slate-50 min-h-screen">
+  <header class="bg-white border-b sticky top-0 z-10">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <a href="schoolerp.html" class="inline-flex items-center text-slate-700 hover:text-blue-600 text-sm">
+          ← Back to ERP
+        </a>
+        <h1 class="text-xl md:text-2xl font-bold">Attendance Register</h1>
+      </div>
+      <div id="todayAlert" class="hidden text-sm font-semibold px-3 py-1 rounded-full bg-yellow-100 text-yellow-800"></div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-4 space-y-4">
+    <!-- Filters -->
+    <section class="bg-white rounded-2xl shadow-sm border p-4">
+      <div class="grid md:grid-cols-5 gap-3 items-end">
+        <div>
+          <label class="block text-sm font-medium mb-1">Class</label>
+          <select id="classSelect" class="tap w-full border rounded-xl px-3 py-2"></select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Date</label>
+          <input id="dateInput" type="date" class="tap w-full border rounded-xl px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Search Student</label>
+          <input id="searchInput" type="text" placeholder="Type name/admission no." class="tap w-full border rounded-xl px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Quick Set AM</label>
+          <select id="quickAm" class="tap w-full border rounded-xl px-3 py-2">
+            <option value="">—</option>
+            <option value="P">Present</option>
+            <option value="A">Absent</option>
+            <option value="S">Sick</option>
+            <option value="LE">Left Early</option>
+            <option value="MT">Mtoro</option>
+            <option value="PG">Permission</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Quick Set PM</label>
+          <select id="quickPm" class="tap w-full border rounded-xl px-3 py-2">
+            <option value="">—</option>
+            <option value="P">Present</option>
+            <option value="A">Absent</option>
+            <option value="S">Sick</option>
+            <option value="LE">Left Early</option>
+            <option value="MT">Mtoro</option>
+            <option value="PG">Permission</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-3">
+        <button id="applyQuick" class="tap inline-flex items-center px-4 py-2 rounded-xl border bg-slate-900 text-white">Apply Quick</button>
+        <button id="saveAll" class="tap inline-flex items-center px-4 py-2 rounded-xl border bg-blue-600 text-white">Save All</button>
+        <button id="exportDaily" class="tap inline-flex items-center px-4 py-2 rounded-xl border">Export Daily PDF</button>
+        <button id="exportMonthly" class="tap inline-flex items-center px-4 py-2 rounded-xl border">Export Monthly PDF</button>
+        <span id="saveToast" class="ml-auto text-sm text-slate-600"></span>
+      </div>
+    </section>
+
+    <!-- Table -->
+    <section class="bg-white rounded-2xl shadow-sm border">
+      <div class="scroll-x">
+        <table class="table" id="attTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Admission No.</th>
+              <th>Student Name</th>
+              <th>Class</th>
+              <th>AM</th>
+              <th>PM</th>
+              <th>Daily</th>
+              <th>Fee Due</th>
+              <th>Paid</th>
+              <th>Balance</th>
+            </tr>
+          </thead>
+          <tbody id="attBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Analytics -->
+    <section class="bg-white rounded-2xl shadow-sm border p-4">
+      <h2 class="text-lg font-semibold mb-2">Analytics — <span id="monthLabel"></span></h2>
+      <div class="grid-auto">
+        <div class="p-4 rounded-2xl border bg-[var(--muted)]">
+          <div class="text-sm text-slate-500">Class Days (excl. weekends & holidays)</div>
+          <div id="classDays" class="text-2xl font-bold">—</div>
+        </div>
+        <div class="p-4 rounded-2xl border bg-[var(--muted)]">
+          <div class="text-sm text-slate-500">% Present (Class Avg)</div>
+          <div id="classPctPresent" class="text-2xl font-bold">—</div>
+        </div>
+        <div class="p-4 rounded-2xl border bg-[var(--muted)]">
+          <div class="text-sm text-slate-500">Yellow Alerts (≥ 10 school days absent in month)</div>
+          <div id="yellowCount" class="text-2xl font-bold">—</div>
+        </div>
+        <div class="p-4 rounded-2xl border bg-[var(--muted)]">
+          <div class="text-sm text-slate-500">Red Alerts (≥ 35 days absent across 3 months)</div>
+          <div id="redCount" class="text-2xl font-bold">—</div>
+        </div>
+      </div>
+      <div id="perStudentStats" class="mt-4"></div>
+    </section>
+  </main>
+
+  <footer class="sticky-footer px-4 py-2">
+    <div class="max-w-7xl mx-auto flex items-center gap-3 text-sm">
+      <div class="text-slate-500">SoMAp Attendance · Mobile friendly · Autosave ready</div>
+      <div id="rtState" class="ml-auto text-slate-500"></div>
+    </div>
+  </footer>
+
+<script>
+(function(){
+  // ---------- Config ----------
+  const TZ = 'Africa/Nairobi';            // TZ for Tanzania/Kenya region
+  const SCHOOL_DAY_CUTOFF_HOUR = 15;      // 3PM alert if not marked
+  const STATUS = ['P','A','S','LE','MT','PG']; // Present, Absent, Sick, Left Early, Mtoro, Permission
+  // Daily code derived from AM/PM:
+  // 'P' if AM=P and PM=P
+  // 'PA','AP','PS','PMT','... based on combos. We'll compute string like AM+PM with small normalization.
+  const HOLIDAYS_TZ = [
+    // Tanzania fixed/movable (sample baseline; adjust yearly if needed)
+    // Format: 'MM-DD' for fixed, or 'YYYY-MM-DD' for dated (movable) that we know.
+    '01-01','04-07','04-26','05-01','07-07','08-08','10-14','12-09','12-25','12-26',
+  ];
+  // Movable 2025 examples (extend as needed):
+  const MOVABLE_2025 = ['2025-03-29','2025-04-01','2025-04-10','2025-04-11','2025-06-16'];
+
+  // ---------- State ----------
+  let students = [];        // [{id, admissionNo, name, class, feeDue, feePaid, balance}]
+  let filtered = [];
+  let currentClass = '';
+  let currentDateStr = '';
+  let monthKey = '';        // 'YYYY-MM'
+  let attendanceCache = {}; // {studentId: {am, pm, daily}}
+  let monthAttendance = {}; // {studentId: { 'YYYY-MM-DD': {am,pm,daily} }}
+
+  // ---------- Helpers ----------
+  function fmtDate(d){
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+  function toMonthKey(dOrStr){
+    const d = typeof dOrStr === 'string' ? new Date(dOrStr + 'T00:00:00') : dOrStr;
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    return `${y}-${m}`;
+  }
+  function isWeekend(d){
+    const day = d.getDay(); // 0 Sun, 6 Sat
+    return day===0 || day===6;
+  }
+  function isHoliday(d){
+    const fixed = `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const iso = fmtDate(d);
+    return HOLIDAYS_TZ.includes(fixed) || MOVABLE_2025.includes(iso);
+  }
+  function deriveDaily(am, pm){
+    if(!am && !pm) return '';
+    const A = (am||'').toUpperCase();
+    const P = (pm||'').toUpperCase();
+    if(A==='P' && P==='P') return 'P';
+    // Normalize combined codes
+    const map = {
+      'P-A':'PA','A-P':'AP','P-S':'PS','P-MT':'PMT','P-PG':'PPG','P-LE':'PLE',
+      'S-P':'SP','MT-P':'MTP','PG-P':'PGP','LE-P':'LEP',
+      'A-A':'AA','S-S':'SS','MT-MT':'MTMT','PG-PG':'PGPG','LE-LE':'LELE'
+    };
+    return map[`${A}-${P}`] || `${A}${P}`;
+  }
+  function el(id){ return document.getElementById(id); }
+  function setStatus(elm, val){
+    if(!elm) return;
+    elm.textContent = val || '—';
+    elm.className = 'status-pill ' + (val==='P' ? 'bg-green-100 text-green-700' :
+                       val?.includes('A') ? 'bg-red-100 text-red-700' :
+                       val?.includes('MT') ? 'bg-orange-100 text-orange-700' :
+                       val?.includes('S') ? 'bg-yellow-100 text-yellow-800' :
+                       'bg-slate-100 text-slate-700');
+  }
+
+  function monthWorkingDays(dateStr){
+    const d = new Date(dateStr + 'T00:00:00');
+    const y = d.getFullYear(); const m = d.getMonth();
+    let count = 0;
+    for(let day=1; day<=31; day++){
+      const dt = new Date(y, m, day);
+      if(dt.getMonth()!==m) break;
+      if(isWeekend(dt) || isHoliday(dt)) continue;
+      count++;
+    }
+    return count;
+  }
+
+  // ---------- Firebase ----------
+  const db = window.db; // from firebase.js
+
+  async function loadStudents(){
+    // Expect schema: /Students/{studentId} with {admissionNo, firstName, middleName, lastName, class, feeDue, feePaid, balance}
+    const snap = await db.ref('Students').get();
+    const data = snap.val() || {};
+    students = Object.keys(data).map(id => {
+      const s = data[id] || {};
+      const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || '';
+      const feeDue = Number(s.totalFee || s.feeDue || 0);
+      const feePaid = Number(s.feesPaid || s.feePaid || 0);
+      const balance = (Number(s.balance) || (feeDue - feePaid)) || 0;
+      return {
+        id,
+        admissionNo: s.admissionNo || s.admNo || '',
+        name,
+        class: s.class || s.className || s.grade || 'Unknown',
+        feeDue, feePaid, balance
+      };
+    });
+    // Build class list
+    const classes = Array.from(new Set(students.map(s => s.class))).sort();
+    const opts = ['<option value="">Select class…</option>'].concat(classes.map(c => `<option value="${c}">${c}</option>`));
+    el('classSelect').innerHTML = opts.join('');
+  }
+
+  async function loadDayAttendance(cls, dateStr){
+    attendanceCache = {};
+    const yymm = toMonthKey(dateStr);
+    const ref = db.ref(`attendance/${cls}/${yymm}/${dateStr}`);
+    const snap = await ref.get();
+    const d = snap.val() || {};
+    Object.keys(d).forEach(stuId => {
+      attendanceCache[stuId] = d[stuId];
+    });
+  }
+
+  async function saveDayAttendance(cls, dateStr){
+    const yymm = toMonthKey(dateStr);
+    const path = `attendance/${cls}/${yymm}/${dateStr}`;
+    await db.ref(path).update(attendanceCache);
+    el('saveToast').textContent = 'Saved ✓';
+    setTimeout(()=> el('saveToast').textContent = '', 1500);
+  }
+
+  async function loadMonthAttendance(cls, yymm){
+    monthAttendance = {}; // reset
+    const ref = db.ref(`attendance/${cls}/${yymm}`);
+    const snap = await ref.get();
+    const d = snap.val() || {};
+    Object.keys(d).forEach(dateKey => {
+      const byStu = d[dateKey] || {};
+      Object.keys(byStu).forEach(stuId => {
+        monthAttendance[stuId] = monthAttendance[stuId] || {};
+        monthAttendance[stuId][dateKey] = byStu[stuId];
+      });
+    });
+  }
+
+  // ---------- UI Build ----------
+  function renderTable(){
+    const tbody = el('attBody');
+    tbody.innerHTML = '';
+    const q = el('searchInput').value.toLowerCase();
+    filtered = students.filter(s => s.class === currentClass)
+                       .filter(s => !q || s.name.toLowerCase().includes(q) || String(s.admissionNo).includes(q));
+    filtered.sort((a,b)=> (a.admissionNo||'').localeCompare(b.admissionNo||''));
+
+    filtered.forEach((s, idx) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${idx+1}</td>
+        <td>${s.admissionNo||''}</td>
+        <td>${s.name}</td>
+        <td>${s.class}</td>
+        <td>
+          <select class="tap border rounded-lg px-2 py-1" data-stu="${s.id}" data-sess="am">
+            <option value="">—</option>
+            ${STATUS.map(v=>`<option value="${v}">${v}</option>`).join('')}
+          </select>
+        </td>
+        <td>
+          <select class="tap border rounded-lg px-2 py-1" data-stu="${s.id}" data-sess="pm">
+            <option value="">—</option>
+            ${STATUS.map(v=>`<option value="${v}">${v}</option>`).join('')}
+          </select>
+        </td>
+        <td><span id="daily-${s.id}" class="status-pill bg-slate-100 text-slate-700">—</span></td>
+        <td>${s.feeDue.toLocaleString()}</td>
+        <td>${s.feePaid.toLocaleString()}</td>
+        <td>${s.balance.toLocaleString()}</td>
+      `;
+      tbody.appendChild(row);
+      // fill values if exist
+      const rec = attendanceCache[s.id] || {};
+      const amSel = row.querySelector('select[data-sess="am"]');
+      const pmSel = row.querySelector('select[data-sess="pm"]');
+      if(rec.am) amSel.value = rec.am;
+      if(rec.pm) pmSel.value = rec.pm;
+      setStatus(el(`daily-${s.id}`), rec.daily || deriveDaily(rec.am, rec.pm));
+    });
+
+    // wire selects
+    tbody.querySelectorAll('select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const stu = sel.getAttribute('data-stu');
+        const sess = sel.getAttribute('data-sess'); // 'am'|'pm'
+        attendanceCache[stu] = attendanceCache[stu] || {};
+        attendanceCache[stu][sess] = sel.value;
+        attendanceCache[stu].daily = deriveDaily(attendanceCache[stu].am, attendanceCache[stu].pm);
+        // attach snapshot fee to record (handy for exports)
+        const s = students.find(x=>x.id===stu);
+        attendanceCache[stu].snap = {
+          admissionNo: s?.admissionNo || '',
+          name: s?.name || '',
+          class: s?.class || '',
+          feeDue: s?.feeDue || 0,
+          feePaid: s?.feePaid || 0,
+          balance: s?.balance || 0
+        };
+        setStatus(el(`daily-${stu}`), attendanceCache[stu].daily);
+      });
+    });
+  }
+
+  function computeAnalytics(){
+    const workdays = monthWorkingDays(currentDateStr);
+    el('classDays').textContent = workdays;
+    el('monthLabel').textContent = monthKey;
+
+    // per-student present count: count of days where daily === 'P'
+    const statsWrap = el('perStudentStats');
+    statsWrap.innerHTML = '';
+
+    let totalPct = 0, nWithData = 0;
+    let yellow = 0, red = 0;
+
+    filtered.forEach(s => {
+      const dates = monthAttendance[s.id] || {};
+      let presentDays = 0;
+      let absentDays = 0;
+      Object.keys(dates).forEach(dk => {
+        const rec = dates[dk];
+        if(rec.daily === 'P') presentDays++;
+        if((rec.daily||'').includes('A')) absentDays++;
+      });
+      const pct = workdays ? Math.round((presentDays / workdays) * 100) : 0;
+      if(workdays) { totalPct += pct; nWithData++; }
+      // Triggers (Yellow: ≥10 absent days in month; Red: 35+ in rolling 3-months - here only month-level demo)
+      if(absentDays >= 10) yellow++;
+      // Red trigger placeholder: requires 3-month history; we leave as 0 unless implemented
+      // red++ when implemented with history
+
+      const card = document.createElement('div');
+      card.className = 'p-3 rounded-xl border bg-[var(--card)]';
+      card.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="font-medium">${s.name}</div>
+          <div class="text-sm text-slate-500">${s.admissionNo}</div>
+        </div>
+        <div class="text-sm text-slate-600">Present days: <b>${presentDays}</b> / ${workdays} · Absent days: <b>${absentDays}</b></div>
+        <div class="mt-1 text-sm">Attendance: <span class="font-semibold">${pct}%</span></div>
+      `;
+      statsWrap.appendChild(card);
+    });
+
+    el('classPctPresent').textContent = nWithData ? Math.round(totalPct / nWithData) + '%' : '—';
+    el('yellowCount').textContent = yellow;
+    el('redCount').textContent = red;
+  }
+
+  function applyQuick(){
+    const qAm = el('quickAm').value;
+    const qPm = el('quickPm').value;
+    filtered.forEach(s => {
+      if(qAm){
+        attendanceCache[s.id] = attendanceCache[s.id] || {};
+        attendanceCache[s.id].am = qAm;
+        const sel = document.querySelector(`select[data-stu="${s.id}"][data-sess="am"]`);
+        if(sel) sel.value = qAm;
+      }
+      if(qPm){
+        attendanceCache[s.id] = attendanceCache[s.id] || {};
+        attendanceCache[s.id].pm = qPm;
+        const sel2 = document.querySelector(`select[data-stu="${s.id}"][data-sess="pm"]`);
+        if(sel2) sel2.value = qPm;
+      }
+      if(attendanceCache[s.id]){
+        attendanceCache[s.id].daily = deriveDaily(attendanceCache[s.id].am, attendanceCache[s.id].pm);
+        setStatus(el(`daily-${s.id}`), attendanceCache[s.id].daily);
+      }
+    });
+  }
+
+  function update3pmAlert(){
+    const now = new Date();
+    const cutoff = new Date(now);
+    cutoff.setHours(SCHOOL_DAY_CUTOFF_HOUR, 0, 0, 0);
+    const show = now > cutoff;
+    const need = filtered.some(s => {
+      const rec = attendanceCache[s.id] || {};
+      return !(rec.am && rec.pm);
+    });
+    const box = el('todayAlert');
+    if(show && need){
+      box.textContent = '⚠️ 3:00 PM: Attendance not fully marked for today';
+      box.classList.remove('hidden');
+    } else {
+      box.classList.add('hidden');
+    }
+  }
+
+  // ---------- Exports ----------
+  async function exportDailyPDF(){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(12);
+    doc.text(`SoMAp Daily Attendance — Class ${currentClass} — ${currentDateStr}`, 14, 14);
+    let y = 24;
+    doc.setFontSize(10);
+    doc.text('No.', 14, y);
+    doc.text('Adm', 24, y);
+    doc.text('Name', 44, y);
+    doc.text('AM', 114, y);
+    doc.text('PM', 134, y);
+    doc.text('Daily', 154, y);
+    doc.text('Due', 174, y);
+    doc.text('Paid', 204, y);
+    doc.text('Bal', 234, y);
+    y += 6;
+    filtered.forEach((s, i) => {
+      const rec = attendanceCache[s.id] || {};
+      if(y > 190){ doc.addPage('landscape'); y = 20; }
+      doc.text(String(i+1), 14, y);
+      doc.text(String(s.admissionNo||''), 24, y);
+      doc.text(String(s.name||''), 44, y);
+      doc.text(String(rec.am||''), 114, y);
+      doc.text(String(rec.pm||''), 134, y);
+      doc.text(String(rec.daily|| deriveDaily(rec.am, rec.pm) || ''), 154, y);
+      doc.text(String(s.feeDue||0), 174, y);
+      doc.text(String(s.feePaid||0), 204, y);
+      doc.text(String(s.balance||0), 234, y);
+      y += 6;
+    });
+    doc.save(`SoMAp_Daily_${currentClass}_${currentDateStr}.pdf`);
+  }
+
+  async function exportMonthlyPDF(){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait' });
+    doc.setFontSize(12);
+    doc.text(`SoMAp Monthly Attendance Summary — Class ${currentClass} — ${monthKey}`, 14, 14);
+    let y = 24;
+    const workdays = monthWorkingDays(currentDateStr);
+    filtered.forEach((s, i) => {
+      const dates = monthAttendance[s.id] || {};
+      let presentDays = 0;
+      let absentDays = 0;
+      Object.keys(dates).forEach(dk => {
+        const rec = dates[dk];
+        if(rec.daily === 'P') presentDays++;
+        if((rec.daily||'').includes('A')) absentDays++;
+      });
+      const pct = workdays ? Math.round((presentDays / workdays) * 100) : 0;
+      const line = `${i+1}. ${s.name} (${s.admissionNo}) — Present: ${presentDays}/${workdays}  Absent: ${absentDays}  => ${pct}%`;
+      if(y > 270){ doc.addPage('portrait'); y = 20; }
+      doc.text(line, 14, y);
+      y += 6;
+    });
+    doc.save(`SoMAp_Monthly_${currentClass}_${monthKey}.pdf`);
+  }
+
+  // ---------- Wire Up ----------
+  async function init(){
+    // Defaults
+    const now = new Date();
+    currentDateStr = fmtDate(now);
+    monthKey = toMonthKey(now);
+    el('dateInput').value = currentDateStr;
+
+    el('rtState').textContent = 'Connecting to Firebase…';
+    await loadStudents();
+    el('rtState').textContent = 'Students loaded ✓';
+  }
+
+  el('classSelect').addEventListener('change', async (e)=>{
+    currentClass = e.target.value;
+    if(!currentClass) return;
+    monthKey = toMonthKey(currentDateStr);
+    await loadDayAttendance(currentClass, currentDateStr);
+    await loadMonthAttendance(currentClass, monthKey);
+    renderTable();
+    computeAnalytics();
+    update3pmAlert();
+  });
+
+  el('dateInput').addEventListener('change', async (e)=>{
+    currentDateStr = e.target.value;
+    monthKey = toMonthKey(currentDateStr);
+    if(!currentClass) return;
+    await loadDayAttendance(currentClass, currentDateStr);
+    await loadMonthAttendance(currentClass, monthKey);
+    renderTable();
+    computeAnalytics();
+    update3pmAlert();
+  });
+
+  el('searchInput').addEventListener('input', ()=>{
+    renderTable();
+  });
+
+  el('applyQuick').addEventListener('click', ()=>{
+    applyQuick();
+  });
+
+  el('saveAll').addEventListener('click', async ()=>{
+    if(!currentClass){ alert('Select a class first'); return; }
+    await saveDayAttendance(currentClass, currentDateStr);
+    await loadMonthAttendance(currentClass, monthKey);
+    computeAnalytics();
+    update3pmAlert();
+  });
+
+  el('exportDaily').addEventListener('click', exportDailyPDF);
+  el('exportMonthly').addEventListener('click', exportMonthlyPDF);
+
+  // periodic alert check
+  setInterval(update3pmAlert, 60 * 1000);
+
+  init();
+})();
+</script>
+
+</body>
+</html>

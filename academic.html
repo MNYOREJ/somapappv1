@@ -1,487 +1,721 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SoMAp – Academic & Exams Module</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SoMAp — Academics & Exams</title>
 
-  <!-- Tailwind + Icons -->
+  <!-- Icons + Tailwind -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-  <!-- PDF & Excel libraries -->
+  <!-- CSV + PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
-  <!-- Optional alerts -->
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- Firebase SDKs (compat v9 like your index.html) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+
+  <!-- Your Firebase config wrapper (exports window.db, window.storage) -->
+  <script src="firebase.js"></script>
 
   <style>
-    :root{
-      --primary:#1e3a8a; /* thick blue */
-      --border:#e5e7eb;
-    }
-    .brand { color: var(--primary); }
-    .thin { font-weight: 500; }
-    .cell-input{ width: 5rem; }
-    .badge{ border:1px solid var(--border); padding:.125rem .375rem; border-radius:.375rem; font-size:.75rem; }
-    .muted{ color:#6b7280; }
-    .table-fixed th, .table-fixed td { white-space: nowrap; }
+    body { font-family: Inter, system-ui, Arial; background:#f8fafc; color:#0f172a; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.04); }
+    .chip { font-size:12px; padding:.2rem .5rem; border-radius:999px; }
+    .sticky-top { position: sticky; top: 0; z-index: 50; }
+    .table-input { width:70px; padding:.35rem .4rem; border:1px solid #e5e7eb; border-radius:8px; font-size:13px; text-align:center; }
+    .pos { font-size:11px; color:#6b7280 }
+    .pill { padding:.2rem .5rem; border-radius:999px; }
+    .grade-A { background:#ecfdf5; color:#065f46; }
+    .grade-B { background:#eff6ff; color:#1d4ed8; }
+    .grade-C { background:#fff7ed; color:#9a3412; }
+    .grade-D { background:#fef3c7; color:#92400e; }
+    .grade-F { background:#fee2e2; color:#991b1b; }
+    .kpi { font-variant-numeric: tabular-nums; }
+    .hint { font-size:12px; color:#6b7280; }
+    .btn { display:inline-flex; align-items:center; gap:8px; padding:.55rem .9rem; border-radius:.7rem; }
+    .btn-primary { background:#4f46e5; color:#fff; }
+    .btn-primary:hover { background:#4338ca; }
+    .btn-soft { background:#eef2ff; color:#4338ca; }
+    .btn-neutral { background:#f3f4f6; }
+    .overflow-x { overflow-x:auto; }
+    th, td { white-space:nowrap; }
   </style>
 </head>
+<body class="p-4">
 
-<body class="bg-gray-50">
-  <!-- Top Bar -->
-  <header class="bg-white border-b">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-      <a href="index.html" class="flex items-center gap-3">
-        <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-10 w-auto">
-        <div>
-          <div class="text-xl font-bold brand">SoMAp – Academics</div>
-          <div class="text-xs text-gray-500 -mt-1">Scoresheets • Reports • Dashboards</div>
-        </div>
-      </a>
-      <nav class="flex items-center gap-2">
-        <a href="index.html" class="text-sm px-3 py-1 rounded hover:bg-gray-100">Home</a>
-        <a href="schoolerp.html.html" class="text-sm px-3 py-1 rounded hover:bg-gray-100">ERP</a>
-      </nav>
+  <!-- Title -->
+  <div class="mb-4">
+    <div class="bg-indigo-50 text-indigo-800 px-4 py-2 rounded-lg text-sm mb-3">
+      SoMAp — Academic & Exams Module
     </div>
-  </header>
+    <h1 class="text-xl font-semibold">Scoresheet & Dashboard</h1>
+    <p class="hint mt-1">Pulls students from Registration (Firebase), supports monthly/midterm/term/annual exams, ranks & grades automatically, and exports CSV/PDF.</p>
+  </div>
 
-  <main class="max-w-7xl mx-auto p-4 md:p-6">
-    <div class="bg-white rounded-xl shadow p-4 md:p-6">
-      <h1 class="text-2xl md:text-3xl font-bold text-gray-800">Academic & Exams Module</h1>
-      <p class="text-gray-600 mt-1">Enter marks, compute averages, rank students, and export report cards.</p>
+  <!-- Controls -->
+  <div class="card p-4 mb-4">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">Class</label>
+        <select id="classSelect" class="w-full p-2 border rounded-lg">
+          <option value="">Select class…</option>
+          <option>Baby Class</option>
+          <option>Middle Class</option>
+          <option>Preunit</option>
+          <option>Class 1</option>
+          <option>Class 2</option>
+          <option>Class 3</option>
+          <option>Class 4</option>
+          <option>Class 5</option>
+          <option>Class 6</option>
+          <option>Class 7</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">Year</label>
+        <input id="yearInput" type="number" class="w-full p-2 border rounded-lg" placeholder="e.g., 2025"/>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">Exam Period</label>
+        <select id="periodSelect" class="w-full p-2 border rounded-lg">
+          <option value="monthly">Monthly</option>
+          <option value="midterm1">Midterm 1</option>
+          <option value="term1">End of Term 1</option>
+          <option value="midterm2">Midterm 2</option>
+          <option value="term2">End of Term 2</option>
+          <option value="annual">Annual</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">Month (for Monthly)</label>
+        <select id="monthSelect" class="w-full p-2 border rounded-lg">
+          <option value="">—</option>
+          <option value="01">January</option>
+          <option value="02">February</option>
+          <option value="03">March</option>
+          <option value="04">April</option>
+          <option value="05">May</option>
+          <option value="06">June</option>
+          <option value="07">July</option>
+          <option value="08">August</option>
+          <option value="09">September</option>
+          <option value="10">October</option>
+          <option value="11">November</option>
+          <option value="12">December</option>
+        </select>
+      </div>
+      <div class="flex items-end gap-2">
+        <button id="loadBtn" class="btn btn-soft w-full"><i class="fa fa-download"></i> Load Class</button>
+      </div>
+    </div>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <button id="saveBtn" class="btn btn-primary"><i class="fa fa-save"></i> Save Scores</button>
+      <button id="clearZerosBtn" class="btn btn-neutral"><i class="fa fa-eraser"></i> Clear All</button>
+      <button id="fillZerosBtn" class="btn btn-neutral"><i class="fa fa-bolt"></i> Fill Blank = 0</button>
+      <button id="exportCsvBtn" class="btn btn-neutral"><i class="fa fa-file-csv"></i> Export CSV</button>
+      <button id="exportPdfBtn" class="btn btn-neutral"><i class="fa fa-file-pdf"></i> Export PDF</button>
+    </div>
+    <p class="hint mt-2">Tip: Choose Class + Year + Exam Period (and Month if Monthly), click <b>Load Class</b>. Enter scores and <b>Save Scores</b>.</p>
+  </div>
 
-      <!-- Controls -->
-      <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <!-- Class -->
-        <div>
-          <label class="block text-sm text-gray-600 mb-1">Class</label>
-          <select id="classSelect" class="w-full border rounded-lg px-3 py-2">
-            <option value="">Choose Class</option>
-            <option value="baby">Baby</option>
-            <option value="middle">Middle</option>
-            <option value="preunit">Preunit</option>
-            <option value="class1">Class 1</option>
-            <option value="class2">Class 2</option>
-            <option value="class3">Class 3</option>
-            <option value="class4">Class 4</option>
-            <option value="class5">Class 5</option>
-            <option value="class6">Class 6</option>
-            <option value="class7">Class 7</option>
-          </select>
+  <!-- Dashboard -->
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
+    <div class="card p-4">
+      <h3 class="font-semibold text-gray-700 mb-3">Class Analytics</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3 rounded-lg bg-indigo-50">
+          <div class="text-xs text-indigo-800">Class Average</div>
+          <div id="kpiClassAvg" class="kpi text-2xl font-semibold">—</div>
         </div>
-
-        <!-- Month -->
-        <div>
-          <label class="block text-sm text-gray-600 mb-1">Month</label>
-          <select id="monthSelect" class="w-full border rounded-lg px-3 py-2">
-            <option>January</option><option>February</option><option>March</option><option>April</option>
-            <option>May</option><option>June</option><option>July</option><option>August</option>
-            <option>September</option><option>October</option><option>November</option><option>December</option>
-          </select>
+        <div class="p-3 rounded-lg bg-emerald-50">
+          <div class="text-xs text-emerald-800">% Present (Est.)</div>
+          <div id="kpiPresentPct" class="kpi text-2xl font-semibold">—</div>
         </div>
-
-        <!-- Year -->
-        <div>
-          <label class="block text-sm text-gray-600 mb-1">Year</label>
-          <input id="yearInput" type="number" class="w-full border rounded-lg px-3 py-2" min="2000" max="2100" />
+        <div class="p-3 rounded-lg bg-rose-50">
+          <div class="text-xs text-rose-800">% Absent (Est.)</div>
+          <div id="kpiAbsentPct" class="kpi text-2xl font-semibold">—</div>
         </div>
-
-        <!-- Exam type -->
-        <div>
-          <label class="block text-sm text-gray-600 mb-1">Exam Type</label>
-          <select id="examTypeSelect" class="w-full border rounded-lg px-3 py-2">
-            <option value="monthly">Monthly</option>
-            <option value="midterm">Midterm</option>
-            <option value="term">Term</option>
-            <option value="annual">Annual</option>
-          </select>
+        <div class="p-3 rounded-lg bg-amber-50">
+          <div class="text-xs text-amber-800">Students</div>
+          <div id="kpiCount" class="kpi text-2xl font-semibold">—</div>
         </div>
       </div>
+      <p class="hint mt-3">Attendance % tries to read summaries; if not found, it shows “—”.</p>
+    </div>
 
-      <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button id="loadStudentsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-          Load Students
-        </button>
-        <span id="statusBadge" class="badge muted">Idle</span>
+    <div class="card p-4">
+      <h3 class="font-semibold text-gray-700 mb-3">Leaders</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3 rounded-lg bg-white border">
+          <div class="text-xs text-gray-500">Top Student</div>
+          <div id="kpiTopName" class="font-medium">—</div>
+          <div id="kpiTopAvg" class="text-sm text-gray-700">—</div>
+        </div>
+        <div class="p-3 rounded-lg bg-white border">
+          <div class="text-xs text-gray-500">Bottom Student</div>
+          <div id="kpiBottomName" class="font-medium">—</div>
+          <div id="kpiBottomAvg" class="text-sm text-gray-700">—</div>
+        </div>
       </div>
+      <p class="hint mt-3">Computed from current scores loaded on the sheet.</p>
+    </div>
 
-      <!-- Scoresheet -->
-      <div class="mt-6 overflow-x-auto">
-        <table id="scoresheetTable" class="min-w-full table-fixed border">
-          <thead class="bg-indigo-50">
-            <tr id="scoresheetHeader">
-              <!-- dynamic columns -->
-            </tr>
-          </thead>
-          <tbody id="scoresheetBody">
-            <!-- dynamic rows -->
-          </tbody>
+    <div class="card p-4">
+      <h3 class="font-semibold text-gray-700 mb-3">Fees Snapshot</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3 rounded-lg bg-white border">
+          <div class="text-xs text-gray-500">Total Fee (Year)</div>
+          <div id="kpiFeeTotal" class="kpi text-lg font-semibold">—</div>
+        </div>
+        <div class="p-3 rounded-lg bg-white border">
+          <div class="text-xs text-gray-500">Paid</div>
+          <div id="kpiFeePaid" class="kpi text-lg font-semibold">—</div>
+        </div>
+        <div class="p-3 rounded-lg bg-white border">
+          <div class="text-xs text-gray-500">Balance</div>
+          <div id="kpiFeeDebt" class="kpi text-lg font-semibold">—</div>
+        </div>
+        <div class="p-3 rounded-lg bg-white border">
+          <div class="text-xs text-gray-500">Students with Debt</div>
+          <div id="kpiDebtors" class="kpi text-lg font-semibold">—</div>
+        </div>
+      </div>
+      <p class="hint mt-3">Uses student fields: <b>feePerYear</b>, <b>paidAmount</b>, <b>debt</b> (if present).</p>
+    </div>
+  </div>
+
+  <!-- Scoresheet -->
+  <div class="card p-0 overflow-hidden">
+    <div class="sticky-top bg-white p-3 border-b">
+      <div class="flex flex-wrap items-center gap-2">
+        <h3 class="font-semibold text-gray-700 mr-auto">Scoresheet</h3>
+        <span id="subjectListChip" class="chip bg-gray-100">Subjects: —</span>
+      </div>
+    </div>
+
+    <div class="overflow-x p-3">
+      <div class="overflow-x-auto">
+        <table id="scoreTable" class="min-w-full text-sm">
+          <thead id="scoreThead"></thead>
+          <tbody id="scoreTbody"></tbody>
         </table>
       </div>
-
-      <!-- Actions -->
-      <div class="mt-5 flex flex-wrap gap-2">
-        <button id="saveBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-          Save to Firebase
-        </button>
-        <button id="pdfBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-          Download Class PDF
-        </button>
-        <button id="excelBtn" class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600">
-          Download Excel
-        </button>
-        <button id="recalcBtn" class="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700">
-          Recalculate Averages & Positions
-        </button>
-      </div>
-
-      <!-- Notes -->
-      <div class="mt-6 bg-gray-50 border rounded-lg p-4 text-sm">
-        <p class="mb-2"><strong>Data paths (Firebase Realtime Database):</strong></p>
-        <ul class="list-disc ml-5 space-y-1">
-          <li><code>students/{classId}/{studentId} → { name, admissionNumber, photoUrl? }</code></li>
-          <li><code>attendanceSummary/{classId}/{studentId}/{periodKey} → { presentDays, absentDays, totalDays }</code></li>
-          <li><code>fees/{studentId}/balance → number (TZS)</code></li>
-          <li><code>marks/{classId}/{studentId}/{periodKey} → { subjectScores..., average, position }</code></li>
-        </ul>
-        <p class="mt-2 text-gray-600">If attendance/fees don’t exist yet, the table shows “–”. You can add them later — saving marks still works.</p>
-      </div>
+      <p class="hint mt-2">Per-subject positions appear under each score (small gray “#”). Grades: A ≥ 80.5, B ≥ 60.5, C ≥ 40.5, D ≥ 20.5, else F.</p>
     </div>
-  </main>
+  </div>
 
-    <script>
-    // -----------------------------
-    // Helpers & Config
-    // -----------------------------
-    const monthMap = {
-      January:'01', February:'02', March:'03', April:'04',
-      May:'05', June:'06', July:'07', August:'08',
-      September:'09', October:'10', November:'11', December:'12'
+  <script>
+    // -------------------- Firebase handles --------------------
+    const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+    if (!db) console.error("Firebase DB not available — ensure firebase.js is present and loads after compat SDKs.");
+
+    // -------------------- Subjects per class --------------------
+    const SUBJECTS_BY_CLASS = {
+      "Baby Class":        ["Arithmetic","Communication","Relation","CRN","Healthcare","Arts"],
+      "Middle Class":      ["Arithmetic","Communication","Relation","CRN","Healthcare","Arts"],
+      "Preunit":           ["Arithmetic","Communication","Relation","CRN","Healthcare","Arts"],
+      "Class 1":           ["Writing Skills","Arithmetic","Developing Sports & Arts","Health.AREC","Kusoma","Listening","English"],
+      "Class 2":           ["Writing Skills","Arithmetic","Developing Sports & Arts","Health.AREC","Kusoma","Listening","English"],
+      "Class 3":           ["Math","English","Kiswahili","Science","Geography","Arts","History","French"],
+      "Class 4":           ["Math","English","Kiswahili","Science","Geography","Arts","History","French"],
+      "Class 5":           ["Math","English","Kiswahili","Science","Geography","Arts","History","French"],
+      "Class 6":           ["Math","English","Kiswahili","Science","Social Studies","Civics & Morals"],
+      "Class 7":           ["Math","English","Kiswahili","Science","Social Studies","Civics & Morals"]
     };
 
-    // Subject templates by level
-    const SUBJECTS = {
-      baby: ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
-      middle: ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
-      preunit: ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
-      class1: ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      class2: ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      class3: ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      class4: ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      class5: ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      class6: ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
-      class7: ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
-    };
+    // -------------------- Grading --------------------
+    function gradeFromAvg(avg){
+      const a = Number(avg);
+      if (a >= 80.5) return "A";
+      if (a >= 60.5) return "B";
+      if (a >= 40.5) return "C";
+      if (a >= 20.5) return "D";
+      return "F";
+    }
+    function gradeClassName(g){
+      return {
+        "A":"grade-A",
+        "B":"grade-B",
+        "C":"grade-C",
+        "D":"grade-D",
+        "F":"grade-F"
+      }[g] || "grade-C";
+    }
 
+    // -------------------- UI Els --------------------
     const classSelect = document.getElementById('classSelect');
-    const monthSelect = document.getElementById('monthSelect');
     const yearInput = document.getElementById('yearInput');
-    const examTypeSelect = document.getElementById('examTypeSelect');
-    const statusBadge = document.getElementById('statusBadge');
+    const periodSelect = document.getElementById('periodSelect');
+    const monthSelect = document.getElementById('monthSelect');
 
-    const headerEl = document.getElementById('scoresheetHeader');
-    const bodyEl = document.getElementById('scoresheetBody');
+    const loadBtn = document.getElementById('loadBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const fillZerosBtn = document.getElementById('fillZerosBtn');
+    const clearZerosBtn = document.getElementById('clearZerosBtn');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const exportPdfBtn = document.getElementById('exportPdfBtn');
 
-    document.getElementById('loadStudentsBtn').addEventListener('click', loadStudents);
-    document.getElementById('saveBtn').addEventListener('click', saveScoresheet);
-    document.getElementById('recalcBtn').addEventListener('click', recalcAll);
-    document.getElementById('pdfBtn').addEventListener('click', downloadPDF);
-    document.getElementById('excelBtn').addEventListener('click', downloadExcel);
+    const scoreThead = document.getElementById('scoreThead');
+    const scoreTbody = document.getElementById('scoreTbody');
+    const subjectListChip = document.getElementById('subjectListChip');
 
-    // Default year = current
-    (function setDefaultYear(){
-      const y = new Date().getFullYear();
-      yearInput.value = y;
-    })();
+    // KPIs
+    const kpiCount = document.getElementById('kpiCount');
+    const kpiClassAvg = document.getElementById('kpiClassAvg');
+    const kpiTopName = document.getElementById('kpiTopName');
+    const kpiTopAvg = document.getElementById('kpiTopAvg');
+    const kpiBottomName = document.getElementById('kpiBottomName');
+    const kpiBottomAvg = document.getElementById('kpiBottomAvg');
+    const kpiPresentPct = document.getElementById('kpiPresentPct');
+    const kpiAbsentPct = document.getElementById('kpiAbsentPct');
+    const kpiFeeTotal = document.getElementById('kpiFeeTotal');
+    const kpiFeePaid = document.getElementById('kpiFeePaid');
+    const kpiFeeDebt = document.getElementById('kpiFeeDebt');
+    const kpiDebtors = document.getElementById('kpiDebtors');
 
-    function setStatus(text, tone='muted'){
-      statusBadge.textContent = text;
-      statusBadge.className = 'badge ' + (tone==='ok' ? 'text-green-700 border-green-300 bg-green-50'
-                                     : tone==='warn' ? 'text-yellow-700 border-yellow-300 bg-yellow-50'
-                                     : tone==='err' ? 'text-red-700 border-red-300 bg-red-50'
-                                     : 'muted');
+    // -------------------- State --------------------
+    let students = [];      // [{key, admissionNumber, firstName, middleName, lastName, classLevel, ...}]
+    let subjects = [];      // current subject list
+    let marks = {};         // { studentKey: { subject: number, ... }, ... }
+
+    function currentNodePath(){
+      const cls = classSelect.value;
+      const year = yearInput.value;
+      const period = periodSelect.value;
+      const month = monthSelect.value || "__";
+      if (!cls || !year || !period) return null;
+      // monthly includes month; others put "__"
+      const finalMonth = (period === "monthly") ? (month || "01") : "__";
+      return `academics/${year}/${period}/${finalMonth}/${cls}`;
     }
 
-    function getPeriodKey(){
-      const m = monthSelect.value;
-      const y = (yearInput.value || '').trim();
-      const t = examTypeSelect.value;
-      const mm = monthMap[m] || '01';
-      return `${y}-${mm}_${t}`;
-    }
-
-    // -----------------------------
-    // Load students & build table
-    // -----------------------------
-    async function loadStudents(){
-      const classId = classSelect.value;
-      if(!classId){ alert('Choose Class'); return; }
-
-      setStatus('Loading students...', 'warn');
-
-      // Build header
-      buildHeader(classId);
-
-      // Fetch students
-      try{
-        const snap = await db.ref(`students/${classId}`).get();
-        const studentsObj = snap.val() || {};
-        const students = Object.entries(studentsObj).map(([id, s]) => ({ id, ...s }));
-
-        // Sort by name
-        students.sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-
-        // Render
-        bodyEl.innerHTML = '';
-        for(const s of students){
-          await renderStudentRow(classId, s);
-        }
-        recalcAll();
-        setStatus(`Loaded ${students.length} students`, 'ok');
-      }catch(err){
-        console.error(err);
-        setStatus('Failed to load students', 'err');
-        alert('Failed to load students: ' + err.message);
+    // -------------------- Load Students + Existing Marks --------------------
+    async function loadClass(){
+      const cls = classSelect.value;
+      const year = yearInput.value;
+      const period = periodSelect.value;
+      if (!cls || !year || !period) {
+        alert("Please choose Class, Year and Exam Period first.");
+        return;
       }
-    }
+      subjects = SUBJECTS_BY_CLASS[cls] || [];
+      subjectListChip.textContent = subjects.length ? `Subjects: ${subjects.join(", ")}` : "Subjects: —";
 
-    function buildHeader(classId){
-      const subs = SUBJECTS[classId] || [];
-      const staticCols = [
-        '<th class="px-3 py-2 border text-left">Student</th>',
-        '<th class="px-3 py-2 border text-left">Adm No.</th>',
-        '<th class="px-3 py-2 border text-left">Attendance</th>',
-        '<th class="px-3 py-2 border text-left">Fees (TZS)</th>'
-      ];
-      const subjectCols = subs.map(s=> `<th class="px-3 py-2 border text-left">${escapeHtml(s)}</th>`);
-      const tail = [
-        '<th class="px-3 py-2 border text-left">Average</th>',
-        '<th class="px-3 py-2 border text-left">Position</th>'
-      ];
-      headerEl.innerHTML = staticCols.concat(subjectCols).concat(tail).join('');
-    }
+      // 1) Load students from /students (Registration)
+      students = [];
+      marks = {};
+      scoreThead.innerHTML = "";
+      scoreTbody.innerHTML = "";
 
-    async function renderStudentRow(classId, student){
-      const periodKey = getPeriodKey();
-      const subs = SUBJECTS[classId] || [];
-
-      // Fetch attendance (optional)
-      let attendStr = '–';
-      try{
-        const atSnap = await db.ref(`attendanceSummary/${classId}/${student.id}/${periodKey}`).get();
-        const at = atSnap.val();
-        if(at && (at.totalDays || at.presentDays || at.absentDays)){
-          const present = at.presentDays ?? '–';
-          const total = at.totalDays ?? '–';
-          attendStr = `${present}/${total}`;
-        }
-      }catch(_){}
-
-      // Fetch fees balance (optional)
-      let feeBalance = '–';
-      try{
-        const feeSnap = await db.ref(`fees/${student.id}/balance`).get();
-        const bal = feeSnap.val();
-        if(typeof bal === 'number'){ feeBalance = Intl.NumberFormat().format(bal); }
-      }catch(_){}
-
-      // Fetch previous marks (if any)
-      let marks = {};
-      try{
-        const mkSnap = await db.ref(`marks/${classId}/${student.id}/${periodKey}`).get();
-        marks = mkSnap.val() || {};
-      }catch(_){}
-
-      const tr = document.createElement('tr');
-      tr.dataset.sid = student.id;
-
-      const cells = [];
-      // Student
-      cells.push(`<td class="px-3 py-2 border"><div class="font-medium">${escapeHtml(student.name||'')}</div></td>`);
-      // Adm
-      cells.push(`<td class="px-3 py-2 border">${escapeHtml(student.admissionNumber||'')}</td>`);
-      // Attendance
-      cells.push(`<td class="px-3 py-2 border">${attendStr}</td>`);
-      // Fees
-      cells.push(`<td class="px-3 py-2 border">${feeBalance}</td>`);
-
-      // Subject inputs
-      for(const sub of subs){
-        const key = normKey(sub);
-        const val = (marks[key] ?? '');
-        cells.push(`
-          <td class="px-2 py-1 border">
-            <input type="number" min="0" max="100" step="0.5"
-                   class="border rounded px-2 py-1 cell-input"
-                   data-subject="${escapeAttr(key)}"
-                   value="${escapeAttr(val)}"
-                   oninput="onScoreChange(this)" />
-          </td>`);
+      try {
+        const snap = await db.ref('students').orderByChild('classLevel').equalTo(cls).once('value');
+        const raw = snap.val() || {};
+        students = Object.entries(raw).map(([key, s]) => ({ key, ...s }))
+          .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
+      } catch(err){
+        console.error("Failed to fetch students:", err);
+        alert("Could not fetch students from Firebase.");
+        return;
       }
 
-      // Average + Position
-      const avg = (typeof marks.average === 'number') ? marks.average.toFixed(2) : '';
-      const pos = (marks.position ?? '');
-      cells.push(`<td class="px-3 py-2 border avg-cell text-gray-800 font-semibold">${avg}</td>`);
-      cells.push(`<td class="px-3 py-2 border pos-cell">${pos}</td>`);
+      // 2) Load existing marks (if any)
+      let saved = {};
+      const path = currentNodePath();
+      if (path) {
+        try {
+          const msnap = await db.ref(path).once('value');
+          saved = msnap.val() || {};
+        } catch(err) {
+          console.warn("No existing marks or error reading:", err);
+        }
+      }
 
-      tr.innerHTML = cells.join('');
-      bodyEl.appendChild(tr);
+      // 3) Render table
+      renderTable(students, subjects, saved);
+
+      // 4) Update dashboards (attendance + fee)
+      computeKPIs();
+      await tryLoadAttendanceKPIs();
     }
 
-    function onScoreChange(input){
-      // Recalculate this row’s average
-      const tr = input.closest('tr');
-      calcRowAverage(tr);
-    }
+    function renderTable(stus, subs, saved){
+      // header
+      const th1 = document.createElement('tr');
+      th1.innerHTML = `
+        <th class="p-2 border bg-indigo-50">#</th>
+        <th class="p-2 border bg-indigo-50">Photo</th>
+        <th class="p-2 border bg-indigo-50">Admission</th>
+        <th class="p-2 border bg-indigo-50">Student Name</th>
+        ${subs.map(s => `<th class="p-2 border bg-indigo-50 text-center">${s}</th>`).join('')}
+        <th class="p-2 border bg-indigo-50 text-center">Total</th>
+        <th class="p-2 border bg-indigo-50 text-center">Avg</th>
+        <th class="p-2 border bg-indigo-50 text-center">Grade</th>
+        <th class="p-2 border bg-indigo-50 text-center">Overall Pos</th>
+      `;
+      scoreThead.appendChild(th1);
 
-    function calcRowAverage(tr){
-      const inputs = tr.querySelectorAll('input[data-subject]');
-      let sum = 0, n = 0;
-      inputs.forEach(i=>{
-        const v = parseFloat(i.value);
-        if(!isNaN(v)){ sum += v; n++; }
+      // body
+      scoreTbody.innerHTML = "";
+      stus.forEach((s, idx) => {
+        const full = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
+        const photo = s.passportPhotoURL || 'https://via.placeholder.com/40';
+        const existing = (saved[s.key] && saved[s.key].scores) ? saved[s.key].scores : {};
+        marks[s.key] = {};
+        const tr = document.createElement('tr');
+
+        const subjInputs = subs.map(subj => {
+          const val = (existing[subj] != null) ? existing[subj] : "";
+          marks[s.key][subj] = (val === "" ? "" : Number(val));
+          const id = `in_${s.key}_${hash(subj)}`;
+          return `
+            <td class="p-2 border text-center align-top">
+              <input id="${id}" data-skey="${s.key}" data-subj="${escapeAttr(subj)}" class="table-input"
+                     type="number" min="0" max="100" step="0.1" value="${val}"/>
+              <div class="pos" id="pos_${s.key}_${hash(subj)}">#—</div>
+            </td>
+          `;
+        }).join('');
+
+        tr.innerHTML = `
+          <td class="p-2 border text-gray-500">${idx+1}</td>
+          <td class="p-2 border"><img src="${photo}" alt="photo" style="width:40px;height:40px;object-fit:cover;border-radius:6px"/></td>
+          <td class="p-2 border">${escapeHtml(s.admissionNumber || '—')}</td>
+          <td class="p-2 border font-medium">${escapeHtml(full || '—')}</td>
+          ${subjInputs}
+          <td class="p-2 border text-center" id="tot_${s.key}">—</td>
+          <td class="p-2 border text-center" id="avg_${s.key}">—</td>
+          <td class="p-2 border text-center" id="grade_${s.key}"><span class="pill">—</span></td>
+          <td class="p-2 border text-center" id="pos_overall_${s.key}">#—</td>
+        `;
+        scoreTbody.appendChild(tr);
       });
-      const avg = n ? (sum/n) : 0;
-      tr.querySelector('.avg-cell').textContent = n ? avg.toFixed(2) : '';
-    }
 
-    function recalcAll(){
-      const rows = [...bodyEl.querySelectorAll('tr')];
-      // averages
-      rows.forEach(calcRowAverage);
-      // positions
-      const arr = rows.map(tr=>{
-        const avg = parseFloat(tr.querySelector('.avg-cell').textContent) || 0;
-        return { tr, avg };
-      });
-      arr.sort((a,b)=> b.avg - a.avg);
-
-      // Assign positions with ties
-      let currentPos = 0;
-      let lastAvg = null;
-      for(let i=0;i<arr.length;i++){
-        const {tr, avg} = arr[i];
-        if(i===0){ currentPos = 1; lastAvg = avg; }
-        else{
-          if(avg === lastAvg){ /* same position */ }
-          else{ currentPos = i+1; lastAvg = avg; }
-        }
-        tr.querySelector('.pos-cell').textContent = (avg>0)? currentPos : '';
-      }
-    }
-
-    // -----------------------------
-    // Save to Firebase
-    // -----------------------------
-    async function saveScoresheet(){
-      const classId = classSelect.value;
-      if(!classId){ alert('Choose Class'); return; }
-      const periodKey = getPeriodKey();
-
-      setStatus('Saving...', 'warn');
-      const updates = {};
-
-      const rows = [...bodyEl.querySelectorAll('tr')];
-      for(const tr of rows){
-        const sid = tr.dataset.sid;
-        const inputs = tr.querySelectorAll('input[data-subject]');
-        const data = {};
-        let sum = 0, n = 0;
-
-        inputs.forEach(i=>{
-          const key = i.getAttribute('data-subject');
-          const val = parseFloat(i.value);
-          if(!isNaN(val)){ data[key] = val; sum += val; n++; }
+      // wire inputs
+      document.querySelectorAll('input.table-input').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const key = inp.getAttribute('data-skey');
+          const subj = inp.getAttribute('data-subj');
+          const val = inp.value === "" ? "" : Number(inp.value);
+          marks[key][subj] = val;
+          recalcTable();
         });
+      });
 
-        const avg = n? (sum/n) : 0;
-        data.average = avg;
+      // initial compute
+      recalcTable();
+    }
 
-        // position cell may not exist yet (call recalcAll before save)
-        const posText = tr.querySelector('.pos-cell').textContent.trim();
-        if(posText){ data.position = parseInt(posText,10); }
+    // -------------------- Calculations --------------------
+    function recalcTable(){
+      const totals = {};
+      const avgs = {};
+      const subs = subjects;
 
-        updates[`marks/${classId}/${sid}/${periodKey}`] = data;
+      // per-subject arrays for positions
+      const perSubjectValues = {};
+      subs.forEach(s => perSubjectValues[s] = []);
+
+      // compute totals/avgs
+      students.forEach(s => {
+        const m = marks[s.key] || {};
+        let sum = 0, count = 0;
+        subs.forEach(subj => {
+          const v = m[subj];
+          if (v !== "" && v != null && !isNaN(v)) {
+            sum += Number(v);
+            count++;
+            perSubjectValues[subj].push({ key: s.key, val: Number(v) });
+          }
+        });
+        const avg = count ? (sum / count) : 0;
+        totals[s.key] = sum;
+        avgs[s.key] = count ? Number(avg.toFixed(2)) : 0;
+      });
+
+      // overall positions by avg (desc)
+      const ranked = students
+        .map(s => ({ key: s.key, avg: avgs[s.key] || 0 }))
+        .sort((a,b) => b.avg - a.avg);
+
+      // position with ties
+      const overallPos = {};
+      let currentPos = 0, lastScore = null, seen = 0;
+      ranked.forEach(item => {
+        seen++;
+        if (lastScore === null || item.avg < lastScore) {
+          currentPos = seen;
+          lastScore = item.avg;
+        }
+        overallPos[item.key] = currentPos;
+      });
+
+      // per-subject positions
+      const subjPosMap = {}; // subj -> { studentKey: pos }
+      subjects.forEach(subj => {
+        const arr = perSubjectValues[subj].sort((a,b) => b.val - a.val);
+        const posMap = {};
+        let cpos = 0, lval = null, i = 0;
+        arr.forEach(it => {
+          i++;
+          if (lval === null || it.val < lval) {
+            cpos = i;
+            lval = it.val;
+          }
+          posMap[it.key] = cpos;
+        });
+        subjPosMap[subj] = posMap;
+      });
+
+      // write back to DOM
+      students.forEach(s => {
+        const totEl = document.getElementById(`tot_${s.key}`);
+        const avgEl = document.getElementById(`avg_${s.key}`);
+        const grdEl = document.getElementById(`grade_${s.key}`);
+        const posEl = document.getElementById(`pos_overall_${s.key}`);
+
+        if (totEl) totEl.textContent = (totals[s.key] || 0).toFixed(1);
+        if (avgEl) avgEl.textContent = (avgs[s.key] || 0).toFixed(2);
+        if (grdEl) {
+          const g = gradeFromAvg(avgs[s.key] || 0);
+          grdEl.innerHTML = `<span class="pill ${gradeClassName(g)}">${g}</span>`;
+        }
+        if (posEl) posEl.textContent = `#${overallPos[s.key] || '—'}`;
+
+        // per subject pos below inputs
+        subjects.forEach(subj => {
+          const posDiv = document.getElementById(`pos_${s.key}_${hash(subj)}`);
+          if (posDiv) {
+            const p = subjPosMap[subj] ? subjPosMap[subj][s.key] : null;
+            posDiv.textContent = p ? `#${p}` : "#—";
+          }
+        });
+      });
+
+      // KPIs from avgs
+      const av = Object.values(avgs);
+      const classAvg = av.length ? (av.reduce((a,b)=>a+b,0) / av.length) : 0;
+      kpiClassAvg.textContent = classAvg ? `${classAvg.toFixed(2)}%` : "—";
+      kpiCount.textContent = String(students.length || 0);
+
+      let top = null, bottom = null;
+      students.forEach(s => {
+        const a = avgs[s.key] || 0;
+        const name = `${s.firstName||''} ${s.lastName||''}`.trim() || (s.admissionNumber || s.key);
+        if (!top || a > top.avg) top = { name, avg:a };
+        if (!bottom || a < bottom.avg) bottom = { name, avg:a };
+      });
+      kpiTopName.textContent = top ? top.name : "—";
+      kpiTopAvg.textContent = top ? `${top.avg.toFixed(2)}%` : "—";
+      kpiBottomName.textContent = bottom ? bottom.name : "—";
+      kpiBottomAvg.textContent = bottom ? `${bottom.avg.toFixed(2)}%` : "—";
+
+      // Fee snapshot
+      let feeTotal = 0, paid = 0, debt = 0, debtors = 0;
+      students.forEach(s => {
+        const f = Number(s.feePerYear || 0);
+        const p = Number(s.paidAmount || 0);
+        const d = (s.debt != null) ? Number(s.debt) : Math.max(0, f - p);
+        feeTotal += f; paid += p; debt += d;
+        if (d > 0.1) debtors++;
+      });
+      kpiFeeTotal.textContent = feeTotal ? formatTZS(feeTotal) : "—";
+      kpiFeePaid.textContent = paid ? formatTZS(paid) : "—";
+      kpiFeeDebt.textContent = debt ? formatTZS(debt) : "—";
+      kpiDebtors.textContent = String(debtors);
+    }
+
+    // -------------------- Attendance KPIs (best-effort) --------------------
+    async function tryLoadAttendanceKPIs(){
+      // We try a summary path: attendanceSummary/{year}/{month}/{class}
+      // If not found, keep dashes.
+      const year = yearInput.value;
+      const month = (periodSelect.value === 'monthly') ? (monthSelect.value || '') : '';
+      const cls = classSelect.value;
+      if (!year || !cls) return;
+
+      let presentPct = null, absentPct = null;
+
+      try {
+        if (month) {
+          const p = `attendanceSummary/${year}/${month}/${cls}`;
+          const snap = await db.ref(p).once('value');
+          const v = snap.val();
+          if (v && typeof v.presentPct === 'number' && typeof v.absentPct === 'number') {
+            presentPct = v.presentPct; absentPct = v.absentPct;
+          }
+        } else {
+          const p = `attendanceSummary/${year}/__/${cls}`;
+          const snap = await db.ref(p).once('value');
+          const v = snap.val();
+          if (v && typeof v.presentPct === 'number' && typeof v.absentPct === 'number') {
+            presentPct = v.presentPct; absentPct = v.absentPct;
+          }
+        }
+      } catch(err){
+        // ignore
       }
 
-      try{
-        await db.ref().update(updates);
-        setStatus('Saved successfully', 'ok');
-        Swal.fire({icon:'success', title:'Saved', text:'Scoresheet stored in Firebase.'});
-      }catch(err){
+      kpiPresentPct.textContent = (presentPct != null) ? `${presentPct.toFixed(1)}%` : "—";
+      kpiAbsentPct.textContent = (absentPct != null) ? `${absentPct.toFixed(1)}%` : "—";
+    }
+
+    // -------------------- Save / Load --------------------
+    async function saveScores(){
+      const path = currentNodePath();
+      if (!path) return alert("Choose Class, Year, Exam Period (and Month if Monthly) first.");
+
+      // Prepare payload per student
+      const payload = {};
+      students.forEach(s => {
+        payload[s.key] = {
+          studentRef: {
+            admissionNumber: s.admissionNumber || "",
+            firstName: s.firstName || "",
+            middleName: s.middleName || "",
+            lastName: s.lastName || "",
+            classLevel: s.classLevel || "",
+          },
+          scores: marks[s.key] || {},
+          total: textAsNumber(document.getElementById(`tot_${s.key}`)?.textContent),
+          average: textAsNumber(document.getElementById(`avg_${s.key}`)?.textContent),
+          grade: (document.getElementById(`grade_${s.key}`)?.textContent || "").trim(),
+          updatedAt: firebase.database.ServerValue.TIMESTAMP
+        };
+      });
+
+      try {
+        await db.ref(path).set(payload);
+        alert("✅ Scores saved successfully.");
+      } catch(err){
         console.error(err);
-        setStatus('Save failed', 'err');
-        Swal.fire({icon:'error', title:'Error', text:err.message});
+        alert("❌ Failed to save scores.");
       }
     }
 
-    // -----------------------------
-    // Export: PDF
-    // -----------------------------
-    function downloadPDF(){
-      const classId = classSelect.value || 'class';
-      const periodKey = getPeriodKey();
+    // -------------------- Utilities --------------------
+    function hash(s){ return btoa(unescape(encodeURIComponent(s))).replace(/=+$/,''); }
+    function escapeHtml(t){ return String(t||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m])); }
+    function escapeAttr(t){ return String(t||'').replace(/"/g, '&quot;'); }
+    function textAsNumber(t){ const n = Number((t||"").toString().replace(/[^\d\.\-]/g,'')); return isNaN(n) ? 0 : n; }
+    function formatTZS(n){ return new Intl.NumberFormat('en-TZ', { style:'currency', currency:'TZS', maximumFractionDigits:0 }).format(n); }
+
+    function setAllInputs(val){
+      document.querySelectorAll('input.table-input').forEach(inp => {
+        inp.value = (val === "" ? "" : Number(val));
+        const key = inp.getAttribute('data-skey');
+        const subj = inp.getAttribute('data-subj');
+        marks[key][subj] = (val === "" ? "" : Number(val));
+      });
+      recalcTable();
+    }
+
+    // -------------------- Export --------------------
+    function exportCSV(){
+      if (!students.length) return alert("Load a class first.");
+
+      const rows = [];
+      // header
+      rows.push([
+        "Admission No","Student Name",
+        ...subjects,
+        "Total","Average","Grade","Overall Position"
+      ]);
+
+      students.forEach(s => {
+        const full = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
+        const row = [
+          s.admissionNumber || "",
+          full || ""
+        ];
+        subjects.forEach(subj => {
+          const v = marks[s.key]?.[subj];
+          row.push(v === "" ? "" : v);
+        });
+        row.push(
+          document.getElementById(`tot_${s.key}`)?.textContent || "",
+          document.getElementById(`avg_${s.key}`)?.textContent || "",
+          document.getElementById(`grade_${s.key}`)?.textContent || "",
+          document.getElementById(`pos_overall_${s.key}`)?.textContent || ""
+        );
+        rows.push(row);
+      });
+
+      const csv = Papa.unparse(rows);
+      const blob = new Blob([csv], { type:"text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const cls = classSelect.value || "class";
+      const year = yearInput.value || "year";
+      const period = periodSelect.value || "period";
+      const month = (period === 'monthly') ? (monthSelect.value || 'month') : '__';
+      a.href = url;
+      a.download = `scoresheet_${cls}_${year}_${period}_${month}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function exportPDF(){
+      if (!students.length) return alert("Load a class first.");
+
+      const head = [
+        "Adm No","Student Name",
+        ...subjects,
+        "Total","Avg","Grade","Pos"
+      ];
+
+      const body = students.map(s => {
+        const full = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
+        const row = [
+          s.admissionNumber || "", full || ""
+        ];
+        subjects.forEach(subj => {
+          const v = marks[s.key]?.[subj];
+          row.push(v === "" ? "" : v);
+        });
+        row.push(
+          document.getElementById(`tot_${s.key}`)?.textContent || "",
+          document.getElementById(`avg_${s.key}`)?.textContent || "",
+          document.getElementById(`grade_${s.key}`)?.textContent || "",
+          (document.getElementById(`pos_overall_${s.key}`)?.textContent || "").replace('#','')
+        );
+        return row;
+      });
+
       const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-
-      const title = `SoMAp – ${classId.toUpperCase()} • ${periodKey}`;
+      const doc = new jsPDF({ orientation: 'landscape' });
+      const cls = classSelect.value || "Class";
+      const year = yearInput.value || "Year";
+      const period = periodSelect.value || "Period";
+      const month = (period === 'monthly') ? (monthSelect.value || '') : '';
       doc.setFontSize(14);
-      doc.text(title, 14, 16);
-
-      // Build table for PDF
-      const head = [...headerEl.children].map(th=> th.textContent.trim());
-      const rows = [...bodyEl.querySelectorAll('tr')].map(tr=>{
-        return [...tr.children].map(td=>{
-          return td.querySelector('input') ? (td.querySelector('input').value || '') : td.textContent.trim();
-        });
-      });
-
+      doc.text(`Scoresheet — ${cls} — ${year} — ${period}${month?(' '+month):''}`, 14, 12);
       doc.autoTable({
-        head:[head],
-        body: rows,
-        startY: 22,
-        styles: { fontSize: 8, cellPadding: 2 },
-        headStyles: { fillColor: [30,58,138] } // deep blue
+        head: [head],
+        body,
+        startY: 18,
+        styles: { fontSize: 8 }
       });
-
-      doc.save(`SoMAp_${classId}_${periodKey}.pdf`);
+      doc.save(`scoresheet_${cls}_${year}_${period}_${month||'__'}.pdf`);
     }
 
-    // -----------------------------
-    // Export: Excel
-    // -----------------------------
-    function downloadExcel(){
-      const classId = classSelect.value || 'class';
-      const periodKey = getPeriodKey();
+    // -------------------- Events --------------------
+    loadBtn.addEventListener('click', loadClass);
+    saveBtn.addEventListener('click', saveScores);
+    clearZerosBtn.addEventListener('click', () => setAllInputs(""));
+    fillZerosBtn.addEventListener('click', () => setAllInputs(0));
+    exportCsvBtn.addEventListener('click', exportCSV);
+    exportPdfBtn.addEventListener('click', exportPDF);
 
-      // Build JSON rows
-      const head = [...headerEl.children].map(th=> th.textContent.trim());
-      const rows = [...bodyEl.querySelectorAll('tr')].map(tr=>{
-        return [...tr.children].map(td=>{
-          return td.querySelector('input') ? (td.querySelector('input').value || '') : td.textContent.trim();
-        });
-      });
+    // Default year
+    yearInput.value = new Date().getFullYear();
 
-      const data = [head, ...rows];
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Scoresheet");
-      XLSX.writeFile(wb, `SoMAp_${classId}_${periodKey}.xlsx`);
-    }
-
-    // -----------------------------
-    // Utils
-    // -----------------------------
-    function normKey(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,''); }
-    function escapeHtml(s){
-      return String(s ?? '').replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    }
-    function escapeAttr(s){ return String(s ?? '').replace(/"/g,'&quot;'); }
   </script>
 </body>
 </html>

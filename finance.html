@@ -43,20 +43,28 @@
     </header>
 
     <!-- Summary cards -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="bg-white p-4 rounded shadow">
-        <h3 class="text-sm text-gray-500">Total Due (All Students)</h3>
-        <div id="totalDue" class="text-xl font-semibold mt-2">--</div>
-      </div>
-      <div class="bg-white p-4 rounded shadow">
-        <h3 class="text-sm text-gray-500">Total Collected</h3>
-        <div id="totalCollected" class="text-xl font-semibold mt-2">--</div>
-      </div>
-      <div class="bg-white p-4 rounded shadow">
-        <h3 class="text-sm text-gray-500">Total Outstanding</h3>
-        <div id="totalOutstanding" class="text-xl font-semibold mt-2">--</div>
-      </div>
-    </div>
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+  <div class="bg-white p-4 rounded shadow">
+    <h3 class="text-sm text-gray-500">Total Due (All Students)</h3>
+    <div id="totalDue" class="text-xl font-semibold mt-2">--</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow">
+    <h3 class="text-sm text-gray-500">Total Collected</h3>
+    <div id="totalCollected" class="text-xl font-semibold mt-2">--</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow">
+    <h3 class="text-sm text-gray-500">Total Outstanding</h3>
+    <div id="totalOutstanding" class="text-xl font-semibold mt-2">--</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow">
+    <h3 class="text-sm text-gray-500">Total Expenses</h3>
+    <div id="totalExpenses" class="text-xl font-semibold mt-2">--</div>
+  </div>
+  <div class="bg-white p-4 rounded shadow">
+    <h3 class="text-sm text-gray-500">Net Balance (Collected - Expenses)</h3>
+    <div id="netBalance" class="text-xl font-semibold mt-2">--</div>
+  </div>
+</div>
 
     <!-- Action Row -->
     <div class="flex items-center justify-between mb-4">
@@ -101,6 +109,41 @@
         <tbody></tbody>
       </table>
     </div>
+    <!-- Expenses Management -->
+<div class="bg-white rounded shadow p-4 mt-6">
+  <h2 class="text-lg font-semibold text-indigo-700 mb-3">Expenses</h2>
+
+  <form id="expenseForm" class="grid md:grid-cols-4 gap-3 mb-4">
+    <select id="expenseCategory" required class="p-2 border rounded">
+      <option value="">Select Category</option>
+      <option>FOOD</option>
+      <option>SALARIES</option>
+      <option>OFFICE</option>
+      <option>EDUCATION</option>
+      <option>WATER & ELECTRICITY</option>
+      <option>SANITATION</option>
+      <option>TRANSPORT</option>
+      <option>PROJECTS</option>
+      <option>MAINTENANCE</option>
+      <option>MISCELLANEOUS</option>
+    </select>
+    <input id="expenseDescription" type="text" placeholder="Description" required class="p-2 border rounded">
+    <input id="expenseAmount" type="number" min="1" placeholder="Amount" required class="p-2 border rounded">
+    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded">Add Expense</button>
+  </form>
+
+  <table id="expenseTable" class="min-w-full text-sm border">
+    <thead>
+      <tr class="table-header">
+        <th class="p-2 border">Category</th>
+        <th class="p-2 border">Description</th>
+        <th class="p-2 border">Amount</th>
+        <th class="p-2 border">Date</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
 
     <!-- Payment modal -->
     <div id="paymentModal" class="modal">
@@ -539,6 +582,73 @@
     cachedStudents,
     renderTable
   };
+    // ================== EXPENSES ==================
+
+  const expenseForm = document.getElementById('expenseForm');
+  const expenseTableBody = document.querySelector('#expenseTable tbody');
+
+  async function loadExpenses() {
+    try {
+      const snap = await db.ref('expenses').once('value');
+      const raw = snap.val() || {};
+      expenseTableBody.innerHTML = '';
+      let total = 0;
+      Object.values(raw).forEach(exp => {
+        total += Number(exp.amount) || 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="p-2 border">${exp.category || ''}</td>
+          <td class="p-2 border">${exp.description || ''}</td>
+          <td class="p-2 border">${fmt(exp.amount)}</td>
+          <td class="p-2 border">${exp.timestamp ? new Date(exp.timestamp).toLocaleDateString() : ''}</td>
+        `;
+        expenseTableBody.appendChild(tr);
+      });
+      document.getElementById('totalExpenses').textContent = fmt(total);
+
+      // update net balance (collected - expenses)
+      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g,'')) || 0;
+      document.getElementById('netBalance').textContent = fmt(collected - total);
+    } catch (err) {
+      console.error('Error loading expenses:', err);
+    }
+  }
+
+  // Record new expense
+  expenseForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const category = document.getElementById('expenseCategory').value;
+    const description = document.getElementById('expenseDescription').value;
+    const amount = Number(document.getElementById('expenseAmount').value);
+    if (!category || !description || !amount) return alert('Fill all fields');
+
+    try {
+      await db.ref('expenses').push({
+        category,
+        description,
+        amount,
+        timestamp: Date.now()
+      });
+      expenseForm.reset();
+      await loadExpenses();
+    } catch (err) {
+      console.error('Error saving expense:', err);
+      alert('Error saving expense');
+    }
+  });
+
+  // Refresh net when students are reloaded
+  async function reloadAll() {
+    await loadStudents();
+    await loadExpenses();
+  }
+  reloadBtn.addEventListener('click', reloadAll);
+
+  // Initial load
+  document.addEventListener('DOMContentLoaded', () => {
+    reloadAll();
+  });
+
 
 })(); // end IIFE
 </script>

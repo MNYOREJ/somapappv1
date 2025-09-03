@@ -19,14 +19,11 @@
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-  <!-- Firebase compat (v9 compat libs) -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
-
-  <!-- Your firebase.js must be alongside this file -->
-  <script src="firebase.js"></script>
+ <!-- Firebase libs assumed; your firebase.js must load and set window.db -->
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+<script src="firebase.js"></script>
 
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
@@ -848,31 +845,74 @@ async function fetchStudents(selectedClass) {
   }
 
   /* ---------- Load sequence (main entry) ---------- */
-  async function loadAll(){
-    state.className = classSelect.value;
-    state.stream = (streamInput.value||'').trim();
-    state.month = monthSelect.value;
-    state.year = (yearInput.value||'').trim();
-    state.examKey = EXAM_KEYS[examType.value] || 'monthly';
-    state.schoolBranch = (schoolBranch.value || '').trim();
+  async function loadClass(){
+  const cls = classSelect.value;
+  const year = yearInput.value;
+  const period = periodSelect.value;
 
-    if(!state.className){ alert('Select a class'); return; }
-    if(!state.year){ alert('Enter academic year'); return; }
-
-    state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
-
-    // fetch students (robust)
-  state.students = await fetchStudents(state.className);
-
-    // fetch attendance, fees, scores
-    state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
-    state.fees = await fetchFees(state.year, state.className) || {};
-    state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
-
-    buildTable();
-    recomputeAll();
-    drawCharts();
+  if (!cls || !year || !period) {
+    alert("Please choose Class, Year and Exam Period first.");
+    return;
   }
+
+  subjects = SUBJECTS_BY_CLASS[cls] || [];
+  subjectListChip.textContent = subjects.length
+    ? `Subjects: ${subjects.join(", ")}`
+    : "Subjects: —";
+
+  // 1) Load students from /students (Registration)
+  students = [];
+  marks = {};
+  scoreThead.innerHTML = "";
+  scoreTbody.innerHTML = "";
+
+  try {
+    // === Structure ya RTDB yako: /students/{pushId} with classLevel ===
+    let snap = await db.ref('students')
+      .orderByChild('classLevel')
+      .equalTo(cls)
+      .once('value');
+
+    let raw = snap.val() || {};
+
+    // fallback kama ulihifadhi jina la darasa kwenye field tofauti (mf. "class")
+    if (!raw || Object.keys(raw).length === 0) {
+      const snap2 = await db.ref('students')
+        .orderByChild('class')
+        .equalTo(cls)
+        .once('value');
+      raw = snap2.val() || {};
+    }
+
+    students = Object.entries(raw)
+      .map(([key, s]) => ({ key, ...s }))
+      .sort((a,b) => (a.firstName||'').localeCompare(b.firstName||''));
+  } catch(err){
+    console.error("Failed to fetch students:", err);
+    alert("Could not fetch students from Firebase.");
+    return;
+  }
+
+  // 2) Load existing marks (if any)
+  let saved = {};
+  const path = currentNodePath();
+  if (path) {
+    try {
+      const msnap = await db.ref(path).once('value');
+      saved = msnap.val() || {};
+    } catch(err) {
+      console.warn("No existing marks or error reading:", err);
+    }
+  }
+
+  // 3) Render table
+  renderTable(students, subjects, saved);
+
+  // 4) Update dashboards (attendance + fee)
+  computeKPIs();
+  await tryLoadAttendanceKPIs();
+}
+
 
   // Add a small load-once helper: create a visible "Load" button if not present
   (function ensureLoadButton(){

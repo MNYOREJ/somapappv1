@@ -361,52 +361,29 @@
   }
 
   /* ---------- Robust student loader (attendance style) ---------- */
-  async function fetchStudents(className, stream){
-    const db = getDB();
-    if(!db) return [];
-    const tryPaths = ['students','Students','StudentsList','Students_List','studentList','studentlist','attendance','school','schoolerp'];
-    for(const p of tryPaths){
-      try{
-        const snap = await db.ref(p).get();
-        if(snap && snap.exists && snap.exists()){
-          const data = snap.val();
-          // If data looks like attendance map (nested months/classes) -> attempt to drill
-          // But for simplicity, convert object keys to student objects
-          const arr = [];
-          if(Array.isArray(data)){
-            data.forEach((item, idx)=> {
-              if(item) {
-                const adm = item.adm || item.admissionNumber || item.admNo || ('A'+idx);
-                arr.push(normalizeStudentRecord(adm, item));
-              }
-            });
-          } else {
-            Object.keys(data).forEach(k=>{
-              const s = data[k] || {};
-              // if this node is clearly not student but a branch, skip
-              // Heuristic: if node has 'firstName' or 'name' or 'admission' treat as student
-              if(typeof s === 'object' && (s.name || s.fullName || s.firstName || s.adm || s.admissionNumber || s.admissionNo || s.feeDue || s.feePaid)){
-                const adm = s.adm || s.admissionNumber || s.admNo || s.admission || k;
-                arr.push(normalizeStudentRecord(adm, s));
-              }
-            });
-          }
-          // filter by class/stream if provided
-          const filtered = arr.filter(x=>{
-            const classMatches = !className || String(x.class) === String(className);
-            const streamMatches = !stream || !x.stream || String(x.stream) === String(stream);
-            return classMatches && streamMatches;
-          });
-          filtered.sort((a,b)=> (a.name || '').localeCompare(b.name || ''));
-          if(filtered.length) return filtered;
-        }
-      }catch(err){
-        // ignore and continue
-        console.warn('fetchStudents trying', p, err && err.message);
-      }
-    }
+async function fetchStudents(selectedClass) {
+  try {
+    const snapshot = await db.ref("students").once("value");
+    const data = snapshot.val();
+    if (!data) return [];
+
+    const students = Object.entries(data)
+      .map(([id, s]) => ({
+        adm: s.adm || s.admissionNo || id,
+        name: s.fullName || s.studentName || s.name || "Unnamed",
+        class: s.class || s.className || "",
+        feeDue: s.feeDue || 0,
+        paid: s.paid || s.feePaid || 0,
+        balance: s.balance || ((s.feeDue || 0) - (s.feePaid || 0))
+      }))
+      .filter(stu => !selectedClass || (stu.class && stu.class.includes(selectedClass)));
+
+    return students;
+  } catch (err) {
+    console.error("Error fetching students:", err);
     return [];
   }
+}
 
   function normalizeStudentRecord(admKey, s){
     const name = [s.fullName, s.name, (s.firstName? s.firstName + (s.lastName? ' ' + s.lastName : '') : null)].filter(Boolean).join(' ').trim() || ('Student ' + admKey);

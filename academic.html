@@ -361,24 +361,24 @@
   }
 
   /* ---------- Robust student loader (attendance style) ---------- */
+/* ---------- Robust student loader (attendance style) ---------- */
 async function fetchStudents(selectedClass) {
+  const db = getDB();
+  if (!db) return [];
+
   try {
-    const snapshot = await db.ref("students").once("value");
+    const snapshot = await db.ref("students").get();
     const data = snapshot.val();
     if (!data) return [];
 
-    const students = Object.entries(data)
-      .map(([id, s]) => ({
-        adm: s.adm || s.admissionNo || id,
-        name: s.fullName || s.studentName || s.name || "Unnamed",
-        class: s.class || s.className || "",
-        feeDue: s.feeDue || 0,
-        paid: s.paid || s.feePaid || 0,
-        balance: s.balance || ((s.feeDue || 0) - (s.feePaid || 0))
-      }))
-      .filter(stu => !selectedClass || (stu.class && stu.class.includes(selectedClass)));
+    const students = Object.entries(data).map(([id, s]) =>
+      normalizeStudentRecord(id, s)
+    );
 
-    return students;
+    // match class exactly, like attendance does
+    return selectedClass
+      ? students.filter(stu => stu.class === selectedClass)
+      : students;
   } catch (err) {
     console.error("Error fetching students:", err);
     return [];
@@ -862,7 +862,7 @@ async function fetchStudents(selectedClass) {
     state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
 
     // fetch students (robust)
-    state.students = await fetchStudents(state.className, state.stream);
+  state.students = await fetchStudents(state.className);
 
     // fetch attendance, fees, scores
     state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};

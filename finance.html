@@ -258,80 +258,105 @@
     n = Number(n) || 0;
     return n.toLocaleString();
   }
+// Returns installment amount per class
+function classInstalment(className, instNo) {
+  className = (className || "").toLowerCase();
+  if (["class 1", "class 2", "class 3"].includes(className)) {
+    const values = [184000, 36000, 65000, 60000, 110000, 110000, 80000];
+    return values[instNo] || 0;
+  }
+  if (["class 4", "class 7"].includes(className)) {
+    const values = [234000, 36000, 200000, 200000, 150000, 0, 0];
+    return values[instNo] || 0;
+  }
+  if (["class 5"].includes(className)) {
+    const values = [184000, 36000, 115000, 110000, 160000, 130000, 85000];
+    return values[instNo] || 0;
+  }
+  if (["class 6"].includes(className)) {
+    const values = [236000, 0, 115000, 110000, 160000, 160000, 100000];
+    return values[instNo] || 0;
+  }
+  return 0;
+}
 
   // Compute financials for a student from stored payments (source-of-truth)
   // Returns object: { paidAmount, totalDue, previousDebt, balance, credit, installments }
-  function computeStudentFinancials(student) {
-    // Normalize
-    const feePerYear = Number(student.feePerYear) || 0;
-    const previousDebt = Number(student.debt) || Number(student.previousDebt) || 0;
-    // collect payments
-    let paid = 0;
-    if (student.payments) {
-      Object.values(student.payments).forEach(p => {
-        paid += Number(p.amount) || 0;
-      });
-    }
+  // Compute financials with installment/monthly plan logic
+function computeStudentFinancials(student) {
+  const feePerYear = Number(student.feePerYear) || 0;
+  const previousDebt = Number(student.previousDebt) || 0;
+  const plan = (student.paymentPlan || '').toLowerCase();
+  let paid = 0;
 
-    const totalDue = previousDebt + feePerYear;
-    // after paying previous debt fully, rest applies to current year
-    let remainingAfterPrev = Math.max(0, paid - previousDebt);
-    let debtRemaining = Math.max(0, previousDebt - paid); // still owe previous debt
-    let balanceThisYear = Math.max(0, feePerYear - Math.max(0, remainingAfterPrev));
-    let credit = Math.max(0, paid - totalDue);
-
-    // Build an installment breakdown (basic)
-    // We compute installments based on paymentPlan:
-    const plan = (student.paymentPlan || '').toLowerCase();
-    let installments = [];
-    if (plan.indexOf('6') !== -1 || plan.indexOf('6-instal') !== -1 || plan.indexOf('6-instal') !== -1) {
-      // 6 installments: split feePerYear equally into 6
-      const base = Math.floor((feePerYear / 6) * 100) / 100;
-      for (let i = 0; i < 6; i++) {
-        installments.push({ label: `Inst ${i+1}`, due: base, paid: 0 });
-      }
-    } else if (plan.indexOf('monthly') !== -1 || plan.indexOf('10') !== -1) {
-      // monthly 10 months: Jan-Oct
-      const base = Math.floor((feePerYear / 10) * 100) / 100;
-      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'];
-      installments = months.map(m => ({ label: m, due: base, paid: 0 }));
-    } else if (plan.indexOf('2') !== -1 || plan.indexOf('2-instal') !== -1) {
-      // 2 installments: split into 2 (48% and 48% as per your plan? We'll use 50/50 if not specified)
-      const base = Math.floor((feePerYear / 2) * 100) / 100;
-      installments.push({ label: '1st', due: base, paid: 0 });
-      installments.push({ label: '2nd', due: base, paid: 0 });
-    } else {
-      // yearly/other: single installment
-      installments.push({ label: 'Full Year', due: feePerYear, paid: 0 });
-    }
-
-    // Allocate paid money to previous debt first then to installments
-    let toAllocate = paid;
-    // reduce previous debt first
-    if (previousDebt > 0) {
-      const againstPrev = Math.min(toAllocate, previousDebt);
-      toAllocate -= againstPrev;
-      // we track debtRemaining above
-    }
-
-    // Now allocate to installments oldest-first
-    for (let inst of installments) {
-      const allocated = Math.min(toAllocate, inst.due);
-      inst.paid = allocated;
-      toAllocate -= allocated;
-      if (toAllocate <= 0) break;
-    }
-
-    return {
-      paidAmount: paid,
-      totalDue,
-      previousDebt,
-      balance: balanceThisYear,
-      debt: debtRemaining,
-      credit,
-      installments
-    };
+  if (student.payments) {
+    Object.values(student.payments).forEach(p => {
+      paid += Number(p.amount) || 0;
+    });
   }
+
+  // Define installment schedules
+  const today = new Date();
+  const schedules = [];
+
+  if (plan.includes("6")) {
+    // 6 Installments logic
+    schedules.push({ label: "Inst 1", due: "01-10", month: 1, amount: classInstalment(student.className, 1) });
+    schedules.push({ label: "Inst 2", due: "03-15", month: 3, amount: classInstalment(student.className, 2) });
+    schedules.push({ label: "Inst 3", due: "04-15", month: 4, amount: classInstalment(student.className, 3) });
+    schedules.push({ label: "Inst 4", due: "05-15", month: 5, amount: classInstalment(student.className, 4) });
+    schedules.push({ label: "Inst 5", due: "07-15", month: 7, amount: classInstalment(student.className, 5) });
+    schedules.push({ label: "Inst 6", due: "09-15", month: 9, amount: classInstalment(student.className, 6) });
+  } 
+  else if (plan.includes("monthly")) {
+    // Monthly logic (Jan–Oct, Jan/Jul cover 2 months)
+    const monthlyAmount = feePerYear / 10;
+    schedules.push({ label: "Jan (2 months)", month: 1, due: "01-31", amount: monthlyAmount * 2 });
+    schedules.push({ label: "Feb", month: 2, due: "02-28", amount: monthlyAmount });
+    schedules.push({ label: "Mar", month: 3, due: "03-31", amount: monthlyAmount });
+    schedules.push({ label: "Apr", month: 4, due: "04-30", amount: monthlyAmount });
+    schedules.push({ label: "May", month: 5, due: "05-31", amount: monthlyAmount });
+    schedules.push({ label: "Jun", month: 6, due: "06-30", amount: monthlyAmount });
+    schedules.push({ label: "Jul (2 months)", month: 7, due: "07-31", amount: monthlyAmount * 2 });
+    schedules.push({ label: "Aug", month: 8, due: "08-31", amount: monthlyAmount });
+    schedules.push({ label: "Sep", month: 9, due: "09-30", amount: monthlyAmount });
+    schedules.push({ label: "Oct", month: 10, due: "10-31", amount: monthlyAmount });
+  } 
+  else if (plan.includes("2")) {
+    // 2 Installments (48% each, 4% discount total)
+    const discounted = feePerYear * 0.96; // apply 4% discount
+    schedules.push({ label: "Half 1", month: 1, due: "01-10", amount: discounted * 0.5 });
+    schedules.push({ label: "Half 2", month: 7, due: "07-05", amount: discounted * 0.5 });
+  } 
+  else if (plan.includes("full")) {
+    // Full year upfront, 5% discount
+    const discounted = feePerYear * 0.95;
+    schedules.push({ label: "Full Year", month: 1, due: "01-10", amount: discounted });
+  }
+
+  // Work out expected payment till today
+  let expectedTillNow = 0;
+  const currentMonth = today.getMonth() + 1;
+
+  schedules.forEach(sch => {
+    if (sch.month <= currentMonth) {
+      expectedTillNow += sch.amount;
+    }
+  });
+
+  // Debt = what should be paid by now - what is actually paid
+  const debt = Math.max(0, expectedTillNow - paid);
+  const balanceYear = feePerYear - paid;
+
+  return {
+    paidAmount: paid,
+    totalDue: feePerYear,
+    previousDebt,
+    balance: balanceYear,
+    debtTillNow: debt,
+    installments: schedules
+  };
+}
 
   // Render main table using cachedStudents
   function renderTable() {

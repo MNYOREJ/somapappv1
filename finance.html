@@ -85,7 +85,7 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <button id="downloadCsv" class="px-3 py-1 bg-indigo-600 text-white rounded">Download CSV</button>
+        <button id="downloadCsv" class="px-3 py-1 bg-indigo-600 text-white rounded">Download Excel</button>
         <button id="downloadPdf" class="px-3 py-1 bg-red-600 text-white rounded">Download PDF</button>
       </div>
     </div>
@@ -258,105 +258,155 @@
     n = Number(n) || 0;
     return n.toLocaleString();
   }
-// Returns installment amount per class
-function classInstalment(className, instNo) {
-  className = (className || "").toLowerCase();
-  if (["class 1", "class 2", "class 3"].includes(className)) {
-    const values = [184000, 36000, 65000, 60000, 110000, 110000, 80000];
-    return values[instNo] || 0;
-  }
-  if (["class 4", "class 7"].includes(className)) {
-    const values = [234000, 36000, 200000, 200000, 150000, 0, 0];
-    return values[instNo] || 0;
-  }
-  if (["class 5"].includes(className)) {
-    const values = [184000, 36000, 115000, 110000, 160000, 130000, 85000];
-    return values[instNo] || 0;
-  }
-  if (["class 6"].includes(className)) {
-    const values = [236000, 0, 115000, 110000, 160000, 160000, 100000];
-    return values[instNo] || 0;
-  }
-  return 0;
-}
 
-  // Compute financials for a student from stored payments (source-of-truth)
-  // Returns object: { paidAmount, totalDue, previousDebt, balance, credit, installments }
-  // Compute financials with installment/monthly plan logic
-function computeStudentFinancials(student) {
-  const feePerYear = Number(student.feePerYear) || 0;
-  const previousDebt = Number(student.previousDebt) || 0;
-  const plan = (student.paymentPlan || '').toLowerCase();
-  let paid = 0;
-
-  if (student.payments) {
-    Object.values(student.payments).forEach(p => {
-      paid += Number(p.amount) || 0;
-    });
-  }
-
-  // Define installment schedules
-  const today = new Date();
-  const schedules = [];
-
-  if (plan.includes("6")) {
-    // 6 Installments logic
-    schedules.push({ label: "Inst 1", due: "01-10", month: 1, amount: classInstalment(student.className, 1) });
-    schedules.push({ label: "Inst 2", due: "03-15", month: 3, amount: classInstalment(student.className, 2) });
-    schedules.push({ label: "Inst 3", due: "04-15", month: 4, amount: classInstalment(student.className, 3) });
-    schedules.push({ label: "Inst 4", due: "05-15", month: 5, amount: classInstalment(student.className, 4) });
-    schedules.push({ label: "Inst 5", due: "07-15", month: 7, amount: classInstalment(student.className, 5) });
-    schedules.push({ label: "Inst 6", due: "09-15", month: 9, amount: classInstalment(student.className, 6) });
-  } 
-  else if (plan.includes("monthly")) {
-    // Monthly logic (Jan–Oct, Jan/Jul cover 2 months)
-    const monthlyAmount = feePerYear / 10;
-    schedules.push({ label: "Jan (2 months)", month: 1, due: "01-31", amount: monthlyAmount * 2 });
-    schedules.push({ label: "Feb", month: 2, due: "02-28", amount: monthlyAmount });
-    schedules.push({ label: "Mar", month: 3, due: "03-31", amount: monthlyAmount });
-    schedules.push({ label: "Apr", month: 4, due: "04-30", amount: monthlyAmount });
-    schedules.push({ label: "May", month: 5, due: "05-31", amount: monthlyAmount });
-    schedules.push({ label: "Jun", month: 6, due: "06-30", amount: monthlyAmount });
-    schedules.push({ label: "Jul (2 months)", month: 7, due: "07-31", amount: monthlyAmount * 2 });
-    schedules.push({ label: "Aug", month: 8, due: "08-31", amount: monthlyAmount });
-    schedules.push({ label: "Sep", month: 9, due: "09-30", amount: monthlyAmount });
-    schedules.push({ label: "Oct", month: 10, due: "10-31", amount: monthlyAmount });
-  } 
-  else if (plan.includes("2")) {
-    // 2 Installments (48% each, 4% discount total)
-    const discounted = feePerYear * 0.96; // apply 4% discount
-    schedules.push({ label: "Half 1", month: 1, due: "01-10", amount: discounted * 0.5 });
-    schedules.push({ label: "Half 2", month: 7, due: "07-05", amount: discounted * 0.5 });
-  } 
-  else if (plan.includes("full")) {
-    // Full year upfront, 5% discount
-    const discounted = feePerYear * 0.95;
-    schedules.push({ label: "Full Year", month: 1, due: "01-10", amount: discounted });
-  }
-
-  // Work out expected payment till today
-  let expectedTillNow = 0;
-  const currentMonth = today.getMonth() + 1;
-
-  schedules.forEach(sch => {
-    if (sch.month <= currentMonth) {
-      expectedTillNow += sch.amount;
+  // Class installment amounts based on table
+  function classInstalment(className, instNo) {
+    className = (className || "").toLowerCase();
+    if (["class 1", "class 2", "class 3"].includes(className)) {
+      const values = [184000, 36000, 65000, 60000, 110000, 110000, 80000];
+      return values[instNo] || 0;
     }
-  });
+    if (["class 4", "class 7"].includes(className)) {
+      const values = [234000, 36000, 200000, 200000, 150000, 0, 0];
+      return values[instNo] || 0;
+    }
+    if (["class 5"].includes(className)) {
+      const values = [184000, 36000, 115000, 110000, 160000, 130000, 85000];
+      return values[instNo] || 0;
+    }
+    if (["class 6"].includes(className)) {
+      const values = [236000, 0, 115000, 110000, 160000, 160000, 100000];
+      return values[instNo] || 0;
+    }
+    return 0;
+  }
 
-  // Debt = what should be paid by now - what is actually paid
-  const debt = Math.max(0, expectedTillNow - paid);
-  const balanceYear = feePerYear - paid;
+  // Compute financials with installment/monthly plan logic
+  function computeStudentFinancials(student) {
+    const feePerYear = Number(student.feePerYear) || 0;
+    const previousDebt = Number(student.previousDebt) || 0;
+    const plan = (student.paymentPlan || '').toLowerCase();
+    let paid = 0;
 
-  return {
-    paidAmount: paid,
-    totalDue: feePerYear,
-    previousDebt,
-    balance: balanceYear,
-    debtTillNow: debt,
-    installments: schedules
-  };
-}
+    if (student.payments) {
+      Object.values(student.payments).forEach(p => {
+        paid += Number(p.amount) || 0;
+      });
+    }
+
+    // Define installment schedules
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const schedules = [];
+
+    let currentFee = feePerYear;
+
+    if (plan.includes("6")) {
+      // 6 Installments logic with fixed amounts per class
+      // Inst1 includes MKUPUO WA 1 + VITABU
+      const inst1Amount = classInstalment(student.classLevel, 0) + classInstalment(student.classLevel, 1);
+      if (inst1Amount > 0) {
+        schedules.push({ label: "Inst 1", due: "01-10", month: 1, amount: inst1Amount });
+      }
+      const inst2Amount = classInstalment(student.classLevel, 2);
+      if (inst2Amount > 0) {
+        schedules.push({ label: "Inst 2", due: "03-15", month: 3, amount: inst2Amount });
+      }
+      const inst3Amount = classInstalment(student.classLevel, 3);
+      if (inst3Amount > 0) {
+        schedules.push({ label: "Inst 3", due: "04-15", month: 4, amount: inst3Amount });
+      }
+      const inst4Amount = classInstalment(student.classLevel, 4);
+      if (inst4Amount > 0) {
+        schedules.push({ label: "Inst 4", due: "05-15", month: 5, amount: inst4Amount });
+      }
+      const inst5Amount = classInstalment(student.classLevel, 5);
+      if (inst5Amount > 0) {
+        schedules.push({ label: "Inst 5", due: "07-15", month: 7, amount: inst5Amount });
+      }
+      const inst6Amount = classInstalment(student.classLevel, 6);
+      if (inst6Amount > 0) {
+        schedules.push({ label: "Inst 6", due: "09-15", month: 9, amount: inst6Amount });
+      }
+      // Override currentFee with sum if different (but should match feePerYear)
+      currentFee = schedules.reduce((sum, s) => sum + s.amount, 0);
+    } else if (plan.includes("monthly")) {
+      // Monthly logic: Jan(Jan+Dec), Feb(Feb), Mar(Mar), Apr(Apr), May(May), Jul(Jul+Jun), Aug(Aug), Sep(Sep), Oct(Oct+Nov)
+      // No payment in June
+      const monthlyAmount = feePerYear / 12;
+      schedules.push({ label: "Jan (2 months)", month: 1, due: "01-31", amount: monthlyAmount * 2 });
+      schedules.push({ label: "Feb", month: 2, due: "02-28", amount: monthlyAmount });
+      schedules.push({ label: "Mar", month: 3, due: "03-31", amount: monthlyAmount });
+      schedules.push({ label: "Apr", month: 4, due: "04-30", amount: monthlyAmount });
+      schedules.push({ label: "May", month: 5, due: "05-31", amount: monthlyAmount });
+      schedules.push({ label: "Jul (2 months)", month: 7, due: "07-31", amount: monthlyAmount * 2 });
+      schedules.push({ label: "Aug", month: 8, due: "08-31", amount: monthlyAmount });
+      schedules.push({ label: "Sep", month: 9, due: "09-30", amount: monthlyAmount });
+      schedules.push({ label: "Oct (2 months)", month: 10, due: "10-31", amount: monthlyAmount * 2 });
+    } else if (plan.includes("2")) {
+      // 2 Installments (48% each, 4% discount total)
+      currentFee = feePerYear * 0.96; // apply 4% discount
+      schedules.push({ label: "Half 1", month: 1, due: "01-10", amount: currentFee * 0.5 });
+      schedules.push({ label: "Half 2", month: 7, due: "07-05", amount: currentFee * 0.5 });
+    } else if (plan.includes("full")) {
+      // Full year upfront, 5% discount
+      currentFee = feePerYear * 0.95;
+      schedules.push({ label: "Full Year", month: 1, due: "01-10", amount: currentFee });
+    }
+
+    // Set dueDate as Date objects
+    schedules.forEach(sch => {
+      const [mStr, dStr] = sch.due.split('-');
+      const day = parseInt(dStr);
+      sch.dueDate = new Date(currentYear, sch.month - 1, day);
+      sch.paid = 0; // Initialize paid for each installment
+    });
+
+    // Work out expected payment till today (cumulative past due amounts)
+    let expectedTillNow = 0;
+    schedules.forEach(sch => {
+      if (sch.dueDate < today) {
+        expectedTillNow += sch.amount;
+      }
+    });
+
+    // Find the latest past due label
+    let tillLabel = '';
+    for (let i = schedules.length - 1; i >= 0; i--) {
+      if (schedules[i].dueDate < today) {
+        tillLabel = schedules[i].label;
+        break;
+      }
+    }
+
+    // Allocate paid: first to previous debt, then to installments (oldest first)
+    let toAllocate = paid;
+    const debtRemaining = Math.max(0, previousDebt - toAllocate);
+    toAllocate = Math.max(0, toAllocate - previousDebt);
+
+    schedules.forEach(sch => {
+      const alloc = Math.min(toAllocate, sch.amount - sch.paid);
+      sch.paid += alloc;
+      toAllocate -= alloc;
+    });
+
+    const credit = toAllocate; // Any overpayment beyond all
+    const balanceYear = currentFee - Math.max(0, paid - previousDebt);
+
+    // Debt till now: unpaid previous + unpaid past installments
+    const debtTillNow = Math.max(0, previousDebt + expectedTillNow - paid);
+
+    return {
+      paidAmount: paid,
+      totalDue: previousDebt + currentFee,
+      previousDebt,
+      balance: balanceYear,
+      debtTillNow: debtTillNow,
+      credit,
+      installments: schedules,
+      tillLabel
+    };
+  }
 
   // Render main table using cachedStudents
   function renderTable() {
@@ -370,11 +420,11 @@ function computeStudentFinancials(student) {
       const fin = computeStudentFinancials(student);
 
       // skip non-debtors if button toggled
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debt <= 0 && fin.credit <= 0)) return;
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debtTillNow <= 0 && fin.credit <= 0)) return;
 
       totalDue += fin.totalDue;
       totalCollected += fin.paidAmount;
-      totalOutstanding += fin.balance + fin.debt;
+      totalOutstanding += fin.balance + fin.debtTillNow;
 
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g,' ').trim();
 
@@ -388,7 +438,7 @@ function computeStudentFinancials(student) {
         <td class="p-2 border">${student.paymentPlan || ''}</td>
         <td class="p-2 border">${fmt(fin.paidAmount)}</td>
         <td class="p-2 border">${fmt(fin.balance)}</td>
-        <td class="p-2 border">${fmt(fin.debt)}</td>
+        <td class="p-2 border">${fmt(fin.debtTillNow)} <small>(till ${fin.tillLabel || "—"})</small></td>
         <td class="p-2 border">
           <button class="viewBtn px-2 py-1 text-xs border rounded" data-id="${id}">View</button>
           <button class="payBtn px-2 py-1 text-xs bg-indigo-600 text-white rounded ml-1" data-id="${id}">Pay</button>
@@ -471,10 +521,22 @@ function computeStudentFinancials(student) {
       <p><strong>Total Due:</strong> ${fmt(fin.totalDue)}</p>
       <p><strong>Paid:</strong> ${fmt(fin.paidAmount)}</p>
       <p><strong>Balance:</strong> ${fmt(fin.balance)}</p>
+      <p><strong>Debt Till Now:</strong> ${fmt(fin.debtTillNow)} (till ${fin.tillLabel || "—"})</p>
       <p><strong>Credit:</strong> ${fmt(fin.credit)}</p>
       <hr class="my-3"/>
-      <h4 class="font-semibold">Payments Ledger</h4>
+      <h4 class="font-semibold">Installment Breakdown</h4>
+      <table class="min-w-full text-xs mt-2 border">
+        <thead><tr class="table-header"><th class="p-1 border">Installment</th><th class="p-1 border">Amount</th><th class="p-1 border">Due Date</th><th class="p-1 border">Paid</th><th class="p-1 border">Status</th></tr></thead>
+        <tbody>
     `;
+
+    fin.installments.forEach(inst => {
+      const status = inst.paid >= inst.amount ? '✅ Paid' : '❌ Pending';
+      const dueStr = inst.dueDate ? inst.dueDate.toLocaleDateString() : '—';
+      html += `<tr><td class="p-1 border">${inst.label}</td><td class="p-1 border">${fmt(inst.amount)}</td><td class="p-1 border">${dueStr}</td><td class="p-1 border">${fmt(inst.paid)}</td><td class="p-1 border">${status}</td></tr>`;
+    });
+
+    html += `</tbody></table><hr class="my-3"/><h4 class="font-semibold">Payments Ledger</h4>`;
 
     if (!s.payments) {
       html += '<div class="text-sm text-gray-500">No payments recorded yet.</div>';
@@ -523,19 +585,13 @@ function computeStudentFinancials(student) {
       let paidToDate = 0;
       paymentsSnap.forEach(p => { paidToDate += Number(p.val().amount) || 0; });
 
-      const feePerYear = Number(student.feePerYear) || 0;
-      const prevDebt = Number(student.debt) || Number(student.previousDebt) || 0;
-      const totalDue = prevDebt + feePerYear;
-      const debtRemaining = Math.max(0, prevDebt - paidToDate);
-      const remainingAfterPrev = Math.max(0, paidToDate - prevDebt);
-      const balanceThisYear = Math.max(0, feePerYear - remainingAfterPrev);
-      const credit = Math.max(0, paidToDate - totalDue);
+      const fin = computeStudentFinancials({ ...student, paidAmount: paidToDate }); // recompute with new paid
 
       await studentRef.update({
         paidAmount: paidToDate,
-        balance: balanceThisYear,
-        debt: debtRemaining,
-        credit
+        balance: fin.balance,
+        debt: fin.debtTillNow, // update with current debtTillNow
+        credit: fin.credit
       });
 
       alert('Payment recorded successfully.');
@@ -547,51 +603,142 @@ function computeStudentFinancials(student) {
     }
   });
 
-  // CSV download of displayed table
+  // Excel download of displayed table with breakdowns
   function downloadCSV() {
-    // build array of rows from currently shown table
-    const rows = [];
-    // header
-    rows.push(['Admission No','Full Name','Class','Fee','Plan','Paid','Balance','Debt']);
+    const workbook = XLSX.utils.book_new();
+    const studentsList = Object.values(cachedStudents).sort((a, b) => (a.admissionNumber || '').localeCompare(b.admissionNumber || ''));
     const filterClass = classFilter.value;
-    Object.entries(cachedStudents).forEach(([id, s]) => {
-      if (filterClass && (s.classLevel || '') !== filterClass) return;
-      const fin = computeStudentFinancials(s);
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debt <= 0 && fin.credit <= 0)) return;
-      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
-      rows.push([s.admissionNumber||'', fullName, s.classLevel||'', fin.totalDue - fin.previousDebt, s.paymentPlan||'', fin.paidAmount, fin.balance, fin.debt]);
+
+    // Summary sheet
+    const summaryData = [["Admission No", "Full Name", "Class", "Total Fee", "Paid", "Previous Debt", "Balance", "Debt Till Now"]];
+    let totalFee = 0, totalPaid = 0, totalPrevDebt = 0, totalBalance = 0, totalDebtTillNow = 0;
+
+    studentsList.forEach(stu => {
+      if (filterClass && (stu.classLevel || '') !== filterClass) return;
+      const fin = computeStudentFinancials(stu);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debtTillNow <= 0 && fin.credit <= 0)) return;
+
+      const fullName = `${stu.firstName || ''} ${stu.middleName || ''} ${stu.lastName || ''}`.replace(/\s+/g, ' ').trim();
+      totalFee += fin.totalDue;
+      totalPaid += fin.paidAmount;
+      totalPrevDebt += fin.previousDebt;
+      totalBalance += fin.balance;
+      totalDebtTillNow += fin.debtTillNow;
+
+      summaryData.push([
+        stu.admissionNumber || '', fullName, stu.classLevel || '', fin.totalDue, fin.paidAmount,
+        fin.previousDebt, fin.balance, fin.debtTillNow
+      ]);
     });
 
-    // convert to workbook and save with SheetJS
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Finance');
-    XLSX.writeFile(wb, `finance_export_${Date.now()}.xlsx`);
+    // Add totals row
+    summaryData.push([
+      "TOTAL", "-", "-", totalFee, totalPaid, totalPrevDebt, totalBalance, totalDebtTillNow
+    ]);
+
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(summaryData), "Summary");
+
+    // Individual installment sheets
+    studentsList.forEach(stu => {
+      if (filterClass && (stu.classLevel || '') !== filterClass) return;
+      const fin = computeStudentFinancials(stu);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debtTillNow <= 0 && fin.credit <= 0)) return;
+
+      const instData = [["Installment", "Amount", "Due Date", "Paid", "Status"]];
+      let instTotal = 0, paidTotal = 0;
+
+      fin.installments.forEach(inst => {
+        instTotal += inst.amount;
+        paidTotal += inst.paid;
+        const status = inst.paid >= inst.amount ? "Paid" : "Pending";
+        const dueStr = inst.dueDate ? inst.dueDate.toLocaleDateString() : "—";
+        instData.push([inst.label, inst.amount, dueStr, inst.paid, status]);
+      });
+
+      // Totals for installments
+      instData.push(["TOTAL", instTotal, "-", paidTotal, "-"]);
+
+      const sheetName = (stu.firstName || 'Student').substring(0, 20);
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(instData), sheetName);
+    });
+
+    XLSX.writeFile(workbook, `finance_export_${Date.now()}.xlsx`);
   }
 
   // PDF download using jsPDF autoTable
   function downloadPDF() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape' });
-    const headers = [['Admission No','Full Name','Class','Fee','Plan','Paid','Balance','Debt']];
-    const body = [];
+    const studentsList = Object.values(cachedStudents).sort((a, b) => (a.admissionNumber || '').localeCompare(b.admissionNumber || ''));
     const filterClass = classFilter.value;
-    Object.entries(cachedStudents).forEach(([id, s]) => {
-      if (filterClass && (s.classLevel || '') !== filterClass) return;
-      const fin = computeStudentFinancials(s);
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debt <= 0 && fin.credit <= 0)) return;
-      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
-      body.push([s.admissionNumber||'', fullName, s.classLevel||'', (s.feePerYear||0), s.paymentPlan||'', fin.paidAmount, fin.balance, fin.debt]);
-    });
 
     doc.setFontSize(14);
     doc.text('SoMAp Finance Report', 14, 14);
+
+    // Summary Table
+    const summaryData = [];
+    let totalFee = 0, totalPaid = 0, totalPrevDebt = 0, totalBalance = 0, totalDebtTillNow = 0;
+
+    studentsList.forEach(stu => {
+      if (filterClass && (stu.classLevel || '') !== filterClass) return;
+      const fin = computeStudentFinancials(stu);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debtTillNow <= 0 && fin.credit <= 0)) return;
+
+      const fullName = `${stu.firstName || ''} ${stu.middleName || ''} ${stu.lastName || ''}`.replace(/\s+/g, ' ').trim();
+      totalFee += fin.totalDue;
+      totalPaid += fin.paidAmount;
+      totalPrevDebt += fin.previousDebt;
+      totalBalance += fin.balance;
+      totalDebtTillNow += fin.debtTillNow;
+
+      summaryData.push([
+        stu.admissionNumber || '', fullName, stu.classLevel || '', fin.totalDue, fin.paidAmount,
+        fin.previousDebt, fin.balance, fin.debtTillNow
+      ]);
+    });
+
+    // Add totals row
+    summaryData.push([
+      "TOTAL", "-", "-", totalFee, totalPaid, totalPrevDebt, totalBalance, totalDebtTillNow
+    ]);
+
     doc.autoTable({
-      head: headers,
-      body,
+      head: [["Admission No", "Full Name", "Class", "Total Fee", "Paid", "Prev Debt", "Balance", "Debt Till Now"]],
+      body: summaryData,
       startY: 20,
       styles: { fontSize: 8 }
     });
+
+    // Installment breakdown per student
+    studentsList.forEach(stu => {
+      if (filterClass && (stu.classLevel || '') !== filterClass) return;
+      const fin = computeStudentFinancials(stu);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debtTillNow <= 0 && fin.credit <= 0)) return;
+
+      doc.addPage();
+      doc.setFontSize(14);
+      doc.text(`Installment Breakdown - ${stu.firstName || 'Student'}`, 14, 14);
+
+      let instTotal = 0, paidTotal = 0;
+      const instData = fin.installments.map(inst => {
+        instTotal += inst.amount;
+        paidTotal += inst.paid;
+        const status = inst.paid >= inst.amount ? "Paid" : "Pending";
+        const dueStr = inst.dueDate ? inst.dueDate.toLocaleDateString() : "—";
+        return [inst.label, inst.amount, dueStr, inst.paid, status];
+      });
+
+      // Add total row
+      instData.push(["TOTAL", instTotal, "-", paidTotal, "-"]);
+
+      doc.autoTable({
+        head: [["Installment", "Amount", "Due Date", "Paid", "Status"]],
+        body: instData,
+        startY: 20,
+        styles: { fontSize: 8 }
+      });
+    });
+
     doc.save(`finance_report_${Date.now()}.pdf`);
   }
 

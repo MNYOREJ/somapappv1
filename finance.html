@@ -4,18 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <!-- Firebase SDKs (same as index.html, version 9 compat) -->
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
 
-<!-- Your Firebase config wrapper -->
-<script src="firebase.js"></script>
+  <!-- Your Firebase config wrapper -->
+  <script src="firebase.js"></script>
   <title>SoMAp - Finance</title>
 
   <!-- Tailwind + FontAwesome (same style as your app) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
 
   <style>
     body { background: #f8fafc; }
@@ -23,6 +23,11 @@
     .table-row:nth-child(even) { background: #ffffff; }
     .modal { display:none; position:fixed; inset:0; background: rgba(0,0,0,0.5); z-index:1000; }
     .modal-content { background:#fff; max-width:800px; margin:4% auto; padding:18px; border-radius:8px; height:80vh; overflow:auto; }
+    .expander { cursor: pointer; }
+    .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
+    .status-paid { background:#dcfce7; color:#166534; }       /* green */
+    .status-partial { background:#fef9c3; color:#854d0e; }    /* amber */
+    .status-overdue { background:#fee2e2; color:#991b1b; }    /* red */
   </style>
 
   <!-- Third-party libs for export -->
@@ -44,27 +49,27 @@
 
     <!-- Summary cards -->
     <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-  <div class="bg-white p-4 rounded shadow">
-    <h3 class="text-sm text-gray-500">Total Due (All Students)</h3>
-    <div id="totalDue" class="text-xl font-semibold mt-2">--</div>
-  </div>
-  <div class="bg-white p-4 rounded shadow">
-    <h3 class="text-sm text-gray-500">Total Collected</h3>
-    <div id="totalCollected" class="text-xl font-semibold mt-2">--</div>
-  </div>
-  <div class="bg-white p-4 rounded shadow">
-    <h3 class="text-sm text-gray-500">Total Outstanding</h3>
-    <div id="totalOutstanding" class="text-xl font-semibold mt-2">--</div>
-  </div>
-  <div class="bg-white p-4 rounded shadow">
-    <h3 class="text-sm text-gray-500">Total Expenses</h3>
-    <div id="totalExpenses" class="text-xl font-semibold mt-2">--</div>
-  </div>
-  <div class="bg-white p-4 rounded shadow">
-    <h3 class="text-sm text-gray-500">Net Balance (Collected - Expenses)</h3>
-    <div id="netBalance" class="text-xl font-semibold mt-2">--</div>
-  </div>
-</div>
+      <div class="bg-white p-4 rounded shadow">
+        <h3 class="text-sm text-gray-500">Total Due (All Students)</h3>
+        <div id="totalDue" class="text-xl font-semibold mt-2">--</div>
+      </div>
+      <div class="bg-white p-4 rounded shadow">
+        <h3 class="text-sm text-gray-500">Total Collected</h3>
+        <div id="totalCollected" class="text-xl font-semibold mt-2">--</div>
+      </div>
+      <div class="bg-white p-4 rounded shadow">
+        <h3 class="text-sm text-gray-500">Total Outstanding (Balance + Period Debt)</h3>
+        <div id="totalOutstanding" class="text-xl font-semibold mt-2">--</div>
+      </div>
+      <div class="bg-white p-4 rounded shadow">
+        <h3 class="text-sm text-gray-500">Total Expenses</h3>
+        <div id="totalExpenses" class="text-xl font-semibold mt-2">--</div>
+      </div>
+      <div class="bg-white p-4 rounded shadow">
+        <h3 class="text-sm text-gray-500">Net Balance (Collected - Expenses)</h3>
+        <div id="netBalance" class="text-xl font-semibold mt-2">--</div>
+      </div>
+    </div>
 
     <!-- Action Row -->
     <div class="flex items-center justify-between mb-4">
@@ -85,8 +90,12 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <button id="downloadCsv" class="px-3 py-1 bg-indigo-600 text-white rounded">Download CSV</button>
-        <button id="downloadPdf" class="px-3 py-1 bg-red-600 text-white rounded">Download PDF</button>
+        <button id="downloadCsv" class="px-3 py-1 bg-indigo-600 text-white rounded"><i class="fa fa-file-excel mr-1"></i> Main CSV</button>
+        <button id="downloadPdf" class="px-3 py-1 bg-red-600 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Main PDF</button>
+        <button id="downloadDebtNowCsv" class="px-3 py-1 bg-amber-600 text-white rounded"><i class="fa fa-file-excel mr-1"></i> Debt (current) CSV</button>
+        <button id="downloadDebtNowPdf" class="px-3 py-1 bg-amber-700 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Debt (current) PDF</button>
+        <button id="downloadBreakdownCsv" class="px-3 py-1 bg-teal-600 text-white rounded"><i class="fa fa-file-excel mr-1"></i> Breakdown CSV</button>
+        <button id="downloadBreakdownPdf" class="px-3 py-1 bg-teal-700 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Breakdown PDF</button>
       </div>
     </div>
 
@@ -95,73 +104,76 @@
       <table id="financeTable" class="min-w-full text-sm">
         <thead>
           <tr class="table-header">
+            <th class="p-2 border"></th>
             <th class="p-2 border">Admission No</th>
             <th class="p-2 border">Full Name</th>
             <th class="p-2 border">Class</th>
             <th class="p-2 border">Fee (year)</th>
             <th class="p-2 border">Payment Plan</th>
             <th class="p-2 border">Paid</th>
-            <th class="p-2 border">Balance</th>
-            <th class="p-2 border">Debt</th>
+            <th class="p-2 border">Balance (Year)</th>
+            <th class="p-2 border">Debt till …</th>
             <th class="p-2 border">Actions</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
     </div>
+
     <!-- Expenses Management -->
-<div class="bg-white rounded shadow p-4 mt-6">
-  <h2 class="text-lg font-semibold text-indigo-700 mb-3">Expenses</h2>
+    <div class="bg-white rounded shadow p-4 mt-6">
+      <h2 class="text-lg font-semibold text-indigo-700 mb-3">Expenses</h2>
 
-  <form id="expenseForm" class="grid md:grid-cols-4 gap-3 mb-4">
-    <select id="expenseCategory" required class="p-2 border rounded">
-  <option value="">Select Category</option>
-  <option>FOOD</option>
-  <option>SALARIES</option>
-  <option>OFFICE</option>
-  <option>EDUCATION</option>
-  <option>WATER & ELECTRICITY</option>
-  <option>SANITATION</option>
-  <option>ENVIRONMENT</option>
-  <option>HEALTH</option>
-  <option>SECURITY</option>
-  <option>CLOTHING</option>
-  <option>SHELTER</option>
-  <option>RECREATION</option>
-  <option>PROJECTS</option>
-  <option>TRANSPORT</option>
-  <option>PURCHASES</option>
-  <option>SIL</option>
-  <option>MAINTENANCE</option>
-  <option>BOOKS</option>
-  <option>EMERGENCY</option>
-  <option>MISCELLANEOUS</option>
-</select>
-    <input id="expenseDescription" type="text" placeholder="Description" required class="p-2 border rounded">
-    <input id="expenseAmount" type="number" min="1" placeholder="Amount" required class="p-2 border rounded">
-    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded">Add Expense</button>
-  </form>
-  <div class="flex items-center gap-2 mb-3">
-  <button id="downloadExpenseCsv" class="px-3 py-1 bg-green-600 text-white rounded">
-    Download Expense Report (CSV)
-  </button>
-  <button id="downloadExpensePdf" class="px-3 py-1 bg-red-600 text-white rounded">
-    Download Expense Report (PDF)
-  </button>
-</div>
+      <form id="expenseForm" class="grid md:grid-cols-4 gap-3 mb-4">
+        <select id="expenseCategory" required class="p-2 border rounded">
+          <option value="">Select Category</option>
+          <option>FOOD</option>
+          <option>SALARIES</option>
+          <option>OFFICE</option>
+          <option>EDUCATION</option>
+          <option>WATER & ELECTRICITY</option>
+          <option>SANITATION</option>
+          <option>ENVIRONMENT</option>
+          <option>HEALTH</option>
+          <option>SECURITY</option>
+          <option>CLOTHING</option>
+          <option>SHELTER</option>
+          <option>RECREATION</option>
+          <option>PROJECTS</option>
+          <option>TRANSPORT</option>
+          <option>PURCHASES</option>
+          <option>SIL</option>
+          <option>MAINTENANCE</option>
+          <option>BOOKS</option>
+          <option>EMERGENCY</option>
+          <option>MISCELLANEOUS</option>
+        </select>
+        <input id="expenseDescription" type="text" placeholder="Description" required class="p-2 border rounded">
+        <input id="expenseAmount" type="number" min="1" placeholder="Amount" required class="p-2 border rounded">
+        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded">Add Expense</button>
+      </form>
 
-  <table id="expenseTable" class="min-w-full text-sm border">
-    <thead>
-      <tr class="table-header">
-        <th class="p-2 border">Category</th>
-        <th class="p-2 border">Description</th>
-        <th class="p-2 border">Amount</th>
-        <th class="p-2 border">Date</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</div>
+      <div class="flex items-center gap-2 mb-3">
+        <button id="downloadExpenseCsv" class="px-3 py-1 bg-green-600 text-white rounded">
+          Download Expense Report (CSV)
+        </button>
+        <button id="downloadExpensePdf" class="px-3 py-1 bg-red-600 text-white rounded">
+          Download Expense Report (PDF)
+        </button>
+      </div>
+
+      <table id="expenseTable" class="min-w-full text-sm border">
+        <thead>
+          <tr class="table-header">
+            <th class="p-2 border">Category</th>
+            <th class="p-2 border">Description</th>
+            <th class="p-2 border">Amount</th>
+            <th class="p-2 border">Date</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
 
     <!-- Payment modal -->
     <div id="paymentModal" class="modal">
@@ -205,7 +217,7 @@
       </div>
     </div>
 
-    <!-- Details modal -->
+    <!-- Details modal (kept for ledger view) -->
     <div id="detailsModal" class="modal">
       <div class="modal-content">
         <span id="closeDetailsModal" class="float-right cursor-pointer text-2xl">&times;</span>
@@ -217,15 +229,16 @@
 
 <script>
 /*
-  finance.html
-  - Relies on firebase.js to already initialize Firebase and expose window.db and window.storage
-  - Save as finance.html in same folder with index.html and firebase.js
+  finance.html — enhanced
+  - Strict installment/monthly windows
+  - Payment allocation (previous debt → oldest open installment → next → credit)
+  - “Debt till X” column + downloadable debt list for the current period
+  - Expandable, color-coded per-student breakdown
+  - Exports with totals (main, debt, breakdown)
 */
 
 (function () {
-  // Ensure db is available from firebase.js
   const db = window.db || null;
-  const storage = window.storage || null;
 
   // DOM handles
   const tbody = document.querySelector('#financeTable tbody');
@@ -241,99 +254,281 @@
   const showOnlyDebtorsBtn = document.getElementById('showOnlyDebtors');
   const downloadCsvBtn = document.getElementById('downloadCsv');
   const downloadPdfBtn = document.getElementById('downloadPdf');
+  const downloadDebtNowCsvBtn = document.getElementById('downloadDebtNowCsv');
+  const downloadDebtNowPdfBtn = document.getElementById('downloadDebtNowPdf');
+  const downloadBreakdownCsvBtn = document.getElementById('downloadBreakdownCsv');
+  const downloadBreakdownPdfBtn = document.getElementById('downloadBreakdownPdf');
   const reloadBtn = document.getElementById('reloadBtn');
 
   let cachedStudents = {}; // key => student
   let showingDebtorsOnly = false;
 
-  // Helpful guard
   if (!db) {
-    console.error('Realtime Database (db) not found. finance.html expects firebase.js to have initialized Firebase and set window.db.');
-    alert('DB not ready. Make sure firebase.js initializes Firebase and exposes window.db.');
-    // still continue so user can read UI, but no data will appear
+    console.error('DB not found.');
+    alert('DB not ready. Ensure firebase.js initializes window.db.');
   }
 
-  // Utility: format money
+  // ====================== UTILITIES ======================
   function fmt(n) {
     n = Number(n) || 0;
     return n.toLocaleString();
   }
+  function clamp(n){ return Math.max(0, Math.round(Number(n)||0)); }
+  function todayYMD() {
+    const d = new Date();
+    return { y: d.getFullYear(), m: d.getMonth()+1, d: d.getDate() };
+  }
+  function dateFromYMD(y,m,d){ return new Date(y, m-1, d).getTime(); }
+  function isPast(ts){ return Date.now() > ts; }
+  function within(tsStart, tsEnd, ts){ return ts>=tsStart && ts<=tsEnd; }
 
-  // Compute financials for a student from stored payments (source-of-truth)
-  // Returns object: { paidAmount, totalDue, previousDebt, balance, credit, installments }
-  function computeStudentFinancials(student) {
-    // Normalize
-    const feePerYear = Number(student.feePerYear) || 0;
-    const previousDebt = Number(student.debt) || Number(student.previousDebt) || 0;
-    // collect payments
-    let paid = 0;
+  // Map class → installment amounts for 6-instalments
+  // Indexes: [BOOKS, INST1..INST6] per your spec (we’ll ignore BOOKS for allocation unless you want to track it separately)
+  function class6Amounts(className) {
+    const c = (className||'').toLowerCase();
+    if (["class 1","class 2","class 3"].includes(c)) {
+      return { fee:645000, list:[184000, 36000, 65000, 60000, 110000, 110000, 80000] };
+    }
+    if (["class 4","class 7"].includes(c)) {
+      return { fee:820000, list:[234000, 36000, 200000, 200000, 150000, 0, 0] };
+    }
+    if (["class 5"].includes(c)) {
+      return { fee:820000, list:[184000, 36000, 115000, 110000, 160000, 130000, 85000] };
+    }
+    if (["class 6"].includes(c)) {
+      return { fee:881000, list:[236000, 0, 115000, 110000, 160000, 160000, 100000] };
+    }
+    // default: use feePerYear, split equally in 6 (no books)
+    return { fee: null, list: [0,0,0,0,0,0,0] };
+  }
+
+  // Build plan schedule for a student (windows + expected amounts)
+  // Returns: { items: [{key,label,fromTS,toTS,amount, paidAllocated, status}], periodLabelNow, expectedToDate }
+  function buildSchedule(student) {
+    const { y } = todayYMD();
+    const plan = (student.paymentPlan||'').toLowerCase();
+    const feePerYear = Number(student.feePerYear)||0;
+    const classLevel = student.classLevel||student.className||'';
+    const sc = [];
+
+    if (plan.includes('6')) {
+      // 6 instalments (windows)
+      // 1: Dec 1 (prev year) – Jan 10
+      const amounts = class6Amounts(classLevel);
+      // amounts.list: [BOOKS, i1..i6]
+      const [books,i1,i2,i3,i4,i5,i6] = amounts.list;
+      const feeBase = amounts.fee || feePerYear;
+
+      sc.push({ key:'inst1', label:'Inst 1', fromTS: dateFromYMD(y-1,12,1), toTS: dateFromYMD(y,1,10), amount:i1||0 });
+      sc.push({ key:'inst2', label:'Inst 2', fromTS: dateFromYMD(y,3,1), toTS: dateFromYMD(y,3,15), amount:i2||0 });
+      sc.push({ key:'inst3', label:'Inst 3', fromTS: dateFromYMD(y,4,1), toTS: dateFromYMD(y,4,15), amount:i3||0 });
+      sc.push({ key:'inst4', label:'Inst 4', fromTS: dateFromYMD(y,5,1), toTS: dateFromYMD(y,5,15), amount:i4||0 });
+      sc.push({ key:'inst5', label:'Inst 5', fromTS: dateFromYMD(y,7,1), toTS: dateFromYMD(y,7,15), amount:i5||0 });
+      sc.push({ key:'inst6', label:'Inst 6', fromTS: dateFromYMD(y,9,1), toTS: dateFromYMD(y,9,15), amount:i6||0 });
+
+    } else if (plan.includes('monthly')) {
+      // Monthly Jan–Oct: Jan, Jul, Oct each cover 2 months (10 months total)
+      const monthly = feePerYear/10;
+      sc.push({ key:'jan', label:'Jan (2 months)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,31), amount: monthly*2 });
+      sc.push({ key:'feb', label:'Feb', fromTS: dateFromYMD(y,2,1), toTS: dateFromYMD(y,2,28), amount: monthly });
+      sc.push({ key:'mar', label:'Mar', fromTS: dateFromYMD(y,3,1), toTS: dateFromYMD(y,3,31), amount: monthly });
+      sc.push({ key:'apr', label:'Apr', fromTS: dateFromYMD(y,4,1), toTS: dateFromYMD(y,4,30), amount: monthly });
+      sc.push({ key:'may', label:'May', fromTS: dateFromYMD(y,5,1), toTS: dateFromYMD(y,5,31), amount: monthly });
+      sc.push({ key:'jun', label:'Jun', fromTS: dateFromYMD(y,6,1), toTS: dateFromYMD(y,6,30), amount: monthly });
+      sc.push({ key:'jul', label:'Jul (2 months)', fromTS: dateFromYMD(y,7,1), toTS: dateFromYMD(y,7,31), amount: monthly*2 });
+      sc.push({ key:'aug', label:'Aug', fromTS: dateFromYMD(y,8,1), toTS: dateFromYMD(y,8,31), amount: monthly });
+      sc.push({ key:'sep', label:'Sep', fromTS: dateFromYMD(y,9,1), toTS: dateFromYMD(y,9,30), amount: monthly });
+      sc.push({ key:'oct', label:'Oct (2 months)', fromTS: dateFromYMD(y,10,1), toTS: dateFromYMD(y,10,31), amount: monthly*2 });
+
+    } else if (plan.includes('2')) {
+      // Two instalments with 4% total discount (2% each)
+      const discounted = feePerYear*0.96;
+      sc.push({ key:'half1', label:'Half 1 (48%)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,10), amount: discounted*0.5 });
+      sc.push({ key:'half2', label:'Half 2 (48%)', fromTS: dateFromYMD(y,7,1), toTS: dateFromYMD(y,7,5), amount: discounted*0.5 });
+
+    } else if (plan.includes('full')) {
+      // Full year before Jan 10, 5% discount
+      const discounted = feePerYear*0.95;
+      sc.push({ key:'full', label:'Full Year (5% off)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,10), amount: discounted });
+    }
+
+    // default if no plan recognized: whole fee expected in year (no windows)
+    if (sc.length===0) {
+      sc.push({ key:'year', label:'Year', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,12,31), amount: feePerYear });
+    }
+
+    // Determine current period label for “Debt till …”
+    const now = Date.now();
+    let lastDueIndex = -1;
+    let periodLabel = '—';
+    let expectedToDate = 0;
+    sc.forEach((it, idx) => {
+      if (it.toTS < now) { lastDueIndex = idx; expectedToDate += (Number(it.amount)||0); }
+    });
+    if (lastDueIndex >= 0) periodLabel = sc[lastDueIndex].label;
+
+    // initialize paidAllocated/status containers
+    sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
+
+    return { items: sc, periodLabelNow: periodLabel, expectedToDate };
+  }
+
+  // Allocate payments: previousDebt first, then schedule oldest→newest, then credit
+  // Returns { scheduleItems, prevDebtAfter, credit, totalPaid, debtTillNow }
+  function allocatePayments(student, schedule) {
+    const payList = [];
     if (student.payments) {
       Object.values(student.payments).forEach(p => {
-        paid += Number(p.amount) || 0;
+        payList.push({ amount: Math.round(Number(p.amount)||0), ts: Number(p.timestamp)||0 });
       });
     }
+    // sort payments by time
+    payList.sort((a,b)=>a.ts-b.ts);
 
-    const totalDue = previousDebt + feePerYear;
-    // after paying previous debt fully, rest applies to current year
-    let remainingAfterPrev = Math.max(0, paid - previousDebt);
-    let debtRemaining = Math.max(0, previousDebt - paid); // still owe previous debt
-    let balanceThisYear = Math.max(0, feePerYear - Math.max(0, remainingAfterPrev));
-    let credit = Math.max(0, paid - totalDue);
+    let pot = payList.reduce((s,p)=>s+(p.amount||0), 0);
+    const paidTotal = pot;
 
-    // Build an installment breakdown (basic)
-    // We compute installments based on paymentPlan:
-    const plan = (student.paymentPlan || '').toLowerCase();
-    let installments = [];
-    if (plan.indexOf('6') !== -1 || plan.indexOf('6-instal') !== -1 || plan.indexOf('6-instal') !== -1) {
-      // 6 installments: split feePerYear equally into 6
-      const base = Math.floor((feePerYear / 6) * 100) / 100;
-      for (let i = 0; i < 6; i++) {
-        installments.push({ label: `Inst ${i+1}`, due: base, paid: 0 });
+    // 1) previous debt (opening)
+    let prevDebt = Math.max(0, Number(student.previousDebt)||Number(student.debt)||0);
+    let toPrev = Math.min(prevDebt, pot);
+    prevDebt -= toPrev;
+    pot -= toPrev;
+    // log would be: "Allocated TZS X to Previous Year Debt"
+
+    // 2) Walk schedule oldest to newest
+    for (const it of schedule.items) {
+      const need = Math.max(0, (Number(it.amount)||0) - (it.paidAllocated||0));
+      if (need<=0) { it.paidAllocated = Number(it.amount)||0; continue; }
+      if (pot<=0) break;
+      const use = Math.min(need, pot);
+      it.paidAllocated += use;
+      pot -= use;
+    }
+
+    // 3) Surplus = credit
+    const credit = Math.max(0, pot);
+
+    // Status marking (Paid / Partially Paid / Overdue)
+    const now = Date.now();
+    for (const it of schedule.items) {
+      const a = Math.round(it.paidAllocated||0);
+      const need = Math.round(Number(it.amount)||0);
+      if (a >= need) {
+        it.status = 'Cleared';
+      } else {
+        if (isPast(it.toTS)) {
+          it.status = a>0 ? 'Partially Paid (Overdue)' : 'Overdue';
+        } else {
+          it.status = a>0 ? 'Partially Paid' : 'Pending';
+        }
       }
-    } else if (plan.indexOf('monthly') !== -1 || plan.indexOf('10') !== -1) {
-      // monthly 10 months: Jan-Oct
-      const base = Math.floor((feePerYear / 10) * 100) / 100;
-      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'];
-      installments = months.map(m => ({ label: m, due: base, paid: 0 }));
-    } else if (plan.indexOf('2') !== -1 || plan.indexOf('2-instal') !== -1) {
-      // 2 installments: split into 2 (48% and 48% as per your plan? We'll use 50/50 if not specified)
-      const base = Math.floor((feePerYear / 2) * 100) / 100;
-      installments.push({ label: '1st', due: base, paid: 0 });
-      installments.push({ label: '2nd', due: base, paid: 0 });
-    } else {
-      // yearly/other: single installment
-      installments.push({ label: 'Full Year', due: feePerYear, paid: 0 });
     }
 
-    // Allocate paid money to previous debt first then to installments
-    let toAllocate = paid;
-    // reduce previous debt first
-    if (previousDebt > 0) {
-      const againstPrev = Math.min(toAllocate, previousDebt);
-      toAllocate -= againstPrev;
-      // we track debtRemaining above
-    }
+    // Debt till now (sum expected-to-date minus everything paid (prev debt + schedule allocated), but never negative)
+    const expectedToDate = schedule.items
+      .filter(it => it.toTS < now)
+      .reduce((s,it)=>s+(Number(it.amount)||0),0);
 
-    // Now allocate to installments oldest-first
-    for (let inst of installments) {
-      const allocated = Math.min(toAllocate, inst.due);
-      inst.paid = allocated;
-      toAllocate -= allocated;
-      if (toAllocate <= 0) break;
-    }
+    const paidConsumed = (paidTotal - credit); // what actually got used (prev debt + schedule)
+    const debtTillNow = Math.max(0, Math.round(expectedToDate - paidConsumed));
 
     return {
-      paidAmount: paid,
-      totalDue,
-      previousDebt,
-      balance: balanceThisYear,
-      debt: debtRemaining,
-      credit,
-      installments
+      scheduleItems: schedule.items,
+      prevDebtAfter: prevDebt,
+      credit: credit,
+      totalPaid: paidTotal,
+      debtTillNow: debtTillNow
     };
   }
 
-  // Render main table using cachedStudents
+  // Compute financials for rendering
+  function computeStudentFinancials(student) {
+    const feePerYear = Number(student.feePerYear)||0;
+    const previousDebt = Math.max(0, Number(student.previousDebt)||Number(student.debt)||0);
+
+    const schedule = buildSchedule(student);
+    const alloc = allocatePayments(student, schedule);
+
+    // Year balance (simple: fee - (paid-after-prevDebt))
+    const paidAfterPrev = Math.max(0, alloc.totalPaid - (Math.max(0, Number(student.previousDebt)||Number(student.debt)||0) - alloc.prevDebtAfter));
+    const yearBalance = Math.max(0, feePerYear - paidAfterPrev);
+
+    return {
+      feePerYear,
+      previousDebt,
+      paidAmount: alloc.totalPaid,
+      balance: yearBalance,
+      periodDebtLabel: schedule.periodLabelNow || '—',
+      periodDebtValue: alloc.debtTillNow,
+      credit: alloc.credit,
+      scheduleItems: alloc.scheduleItems
+    };
+  }
+
+  // ====================== RENDER TABLE ======================
+  function breakdownRowHTML(id, fin) {
+    // Build rows for schedule items with statuses
+    const rows = fin.scheduleItems.map(it => {
+      const need = Math.round(Number(it.amount)||0);
+      const got = Math.round(Number(it.paidAllocated)||0);
+      const bal = Math.max(0, need - got);
+      let statusClass = 'status-partial';
+      if (it.status.includes('Overdue')) statusClass = 'status-overdue';
+      if (it.status==='Cleared') statusClass = 'status-paid';
+      return `
+        <tr>
+          <td class="p-1 border">${it.label}</td>
+          <td class="p-1 border text-right">${fmt(need)}</td>
+          <td class="p-1 border text-right">${fmt(got)}</td>
+          <td class="p-1 border text-right">${fmt(bal)}</td>
+          <td class="p-1 border">
+            <span class="status-pill ${statusClass}">${it.status}</span>
+          </td>
+          <td class="p-1 border text-xs">${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const totals = fin.scheduleItems.reduce((a,it)=>{
+      a.exp += Number(it.amount)||0;
+      a.paid += Number(it.paidAllocated)||0;
+      return a;
+    }, {exp:0, paid:0});
+    const rem = Math.max(0, totals.exp - totals.paid);
+
+    return `
+      <tr id="br-${id}" class="hidden bg-slate-50">
+        <td class="p-2 border-t" colspan="10">
+          <div class="text-sm">
+            <div class="flex items-center justify-between mb-2">
+              <div class="font-semibold text-indigo-700">Installment Breakdown</div>
+              <div>
+                <span class="mr-3">Expected: <strong>${fmt(totals.exp)}</strong></span>
+                <span class="mr-3">Paid: <strong>${fmt(totals.paid)}</strong></span>
+                <span>Remaining: <strong>${fmt(rem)}</strong></span>
+              </div>
+            </div>
+            <div class="overflow-auto">
+              <table class="min-w-full text-xs">
+                <thead>
+                  <tr class="table-header">
+                    <th class="p-1 border">Period</th>
+                    <th class="p-1 border">Expected</th>
+                    <th class="p-1 border">Allocated Paid</th>
+                    <th class="p-1 border">Remaining</th>
+                    <th class="p-1 border">Status</th>
+                    <th class="p-1 border">Window</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
   function renderTable() {
     tbody.innerHTML = '';
     let totalDue = 0, totalCollected = 0, totalOutstanding = 0;
@@ -344,60 +539,85 @@
 
       const fin = computeStudentFinancials(student);
 
-      // skip non-debtors if button toggled
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debt <= 0 && fin.credit <= 0)) return;
+      // if "Show Debtors", only show rows with either year balance or period debt > 0
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
 
-      totalDue += fin.totalDue;
+      totalDue += fin.feePerYear;
       totalCollected += fin.paidAmount;
-      totalOutstanding += fin.balance + fin.debt;
+      totalOutstanding += (fin.balance + fin.periodDebtValue);
 
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g,' ').trim();
+      const debtLabel = fin.periodDebtValue>0 ? `Debt till ${fin.periodDebtLabel}` : '—';
 
       const tr = document.createElement('tr');
       tr.className = 'table-row';
       tr.innerHTML = `
-        <td class="p-2 border">${student.admissionNumber || ''}</td>
-        <td class="p-2 border">${fullName}</td>
-        <td class="p-2 border">${student.classLevel || ''}</td>
-        <td class="p-2 border">${fmt(student.feePerYear || 0)}</td>
-        <td class="p-2 border">${student.paymentPlan || ''}</td>
-        <td class="p-2 border">${fmt(fin.paidAmount)}</td>
-        <td class="p-2 border">${fmt(fin.balance)}</td>
-        <td class="p-2 border">${fmt(fin.debt)}</td>
-        <td class="p-2 border">
+        <td class="p-2 border text-center align-top">
+          <button class="expander text-indigo-600 hover:text-indigo-800" data-id="${id}" title="Expand/Collapse"><i class="fa fa-chevron-down"></i></button>
+        </td>
+        <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
+        <td class="p-2 border align-top">${fullName}</td>
+        <td class="p-2 border align-top">${student.classLevel || ''}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear || 0)}</td>
+        <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
+        <td class="p-2 border align-top">
+          <div class="flex items-center justify-between gap-2">
+            <span>${debtLabel}</span>
+            <span class="font-semibold ${fin.periodDebtValue>0?'text-red-700':''}">${fmt(fin.periodDebtValue)}</span>
+          </div>
+        </td>
+        <td class="p-2 border align-top">
           <button class="viewBtn px-2 py-1 text-xs border rounded" data-id="${id}">View</button>
           <button class="payBtn px-2 py-1 text-xs bg-indigo-600 text-white rounded ml-1" data-id="${id}">Pay</button>
         </td>
       `;
       tbody.appendChild(tr);
+
+      // breakdown row (hidden by default)
+      const br = document.createElement('tbody'); // wrapper to safely append row HTML
+      br.innerHTML = breakdownRowHTML(id, fin);
+      // move its single <tr> under main row
+      tbody.appendChild(br.firstElementChild);
     });
 
     document.getElementById('totalDue').textContent = fmt(totalDue);
     document.getElementById('totalCollected').textContent = fmt(totalCollected);
     document.getElementById('totalOutstanding').textContent = fmt(totalOutstanding);
 
-    // attach row action events
+    // attach events
     tbody.querySelectorAll('.payBtn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.dataset.id;
-        openPaymentModalFor(id);
-      });
+      btn.addEventListener('click', (e) => openPaymentModalFor(e.currentTarget.dataset.id));
     });
     tbody.querySelectorAll('.viewBtn').forEach(btn => {
+      btn.addEventListener('click', (e) => openDetailsModal(e.currentTarget.dataset.id));
+    });
+    tbody.querySelectorAll('.expander').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.dataset.id;
-        openDetailsModal(id);
+        const row = document.getElementById('br-'+id);
+        if (!row) return;
+        const icon = e.currentTarget.querySelector('i');
+        if (row.classList.contains('hidden')) {
+          row.classList.remove('hidden');
+          icon.classList.remove('fa-chevron-down');
+          icon.classList.add('fa-chevron-up');
+        } else {
+          row.classList.add('hidden');
+          icon.classList.add('fa-chevron-down');
+          icon.classList.remove('fa-chevron-up');
+        }
       });
     });
   }
 
-  // Load students from DB into cachedStudents then render
+  // ====================== LOAD & SELECTORS ======================
   async function loadStudents() {
     if (!db) return;
     try {
       const snap = await db.ref('students').once('value');
-      const raw = snap.val() || {};
-      cachedStudents = raw; // keep as key => object
+      cachedStudents = snap.val() || {};
       populateStudentSelect();
       renderTable();
     } catch (err) {
@@ -406,7 +626,6 @@
     }
   }
 
-  // Populate the student select in the payment modal
   function populateStudentSelect() {
     studentSelect.innerHTML = '<option value="">-- Select student --</option>';
     Object.entries(cachedStudents).forEach(([id, s]) => {
@@ -418,7 +637,6 @@
     });
   }
 
-  // Open payment modal for a specific student (prefill)
   function openPaymentModalFor(id) {
     if (!cachedStudents[id]) return alert('Student not found');
     studentSelect.value = id;
@@ -429,7 +647,7 @@
     paymentForm.reset();
   }
 
-  // Open details modal
+  // ====================== DETAILS MODAL (ledger) ======================
   function openDetailsModal(id) {
     const s = cachedStudents[id];
     if (!s) return alert('Student not found');
@@ -442,11 +660,9 @@
       <p><strong>Class:</strong> ${s.classLevel || ''}</p>
       <p><strong>Fee/year:</strong> ${fmt(s.feePerYear || 0)}</p>
       <p><strong>Payment Plan:</strong> ${s.paymentPlan || ''}</p>
-      <p><strong>Previous Debt:</strong> ${fmt(fin.previousDebt)}</p>
-      <p><strong>Total Due:</strong> ${fmt(fin.totalDue)}</p>
+      <p><strong>Debt till:</strong> ${fin.periodDebtLabel} — <strong>${fmt(fin.periodDebtValue)}</strong></p>
       <p><strong>Paid:</strong> ${fmt(fin.paidAmount)}</p>
-      <p><strong>Balance:</strong> ${fmt(fin.balance)}</p>
-      <p><strong>Credit:</strong> ${fmt(fin.credit)}</p>
+      <p><strong>Balance (Year):</strong> ${fmt(fin.balance)}</p>
       <hr class="my-3"/>
       <h4 class="font-semibold">Payments Ledger</h4>
     `;
@@ -467,7 +683,7 @@
   }
   function closeDetailsModalFn() { detailsModal.style.display = 'none'; detailsContent.innerHTML = ''; }
 
-  // Payment form submit => write payment and update computed fields
+  // ====================== PAYMENT SAVE (ledger source-of-truth) ======================
   paymentForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const studentId = studentSelect.value;
@@ -483,125 +699,205 @@
       const student = snap.val();
       if (!student) throw new Error('Student not found');
 
-      // push payment to ledger
       const payment = {
-        amount: Math.round(amount), // store integer
+        amount: Math.round(amount),
         method,
         note,
         timestamp: Date.now()
       };
       await studentRef.child('payments').push(payment);
 
-      // Recompute and store derived fields for easy queries (OPTIONAL: we recompute from ledger on fly too)
-      // We'll compute totals now (source-of-truth is payments node)
-      const paymentsSnap = await studentRef.child('payments').once('value');
-      let paidToDate = 0;
-      paymentsSnap.forEach(p => { paidToDate += Number(p.val().amount) || 0; });
-
-      const feePerYear = Number(student.feePerYear) || 0;
-      const prevDebt = Number(student.debt) || Number(student.previousDebt) || 0;
-      const totalDue = prevDebt + feePerYear;
-      const debtRemaining = Math.max(0, prevDebt - paidToDate);
-      const remainingAfterPrev = Math.max(0, paidToDate - prevDebt);
-      const balanceThisYear = Math.max(0, feePerYear - remainingAfterPrev);
-      const credit = Math.max(0, paidToDate - totalDue);
-
-      await studentRef.update({
-        paidAmount: paidToDate,
-        balance: balanceThisYear,
-        debt: debtRemaining,
-        credit
-      });
-
       alert('Payment recorded successfully.');
       closePaymentModalFn();
-      await loadStudents(); // refresh UI
+      await loadStudents();
     } catch (err) {
       console.error('Error recording payment', err);
       alert('Error recording payment: ' + (err.message || err));
     }
   });
 
-  // CSV download of displayed table
-  function downloadCSV() {
-    // build array of rows from currently shown table
+  // ====================== EXPORTS (MAIN) ======================
+  function downloadCSV_Main() {
     const rows = [];
-    // header
-    rows.push(['Admission No','Full Name','Class','Fee','Plan','Paid','Balance','Debt']);
+    rows.push(['Admission No','Full Name','Class','Fee (Year)','Plan','Paid','Balance (Year)','Debt till …','Debt Amount']);
+
+    let totalFee=0,totalPaid=0,totalBal=0,totalDebt=0;
     const filterClass = classFilter.value;
     Object.entries(cachedStudents).forEach(([id, s]) => {
       if (filterClass && (s.classLevel || '') !== filterClass) return;
       const fin = computeStudentFinancials(s);
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debt <= 0 && fin.credit <= 0)) return;
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
       const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
-      rows.push([s.admissionNumber||'', fullName, s.classLevel||'', fin.totalDue - fin.previousDebt, s.paymentPlan||'', fin.paidAmount, fin.balance, fin.debt]);
+
+      rows.push([
+        s.admissionNumber||'',
+        fullName,
+        s.classLevel||'',
+        fin.feePerYear,
+        s.paymentPlan||'',
+        fin.paidAmount,
+        fin.balance,
+        fin.periodDebtLabel,
+        fin.periodDebtValue
+      ]);
+
+      totalFee += fin.feePerYear;
+      totalPaid += fin.paidAmount;
+      totalBal += fin.balance;
+      totalDebt += fin.periodDebtValue;
     });
 
-    // convert to workbook and save with SheetJS
+    rows.push(['TOTAL','','',totalFee,'',totalPaid,totalBal,'',totalDebt]);
+
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Finance');
     XLSX.writeFile(wb, `finance_export_${Date.now()}.xlsx`);
   }
 
-  // PDF download using jsPDF autoTable
-  function downloadPDF() {
+  function downloadPDF_Main() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape' });
-    const headers = [['Admission No','Full Name','Class','Fee','Plan','Paid','Balance','Debt']];
+    const headers = [['Admission No','Full Name','Class','Fee (Year)','Plan','Paid','Balance (Year)','Debt till …','Debt Amount']];
     const body = [];
+
+    let totalFee=0,totalPaid=0,totalBal=0,totalDebt=0;
+    const filterClass = classFilter.value;
+
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && (s.classLevel || '') !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
+
+      body.push([
+        s.admissionNumber||'',
+        fullName,
+        s.classLevel||'',
+        fin.feePerYear,
+        s.paymentPlan||'',
+        fin.paidAmount,
+        fin.balance,
+        fin.periodDebtLabel,
+        fin.periodDebtValue
+      ]);
+
+      totalFee += fin.feePerYear;
+      totalPaid += fin.paidAmount;
+      totalBal += fin.balance;
+      totalDebt += fin.periodDebtValue;
+    });
+
+    body.push(['TOTAL','','',totalFee,'',totalPaid,totalBal,'',totalDebt]);
+
+    doc.setFontSize(14);
+    doc.text('SoMAp Finance Report', 14, 14);
+    doc.autoTable({ head: headers, body, startY: 20, styles: { fontSize: 8 } });
+    doc.save(`finance_report_${Date.now()}.pdf`);
+  }
+
+  // ====================== EXPORTS (CURRENT PERIOD DEBT LIST) ======================
+  function _gatherDebtNow() {
+    const rows = [];
+    let totalDebt=0;
+
     const filterClass = classFilter.value;
     Object.entries(cachedStudents).forEach(([id, s]) => {
       if (filterClass && (s.classLevel || '') !== filterClass) return;
       const fin = computeStudentFinancials(s);
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.debt <= 0 && fin.credit <= 0)) return;
-      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
-      body.push([s.admissionNumber||'', fullName, s.classLevel||'', (s.feePerYear||0), s.paymentPlan||'', fin.paidAmount, fin.balance, fin.debt]);
+      if (fin.periodDebtValue>0) {
+        const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
+        rows.push([s.admissionNumber||'', fullName, s.classLevel||'', s.paymentPlan||'', fin.periodDebtLabel, fin.periodDebtValue]);
+        totalDebt += fin.periodDebtValue;
+      }
     });
-
-    doc.setFontSize(14);
-    doc.text('SoMAp Finance Report', 14, 14);
-    doc.autoTable({
-      head: headers,
-      body,
-      startY: 20,
-      styles: { fontSize: 8 }
-    });
-    doc.save(`finance_report_${Date.now()}.pdf`);
+    return { rows, totalDebt };
   }
 
-  // Event listeners
-  closePaymentModal.addEventListener('click', closePaymentModalFn);
-  cancelPayment.addEventListener('click', closePaymentModalFn);
-  closeDetailsModal.addEventListener('click', closeDetailsModalFn);
-  showOnlyDebtorsBtn.addEventListener('click', () => { showingDebtorsOnly = !showingDebtorsOnly; showOnlyDebtorsBtn.textContent = showingDebtorsOnly ? 'Showing Debtors' : 'Show Debtors'; renderTable(); });
-  downloadCsvBtn.addEventListener('click', downloadCSV);
-  downloadPdfBtn.addEventListener('click', downloadPDF);
-  reloadBtn.addEventListener('click', () => loadStudents());
+  function downloadCSV_DebtNow() {
+    const header = ['Admission No','Full Name','Class','Plan','Debt till …','Debt Amount'];
+    const { rows, totalDebt } = _gatherDebtNow();
+    const data = [header, ...rows, ['TOTAL','','','','', totalDebt]];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Debt Now');
+    XLSX.writeFile(wb, `debt_now_${Date.now()}.xlsx`);
+  }
+  function downloadPDF_DebtNow() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const header = [['Admission No','Full Name','Class','Plan','Debt till …','Debt Amount']];
+    const { rows, totalDebt } = _gatherDebtNow();
+    const body = [...rows, ['TOTAL','','','','', totalDebt]];
+    doc.setFontSize(14);
+    doc.text('Debt List (Current Period)', 14, 14);
+    doc.autoTable({ head: header, body, startY: 20, styles:{fontSize:8} });
+    doc.save(`debt_now_${Date.now()}.pdf`);
+  }
 
-  // Close modal by clicking outside
-  window.addEventListener('click', (ev) => {
-    if (ev.target === paymentModal) closePaymentModalFn();
-    if (ev.target === detailsModal) closeDetailsModalFn();
-  });
+  // ====================== EXPORTS (BREAKDOWN) ======================
+  function _gatherBreakdown() {
+    // returns array of sheets: one per student
+    const sheets = [];
+    const filterClass = classFilter.value;
 
-  // Filter change
-  classFilter.addEventListener('change', renderTable);
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && (s.classLevel || '') !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
 
-  // Initial load
-  document.addEventListener('DOMContentLoaded', function() {
-    loadStudents();
-  });
+      const rows = [['Period','Expected','Allocated Paid','Remaining','Status','Window']];
+      let totalExp=0,totalPaid=0;
+      fin.scheduleItems.forEach(it=>{
+        const need = Math.round(Number(it.amount)||0);
+        const got = Math.round(Number(it.paidAllocated)||0);
+        const rem = Math.max(0, need-got);
+        totalExp += need; totalPaid += got;
+        rows.push([it.label, need, got, rem, it.status, `${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}`]);
+      });
+      const totalRem = Math.max(0, totalExp-totalPaid);
+      rows.push(['TOTAL', totalExp, totalPaid, totalRem,'','']);
 
-  // Expose helpers to console for debugging
-  window.fins = {
-    computeStudentFinancials,
-    loadStudents,
-    cachedStudents,
-    renderTable
-  };
-    // ================== EXPENSES ==================
+      sheets.push({ title: `${fullName} (${s.admissionNumber||''})`, rows });
+    });
+    return sheets;
+  }
 
+  function downloadCSV_Breakdown() {
+    const wb = XLSX.utils.book_new();
+    const sheets = _gatherBreakdown();
+    if (sheets.length===0) {
+      alert('No students to export.');
+      return;
+    }
+    sheets.forEach(sh => {
+      const ws = XLSX.utils.aoa_to_sheet(sh.rows);
+      XLSX.utils.book_append_sheet(wb, ws, sh.title.substring(0,31)); // Excel tab name limit
+    });
+    XLSX.writeFile(wb, `breakdowns_${Date.now()}.xlsx`);
+  }
+
+  function downloadPDF_Breakdown() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+
+    const sheets = _gatherBreakdown();
+    if (sheets.length===0) {
+      alert('No students to export.');
+      return;
+    }
+
+    sheets.forEach((sh, idx) => {
+      if (idx>0) doc.addPage();
+      doc.setFontSize(14);
+      doc.text(`Installment Breakdown — ${sh.title}`, 14, 14);
+      doc.autoTable({ head:[['Period','Expected','Allocated Paid','Remaining','Status','Window']], body: sh.rows.slice(1), startY: 20, styles:{fontSize:8} });
+    });
+
+    doc.save(`breakdowns_${Date.now()}.pdf`);
+  }
+
+  // ====================== EXPENSES (kept) ======================
   const expenseForm = document.getElementById('expenseForm');
   const expenseTableBody = document.querySelector('#expenseTable tbody');
 
@@ -617,7 +913,7 @@
         tr.innerHTML = `
           <td class="p-2 border">${exp.category || ''}</td>
           <td class="p-2 border">${exp.description || ''}</td>
-          <td class="p-2 border">${fmt(exp.amount)}</td>
+          <td class="p-2 border text-right">${fmt(exp.amount)}</td>
           <td class="p-2 border">${exp.timestamp ? new Date(exp.timestamp).toLocaleDateString() : ''}</td>
         `;
         expenseTableBody.appendChild(tr);
@@ -625,14 +921,13 @@
       document.getElementById('totalExpenses').textContent = fmt(total);
 
       // update net balance (collected - expenses)
-      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g,'')) || 0;
+      const collected = Number((document.getElementById('totalCollected').textContent||'0').replace(/,/g,'')) || 0;
       document.getElementById('netBalance').textContent = fmt(collected - total);
     } catch (err) {
       console.error('Error loading expenses:', err);
     }
   }
 
-  // Record new expense
   expenseForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const category = document.getElementById('expenseCategory').value;
@@ -641,12 +936,7 @@
     if (!category || !description || !amount) return alert('Fill all fields');
 
     try {
-      await db.ref('expenses').push({
-        category,
-        description,
-        amount,
-        timestamp: Date.now()
-      });
+      await db.ref('expenses').push({ category, description, amount, timestamp: Date.now() });
       expenseForm.reset();
       await loadExpenses();
     } catch (err) {
@@ -655,57 +945,42 @@
     }
   });
 
-  // Refresh net when students are reloaded
+  // ====================== EVENTS & INIT ======================
+  closePaymentModal.addEventListener('click', closePaymentModalFn);
+  cancelPayment.addEventListener('click', closePaymentModalFn);
+  closeDetailsModal.addEventListener('click', closeDetailsModalFn);
+
+  showOnlyDebtorsBtn.addEventListener('click', () => {
+    showingDebtorsOnly = !showingDebtorsOnly;
+    showOnlyDebtorsBtn.textContent = showingDebtorsOnly ? 'Showing Debtors' : 'Show Debtors';
+    renderTable();
+  });
+
+  downloadCsvBtn.addEventListener('click', downloadCSV_Main);
+  downloadPdfBtn.addEventListener('click', downloadPDF_Main);
+  downloadDebtNowCsvBtn.addEventListener('click', downloadCSV_DebtNow);
+  downloadDebtNowPdfBtn.addEventListener('click', downloadPDF_DebtNow);
+  downloadBreakdownCsvBtn.addEventListener('click', downloadCSV_Breakdown);
+  downloadBreakdownPdfBtn.addEventListener('click', downloadPDF_Breakdown);
+
+  reloadBtn.addEventListener('click', async () => { await reloadAll(); });
+
+  window.addEventListener('click', (ev) => {
+    if (ev.target === paymentModal) closePaymentModalFn();
+    if (ev.target === detailsModal) closeDetailsModalFn();
+  });
+
+  classFilter.addEventListener('change', renderTable);
+
   async function reloadAll() {
     await loadStudents();
     await loadExpenses();
   }
-  reloadBtn.addEventListener('click', reloadAll);
 
-  // Initial load
-  document.addEventListener('DOMContentLoaded', () => {
-    reloadAll();
-  });
-  // ================== EXPENSE EXPORTS ==================
-  function downloadExpenseCSV() {
-    const rows = [['Category','Description','Amount','Date']];
+  document.addEventListener('DOMContentLoaded', () => { reloadAll(); });
 
-    document.querySelectorAll('#expenseTable tbody tr').forEach(tr => {
-      const cols = Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
-      rows.push(cols);
-    });
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
-    XLSX.writeFile(wb, `expenses_${Date.now()}.xlsx`);
-  }
-
-  function downloadExpensePDF() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const headers = [['Category','Description','Amount','Date']];
-    const body = [];
-
-    document.querySelectorAll('#expenseTable tbody tr').forEach(tr => {
-      const cols = Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
-      body.push(cols);
-    });
-
-    doc.setFontSize(14);
-    doc.text('Expense Report', 14, 14);
-    doc.autoTable({
-      head: headers,
-      body,
-      startY: 20,
-      styles: { fontSize: 10 }
-    });
-    doc.save(`expenses_${Date.now()}.pdf`);
-  }
-
-  // Hook export buttons
-  document.getElementById('downloadExpenseCsv').addEventListener('click', downloadExpenseCSV);
-  document.getElementById('downloadExpensePdf').addEventListener('click', downloadExpensePDF);
+  // Expose for console
+  window.fins = { computeStudentFinancials, buildSchedule, allocatePayments };
 
 })(); // end IIFE
 </script>

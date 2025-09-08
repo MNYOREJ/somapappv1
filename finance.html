@@ -304,18 +304,31 @@
 
   // Build plan schedule for a student (windows + expected amounts)
   // Returns: { items: [{key,label,fromTS,toTS,amount, paidAllocated, status}], periodLabelNow, expectedToDate }
-  if (plan.includes('monthly')) {
-    if (["class 4","class 7"].includes(classLevel.toLowerCase())) {
-      // --- Candidate special monthly plan: must finish by May ---
-      const part = feePerYear / 5;  // 5 parts
-      sc.push({ key:'jan', label:'Jan (2 parts)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,31), amount: part*2 });
-      sc.push({ key:'feb', label:'Feb', fromTS: dateFromYMD(y,2,1), toTS: dateFromYMD(y,2,28), amount: part });
-      sc.push({ key:'mar', label:'Mar', fromTS: dateFromYMD(y,3,1), toTS: dateFromYMD(y,3,31), amount: part });
-      sc.push({ key:'apr', label:'Apr', fromTS: dateFromYMD(y,4,1), toTS: dateFromYMD(y,4,30), amount: part });
-      sc.push({ key:'may', label:'May', fromTS: dateFromYMD(y,5,1), toTS: dateFromYMD(y,5,31), amount: part });
-    } else {
-      // --- Normal monthly plan (Jan–Oct, 10 months total) ---
-      const monthly = feePerYear / 12; // per month
+  function buildSchedule(student) {
+    const { y } = todayYMD();
+    const plan = (student.paymentPlan||'').toLowerCase();
+    const feePerYear = Number(student.feePerYear)||0;
+    const classLevel = student.classLevel||student.className||'';
+    const sc = [];
+
+    if (plan.includes('6')) {
+      // 6 instalments (windows)
+      // 1: Dec 1 (prev year) – Jan 10
+      const amounts = class6Amounts(classLevel);
+      // amounts.list: [BOOKS, i1..i6]
+      const [books,i1,i2,i3,i4,i5,i6] = amounts.list;
+      const feeBase = amounts.fee || feePerYear;
+
+      sc.push({ key:'inst1', label:'Inst 1', fromTS: dateFromYMD(y-1,12,1), toTS: dateFromYMD(y,1,10), amount:i1||0 });
+      sc.push({ key:'inst2', label:'Inst 2', fromTS: dateFromYMD(y,3,1), toTS: dateFromYMD(y,3,15), amount:i2||0 });
+      sc.push({ key:'inst3', label:'Inst 3', fromTS: dateFromYMD(y,4,1), toTS: dateFromYMD(y,4,15), amount:i3||0 });
+      sc.push({ key:'inst4', label:'Inst 4', fromTS: dateFromYMD(y,5,1), toTS: dateFromYMD(y,5,15), amount:i4||0 });
+      sc.push({ key:'inst5', label:'Inst 5', fromTS: dateFromYMD(y,7,1), toTS: dateFromYMD(y,7,15), amount:i5||0 });
+      sc.push({ key:'inst6', label:'Inst 6', fromTS: dateFromYMD(y,9,1), toTS: dateFromYMD(y,9,15), amount:i6||0 });
+
+    } else if (plan.includes('monthly')) {
+      // Monthly Jan–Oct: Jan, Jul, Oct each cover 2 months (10 months total)
+      const monthly = feePerYear/10;
       sc.push({ key:'jan', label:'Jan (2 months)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,31), amount: monthly*2 });
       sc.push({ key:'feb', label:'Feb', fromTS: dateFromYMD(y,2,1), toTS: dateFromYMD(y,2,28), amount: monthly });
       sc.push({ key:'mar', label:'Mar', fromTS: dateFromYMD(y,3,1), toTS: dateFromYMD(y,3,31), amount: monthly });
@@ -326,18 +339,38 @@
       sc.push({ key:'aug', label:'Aug', fromTS: dateFromYMD(y,8,1), toTS: dateFromYMD(y,8,31), amount: monthly });
       sc.push({ key:'sep', label:'Sep', fromTS: dateFromYMD(y,9,1), toTS: dateFromYMD(y,9,30), amount: monthly });
       sc.push({ key:'oct', label:'Oct (2 months)', fromTS: dateFromYMD(y,10,1), toTS: dateFromYMD(y,10,31), amount: monthly*2 });
+
+    } else if (plan.includes('2')) {
+      // Two instalments with 4% total discount (2% each)
+      const discounted = feePerYear*0.96;
+      sc.push({ key:'half1', label:'Half 1 (48%)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,10), amount: discounted*0.5 });
+      sc.push({ key:'half2', label:'Half 2 (48%)', fromTS: dateFromYMD(y,7,1), toTS: dateFromYMD(y,7,5), amount: discounted*0.5 });
+
+    } else if (plan.includes('full')) {
+      // Full year before Jan 10, 5% discount
+      const discounted = feePerYear*0.95;
+      sc.push({ key:'full', label:'Full Year (5% off)', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,10), amount: discounted });
     }
-  } else if (plan.includes('2')) {
-    // --- Two instalments (Jan + May) ---
-    sc.push({ key:'half1', label:'Half 1', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,10), amount: feePerYear/2 });
-    sc.push({ key:'half2', label:'Half 2', fromTS: dateFromYMD(y,5,1), toTS: dateFromYMD(y,5,10), amount: feePerYear/2 });
-  } else if (plan.includes('6')) {
-    // keep your 6-instalment logic here (unchanged for now)
-  } else if (plan.includes('full')) {
-    sc.push({ key:'full', label:'Full Year', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,1,10), amount: feePerYear });
-  } else {
-    // default fallback
-    sc.push({ key:'year', label:'Year', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,12,31), amount: feePerYear });
+
+    // default if no plan recognized: whole fee expected in year (no windows)
+    if (sc.length===0) {
+      sc.push({ key:'year', label:'Year', fromTS: dateFromYMD(y,1,1), toTS: dateFromYMD(y,12,31), amount: feePerYear });
+    }
+
+    // Determine current period label for “Debt till …”
+    const now = Date.now();
+    let lastDueIndex = -1;
+    let periodLabel = '—';
+    let expectedToDate = 0;
+    sc.forEach((it, idx) => {
+      if (it.toTS < now) { lastDueIndex = idx; expectedToDate += (Number(it.amount)||0); }
+    });
+    if (lastDueIndex >= 0) periodLabel = sc[lastDueIndex].label;
+
+    // initialize paidAllocated/status containers
+    sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
+
+    return { items: sc, periodLabelNow: periodLabel, expectedToDate };
   }
 
   // Allocate payments: previousDebt first, then schedule oldest→newest, then credit

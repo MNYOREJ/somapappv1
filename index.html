@@ -408,6 +408,23 @@
         .card-body {
           padding: 20px;
         }
+        /* New Finance Cards in Dashboard */
+.finance-card {
+  background: linear-gradient(135deg, #28a745, #198754); /* Green gradient like finance */
+  color: #fff;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+.finance-card h5 {
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+.finance-card p {
+  font-size: 1.5rem;
+  font-weight: bold;
+}
     </style>
 </head>
 <body class="bg-gradient-to-br from-blue-500 to-purple-600">
@@ -612,14 +629,6 @@
                             <div class="col-md-3">
                                 <div class="card stat-card stats-card">
                                     <div class="card-body">
-                                        <h5>Fee Collection</h5>
-                                        <p id="fee-collection">Loading... <small>8.4% Since last month</small></p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card stat-card stats-card">
-                                    <div class="card-body">
                                         <h5>Attendance Rate</h5>
                                         <p id="attendance-rate">Loading... <small>1.5% Since last month</small></p>
                                     </div>
@@ -633,6 +642,36 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="col-md-3">
+  <div class="finance-card">
+    <h5>Total Due (All Students)</h5>
+    <p id="total-due">TSh 0</p>
+  </div>
+</div>
+<div class="col-md-3">
+  <div class="finance-card">
+    <h5>Total Collected</h5>
+    <p id="total-collected">TSh 0</p>
+  </div>
+</div>
+<div class="col-md-3">
+  <div class="finance-card">
+    <h5>Total Outstanding</h5>
+    <p id="total-outstanding">TSh 0</p>
+  </div>
+</div>
+<div class="col-md-3">
+  <div class="finance-card">
+    <h5>Total Expenses</h5>
+    <p id="total-expenses">TSh 0</p>
+  </div>
+</div>
+<div class="col-md-3">
+  <div class="finance-card">
+    <h5>Net Balance</h5>
+    <p id="net-balance">TSh 0</p>
+  </div>
+</div>
                         </div>
                     </section>
                     <!-- Fee Collection Trends Chart -->
@@ -1116,21 +1155,72 @@
         }
         // Load Dashboard Data
         function loadDashboardData(role, className) {
-            const ref = db.ref('students');
-            ref.once('value').then(snapshot => {
-                let students = snapshot.val() ? Object.values(snapshot.val()) : [];
-                if (role === 'teacher' && className) {
-                    students = students.filter(s => s.classLevel === className);
-                }
-                document.getElementById('total-students').innerHTML = `${students.length} <small>5.2% Since last month</small>`;
-                let totalBalance = students.reduce((sum, s) => sum + (s.balance || 0), 0);
-                document.getElementById('fee-collection').innerHTML = `TSh ${totalBalance.toLocaleString()} <small>8.4% Since last month</small>`;
-                let attendanceRate = students.length > 0 ? (students.reduce((sum, s) => sum + (s.attendanceRate || 0), 0) / students.length).toFixed(1) : 0;
-                document.getElementById('attendance-rate').innerHTML = `${attendanceRate}% <small>1.5% Since last month</small>`;
-                document.getElementById('upcoming-events').innerHTML = `${students.reduce((sum, s) => sum + (s.events || 0), 0)} <small>2 new This week</small>`;
-                // More loads...
-            });
+    const studentsRef = db.ref('students');
+    const expensesRef = db.ref('expenses');
+
+    studentsRef.on('value', snapshot => {
+        let students = snapshot.val() ? Object.values(snapshot.val()) : [];
+        if (role === 'teacher' && className) {
+            students = students.filter(s => s.classLevel === className);
         }
+        // Total Students
+        document.getElementById('total-students').innerHTML = `${students.length} <small>5.2% Since last month</small>`;
+
+        // Total Due (feePerYear)
+        let totalDue = students.reduce((sum, s) => sum + (parseInt(s.feePerYear) || 0), 0);
+        document.getElementById('total-due').innerHTML = `TSh ${totalDue.toLocaleString()}`;
+
+        // Total Collected (paid)
+        let totalCollected = students.reduce((sum, s) => sum + (parseInt(s.paid) || 0), 0);
+        document.getElementById('total-collected').innerHTML = `TSh ${totalCollected.toLocaleString()}`;
+
+        // Total Outstanding (Due - Collected)
+        let totalOutstanding = totalDue - totalCollected;
+        document.getElementById('total-outstanding').innerHTML = `TSh ${totalOutstanding.toLocaleString()}`;
+
+        // Attendance Rate (calculate from attendance node or default)
+        let attendanceRate = students.length > 0 ? (students.reduce((sum, s) => sum + (parseFloat(s.attendanceRate) || 94.2), 0) / students.length).toFixed(1) : 0;
+        document.getElementById('attendance-rate').innerHTML = `${attendanceRate}% <small>1.5% Since last month</small>`;
+
+        // Update Fee Chart
+        updateFeeChart(totalCollected, totalDue);
+        updateRecentActivities(students);
+    });
+
+    expensesRef.on('value', snapshot => {
+        let expenses = snapshot.val() ? Object.values(snapshot.val()) : [];
+        let totalExpenses = expenses.reduce((sum, e) => sum + (parseInt(e.amount) || 0), 0);
+        document.getElementById('total-expenses').innerHTML = `TSh ${totalExpenses.toLocaleString()}`;
+
+        // Net Balance (Collected - Expenses)
+        studentsRef.once('value').then(snap => {
+            let students = snap.val() ? Object.values(snap.val()) : [];
+            let totalCollected = students.reduce((sum, s) => sum + (parseInt(s.paid) || 0), 0);
+            let netBalance = totalCollected - totalExpenses;
+            document.getElementById('net-balance').innerHTML = `TSh ${netBalance.toLocaleString()}`;
+        });
+    });
+}
+
+function updateRecentActivities(students) {
+    const list = document.getElementById('activities-list');
+    if (list) {
+        let html = '';
+        students.slice(0, 4).forEach(s => {
+            html += `<li>${s.firstName} ${s.lastName} paid TSh ${(s.paid || 0).toLocaleString()} - ${new Date().toLocaleString()}</li>`;
+        });
+        list.innerHTML = html || '<li>No recent activities.</li>';
+    }
+}
+
+function updateFeeChart(collected, due) {
+    const ctx = document.getElementById('fee-chart')?.getContext('2d');
+    if (ctx && Chart.getChart(ctx.canvas)) {
+        Chart.getChart(ctx.canvas).data.datasets[0].data = [collected, due - collected];
+        Chart.getChart(ctx.canvas).data.labels = ['Collected', 'Outstanding'];
+        Chart.getChart(ctx.canvas).update();
+    }
+}
         // Load Parent Data
         function loadParentData(phone) {
             db.ref('students').orderByChild('parentPhone').equalTo(phone).once('value').then(snapshot => {
@@ -1203,6 +1293,12 @@
             document.querySelectorAll('.sidebar-collapsed').forEach(el => el.classList.toggle('hidden'));
             document.querySelectorAll('.sidebar-expanded').forEach(el => el.classList.toggle('hidden'));
         });
+        document.querySelector('[data-module="dashboard"]').addEventListener('click', () => {
+    loadDashboardData(localStorage.getItem('role'), getClassFromEmail(auth.currentUser?.email));
+    document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth' });
+    document.querySelectorAll('.sidebar-icon').forEach(el => el.classList.remove('active'));
+    document.querySelector('[data-module="dashboard"]').classList.add('active');
+});
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>

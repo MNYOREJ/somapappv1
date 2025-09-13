@@ -1299,5 +1299,80 @@ function updateFeeChart(collected, due) {
 });
      </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
+<script>
+function sanitizeAmount(x) {
+  if (x === undefined || x === null) return 0;
+  const s = String(x).replace(/[^\d\.-]+/g, ''); 
+  return Number(s) || 0;
+}
+
+async function updateDashboardKPIs() {
+  if (!window.db) {
+    console.warn("Firebase DB not initialized");
+    return;
+  }
+
+  const snap = await db.ref("students").once("value");
+  const students = snap.val() || {};
+
+  let totalDue = 0;
+  let totalCollected = 0;
+  let totalExpenses = 0; // optional if you store separately
+  const activities = [];
+
+  Object.entries(students).forEach(([id, s]) => {
+    const fee = sanitizeAmount(s.feePerYear || s.fee || s.totalFee);
+    totalDue += fee;
+
+    if (s.payments) {
+      Object.values(s.payments).forEach(p => {
+        const amt = sanitizeAmount(p.amount);
+        totalCollected += amt;
+        activities.push({
+          student: (s.firstName || s.fullName || s.name || "Unknown"),
+          amount: amt,
+          ts: Number(p.timestamp) || 0
+        });
+      });
+    }
+  });
+
+  // Update KPIs
+  document.getElementById("totalDue").innerText = "TSh " + totalDue.toLocaleString();
+  document.getElementById("totalCollected").innerText = "TSh " + totalCollected.toLocaleString();
+  document.getElementById("totalOutstanding").innerText = "TSh " + (totalDue - totalCollected).toLocaleString();
+  document.getElementById("totalExpenses").innerText = "TSh " + totalExpenses.toLocaleString();
+
+  // Update Recent Activities
+  activities.sort((a, b) => b.ts - a.ts);
+  const recent = activities.slice(0, 5);
+  const container = document.querySelector("#recentActivities");
+  if (container) {
+    container.innerHTML = recent.map(a => {
+      return `
+        <div class="flex items-start">
+          <div class="h-9 w-9 rounded-full bg-blue-100 flex items-center justify-center mr-3">
+            <i class="fas fa-user text-blue-600"></i>
+          </div>
+          <div>
+            <div class="font-medium">${a.student} 
+              <span class="text-sm text-gray-600">paid TSh ${a.amount.toLocaleString()}</span>
+            </div>
+            <div class="text-xs text-gray-500">${a.ts ? new Date(a.ts).toLocaleString() : ""}</div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+}
+
+// run after page load
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    updateDashboardKPIs();
+    setInterval(updateDashboardKPIs, 60000);
+  }, 500);
+});
+</script>
+  </body>
 </html>

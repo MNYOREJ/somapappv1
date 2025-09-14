@@ -1319,6 +1319,293 @@
     });
 </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- ===== SoMAp: Entrance overlay + auth gating + dashboard loader ===== -->
 <script>
+/*
+  Paste this block into index.html just before </body>.
+  Purpose:
+  - add a full-screen welcome overlay (blue) that blocks everything underneath
+  - only after sign-in we remove overlay and load dashboard data
+  - compute KPIs by scanning students/*/payments (works with your current RTDB structure)
+  - map teacher emails (ssclass...) to their class and auto-load class view
+*/
+
+/* ---------- Configuration (edit only if you must) ---------- */
+const EMAIL_CLASS_MAP = {
+  "ssbabyclass2023@gmail.com":"Baby",
+  "ssmiddleclass2023@gmail.com":"Middle",
+  "sspreunit2023@gmail.com":"Preunit",
+  "ssclass1ab2023@gmail.com":"Class1",
+  "ssclass2ab2023@gmail.com":"Class2",
+  "ssclass32023@gmail.com":"Class3",
+  "ssclass42023@gmail.com":"Class4",
+  "ssclass52023@gmail.com":"Class5",
+  "ssclass62023@gmail.com":"Class6",
+  "ssclass72023@gmail.com":"Class7"
+};
+
+/* ---------- Helper: sanitize amounts like "165,000" -> 165000 ---------- */
+function sanitizeAmount(x){
+  if (x === undefined || x === null) return 0;
+  const s = String(x).replace(/[^\d\.-]+/g,''); // remove commas/currency
+  return Number(s) || 0;
+}
+
+/* ---------- Create overlay and attach to body ---------- */
+(function createWelcomeOverlay(){
+  if (document.getElementById('somap-welcome-overlay')) return; // already present
+
+  const overlay = document.createElement('div');
+  overlay.id = 'somap-welcome-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.zIndex = '99999';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.background = 'linear-gradient(135deg,#0ea5e9,#1e3a8a)'; // nice blue
+  overlay.style.color = 'white';
+  overlay.style.padding = '20px';
+  overlay.style.overflow = 'hidden';
+
+  overlay.innerHTML = `
+    <div style="max-width:980px;width:100%;display:flex;gap:24px;align-items:center;">
+      <div style="flex:1;min-width:300px;">
+        <h1 style="font-size:34px;margin:0 0 8px 0;">Welcome to <span style="color:#fde047">SoMAp</span></h1>
+        <p style="margin:0 0 16px 0;opacity:0.92;">Transform your school management with our integrated Educational SuperApp. Manage academics, finance, attendance and more — sign in to continue.</p>
+
+        <div style="display:flex;gap:10px;margin-bottom:8px;">
+          <button id="somap-lang-en" class="somap-btn" style="padding:10px 14px;border-radius:8px;background:white;color:#0f172a;border:none;cursor:pointer;">English</button>
+          <button id="somap-lang-sw" class="somap-btn" style="padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:white;cursor:pointer;">Kiswahili</button>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <button id="somap-get-started" style="padding:12px 16px;border-radius:10px;background:#06b6d4;border:none;cursor:pointer;font-weight:600;">Get Started</button>
+          <button id="somap-learn-more" style="padding:12px 16px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.3);color:white;cursor:pointer;">Learn how it works</button>
+        </div>
+
+        <div style="margin-top:12px; font-size:13px; opacity:0.9;">
+          <div>Everything you will get after joining:</div>
+          <ul style="margin:8px 0 0 18px;">
+            <li>Academic Management (admissions, exams, reports)</li>
+            <li>Financial Management (real-time fee tracking)</li>
+            <li>Digital Library & Communication Hub</li>
+            <li>Marketplace for uniforms and supplies</li>
+          </ul>
+        </div>
+      </div>
+
+      <div style="flex:0 0 380px;display:flex;flex-direction:column;gap:12px;">
+        <div style="background:rgba(255,255,255,0.06);padding:16px;border-radius:12px;">
+          <div style="font-weight:600;margin-bottom:8px;">Sign in to access your dashboard</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <button id="somap-sign-google" style="padding:10px;border-radius:8px;background:#db4437;color:white;border:none;cursor:pointer;">Sign in with Google</button>
+            <button id="somap-sign-github" style="padding:10px;border-radius:8px;background:#111827;color:white;border:none;cursor:pointer;">Sign in with GitHub</button>
+            <button id="somap-sign-email" style="padding:10px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.15);color:white;cursor:pointer;">Sign in with Email</button>
+            <div style="font-size:12px;opacity:0.85;margin-top:8px;">If you're a teacher use your school email (e.g. <em>ssclass32023@gmail.com</em>) to auto-load class data.</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(0,0,0,0.08); padding:10px; border-radius:8px; color: rgba(255,255,255,0.95); font-size:12px;">
+          <div style="font-weight:600">Preview</div>
+          <div style="margin-top:6px;opacity:0.95;">You will see KPIs, student list, attendance & fee tools — after signing in.</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // prevent scrolling while overlay is visible
+  document.documentElement.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden';
+
+  // disable clicks on common nav/sidebar selectors (extra safety)
+  const disableSelectors = ['nav','aside','.sidebar','.left-menu','#sidebar','.menu'];
+  disableSelectors.forEach(sel=>{
+    document.querySelectorAll(sel).forEach(el=>{
+      el.dataset.somapPrevPointer = el.style.pointerEvents || '';
+      el.style.pointerEvents = 'none';
+      el.dataset.somapPrevOpacity = el.style.opacity || '';
+      el.style.opacity = el.style.opacity || '0.6';
+    });
+  });
+
+  // event handlers
+  document.getElementById('somap-get-started').addEventListener('click', ()=> {
+    // prefer auth flow; open sign-in panel by focusing Google sign-in
+    document.getElementById('somap-sign-google').focus();
+    // optionally open sign-in dialog automatically:
+    // do nothing here — user can choose sign-in method
+  });
+
+  document.getElementById('somap-learn-more').addEventListener('click', ()=> {
+    window.open('https://shulesoft.africa/','_blank');
+  });
+
+  document.getElementById('somap-sign-google').addEventListener('click', () => {
+    if (!firebase || !firebase.auth) return alert('Firebase not ready');
+    const provider = new firebase.auth.GoogleAuthProvider();
+    firebase.auth().signInWithPopup(provider).catch(err => alert(err.message));
+  });
+
+  document.getElementById('somap-sign-github').addEventListener('click', () => {
+    if (!firebase || !firebase.auth) return alert('Firebase not ready');
+    const provider = new firebase.auth.GithubAuthProvider();
+    firebase.auth().signInWithPopup(provider).catch(err => alert(err.message));
+  });
+
+  document.getElementById('somap-sign-email').addEventListener('click', ()=> {
+    const email = prompt('Email:');
+    const pass = prompt('Password:');
+    if (!email || !pass) return;
+    firebase.auth().signInWithEmailAndPassword(email, pass).catch(err => alert(err.message));
+  });
+
+})(); // createWelcomeOverlay end
+
+
+/* ---------- On auth state change: hide overlay and load dashboard ---------- */
+firebase && firebase.auth && firebase.auth().onAuthStateChanged(async (user) => {
+  const overlay = document.getElementById('somap-welcome-overlay');
+  if (user) {
+    // reveal UI
+    if (overlay) overlay.style.display = 'none';
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
+
+    // restore pointer-events for common selectors
+    const restoreSelectors = ['nav','aside','.sidebar','.left-menu','#sidebar','.menu'];
+    restoreSelectors.forEach(sel=>{
+      document.querySelectorAll(sel).forEach(el=>{
+        if (el.dataset.somapPrevPointer !== undefined) el.style.pointerEvents = el.dataset.somapPrevPointer;
+        if (el.dataset.somapPrevOpacity !== undefined) el.style.opacity = el.dataset.somapPrevOpacity;
+      });
+    });
+
+    // set signed-in UI (if you have header placeholders)
+    try {
+      document.querySelectorAll('.signed-in-user-name').forEach(e => e.innerText = user.displayName || user.email);
+      document.querySelectorAll('.signed-in-user-email').forEach(e => e.innerText = user.email);
+    } catch(e){}
+
+    // if teacher mapped by email -> auto-load class view
+    const mappedClass = EMAIL_CLASS_MAP[user.email];
+    if (mappedClass) {
+      // if your page has a function loadClass or class selector, call it:
+      if (typeof window.loadClass === 'function') {
+        window.loadClass(mappedClass);
+      }
+      // also set the global selector if it exists:
+      const sel = document.getElementById('globalClassSelect') || document.getElementById('classSelect');
+      if (sel) sel.value = mappedClass;
+    }
+
+    // finally load dashboard data (KPIs, activities etc.)
+    if (typeof loadDashboardData === 'function') {
+      loadDashboardData(); // if page already defines it
+    } else {
+      // otherwise use our internal loader defined below
+      await somapLoadDashboardData();
+    }
+  } else {
+    // user logged out -> show overlay again
+    if (overlay) overlay.style.display = 'flex';
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+  }
+});
+
+
+/* ---------- Main loader (will run after sign-in if no existing loader) ---------- */
+async function somapLoadDashboardData(){
+  if (!window.db) {
+    console.warn('DB handle (window.db) not found. Ensure firebase.js initializes firebase and exposes window.db (firebase.database()).');
+    return;
+  }
+
+  // read students and compute KPIs
+  const snap = await db.ref('students').once('value');
+  const students = snap.val() || {};
+
+  let totalDue = 0;
+  let totalCollected = 0;
+  let totalExpenses = 0; // if tracked elsewhere, adapt accordingly
+  const activities = [];
+
+  Object.entries(students).forEach(([studentId, s])=>{
+    // adapt these field names if your student record uses different keys
+    const fee = sanitizeAmount(s.feePerYear || s.totalFee || s.fee || s.yearFee || 0);
+    totalDue += fee;
+
+    // payments could be object of keys -> values
+    if (s.payments) {
+      Object.values(s.payments).forEach(p => {
+        const amt = sanitizeAmount(p.amount || p.paymentAmount || p.amt);
+        totalCollected += amt;
+        activities.push({
+          actor: (s.name || s.fullName || s.firstName || 'Student'),
+          amount: amt,
+          ts: Number(p.timestamp || p.ts || 0)
+        });
+      });
+    }
+  });
+
+  // write values into the DOM if those elements exist
+  const elTotalDue = document.getElementById('totalDue');
+  if (elTotalDue) elTotalDue.innerText = 'TSh ' + totalDue.toLocaleString();
+
+  const elCollected = document.getElementById('totalCollected');
+  if (elCollected) elCollected.innerText = 'TSh ' + totalCollected.toLocaleString();
+
+  const elOutstanding = document.getElementById('totalOutstanding');
+  if (elOutstanding) elOutstanding.innerText = 'TSh ' + Math.max(0, totalDue - totalCollected).toLocaleString();
+
+  const elExpenses = document.getElementById('totalExpenses');
+  if (elExpenses) elExpenses.innerText = 'TSh ' + totalExpenses.toLocaleString();
+
+  // fill recent activities
+  activities.sort((a,b)=>b.ts - a.ts);
+  const recent = activities.slice(0,6);
+  const recentContainer = document.getElementById('recentActivities') || document.querySelector('.recent-activities') || null;
+
+  if (recentContainer) {
+    if (recent.length === 0) {
+      recentContainer.innerHTML = '<div class="text-sm text-gray-500">No recent payments</div>';
+    } else {
+      recentContainer.innerHTML = recent.map(r => {
+        const time = r.ts ? new Date(r.ts).toLocaleString() : '';
+        return `
+          <div style="display:flex;align-items:flex-start;margin-bottom:12px;">
+            <div style="width:42px;height:42px;border-radius:50%;background:#eef2ff;display:flex;align-items:center;justify-content:center;margin-right:10px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#2563eb" xmlns="http://www.w3.org/2000/svg"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8V22h19.2v-2.8c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            </div>
+            <div>
+              <div style="font-weight:600;">${r.actor} <span style="font-weight:400;color:#6b7280;margin-left:8px;">paid TSh ${r.amount.toLocaleString()}</span></div>
+              <div style="font-size:12px;color:#6b7280;">${time}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // update other KPIs if present (students total, attendance etc.)
+  const elTotalStudents = document.getElementById('totalStudents') || document.getElementById('kpiStudents');
+  if (elTotalStudents) elTotalStudents.innerText = Object.keys(students).length;
+
+  // Run again periodically (60s)
+  setTimeout(() => { if (document.getElementById('somap-welcome-overlay')===null) somapLoadDashboardData(); }, 60000);
+}
+
+/* ---------- Extra: optional function you can call from console to force reload ---------- */
+window.somapForceReloadDashboard = function(){
+  if (typeof somapLoadDashboardData === 'function') somapLoadDashboardData();
+  else console.warn('somapLoadDashboardData not available');
+};
+
+</script>
+<!-- ===== End SoMAp Entrance overlay + auth gating + dashboard loader ===== -->
   </body>
 </html>

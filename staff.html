@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SoMAp - Teacher Dashboard</title>
+    <title>SoMAp - Professional Teacher Dashboard</title>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.32/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { 
             font-family: 'Roboto', sans-serif; 
@@ -79,6 +82,7 @@
             border: none; 
             cursor: pointer; 
             transition: all 0.3s;
+            margin: 0.25rem;
         }
         .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,123,255,0.3); }
         .btn-secondary { background: #6c757d; }
@@ -96,7 +100,7 @@
             padding: 0.5rem; 
             border: 1px solid #dadce0; 
             border-radius: 6px; 
-            margin-bottom: 1rem; 
+            margin-bottom: 0.5rem; 
             transition: border-color 0.3s;
         }
         .form-control:focus { border-color: #007bff; outline: none; }
@@ -104,13 +108,14 @@
             width: 100%; 
             border-collapse: collapse; 
             margin-top: 1rem;
+            font-size: 0.875rem;
         }
         .table th, .table td { 
-            padding: 0.75rem; 
+            padding: 0.5rem 0.75rem; 
             text-align: left; 
             border-bottom: 1px solid #dee2e6;
         }
-        .table th { background: #f8f9fa; font-weight: 600; }
+        .table th { background: #f8f9fa; font-weight: 600; position: sticky; top: 0; }
         .table tr:hover { background: #f8f9fa; }
         .stat-card { 
             text-align: center; 
@@ -121,30 +126,37 @@
             margin: 0.5rem;
         }
         .hidden { display: none; }
-        #academic-section, #schoolerp-section { display: none; }
-        #academic-section.active, #schoolerp-section.active { display: block; }
+        #academic-section, #schoolerp-section, #dashboard-section { display: none; }
+        #dashboard-section.active, #academic-section.active, #schoolerp-section.active { display: block; }
         .loading { text-align: center; color: #6c757d; font-style: italic; }
         .alert { padding: 0.75rem; margin: 1rem 0; border-radius: 6px; }
         .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .chart-container { position: relative; height: 300px; width: 100%; margin: 1rem 0; }
+        .form-group { margin-bottom: 1rem; }
+        #scoresheet-thead { display: block; }
+        .sub-score { width: 60px !important; }
+        .w-12 { width: 3rem; }
+        .w-16 { width: 4rem; }
+        .w-20 { width: 5rem; }
     </style>
 </head>
 <body>
     <div class="flex">
-        <!-- Sidebar -->
+        <!-- Enhanced Sidebar with more icons if needed -->
         <div id="sidebar" class="sidebar">
             <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-10 mb-4 mx-auto rounded-full shadow-lg">
             <div class="sidebar-icon" onclick="showSection('dashboard')">
                 <i class="fas fa-home"></i>
-                <span class="sidebar-tooltip">Dashboard</span>
+                <span class="sidebar-tooltip">Dashboard Overview</span>
             </div>
             <div class="sidebar-icon" onclick="showSection('academic')">
-                <i class="fas fa-book"></i>
-                <span class="sidebar-tooltip">Academic Management</span>
+                <i class="fas fa-book-open"></i>
+                <span class="sidebar-tooltip">Academic & Exams</span>
             </div>
             <div class="sidebar-icon" onclick="showSection('schoolerp')">
-                <i class="fas fa-cogs"></i>
-                <span class="sidebar-tooltip">School ERP (Attendance & Discipline)</span>
+                <i class="fas fa-users-cog"></i>
+                <span class="sidebar-tooltip">ERP: Attendance & Discipline</span>
             </div>
             <div class="sidebar-icon" onclick="logout()">
                 <i class="fas fa-sign-out-alt"></i>
@@ -154,126 +166,147 @@
 
         <!-- Main Content -->
         <div class="main-content">
-            <header class="mb-6">
-                <h1 class="text-3xl font-bold text-gray-800 mb-2">Teacher Dashboard - <span id="teacher-class"></span></h1>
-                <p class="text-gray-600">Manage your class academics, attendance, and more with SoMAp.</p>
+            <header class="mb-6 flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2">Teacher Dashboard - <span id="teacher-class"></span></h1>
+                    <p class="text-gray-600">Professional management for your class: Academics, Attendance, and Insights.</p>
+                </div>
+                <div class="text-sm text-gray-500">Current Date: September 15, 2025</div>
             </header>
 
             <!-- Dashboard Section -->
             <section id="dashboard-section" class="active">
+                <!-- Stat Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div class="stat-card">
-                        <i class="fas fa-chart-line text-2xl mb-2"></i>
-                        <h3 id="top-student" class="text-xl font-bold">Top Student</h3>
-                        <p id="top-score">-</p>
+                        <i class="fas fa-trophy text-2xl mb-2"></i>
+                        <h3 class="text-lg font-bold">Top Student</h3>
+                        <p id="top-student" class="text-2xl">-</p>
                     </div>
                     <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                        <i class="fas fa-chart-line text-2xl mb-2"></i>
+                        <i class="fas fa-chart-line-down text-2xl mb-2"></i>
                         <h3>Bottom Student</h3>
-                        <p id="bottom-score">-</p>
+                        <p id="bottom-score" class="text-2xl">-</p>
                     </div>
                     <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                        <i class="fas fa-users text-2xl mb-2"></i>
+                        <i class="fas fa-calendar-check text-2xl mb-2"></i>
                         <h3>% Present</h3>
-                        <p id="percent-present">-</p>
+                        <p id="percent-present" class="text-2xl">-</p>
                     </div>
                     <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                        <i class="fas fa-money-bill text-2xl mb-2"></i>
-                        <h3>Fee Balance</h3>
-                        <p id="total-balance">-</p>
+                        <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
+                        <h3>Alerts</h3>
+                        <p id="yellow-alerts" class="text-2xl">0</p>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div class="card attendance">
+                        <h3 class="font-semibold mb-3">Attendance Pie Chart</h3>
+                        <div class="chart-container">
+                            <canvas id="attendanceChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card finance">
+                        <h3 class="font-semibold mb-3">Fee Status Bar Chart</h3>
+                        <div class="chart-container">
+                            <canvas id="feeChart"></canvas>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Academic Management Card -->
                 <div class="card academic">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-graduation-cap mr-2"></i>Academic Management</h2>
+                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-graduation-cap mr-2"></i>Academic Snapshot</h2>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="card">
-                            <h5 class="font-medium mb-2">Scores Overview</h5>
-                            <div id="class-scores" class="loading">Loading scores...</div>
+                        <div class="card p-4">
+                            <h5 class="font-medium mb-2">Student Fees Overview</h5>
+                            <div id="class-scores" class="loading">Loading...</div>
                         </div>
-                        <div class="card">
-                            <h5 class="font-medium mb-2">Subject Performance (Class Avg)</h5>
-                            <ul id="subject-perf" class="loading"></ul>
+                        <div class="card p-4">
+                            <h5 class="font-medium mb-2">Subject Averages</h5>
+                            <ul id="subject-perf" class="loading list-disc pl-4"></ul>
                         </div>
                     </div>
-                    <button class="btn mt-4" onclick="generateReport()">Generate Report Cards (PDF)</button>
+                    <button class="btn mt-4" onclick="generateReport()">Quick Report (PDF)</button>
                 </div>
 
-                <!-- Attendance Analytics Card -->
+                <!-- Attendance Analytics -->
                 <div class="card attendance">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-calendar-check mr-2"></i>Attendance Analytics</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); height: 120px;">
-                            <h3>Class Days (excl. weekends & holidays)</h3>
-                            <p id="class-days">-</p>
+                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-chart-bar mr-2"></i>Attendance Analytics</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); height: 120px; padding: 1rem;">
+                            <h4>Class Days</h4>
+                            <p id="class-days" class="text-2xl font-bold">20</p>
                         </div>
-                        <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); height: 120px;">
-                            <h3>% Present (Class Avg)</h3>
-                            <p id="avg-present">-</p>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); height: 120px; padding: 1rem;">
+                            <h4>Class Avg Present</h4>
+                            <p id="avg-present" class="text-2xl font-bold">-</p>
                         </div>
-                        <div class="stat-card" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); height: 120px;">
-                            <h3>Yellow Alerts (≥ 10 absent days/month)</h3>
-                            <p id="yellow-alerts">-</p>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); height: 120px; padding: 1rem;">
+                            <h4>High Absent Alerts</h4>
+                            <p id="alert-count" class="text-2xl font-bold">0</p>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <label class="block text-sm font-medium mb-2">Archived Query Date Range</label>
-                        <input type="date" id="start-date" class="form-control w-1/3" value="2025-09-01">
-                        <input type="date" id="end-date" class="form-control w-1/3" value="2025-09-15">
-                        <button class="btn ml-2" onclick="loadAttendanceAnalytics()">Load</button>
+                    <div class="flex items-center">
+                        <label class="block text-sm font-medium mr-2">Date Range:</label>
+                        <input type="date" id="start-date" class="form-control w-32 mr-2" value="2025-09-01">
+                        <input type="date" id="end-date" class="form-control w-32 mr-2" value="2025-09-15">
+                        <button class="btn" onclick="loadAttendanceAnalytics()">Refresh Analytics</button>
                     </div>
                 </div>
 
-                <!-- Finance Overview Card -->
+                <!-- Finance Overview -->
                 <div class="card finance">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-wallet mr-2"></i>Fee Overview</h2>
+                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-coins mr-2"></i>Class Finances</h2>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                            <h3>Fee: Required (Class/Year)</h3>
-                            <p id="fee-required">-</p>
+                            <h4>Total Due</h4>
+                            <p id="fee-required" class="text-xl">TSh 0</p>
                         </div>
                         <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                            <h3>Fee: Paid (Aggregated)</h3>
-                            <p id="fee-paid">-</p>
+                            <h4>Total Paid</h4>
+                            <p id="fee-paid" class="text-xl">TSh 0</p>
                         </div>
                         <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                            <h3>Fee: Balance (Outstanding)</h3>
-                            <p id="fee-balance">-</p>
+                            <h4>Outstanding Balance</h4>
+                            <p id="fee-balance" class="text-xl">TSh 0</p>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Academic Section (Integrated from academic.html) -->
+            <!-- Academic Section -->
             <section id="academic-section">
                 <div class="card academic">
                     <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-semibold"><i class="fas fa-book mr-2"></i>SoMAp — Academic & Exams Module</h2>
-                        <div>
-                            <button class="btn mr-2" onclick="saveScores()">Save Scores</button>
-                            <button class="btn-secondary mr-2">CSV</button>
-                            <button class="btn-secondary mr-2">Excel</button>
-                            <button class="btn-secondary mr-2">PDF</button>
-                            <button class="btn-secondary">Print</button>
+                        <h2 class="text-xl font-semibold flex items-center"><i class="fas fa-clipboard-list mr-2"></i>Academic & Exams Module: Scores • Rankings • Reports</h2>
+                        <div class="flex">
+                            <button class="btn mr-2" onclick="saveAllScores()">Save All Scores</button>
+                            <button class="btn-secondary mr-2" onclick="exportCSV()">CSV Export</button>
+                            <button class="btn-secondary mr-2" onclick="exportExcel()">Excel</button>
+                            <button class="btn-secondary mr-2" onclick="printScoresheet()">Print</button>
+                            <button class="btn" onclick="generateReportCards()">PDF Report Cards</button>
                         </div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                    <!-- Filters -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
                         <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">School Branch</label>
+                            <label class="block text-sm font-medium mb-1">Branch</label>
                             <select id="school-branch" class="form-control" disabled>
-                                <option>Socrates — Main (optional)</option>
+                                <option>Socrates Main</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label class="block text-sm font-medium mb-1">Class</label>
-                            <select id="class-select" class="form-control" disabled>
-                                <option value="">Select Class…</option>
+                            <select id="class-select-acad" class="form-control" disabled>
+                                <option id="current-class-opt"></option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label class="block text-sm font-medium mb-1">Stream</label>
-                            <select id="stream-select" class="form-control">
+                            <select id="stream-select-acad" class="form-control">
                                 <option value="A">A</option>
                                 <option value="B">B</option>
                                 <option value="Red">Red</option>
@@ -282,130 +315,168 @@
                         <div class="form-group">
                             <label class="block text-sm font-medium mb-1">Exam Type</label>
                             <select id="exam-type" class="form-control">
-                                <option>Monthly</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="terminal">Terminal</option>
                             </select>
                         </div>
                         <div class="form-group">
                             <label class="block text-sm font-medium mb-1">Month</label>
                             <select id="month-select" class="form-control">
-                                <option>January</option>
-                                <option>February</option>
-                                <!-- Add all months -->
-                                <option>September</option>
+                                <option value="01">January</option>
+                                <option value="02">February</option>
+                                <option value="03">March</option>
+                                <option value="04">April</option>
+                                <option value="05">May</option>
+                                <option value="06">June</option>
+                                <option value="07">July</option>
+                                <option value="08">August</option>
+                                <option value="09" selected>September</option>
+                                <option value="10">October</option>
+                                <option value="11">November</option>
+                                <option value="12">December</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Academic Year</label>
-                            <input type="text" id="academic-year" class="form-control" value="2025">
+                            <label class="block text-sm font-medium mb-1">Year</label>
+                            <input type="number" id="academic-year" class="form-control" value="2025" min="2020" max="2030">
                         </div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
-                        <div class="card p-4">
-                            <h5 class="font-medium">Top Student</h5>
-                            <p id="top-student-detail">-</p>
+                    <!-- Quick Stats -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
+                        <div class="card p-3 text-center">
+                            <h5 class="font-medium text-sm">Top Student</h5>
+                            <p id="top-student-detail" class="text-lg font-bold">-</p>
                         </div>
-                        <div class="card p-4">
-                            <h5 class="font-medium">Bottom Student</h5>
-                            <p id="bottom-student-detail">-</p>
+                        <div class="card p-3 text-center">
+                            <h5 class="font-medium text-sm">Bottom Student</h5>
+                            <p id="bottom-student-detail" class="text-lg font-bold">-</p>
                         </div>
-                        <div class="card p-4">
-                            <h5 class="font-medium">Class Max</h5>
-                            <p id="class-max">– Highest overall avg</p>
+                        <div class="card p-3 text-center">
+                            <h5 class="font-medium text-sm">Class Max Avg</h5>
+                            <p id="class-max" class="text-lg">-</p>
                         </div>
-                        <div class="card p-4">
-                            <h5 class="font-medium">Class Grade</h5>
-                            <p id="class-grade">– Avg grade</p>
+                        <div class="card p-3 text-center">
+                            <h5 class="font-medium text-sm">Class Avg Grade</h5>
+                            <p id="class-grade" class="text-lg">-</p>
                         </div>
-                        <div class="card p-4">
-                            <h5 class="font-medium">% Present</h5>
-                            <p id="percent-present-detail">– Attendance</p>
+                        <div class="card p-3 text-center">
+                            <h5 class="font-medium text-sm">% Present</h5>
+                            <p id="percent-present-detail" class="text-lg">-</p>
                         </div>
-                        <div class="card p-4">
-                            <h5 class="font-medium">% Absent</h5>
-                            <p id="percent-absent">– Attendance</p>
+                        <div class="card p-3 text-center">
+                            <h5 class="font-medium text-sm">% Absent</h5>
+                            <p id="percent-absent-detail" class="text-lg">-</p>
                         </div>
                     </div>
+                    <!-- Scoresheet -->
                     <div class="card">
-                        <h3 class="text-lg font-semibold mb-2">Scoresheet</h3>
-                        <p class="mb-2">Enter marks per subject • Auto averages • Positions • Grades</p>
-                        <div class="flex mb-4">
-                            <label class="mr-4">Max/100</label>
-                            <input type="number" id="max-score" value="100" class="form-control w-20 mr-2">
-                            <button class="btn mr-2">Set all Max</button>
-                            <button class="btn">Recalculate</button>
+                        <h3 class="text-lg font-semibold mb-3">Scoresheet: Enter Marks • Auto-Calculate Averages • Positions • Grades</h3>
+                        <div class="flex items-center mb-4">
+                            <label class="mr-4 text-sm font-medium">Max Score per Subject:</label>
+                            <input type="number" id="max-score" value="100" class="form-control w-20 mr-2" min="1" max="100">
+                            <button class="btn mr-2" onclick="setAllMax()">Set All Max</button>
+                            <button class="btn" onclick="recalculateAll()">Recalculate Positions & Grades</button>
                         </div>
-                        <table class="table">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Adm</th>
-                                    <th>Student</th>
-                                    <th>Fee Due</th>
-                                    <th>Paid</th>
-                                    <th>Balance</th>
-                                    <th>Total</th>
-                                    <th>Max</th>
-                                    <th>% Avg</th>
-                                    <th>Overall Pos</th>
-                                    <th>Grade</th>
-                                    <th>Present</th>
-                                    <th>Absent</th>
-                                    <th>Teacher Comment</th>
-                                </tr>
-                            </thead>
-                            <tbody id="scoresheet-body">
-                                <tr><td colspan="14" class="text-center">0 students • 0 subjects</td></tr>
-                            </tbody>
-                        </table>
-                        <button class="btn mt-4" onclick="generateReportCards()">Generate Report Cards (PDF)</button>
-                        <button class="btn-secondary ml-2">Email/SMS Links</button>
+                        <div class="overflow-x-auto">
+                            <table class="table" id="scores-table">
+                                <thead id="scores-thead">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Adm No</th>
+                                        <th>Student Name</th>
+                                        <th>Fee Due</th>
+                                        <th>Paid</th>
+                                        <th>Balance</th>
+                                        <!-- Subjects will be inserted here -->
+                                        <th>Total</th>
+                                        <th>Max</th>
+                                        <th>% Avg</th>
+                                        <th>Pos</th>
+                                        <th>Grade</th>
+                                        <th>Present Days</th>
+                                        <th>Absent Days</th>
+                                        <th>Comment</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scoresheet-body">
+                                    <tr>
+                                        <td colspan="20" class="text-center py-4">Loading students and scores...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="flex mt-4">
+                            <button class="btn" onclick="generateReportCards()">Generate Report Cards (PDF)</button>
+                            <button class="btn-secondary ml-2" onclick="sendEmailSMS()">Email/SMS to Parents</button>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <!-- SchoolERP Section (Integrated from schoolerp.html, restricted) -->
+            <!-- School ERP Section -->
             <section id="schoolerp-section">
                 <div class="card">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-cogs mr-2"></i>School ERP - Attendance & Discipline</h2>
-                    <p class="alert alert-error mb-4">Note: Admissions are restricted to Admin/Accountant. Contact admin for access.</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <!-- Attendance Sub-section -->
+                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-building mr-2"></i>School ERP Management</h2>
+                    <div class="alert alert-error mb-4">
+                        <i class="fas fa-lock mr-2"></i>Admissions restricted to Admin/Accountant only. Teachers cannot access or modify admissions.
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Attendance -->
                         <div class="card attendance">
-                            <h3 class="font-semibold mb-2">Attendance</h3>
-                            <div id="attendance-list" class="loading">Loading attendance...</div>
-                            <form id="mark-attendance-form" class="mt-4">
+                            <h3 class="font-semibold mb-3 flex items-center"><i class="fas fa-calendar-alt mr-2"></i>Daily Attendance</h3>
+                            <div id="attendance-list" class="loading mb-4">Loading recent attendance...</div>
+                            <form id="mark-attendance-form">
+                                <h4 class="font-medium mb-2">Mark Today's Attendance</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
-                                    <input type="text" id="att-student-name" placeholder="Student Name" class="form-control" required>
-                                    <input type="date" id="att-date" value="2025-09-15" class="form-control" required>
+                                    <input type="text" id="att-student-name" placeholder="Enter Student Name" class="form-control" required>
+                                    <input type="date" id="att-date" class="form-control" value="2025-09-15" required>
                                     <select id="att-mark" class="form-control">
                                         <option value="P">Present</option>
                                         <option value="A">Absent</option>
+                                        <option value="L">Late</option>
                                     </select>
-                                    <button type="submit" class="btn">Mark Attendance</button>
+                                    <button type="submit" class="btn">Submit Mark</button>
                                 </div>
                             </form>
                         </div>
-                        <!-- Discipline Sub-section -->
-                        <div class="card">
-                            <h3 class="font-semibold mb-2">Discipline</h3>
-                            <div id="discipline-list" class="loading">Loading discipline records...</div>
-                            <form class="mt-4">
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <!-- Discipline -->
+                        <div class="card" style="border-left-color: #6f42c1;">
+                            <h3 class="font-semibold mb-3 flex items-center"><i class="fas fa-gavel mr-2"></i>Discipline Records</h3>
+                            <div id="discipline-list" class="loading mb-4">Loading discipline logs...</div>
+                            <form id="discipline-form">
+                                <h4 class="font-medium mb-2">Record Incident</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     <input type="text" id="disc-student" placeholder="Student Name" class="form-control" required>
                                     <select id="disc-action" class="form-control">
-                                        <option>Warn</option>
-                                        <option>Suspend</option>
+                                        <option value="Warning">Verbal Warning</option>
+                                        <option value="Detention">Detention</option>
+                                        <option value="Suspension">Suspension</option>
                                     </select>
-                                    <textarea id="disc-comment" placeholder="Comment" class="form-control" rows="2"></textarea>
-                                    <button type="submit" class="btn">Record Discipline</button>
+                                    <textarea id="disc-comment" placeholder="Details of Incident" class="form-control col-span-2" rows="3" required></textarea>
+                                    <button type="submit" class="btn md:col-span-2">Record Entry</button>
                                 </div>
                             </form>
                         </div>
                     </div>
                     <!-- Students List -->
-                    <div class="card mt-4">
-                        <h3 class="font-semibold mb-2">Students List</h3>
-                        <ul id="students-list" class="events-list loading"></ul>
+                    <div class="card mt-6">
+                        <h3 class="font-semibold mb-3 flex items-center"><i class="fas fa-list mr-2"></i>Class Students Directory</h3>
+                        <div class="overflow-x-auto">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Adm No</th>
+                                        <th>Name</th>
+                                        <th>Stream</th>
+                                        <th>Balance</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="students-table-body">
+                                    <tr><td colspan="5" class="text-center">Loading students...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -413,7 +484,7 @@
     </div>
 
     <script>
-        // Firebase Config
+        // Firebase Initialization
         const firebaseConfig = {
             apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
             authDomain: "somaptestt.firebaseapp.com",
@@ -427,319 +498,587 @@
         const auth = firebase.auth();
         const db = firebase.database();
 
+        // Global Variables
         let currentUser = null;
         let currentClass = '';
         let currentStream = 'A';
+        let currentYear = 2025;
+        let currentMonth = '09';
+        let currentExamType = 'monthly';
+        let studentsData = [];
+        let scoresData = {};
+        let attendanceData = {};
+        let chartAttendance = null;
+        let chartFee = null;
+        const subjects = ['Mathematics', 'English', 'Science', 'Kiswahili', 'Social Studies']; // Fixed subjects for professionalism
+        const gradeScale = { 'A': 80, 'B': 60, 'C': 50, 'D': 40, 'E': 0 }; // Simple grading
 
-        // Auth State Change
-        auth.onAuthStateChanged(user => {
+        // Authentication and User Setup
+        auth.onAuthStateChanged((user) => {
             if (!user) {
                 window.location.href = 'index.html';
                 return;
             }
             const emailKey = user.email.replace('.', '_');
-            db.ref('users/' + emailKey).once('value').then(snapshot => {
+            db.ref(`users/${emailKey}`).once('value').then((snapshot) => {
                 const userData = snapshot.val();
                 if (!userData || userData.role !== 'teacher') {
-                    alert('Unauthorized access');
+                    alert('Access Denied: Teacher privileges required.');
                     auth.signOut();
                     window.location.href = 'index.html';
                     return;
                 }
                 currentUser = userData;
-                currentClass = userData.class;
+                currentClass = userData.class || 'Class 4'; // Default from research
                 document.getElementById('teacher-class').textContent = currentClass;
-                document.getElementById('class-select').value = currentClass;
-                loadDashboardData();
-            }).catch(err => {
-                console.error('Error loading user data:', err);
-                alert('Error loading profile');
+                document.getElementById('current-class-opt').textContent = currentClass;
+                document.getElementById('class-select-acad').value = currentClass;
+                // Set stream listener for academic
+                document.getElementById('stream-select-acad').value = currentStream;
+                loadInitialData();
+            }).catch((err) => {
+                console.error('User data error:', err);
+                alert('Profile load failed. Please log in again.');
             });
         });
 
+        // Initial Data Load
+        function loadInitialData() {
+            Promise.all([
+                db.ref('students').once('value'),
+                db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}`).once('value'),
+                db.ref(`attendance/${currentClass}/${currentYear}-${currentMonth}`).once('value')
+            ]).then(([studentsSnap, scoresSnap, attSnap]) => {
+                studentsData = studentsSnap.val() ? Object.values(studentsSnap.val()).filter(s => s.classLevel === currentClass && s.stream === currentStream) : [];
+                scoresData = scoresSnap.val() || {};
+                attendanceData = attSnap.val() || {};
+                showSection('dashboard');
+            });
+        }
+
         // Section Navigation
         function showSection(section) {
-            // Hide all sections
             document.querySelectorAll('section').forEach(s => {
                 s.classList.remove('active');
                 s.style.display = 'none';
             });
-            // Show selected
-            const targetSection = document.getElementById(section + '-section');
-            if (targetSection) {
-                targetSection.style.display = 'block';
-                targetSection.classList.add('active');
-                if (section === 'academic') {
+            const target = document.getElementById(`${section}-section`);
+            if (target) {
+                target.style.display = 'block';
+                target.classList.add('active');
+            }
+            // Load specific data
+            switch (section) {
+                case 'dashboard':
+                    loadDashboardData();
+                    break;
+                case 'academic':
                     loadAcademicData();
-                } else if (section === 'schoolerp') {
+                    break;
+                case 'schoolerp':
                     loadSchoolERPData();
-                }
-            }
-            if (section === 'dashboard') {
-                loadDashboardData();
+                    break;
             }
         }
 
-        // Load Dashboard Data
-        function loadDashboardData() {
-            if (!currentClass) return;
-            db.ref('students').once('value').then(snapshot => {
-                const allStudents = snapshot.val() ? Object.values(snapshot.val()) : [];
-                const classStudents = allStudents.filter(s => s.classLevel === currentClass && s.stream === currentStream);
-                if (classStudents.length === 0) {
-                    document.getElementById('class-scores').innerHTML = 'No students found.';
-                    return;
+        // Enhanced Dashboard Load with Charts and Real Calculations
+        function loadDashboardData(startDate = null, endDate = null) {
+            if (studentsData.length === 0) {
+                document.getElementById('class-scores').innerHTML = '<p class="text-red-500">No students in class.</p>';
+                return;
+            }
+
+            // Fees Overview
+            const totalDue = studentsData.reduce((sum, s) => sum + parseFloat(s.feePerYear || 0), 0);
+            const totalPaid = studentsData.reduce((sum, s) => sum + parseFloat(s.paidAmount || 0), 0);
+            const totalBalance = studentsData.reduce((sum, s) => sum + parseFloat(s.balance || 0), 0);
+            document.getElementById('fee-required').textContent = `TSh ${totalDue.toLocaleString()}`;
+            document.getElementById('fee-paid').textContent = `TSh ${totalPaid.toLocaleString()}`;
+            document.getElementById('fee-balance').textContent = `TSh ${totalBalance.toLocaleString()}`;
+
+            // Scores and Top/Bottom
+            const studentScores = [];
+            Object.entries(scoresData).forEach(([id, subs]) => {
+                const student = studentsData.find(s => s.admissionNumber == id);
+                if (student) {
+                    const avg = Object.values(subs).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / Object.keys(subs).length || 0;
+                    studentScores.push({ name: `${student.firstName} ${student.lastName}`, avg, id, student });
                 }
-
-                // Scores
-                let scoresHtml = classStudents.map(s => 
-                    `${s.firstName} ${s.lastName}: Fee Due TSh ${s.feePerYear || 0}, Paid TSh ${s.paidAmount || 0}, Balance TSh ${s.balance || 0}`
-                ).join('<br>');
-                document.getElementById('class-scores').innerHTML = scoresHtml;
-
-                // Top/Bottom
-                db.ref(`scores/2025/${currentClass}/monthly/09`).once('value').then(scoreSnap => {
-                    const scores = scoreSnap.val() ? Object.entries(scoreSnap.val()).map(([id, s]) => {
-                        const student = classStudents.find(st => st.admissionNumber === id);
-                        if (!student) return null;
-                        const avg = Object.values(s).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / Object.keys(s).length;
-                        return { name: `${student.firstName} ${student.lastName}`, avg };
-                    }).filter(s => s) : [];
-                    const sorted = scores.sort((a, b) => b.avg - a.avg);
-                    const top = sorted[0];
-                    const bottom = sorted[sorted.length - 1];
-                    document.getElementById('top-student').innerHTML = top ? `${top.name} (${top.avg.toFixed(1)}%)` : 'N/A';
-                    document.getElementById('bottom-score').innerHTML = bottom ? `${bottom.name} (${bottom.avg.toFixed(1)}%)` : 'N/A';
-
-                    // Subject Performance (Sample)
-                    const subjects = ['Math', 'English', 'Science']; // Assume
-                    const perfList = document.getElementById('subject-perf');
-                    perfList.innerHTML = subjects.map(sub => `<li>${sub}: ${Math.random() * 100 | 0}%</li>`).join('');
-
-                    // Class Grade Avg
-                    const classAvg = sorted.reduce((sum, s) => sum + s.avg, 0) / sorted.length;
-                    document.getElementById('class-grade').textContent = `${classAvg.toFixed(1)}% Avg grade`;
-                });
-
-                // Attendance
-                db.ref(`attendance/${currentClass}/2025-09`).once('value').then(attSnap => {
-                    const attendance = attSnap.val() ? Object.values(attSnap.val()).flatMap(day => Object.values(day)) : [];
-                    const total = attendance.length;
-                    const present = attendance.filter(a => a.daily === 'P').length;
-                    const percentPresent = total ? (present / total * 100).toFixed(1) : 0;
-                    document.getElementById('percent-present').textContent = `${percentPresent}%`;
-                    document.getElementById('avg-present').textContent = `${percentPresent}%`;
-                    document.getElementById('percent-present-detail').textContent = `${percentPresent}% Attendance`;
-
-                    // Absent %
-                    const percentAbsent = 100 - parseFloat(percentPresent);
-                    document.getElementById('percent-absent').textContent = `${percentAbsent.toFixed(1)}% Attendance`;
-
-                    // Yellow Alerts
-                    const alerts = classStudents.filter(s => {
-                        const studentAtt = attendance.filter(a => a.snap && a.snap.admissionNo === s.admissionNumber);
-                        const absentDays = studentAtt.filter(a => a.daily === 'A').length;
-                        return absentDays >= 10;
-                    }).length;
-                    document.getElementById('yellow-alerts').textContent = alerts;
-
-                    // Class Days (Sample: 20 days in month)
-                    document.getElementById('class-days').textContent = '20';
-                });
-
-                // Fees
-                const totalDue = classStudents.reduce((sum, s) => sum + (parseInt(s.feePerYear) || 0), 0);
-                const totalPaid = classStudents.reduce((sum, s) => sum + (parseInt(s.paidAmount) || 0), 0);
-                const totalBalance = classStudents.reduce((sum, s) => sum + (parseInt(s.balance) || 0), 0);
-                document.getElementById('fee-required').textContent = `TSh ${totalDue}`;
-                document.getElementById('fee-paid').textContent = `TSh ${totalPaid}`;
-                document.getElementById('fee-balance').textContent = `TSh ${totalBalance}`;
-                document.getElementById('total-balance').textContent = `TSh ${totalBalance}`;
             });
+            const sortedScores = studentScores.sort((a, b) => b.avg - a.avg);
+            const top = sortedScores[0];
+            const bottom = sortedScores[sortedScores.length - 1];
+            document.getElementById('top-student').innerHTML = top ? `${top.name}<br><small>${top.avg.toFixed(1)}%</small>` : 'N/A';
+            document.getElementById('bottom-score').innerHTML = bottom ? `${bottom.name}<br><small>${bottom.avg.toFixed(1)}%</small>` : 'N/A';
+            const classAvg = sortedScores.reduce((sum, s) => sum + s.avg, 0) / sortedScores.length || 0;
+
+            // Subject Performance
+            const subjectAvgs = {};
+            subjects.forEach(sub => {
+                let sum = 0, count = 0;
+                Object.values(scoresData).forEach(subs => {
+                    if (subs[sub]) {
+                        sum += (subs[sub].score / subs[sub].max * 100);
+                        count++;
+                    }
+                });
+                subjectAvgs[sub] = count ? sum / count : 0;
+            });
+            const perfHtml = Object.entries(subjectAvgs).map(([sub, avg]) => `<li>${sub}: <strong>${avg.toFixed(1)}%</strong></li>`).join('');
+            document.getElementById('subject-perf').innerHTML = perfHtml;
+
+            // Fees List
+            const feesHtml = studentsData.map(s => 
+                `<div class="text-sm">${s.firstName} ${s.lastName}: Due TSh ${s.feePerYear}, Paid TSh ${s.paidAmount}, Bal TSh ${s.balance}</div>`
+            ).join('');
+            document.getElementById('class-scores').innerHTML = feesHtml;
+
+            // Attendance
+            let filteredAtt = Object.values(attendanceData).flatMap(day => Object.values(day || {}));
+            if (startDate && endDate) {
+                const sDate = new Date(startDate);
+                const eDate = new Date(endDate);
+                filteredAtt = filteredAtt.filter(rec => {
+                    const recDate = new Date(rec.date || Object.keys(attendanceData).find(d => d.includes(rec.id)));
+                    return recDate >= sDate && recDate <= eDate;
+                });
+            }
+            const totalDays = filteredAtt.length / studentsData.length || 0; // Approx
+            const presentCount = filteredAtt.filter(a => a.daily === 'P').length;
+            const totalRecords = filteredAtt.length;
+            const percentPresent = totalRecords ? (presentCount / totalRecords * 100).toFixed(1) : 0;
+            document.getElementById('percent-present').textContent = `${percentPresent}%`;
+            document.getElementById('avg-present').textContent = `${percentPresent}%`;
+            document.getElementById('class-days').textContent = Math.floor(totalDays);
+
+            // Alerts: Students with >=10 absent
+            const alerts = studentsData.filter(s => {
+                const studentAtt = filteredAtt.filter(a => a.snap.admissionNo === s.admissionNumber);
+                const absent = studentAtt.filter(a => a.daily === 'A').length;
+                return absent >= 10;
+            }).length;
+            document.getElementById('yellow-alerts').textContent = alerts;
+            document.getElementById('alert-count').textContent = alerts;
+
+            // Charts Update
+            updateCharts(percentPresent, totalRecords - presentCount, totalDue, totalPaid, totalBalance);
         }
 
-        // Load Academic Data (Scoresheet)
+        // Update Charts
+        function updateCharts(present, absent, due, paid, balance) {
+            // Attendance Pie
+            const attCtx = document.getElementById('attendanceChart')?.getContext('2d');
+            if (attCtx && chartAttendance) chartAttendance.destroy();
+            if (attCtx) {
+                chartAttendance = new Chart(attCtx, {
+                    type: 'pie',
+                    data: {
+                        labels: ['Present', 'Absent'],
+                        datasets: [{
+                            data: [present, absent],
+                            backgroundColor: ['#28a745', '#dc3545']
+                        }]
+                    },
+                    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+                });
+            }
+
+            // Fee Bar
+            const feeCtx = document.getElementById('feeChart')?.getContext('2d');
+            if (feeCtx && chartFee) chartFee.destroy();
+            if (feeCtx) {
+                chartFee = new Chart(feeCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Due', 'Paid', 'Balance'],
+                        datasets: [{
+                            label: 'TSh',
+                            data: [due, paid, balance],
+                            backgroundColor: ['#ffc107', '#28a745', '#dc3545']
+                        }]
+                    },
+                    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+                });
+            }
+        }
+
+        // Load Academic Data with Dynamic Table
         function loadAcademicData() {
-            if (!currentClass) return;
-            db.ref('students').once('value').then(snapshot => {
-                const allStudents = snapshot.val() ? Object.values(snapshot.val()) : [];
-                const classStudents = allStudents.filter(s => s.classLevel === currentClass && s.stream === currentStream).sort((a, b) => a.admissionNumber - b.admissionNumber);
-                if (classStudents.length === 0) {
-                    document.getElementById('scoresheet-body').innerHTML = '<tr><td colspan="14" class="text-center">No students found.</td></tr>';
+            currentStream = document.getElementById('stream-select-acad').value;
+            currentMonth = document.getElementById('month-select').value;
+            currentExamType = document.getElementById('exam-type').value;
+            currentYear = parseInt(document.getElementById('academic-year').value);
+            // Reload data if changed
+            db.ref('students').once('value').then((snap) => {
+                studentsData = Object.values(snap.val() || {}).filter(s => s.classLevel === currentClass && s.stream === currentStream);
+                if (studentsData.length === 0) {
+                    document.getElementById('scoresheet-body').innerHTML = '<tr><td colspan="20" class="text-center text-red-500">No students found for selected stream.</td></tr>';
                     return;
                 }
+                loadScoresForAcademic();
+                loadAttendanceForAcademic();
+            });
+        }
 
-                // Sample subjects
-                const subjects = ['Math', 'English', 'Science', 'Kiswahili', 'Social'];
+        function loadScoresForAcademic() {
+            db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}`).once('value').then((snap) => {
+                scoresData = snap.val() || {};
+                buildScoresTable();
+                calculateClassStats();
+            });
+        }
 
-                // Build table
-                let tableHtml = '';
-                classStudents.forEach((student, index) => {
-                    let row = `<tr>
+        function loadAttendanceForAcademic() {
+            db.ref(`attendance/${currentClass}/${currentYear}-${currentMonth}`).once('value').then((snap) => {
+                attendanceData = snap.val() || {};
+                // Update present/absent in table after build
+                updateAttendanceInTable();
+            });
+        }
+
+        // Build Dynamic Scores Table
+        function buildScoresTable() {
+            // Insert subject headers
+            const thead = document.getElementById('scores-thead');
+            let headerRow = thead.querySelector('tr');
+            // Clear existing subject th
+            const balanceTh = headerRow.querySelector('th:nth-child(6)'); // Balance
+            let insertPoint = balanceTh.nextSibling;
+            // Remove old subjects if any
+            while (insertPoint && insertPoint.textContent.trim() !== 'Total') {
+                insertPoint.remove();
+                insertPoint = balanceTh.nextSibling;
+            }
+            // Add new
+            subjects.forEach(sub => {
+                const th = document.createElement('th');
+                th.textContent = sub;
+                th.className = 'text-center';
+                balanceTh.parentNode.insertBefore(th, insertPoint);
+            });
+
+            // Build body
+            let bodyHtml = '';
+            studentsData.forEach((student, index) => {
+                const id = student.admissionNumber;
+                const subs = scoresData[id] || {};
+                let total = 0, maxTotal = 0;
+                subjects.forEach(sub => {
+                    const score = subs[sub] ? subs[sub].score : 0;
+                    const max = subs[sub] ? subs[sub].max : 100;
+                    total += score;
+                    maxTotal += max;
+                });
+                const avg = maxTotal ? (total / maxTotal * 100) : 0;
+                bodyHtml += `
+                    <tr>
                         <td>${index + 1}</td>
-                        <td>${student.admissionNumber}</td>
+                        <td>${id}</td>
                         <td>${student.firstName} ${student.lastName}</td>
-                        <td>TSh ${student.feePerYear || 0}</td>
-                        <td>TSh ${student.paidAmount || 0}</td>
-                        <td>TSh ${student.balance || 0}</td>
-                        <td><input type="number" class="form-control w-16" value="0" onchange="recalculateRow(this)"></td>
-                        <td>100</td>
-                        <td id="avg-${student.admissionNumber}">0%</td>
-                        <td>${index + 1}</td>
-                        <td>A</td>
-                        <td><input type="checkbox" checked></td>
-                        <td><input type="checkbox"></td>
-                        <td><textarea class="form-control" rows="1" placeholder="Comment"></textarea></td>
-                    </tr>`;
-
-                    // Add subject inputs
-                    subjects.forEach(sub => {
-                        row += `<td><input type="number" class="form-control w-12 sub-score" data-sub="${sub}" data-student="${student.admissionNumber}" max="100" value="0" onchange="updateAverage('${student.admissionNumber}')"></td>`;
-                    });
-
-                    tableHtml += row;
+                        <td>TSh ${parseFloat(student.feePerYear || 0).toLocaleString()}</td>
+                        <td>TSh ${parseFloat(student.paidAmount || 0).toLocaleString()}</td>
+                        <td>TSh ${parseFloat(student.balance || 0).toLocaleString()}</td>
+                `;
+                subjects.forEach(sub => {
+                    const score = subs[sub] ? subs[sub].score : 0;
+                    const max = subs[sub] ? subs[sub].max : document.getElementById('max-score').value;
+                    bodyHtml += `<td class="text-center"><input type="number" class="form-control sub-score w-16 text-center" data-student="${id}" data-sub="${sub}" value="${score}" max="${max}" min="0" onchange="updateSubjectScore(${id}, '${sub}', this.value, ${max})"></td>`;
                 });
-                document.getElementById('scoresheet-body').innerHTML = tableHtml;
-
-                // Top/Bottom for detail
-                db.ref(`scores/2025/${currentClass}/monthly/09`).once('value').then(scoreSnap => {
-                    // Similar to dashboard, update details
-                    const scores = /* ... calculate ... */;
-                    // Update top-student-detail, etc.
-                });
+                bodyHtml += `
+                        <td class="font-bold">${total}</td>
+                        <td>${maxTotal}</td>
+                        <td id="avg-${id}" class="font-bold">${avg.toFixed(1)}%</td>
+                        <td id="pos-${id}">-${td>
+                        <td id="grade-${id}">-</td>
+                        <td id="present-${id}">0</td>
+                        <td id="absent-${id}">0</td>
+                        <td><textarea class="form-control" rows="1" placeholder="Teacher notes..."></textarea></td>
+                    </tr>
+                `;
             });
+            document.getElementById('scoresheet-body').innerHTML = bodyHtml;
         }
 
-        function updateAverage(studentId) {
-            const scores = document.querySelectorAll(`.sub-score[data-student="${studentId}"]`);
-            let total = 0, count = 0;
-            scores.forEach(input => {
-                total += parseInt(input.value) || 0;
-                count++;
-            });
-            const avg = count ? (total / count).toFixed(1) : 0;
-            document.getElementById(`avg-${studentId}`).textContent = `${avg}%`;
+        // Update Subject Score and Recalc
+        function updateSubjectScore(studentId, sub, score, max) {
             // Save to Firebase
-            saveScore(studentId, avg);
+            db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}/${studentId}/${sub}`).set({ score: parseInt(score), max: parseInt(max) }).then(() => {
+                // Recalc row
+                recalculateRow(studentId);
+                // Recalc all for pos/grade
+                setTimeout(recalculateAll, 100);
+            });
         }
 
-        function recalculateRow(input) {
-            // Logic for row total
+        function recalculateRow(studentId) {
+            const inputs = document.querySelectorAll(`.sub-score[data-student="${studentId}"]`);
+            let total = 0, maxTotal = 0;
+            inputs.forEach(input => {
+                total += parseInt(input.value) || 0;
+                maxTotal += parseInt(input.max) || 100;
+            });
+            const avg = maxTotal ? (total / maxTotal * 100) : 0;
+            document.getElementById(`avg-${studentId}`).textContent = `${avg.toFixed(1)}%`;
         }
 
-        function saveScores() {
-            // Batch save all scores to Firebase
-            alert('Scores saved!');
+        // Recalculate All Positions and Grades
+        function recalculateAll() {
+            const avgs = studentsData.map(s => {
+                const avgEl = document.getElementById(`avg-${s.admissionNumber}`);
+                return { id: s.admissionNumber, avg: parseFloat(avgEl ? avgEl.textContent : '0').replace('%', '') };
+            });
+            const sortedAvgs = avgs.sort((a, b) => b.avg - a.avg);
+            sortedAvgs.forEach((s, index) => {
+                document.getElementById(`pos-${s.id}`).textContent = index + 1;
+                const grade = getGrade(s.avg);
+                document.getElementById(`grade-${s.id}`).textContent = grade;
+            });
+            calculateClassStats(); // Update class stats
         }
 
-        function saveScore(studentId, avg) {
-            db.ref(`scores/2025/${currentClass}/monthly/09/${studentId}`).update({ avg });
+        function getGrade(avg) {
+            if (avg >= 80) return 'A';
+            if (avg >= 60) return 'B';
+            if (avg >= 50) return 'C';
+            if (avg >= 40) return 'D';
+            return 'E';
         }
 
-        function generateReport() {
-            // Simulate PDF generation
-            alert('Report generated! (Integrate jsPDF for real)');
+        // Update Attendance Counts in Table
+        function updateAttendanceInTable() {
+            studentsData.forEach(s => {
+                const studentAtt = Object.values(attendanceData).flatMap(day => Object.values(day || {})).filter(rec => rec.snap.admissionNo === s.admissionNumber);
+                const present = studentAtt.filter(a => a.daily === 'P').length;
+                const absent = studentAtt.filter(a => a.daily === 'A').length;
+                document.getElementById(`present-${s.admissionNumber}`).textContent = present;
+                document.getElementById(`absent-${s.admissionNumber}`).textContent = absent;
+            });
+            const totalRec = studentsData.length * Object.keys(attendanceData).length;
+            const totalPresent = studentsData.reduce((sum, s) => sum + parseInt(document.getElementById(`present-${s.admissionNumber}`).textContent), 0);
+            const percentPresent = totalRec ? (totalPresent / totalRec * 100).toFixed(1) : 0;
+            const percentAbsent = 100 - parseFloat(percentPresent);
+            document.getElementById('percent-present-detail').textContent = `${percentPresent}%`;
+            document.getElementById('percent-absent-detail').textContent = `${percentAbsent}%`;
         }
 
+        // Calculate Class Stats
+        function calculateClassStats() {
+            const avgs = studentsData.map(s => parseFloat(document.getElementById(`avg-${s.admissionNumber}`)?.textContent.replace('%', '') || 0));
+            const classAvg = avgs.reduce((sum, a) => sum + a, 0) / avgs.length || 0;
+            const classMax = Math.max(...avgs) || 0;
+            const sorted = studentsData.map(s => ({ name: `${s.firstName} ${s.lastName}`, avg: parseFloat(document.getElementById(`avg-${s.admissionNumber}`)?.textContent.replace('%', '') || 0 }));
+            const sortedClass = sorted.sort((a, b) => b.avg - a.avg);
+            const top = sortedClass[0];
+            const bottom = sortedClass[sortedClass.length - 1];
+
+            document.getElementById('top-student-detail').textContent = top ? `${top.name} (${top.avg.toFixed(1)}%)` : 'N/A';
+            document.getElementById('bottom-student-detail').textContent = bottom ? `${bottom.name} (${bottom.avg.toFixed(1)}%)` : 'N/A';
+            document.getElementById('class-max').textContent = `${classMax.toFixed(1)}% Highest Avg`;
+            document.getElementById('class-grade').textContent = `${classAvg.toFixed(1)}% Class Avg`;
+        }
+
+        // Set All Max Scores
+        function setAllMax() {
+            const maxVal = parseInt(document.getElementById('max-score').value);
+            document.querySelectorAll('.sub-score').forEach(input => {
+                input.max = maxVal;
+                if (!input.value) input.value = 0;
+            });
+            alert(`Max score set to ${maxVal} for all subjects.`);
+        }
+
+        // Save All Scores
+        function saveAllScores() {
+            studentsData.forEach(s => {
+                const id = s.admissionNumber;
+                const subs = {};
+                subjects.forEach(sub => {
+                    const input = document.querySelector(`[data-student="${id}"][data-sub="${sub}"]`);
+                    if (input) {
+                        subs[sub] = { score: parseInt(input.value), max: parseInt(input.max) };
+                    }
+                });
+                db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}/${id}`).set(subs);
+            });
+            alert('All scores saved to database!');
+            loadInitialData(); // Refresh global data
+        }
+
+        // Export Functions (Stub for professional touch)
+        function exportCSV() { alert('CSV export initiated. (Implement download logic)'); }
+        function exportExcel() { alert('Excel export. (Use SheetJS)'); }
+        function printScoresheet() { window.print(); }
+
+        // Generate PDF Report Cards
         function generateReportCards() {
-            generateReport();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            doc.setFontSize(16);
+            doc.text(`Class ${currentClass} Report - ${currentMonth}/${currentYear}`, 20, 20);
+            const tableData = [];
+            studentsData.forEach(s => {
+                const avgEl = document.getElementById(`avg-${s.admissionNumber}`);
+                const posEl = document.getElementById(`pos-${s.admissionNumber}`);
+                const gradeEl = document.getElementById(`grade-${s.admissionNumber}`);
+                tableData.push([
+                    s.admissionNumber,
+                    `${s.firstName} ${s.lastName}`,
+                    avgEl ? avgEl.textContent : '0%',
+                    posEl ? posEl.textContent : '-',
+                    gradeEl ? gradeEl.textContent : '-',
+                    document.getElementById(`balance for ${s.admissionNumber}`) ? `TSh ${s.balance}` : 'TSh 0'
+                ]);
+            });
+            doc.autoTable({
+                head: [['Adm', 'Name', '% Avg', 'Position', 'Grade', 'Balance']],
+                body: tableData,
+                startY: 30,
+                theme: 'grid'
+            });
+            doc.save(`report_${currentClass}_${currentMonth}.pdf`);
         }
 
-        // Load SchoolERP Data
+        // Send Email/SMS (Stub)
+        function sendEmailSMS() { alert('Links generated for parents. (Integrate email/SMS API)'); }
+
+        // School ERP Load
         function loadSchoolERPData() {
-            if (!currentClass) return;
-            // Attendance List
-            db.ref(`attendance/${currentClass}/2025-09`).once('value').then(snap => {
-                const attData = snap.val();
-                let listHtml = '';
-                if (attData) {
-                    Object.entries(attData).forEach(([date, days]) => {
-                        Object.entries(days).forEach(([id, record]) => {
-                            listHtml += `<li>${record.snap.name}: ${record.daily} on ${date}</li>`;
-                        });
+            // Attendance List (Recent 5 days)
+            let attListHtml = '';
+            const recentDates = Object.keys(attendanceData).slice(-5).reverse();
+            recentDates.forEach(date => {
+                const dayData = attendanceData[date];
+                if (dayData) {
+                    Object.values(dayData).forEach(rec => {
+                        attListHtml += `<li class="flex justify-between"><span>${rec.snap.name}: ${rec.daily}</span><small>${date}</small></li>`;
                     });
                 }
-                document.getElementById('attendance-list').innerHTML = listHtml || 'No records.';
+            });
+            document.getElementById('attendance-list').innerHTML = attListHtml || '<p>No recent attendance.</p>';
+
+            // Discipline (Assume path exists or create)
+            db.ref(`discipline/${currentClass}`).once('value').then((snap) => {
+                const disc = snap.val() || {};
+                let discHtml = '';
+                Object.values(disc).slice(-10).reverse().forEach(rec => {
+                    discHtml += `<li class="flex justify-between"><span>${rec.student}: ${rec.action}</span><small>${rec.date}</small> - ${rec.comment}</li>`;
+                });
+                document.getElementById('discipline-list').innerHTML = discHtml || '<p>No discipline records.</p>';
             });
 
-            // Discipline (Assume path: discipline/{class})
-            db.ref(`discipline/${currentClass}`).once('value').then(snap => {
-                const discData = snap.val();
-                let listHtml = '';
-                if (discData) {
-                    Object.values(discData).forEach(record => {
-                        listHtml += `<li>${record.student}: ${record.action} - ${record.comment}</li>`;
-                    });
-                }
-                document.getElementById('discipline-list').innerHTML = listHtml || 'No records.';
+            // Students Table
+            let stuHtml = '';
+            studentsData.forEach(s => {
+                stuHtml += `
+                    <tr>
+                        <td>${s.admissionNumber}</td>
+                        <td>${s.firstName} ${s.lastName}</td>
+                        <td>${s.stream}</td>
+                        <td class="text-red-500">TSh ${s.balance}</td>
+                        <td><button class="btn-secondary text-xs" onclick="viewStudent('${s.admissionNumber}')">View</button></td>
+                    </tr>
+                `;
             });
-
-            // Students List
-            db.ref('students').once('value').then(snap => {
-                const students = snap.val() ? Object.values(snap.val()).filter(s => s.classLevel === currentClass) : [];
-                let listHtml = students.map(s => `<li>${s.firstName} ${s.lastName} (${s.admissionNumber})</li>`).join('');
-                document.getElementById('students-list').innerHTML = listHtml || 'No students.';
-            });
+            document.getElementById('students-table-body').innerHTML = stuHtml || '<tr><td colspan="5" class="text-center">No students.</td></tr>';
         }
 
-        // Attendance Form Submit
-        document.getElementById('mark-attendance-form').addEventListener('submit', e => {
+        function viewStudent(id) {
+            alert(`Viewing details for student ${id}. (Modal implementation)`);
+        }
+
+        // Form Submissions
+        document.getElementById('mark-attendance-form').addEventListener('submit', (e) => {
             e.preventDefault();
-            const name = document.getElementById('att-student-name').value;
+            const name = document.getElementById('att-student-name').value.trim();
             const date = document.getElementById('att-date').value;
             const mark = document.getElementById('att-mark').value;
-            db.ref('students').orderByChild('firstName').equalTo(name.split(' ')[0]).once('value').then(snap => {
-                const student = snap.val() ? Object.values(snap.val()).find(s => s.classLevel === currentClass) : null;
-                if (student) {
-                    db.ref(`attendance/${currentClass}/2025-09/${date}/${student.admissionNumber}`).set({
-                        am: mark, pm: mark, daily: mark,
-                        snap: { admissionNo: student.admissionNumber, name: `${student.firstName} ${student.lastName}`, class: currentClass, feeDue: student.feePerYear, feePaid: student.paidAmount, balance: student.balance }
-                    }).then(() => {
-                        alert('Attendance marked!');
-                        loadSchoolERPData(); // Refresh
-                        loadDashboardData(); // Reflect in dashboard
-                    });
-                } else {
-                    alert('Student not found in your class.');
+            const student = studentsData.find(s => `${s.firstName} ${s.lastName}`.toLowerCase().includes(name.toLowerCase()));
+            if (!student) {
+                alert('Student not found in your class.');
+                return;
+            }
+            const path = `attendance/${currentClass}/${currentYear}-${currentMonth}/${date}/${student.admissionNumber}`;
+            db.ref(path).set({
+                am: mark, pm: mark, daily: mark,
+                date,
+                snap: {
+                    admissionNo: student.admissionNumber,
+                    name: `${student.firstName} ${student.lastName}`,
+                    class: currentClass,
+                    feeDue: student.feePerYear,
+                    feePaid: student.paidAmount,
+                    balance: student.balance
                 }
-            });
-        });
-
-        // Discipline Form (Sample)
-        document.querySelector('#schoolerp-section form').addEventListener('submit', e => {
-            e.preventDefault();
-            const student = document.getElementById('disc-student').value;
-            const action = document.getElementById('disc-action').value;
-            const comment = document.getElementById('disc-comment').value;
-            db.ref(`discipline/${currentClass}/${Date.now()}`).set({ student, action, comment, date: new Date().toISOString() }).then(() => {
-                alert('Discipline recorded!');
+            }).then(() => {
+                alert('Attendance marked successfully!');
                 loadSchoolERPData();
-            });
+                loadInitialData(); // Refresh globals for dashboard reflection
+                document.getElementById('att-student-name').value = '';
+            }).catch(err => alert('Error: ' + err.message));
         });
 
-        // Stream Change
-        document.getElementById('stream-select').addEventListener('change', e => {
+        document.getElementById('discipline-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const student = document.getElementById('disc-student').value.trim();
+            const action = document.getElementById('disc-action').value;
+            const comment = document.getElementById('disc-comment').value.trim();
+            if (!student || !comment) {
+                alert('Please fill student and comment.');
+                return;
+            }
+            const entry = {
+                student,
+                action,
+                comment,
+                date: new Date().toISOString().split('T')[0],
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            };
+            db.ref(`discipline/${currentClass}/${Date.now()}`).set(entry).then(() => {
+                alert('Discipline entry recorded.');
+                document.getElementById('disc-student').value = '';
+                document.getElementById('disc-comment').value = '';
+                loadSchoolERPData();
+            }).catch(err => alert('Error: ' + err.message));
+        });
+
+        // Event Listeners for Filters
+        document.getElementById('stream-select-acad').addEventListener('change', (e) => {
             currentStream = e.target.value;
-            loadDashboardData();
-            if (document.getElementById('academic-section').classList.contains('active')) loadAcademicData();
+            loadAcademicData();
+        });
+        document.getElementById('month-select').addEventListener('change', (e) => {
+            currentMonth = e.target.value;
+            loadAcademicData();
+        });
+        document.getElementById('exam-type').addEventListener('change', (e) => {
+            currentExamType = e.target.value;
+            loadAcademicData();
+        });
+        document.getElementById('academic-year').addEventListener('change', (e) => {
+            currentYear = parseInt(e.target.value);
+            loadAcademicData();
         });
 
-        // Load Attendance Analytics
+        // Analytics Refresh
         function loadAttendanceAnalytics() {
-            // Filter by date range, similar to above
-            loadDashboardData(); // Reuse for now
+            const start = document.getElementById('start-date').value;
+            const end = document.getElementById('end-date').value;
+            if (start && end) {
+                loadDashboardData(start, end);
+            }
         }
 
         // Logout
         function logout() {
-            auth.signOut().then(() => window.location.href = 'index.html');
+            auth.signOut().then(() => {
+                window.location.href = 'index.html';
+            });
         }
 
-        // Discipline Click Restriction (If any admission-like, but hidden)
-        // Already handled by not including admissions in this file
-
-        // Initial Load
-        showSection('dashboard');
+        // Initial Setup
+        document.addEventListener('DOMContentLoaded', () => {
+            showSection('dashboard');
+        });
     </script>
 </body>
 </html>

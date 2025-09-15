@@ -1,195 +1,644 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>SoMAp — Teacher Dashboard</title>
+
+  <!-- Tailwind (for quick styling) -->
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+
+  <!-- Firebase compat SDKs (used across your project) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+
+  <style>
+    /* small extra polish */
+    html,body { height:100%; }
+    .sidebar-scroll { max-height: calc(100vh - 160px); overflow:auto; }
+    .card { border-radius: 14px; }
+    .muted { color: #6b7280; }
+    .currency { font-weight:700; letter-spacing:0.4px; }
+  </style>
 </head>
-<body class="bg-gray-100 flex h-screen overflow-hidden">
-  
-  <!-- Sidebar -->
-  <aside class="w-64 bg-blue-900 text-white flex flex-col">
-    <div class="p-6 text-2xl font-bold tracking-wide">SoMAp Teacher</div>
-    <nav class="flex-1">
-      <ul>
-        <li>
-          <button onclick="showDashboard()" class="w-full flex items-center p-4 hover:bg-blue-700">
-            <span class="material-icons mr-2">dashboard</span>
-            Dashboard
-          </button>
-        </li>
-        <li>
-          <button onclick="loadAcademic()" class="w-full flex items-center p-4 hover:bg-blue-700">
-            <span class="material-icons mr-2">school</span>
-            Academic
-          </button>
-        </li>
-        <li>
-          <button onclick="logout()" class="w-full flex items-center p-4 hover:bg-blue-700">
-            <span class="material-icons mr-2">logout</span>
-            Logout
-          </button>
-        </li>
-      </ul>
-    </nav>
-    <footer class="p-4 text-sm bg-blue-800 text-center">
-      &copy; 2025 SoMAp
-    </footer>
-  </aside>
+<body class="bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 min-h-screen text-gray-900">
 
-  <!-- Main Content -->
-  <main id="mainContent" class="flex-1 overflow-y-auto p-6">
-    <!-- Dashboard Overview -->
-    <section id="dashboardSection">
-      <h1 class="text-3xl font-bold text-gray-800 mb-6">Teacher Dashboard</h1>
-      
-      <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-gray-600 text-sm">Total Students</h2>
-          <p id="totalStudents" class="text-2xl font-bold text-blue-800">0</p>
-        </div>
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-gray-600 text-sm">Avg Attendance</h2>
-          <p id="avgAttendance" class="text-2xl font-bold text-green-600">0%</p>
-        </div>
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-gray-600 text-sm">Total Fee Collected</h2>
-          <p id="feeCollected" class="text-2xl font-bold text-purple-600">TSh 0</p>
-        </div>
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-gray-600 text-sm">Outstanding Balance</h2>
-          <p id="feeOutstanding" class="text-2xl font-bold text-red-600">TSh 0</p>
+  <div class="flex h-screen">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="w-20 lg:w-64 bg-gradient-to-b from-orange-500 to-yellow-400 text-white p-3 flex flex-col">
+      <div class="flex items-center justify-center lg:justify-start gap-2 mb-4">
+        <img src="images/somap-logo.png.jpg" alt="SoMAp" class="h-10 w-10 rounded-full object-cover">
+        <div class="hidden lg:block">
+          <div class="text-lg font-bold">SoMAp</div>
+          <div class="text-xs">Teacher</div>
         </div>
       </div>
 
-      <!-- Charts -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-lg font-semibold mb-4">Class Performance</h2>
-          <canvas id="performanceChart"></canvas>
-        </div>
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-lg font-semibold mb-4">Attendance Trend</h2>
-          <canvas id="attendanceChart"></canvas>
-        </div>
-      </div>
+      <nav class="flex-1 sidebar-scroll">
+        <button id="btn-dashboard" class="w-full flex items-center gap-3 p-2 rounded hover:bg-orange-600 mb-1">
+          <i class="fas fa-th-large w-6 text-center"></i>
+          <span class="hidden lg:block">Dashboard</span>
+        </button>
 
-      <!-- Top & Bottom Students -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-lg font-semibold mb-4">Top Student</h2>
-          <p id="topStudent" class="text-gray-700 font-medium">No data</p>
-        </div>
-        <div class="bg-white p-6 rounded-2xl shadow">
-          <h2 class="text-lg font-semibold mb-4">Bottom Student</h2>
-          <p id="bottomStudent" class="text-gray-700 font-medium">No data</p>
-        </div>
-      </div>
-    </section>
+        <button id="btn-academic" class="w-full flex items-center gap-3 p-2 rounded hover:bg-orange-600 mb-1">
+          <i class="fas fa-school w-6 text-center"></i>
+          <span class="hidden lg:block">Academic</span>
+        </button>
 
-    <!-- Academic Section -->
-    <section id="academicSection" class="hidden">
-      <iframe src="academic.html" class="w-full h-[80vh] rounded-2xl shadow"></iframe>
-    </section>
-  </main>
+        <button id="btn-erp" class="w-full flex items-center gap-3 p-2 rounded hover:bg-orange-600 mb-1">
+          <i class="fas fa-chalkboard-teacher w-6 text-center"></i>
+          <span class="hidden lg:block">School ERP</span>
+        </button>
+
+        <div class="border-t border-white/20 my-3"></div>
+
+        <div id="teacher-info" class="p-2 text-xs muted hidden lg:block">
+          <div>Signed in as:</div>
+          <div id="user-name" class="font-semibold mt-1">—</div>
+          <div id="user-email" class="text-xs mt-1">—</div>
+          <div id="user-class" class="mt-1 text-sm font-medium">Class: —</div>
+        </div>
+      </nav>
+
+      <div class="mt-4">
+        <button id="btn-logout" class="w-full bg-white/20 hover:bg-white/30 p-2 rounded text-white flex items-center justify-center gap-2">
+          <i class="fas fa-sign-out-alt"></i><span class="hidden lg:block">Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 overflow-y-auto p-6">
+      <!-- Header -->
+      <header class="mb-6 flex items-center justify-between">
+        <div>
+          <h1 id="page-title" class="text-white text-2xl font-bold">Teacher Dashboard</h1>
+          <p id="page-sub" class="text-white/80 text-sm mt-1">Live class view & academic tools</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <div id="status" class="text-white/90 text-sm">Loading...</div>
+        </div>
+      </header>
+
+      <!-- Dashboard overview -->
+      <section id="dashboard-view" class="space-y-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="card p-4 bg-white/90">
+            <div class="text-sm muted">Total Students</div>
+            <div id="total-students" class="text-2xl font-bold mt-2">0</div>
+            <div class="text-xs muted mt-1">Students in your class</div>
+          </div>
+
+          <div class="card p-4 bg-white/90">
+            <div class="text-sm muted">Avg % Present (class)</div>
+            <div id="avg-present" class="text-2xl font-bold mt-2">0%</div>
+            <div class="text-xs muted mt-1">Attendance last 30 days</div>
+          </div>
+
+          <div class="card p-4 bg-white/90">
+            <div class="text-sm muted">Fee Collected</div>
+            <div id="fee-collected" class="text-2xl currency mt-2">TSh 0</div>
+            <div class="text-xs muted mt-1">From your class</div>
+          </div>
+
+          <div class="card p-4 bg-white/90">
+            <div class="text-sm muted">Outstanding (Balance)</div>
+            <div id="fee-outstanding" class="text-2xl currency mt-2">TSh 0</div>
+            <div class="text-xs muted mt-1">Your class</div>
+          </div>
+        </div>
+
+        <!-- Charts and lists -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-2 card p-4 bg-white/95">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold">Class Performance — last exam</h3>
+              <div class="text-xs muted">Auto averages & top/bottom</div>
+            </div>
+            <canvas id="performance-chart" style="height:280px"></canvas>
+
+            <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div class="p-3 bg-gray-50 rounded">
+                <div class="muted text-xs">Top Student</div>
+                <div id="top-student" class="font-bold">—</div>
+              </div>
+              <div class="p-3 bg-gray-50 rounded">
+                <div class="muted text-xs">Bottom Student</div>
+                <div id="bottom-student" class="font-bold">—</div>
+              </div>
+              <div class="p-3 bg-gray-50 rounded">
+                <div class="muted text-xs">Class Avg</div>
+                <div id="class-avg" class="font-bold">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-4 bg-white/95">
+            <h3 class="font-semibold mb-3">Recent Activity</h3>
+            <ul id="recent-activity" class="space-y-2 text-sm muted">
+              <li>No activity yet.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Academic iframe / container -->
+      <section id="academic-panel" class="hidden mt-6">
+        <div class="card p-3 bg-white/95">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold">Academic Module (embedded)</h3>
+            <div class="text-xs muted">You are viewing only your class</div>
+          </div>
+          <!-- We'll embed academic.html passing class in query -->
+          <iframe id="academic-iframe" src="" class="w-full h-[70vh] border rounded"></iframe>
+        </div>
+      </section>
+
+      <!-- ERP container where we load schoolerp.html but stripped for teachers -->
+      <section id="erp-panel" class="hidden mt-6">
+        <div class="card p-3 bg-white/95">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold">School ERP (admissions hidden)</h3>
+            <div class="text-xs muted">Admissions area is restricted for teachers. Contact admin to create admissions.</div>
+          </div>
+
+          <div id="erp-container" class="prose max-w-full"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Font Awesome (icons) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js"></script>
 
   <script>
-    // Firebase Config
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_AUTH_DOMAIN",
-      databaseURL: "YOUR_DATABASE_URL",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_STORAGE_BUCKET",
-      messagingSenderId: "YOUR_MSG_ID",
-      appId: "YOUR_APP_ID"
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
+  // -----------------------
+  // Firebase config (your real values you provided earlier)
+  // -----------------------
+  const firebaseConfig = {
+    apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+    authDomain: "somaptestt.firebaseapp.com",
+    databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+    projectId: "somaptestt",
+    storageBucket: "somaptestt.appspot.com",
+    messagingSenderId: "105526245138",
+    appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+  };
 
-    let teacherClass = localStorage.getItem("teacherClass") || "Class 7";
+  // initialize firebase
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.database();
 
-    // Sidebar Navigation
-    function showDashboard() {
-      document.getElementById("dashboardSection").classList.remove("hidden");
-      document.getElementById("academicSection").classList.add("hidden");
+  // UI refs
+  const btnDashboard = document.getElementById('btn-dashboard');
+  const btnAcademic = document.getElementById('btn-academic');
+  const btnERP = document.getElementById('btn-erp');
+  const btnLogout = document.getElementById('btn-logout');
+
+  const dashboardView = document.getElementById('dashboard-view');
+  const academicPanel = document.getElementById('academic-panel');
+  const erpPanel = document.getElementById('erp-panel');
+
+  const academicIframe = document.getElementById('academic-iframe');
+  const erpContainer = document.getElementById('erp-container');
+
+  // cards
+  const totalStudentsEl = document.getElementById('total-students');
+  const avgPresentEl = document.getElementById('avg-present');
+  const feeCollectedEl = document.getElementById('fee-collected');
+  const feeOutstandingEl = document.getElementById('fee-outstanding');
+
+  const topStudentEl = document.getElementById('top-student');
+  const bottomStudentEl = document.getElementById('bottom-student');
+  const classAvgEl = document.getElementById('class-avg');
+  const recentActivityEl = document.getElementById('recent-activity');
+
+  const pageStatus = document.getElementById('status');
+  const userNameEl = document.getElementById('user-name');
+  const userEmailEl = document.getElementById('user-email');
+  const userClassEl = document.getElementById('user-class');
+
+  // small utilities
+  function emailToKey(email) {
+    return email.replace(/\./g, '_').replace(/@/g, '_'); // matches your users node keys like ssclass42023_gmail_com
+  }
+
+  function formatCurrency(n) {
+    if (n == null) return "TSh 0";
+    return "TSh " + Number(n).toLocaleString();
+  }
+
+  // navigation
+  btnDashboard.addEventListener('click', () => {
+    dashboardView.classList.remove('hidden');
+    academicPanel.classList.add('hidden');
+    erpPanel.classList.add('hidden');
+  });
+  btnAcademic.addEventListener('click', () => {
+    dashboardView.classList.add('hidden');
+    academicPanel.classList.remove('hidden');
+    erpPanel.classList.add('hidden');
+  });
+  btnERP.addEventListener('click', () => {
+    dashboardView.classList.add('hidden');
+    academicPanel.classList.add('hidden');
+    erpPanel.classList.remove('hidden');
+    loadERPForTeacher(); // load on demand
+  });
+  btnLogout.addEventListener('click', () => {
+    auth.signOut().then(() => location.href = 'index.html');
+  });
+
+  // Charts globals
+  let performanceChart = null;
+
+  // Auth & role check
+  auth.onAuthStateChanged(async (user) => {
+    if (!user) {
+      // not signed in -> redirect to index
+      window.location.href = 'index.html';
+      return;
     }
-    function loadAcademic() {
-      document.getElementById("dashboardSection").classList.add("hidden");
-      document.getElementById("academicSection").classList.remove("hidden");
+
+    pageStatus.textContent = 'Checking role...';
+    const key = emailToKey(user.email.toLowerCase());
+    try {
+      const snap = await db.ref('users/' + key).once('value');
+      const profile = snap.val();
+      if (!profile) {
+        alert('No user profile found for ' + user.email + '. Contact admin.');
+        await auth.signOut();
+        window.location.href = 'index.html';
+        return;
+      }
+
+      if (profile.role !== 'teacher') {
+        // not a teacher — block
+        alert('You are not authorized to access teacher dashboard. Redirecting...');
+        await auth.signOut();
+        window.location.href = 'index.html';
+        return;
+      }
+
+      // OK it is a teacher
+      const teacherClass = profile.class || profile['class'] || profile.className || 'Class 1';
+      window._teacherClass = teacherClass; // for debugging
+      userNameEl.textContent = (user.displayName || profile.name || 'Teacher').toUpperCase();
+      userEmailEl.textContent = user.email;
+      userClassEl.textContent = 'Class: ' + teacherClass;
+      pageStatus.textContent = `Signed-in as ${user.email} • Class: ${teacherClass}`;
+
+      // Populate initial dashboard
+      await loadTeacherDashboard(teacherClass);
+
+      // prepare academic iframe with query param (academic.html should read it if implemented)
+      const acadSrc = `academic.html?class=${encodeURIComponent(teacherClass)}`;
+      academicIframe.src = acadSrc;
+
+      // show dashboard by default
+      btnDashboard.click();
+
+      // Listen for live updates (students/payments/attendance)
+      db.ref('students').on('value', () => loadTeacherDashboard(teacherClass));
+
+    } catch (err) {
+      console.error(err);
+      Swal && Swal.fire ? Swal.fire('Error', err.message) : alert('Error: ' + err.message);
     }
-    function logout() {
-      firebase.auth().signOut().then(() => {
-        window.location.href = "index.html";
+  });
+
+  // Load teacher dashboard aggregated stats (class-level)
+  async function loadTeacherDashboard(className) {
+    pageStatus.textContent = 'Loading class data...';
+    const studentsSnap = await db.ref('students').once('value');
+    const studentsRaw = studentsSnap.val() || {};
+    // filter students by classLevel equal to className (your DB uses classLevel fields)
+    const students = Object.values(studentsRaw).filter(s => (s.classLevel || s.class || s['class']) === className);
+
+    const totalStudents = students.length;
+    totalStudentsEl.textContent = String(totalStudents);
+
+    // attendance aggregation — we need to traverse attendance structure to count presents for that class
+    // Your attendance structure stores nested per-class per-month per-day entries; we'll scan snapshot root quickly:
+    const attendanceSnap = await db.ref('attendance/' + className).once('value');
+    const attendanceData = attendanceSnap.val() || {};
+
+    // Flatten attendance entries and compute present counts
+    let presentCount = 0;
+    let totalAttendanceRecords = 0;
+    // attendanceData may be months -> dates -> entries
+    Object.values(attendanceData).forEach(monthObj => {
+      Object.values(monthObj || {}).forEach(dateObj => {
+        Object.values(dateObj || {}).forEach(entry => {
+          // entry.daily could be 'P' or 'A' or 'PA' etc. we treat 'P' or 'PS' that includes 'P' as present
+          const daily = entry.daily || '';
+          if (typeof daily === 'string') {
+            if (daily.includes('P')) presentCount++;
+            totalAttendanceRecords++;
+          } else if (daily === true) { presentCount++; totalAttendanceRecords++; } // fallback
+        });
       });
-    }
+    });
 
-    // Load Dashboard Data
-    function loadDashboardData() {
-      db.ref("students").orderByChild("class").equalTo(teacherClass).on("value", snapshot => {
-        let students = snapshot.val() || {};
-        let totalStudents = Object.keys(students).length;
-        document.getElementById("totalStudents").textContent = totalStudents;
+    const avgPresentPercent = totalAttendanceRecords ? ((presentCount / totalAttendanceRecords) * 100) : 0;
+    avgPresentEl.textContent = avgPresentPercent.toFixed(1) + '%';
 
-        let totalAttendance = 0;
-        let totalPayments = 0;
-        let totalDue = 0;
-        let scores = [];
+    // Fees: compute paid amounts and outstanding for this class from the students list (students have payments object)
+    let collected = 0;
+    let required = 0;
+    const recentActivities = [];
 
-        Object.values(students).forEach(stu => {
-          if (stu.attendance) {
-            let daysPresent = Object.values(stu.attendance).filter(a => a === "Present").length;
-            let daysTotal = Object.keys(stu.attendance).length;
-            totalAttendance += (daysPresent / daysTotal) * 100;
-          }
-          if (stu.fee) {
-            totalPayments += stu.fee.paid || 0;
-            totalDue += stu.fee.total || 0;
-          }
-          if (stu.scores) {
-            let avgScore = Object.values(stu.scores).reduce((a,b)=>a+b,0) / Object.keys(stu.scores).length;
-            scores.push({ name: stu.name, score: avgScore });
+    students.forEach(s => {
+      // payments consolidation: your students objects have .payments child (object of payment entries)
+      if (s.payments) {
+        Object.values(s.payments).forEach(p => {
+          const amt = Number(p.amount || 0);
+          collected += amt;
+          // record recent
+          recentActivities.push({
+            when: p.timestamp || p.ts || Date.now(),
+            text: `${s.firstName || s.firstName || ''} ${s.lastName || ''} paid TSh ${amt} via ${p.method || p.method || 'Unknown'}`
+          });
+        });
+      } else if (s.paidAmount) {
+        collected += Number(s.paidAmount || 0);
+      }
+      // required fee per year/term
+      required += Number(s.feePerYear || s.fee || s.feeTotal || 0);
+    });
+
+    const outstanding = required - collected;
+
+    feeCollectedEl.textContent = formatCurrency(collected);
+    feeOutstandingEl.textContent = formatCurrency(outstanding);
+
+    // Recent activity – sort by timestamp descending (limit 10)
+    recentActivities.sort((a, b) => (b.when || 0) - (a.when || 0));
+    recentActivityEl.innerHTML = recentActivities.slice(0, 8).map(r => `<li>${new Date(r.when).toLocaleString()}: ${r.text}</li>`).join('') || '<li class="muted">No recent payments.</li>';
+
+    // Performance: get scores from /scores or per student snapshots (your DB has scores path)
+    // We'll try scores under /scores/2025/<class>/monthly/<month>
+    let scoresList = [];
+    try {
+      const scoresSnap = await db.ref('scores/2025/' + className + '/monthly').once('value');
+      const monthly = scoresSnap.val() || {};
+      // find latest month (highest key)
+      const months = Object.keys(monthly).sort();
+      const lastMonthKey = months.length ? months[months.length - 1] : null;
+      if (lastMonthKey) {
+        const lastMonthScores = monthly[lastMonthKey] || {};
+        // lastMonthScores has objects keyed by admissionNo. We'll compute avg per student
+        Object.entries(lastMonthScores).forEach(([adm, subjObj]) => {
+          const subjects = Object.values(subjObj || {});
+          if (!subjects.length) return;
+          let totalPercent = 0;
+          let count = 0;
+          Object.values(subjObj).forEach(sub => {
+            const score = Number(sub.score || 0);
+            const max = Number(sub.max || 100);
+            if (max > 0) { totalPercent += (score / max) * 100; count++; }
+          });
+          if (count) {
+            const avg = totalPercent / count;
+            // find student name from students list
+            const student = students.find(s => s.admissionNumber === adm || s.admissionNumber === adm || s.admissionNumber === (adm || '').toString());
+            const name = student ? ((student.firstName || '') + ' ' + (student.lastName || '')) : adm;
+            scoresList.push({ name, avg });
           }
         });
+      }
+    } catch (err) {
+      console.warn('Scores load issue', err);
+    }
 
-        document.getElementById("avgAttendance").textContent = totalStudents ? (totalAttendance/totalStudents).toFixed(1)+"%" : "0%";
-        document.getElementById("feeCollected").textContent = "TSh " + totalPayments.toLocaleString();
-        document.getElementById("feeOutstanding").textContent = "TSh " + (totalDue - totalPayments).toLocaleString();
-
-        // Top & Bottom Student
-        scores.sort((a,b)=>b.score-a.score);
-        if (scores.length) {
-          document.getElementById("topStudent").textContent = scores[0].name + " (" + scores[0].score.toFixed(1) + "%)";
-          document.getElementById("bottomStudent").textContent = scores[scores.length-1].name + " (" + scores[scores.length-1].score.toFixed(1) + "%)";
+    // fallback: if no scores in scoresList, attempt to compute from per-student score fields
+    if (!scoresList.length) {
+      students.forEach(s => {
+        if (s.scores) {
+          const subs = Object.values(s.scores);
+          if (!subs.length) return;
+          const avg = subs.reduce((a,b)=>Number(a)+Number(b),0)/subs.length;
+          scoresList.push({ name: (s.firstName || '') + ' ' + (s.lastName || ''), avg });
         }
+      });
+    }
 
-        // Charts
-        let labels = scores.map(s=>s.name);
-        let dataScores = scores.map(s=>s.score);
-        new Chart(document.getElementById("performanceChart"), {
-          type: "bar",
-          data: {
-            labels: labels,
-            datasets: [{ label: "Scores", data: dataScores, backgroundColor: "#2563eb" }]
+    // compute top/bottom/class avg
+    if (scoresList.length) {
+      scoresList.sort((a,b)=>b.avg - a.avg);
+      topStudentEl.textContent = `${scoresList[0].name} (${scoresList[0].avg.toFixed(1)}%)`;
+      bottomStudentEl.textContent = `${scoresList[scoresList.length-1].name} (${scoresList[scoresList.length-1].avg.toFixed(1)}%)`;
+      const avg = scoresList.reduce((s, it) => s + it.avg, 0) / scoresList.length;
+      classAvgEl.textContent = avg.toFixed(1) + '%';
+    } else {
+      topStudentEl.textContent = '—';
+      bottomStudentEl.textContent = '—';
+      classAvgEl.textContent = '—';
+    }
+
+    // render chart
+    renderPerformanceChart(scoresList);
+
+    pageStatus.textContent = `Class ${className} • ${totalStudents} students • Data updated ${new Date().toLocaleTimeString()}`;
+  }
+
+  function renderPerformanceChart(scoresList) {
+    const ctx = document.getElementById('performance-chart').getContext('2d');
+    // destroy previous
+    if (performanceChart) performanceChart.destroy();
+
+    const labels = scoresList.map(s => s.name);
+    const data = scoresList.map(s => Number(s.avg.toFixed(1)));
+
+    performanceChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Avg %',
+          data,
+          backgroundColor: labels.map((_,i)=>i%2? 'rgba(59,130,246,0.8)':'rgba(99,102,241,0.8)'),
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display:false } },
+        scales: {
+          y: { beginAtZero:true, max:100, ticks: { callback: v => v + '%' } }
+        }
+      }
+    });
+  }
+
+  // -------------------------
+  // Load schoolerp.html but remove/hide Admissions area and attendance forms for teachers
+  // -------------------------
+  let erpLoaded = false;
+  async function loadERPForTeacher() {
+    if (erpLoaded) return; // load once
+    erpLoaded = true;
+    const className = window._teacherClass || 'Class 1';
+
+    try {
+      pageStatus.textContent = 'Loading ERP module...';
+      // fetch the raw HTML of schoolerp.html from same origin
+      const res = await fetch('schoolerp.html');
+      if (!res.ok) {
+        erpContainer.innerHTML = `<div class="p-4 text-sm text-red-600">Failed to load schoolerp.html: ${res.status}</div>`;
+        return;
+      }
+      let html = await res.text();
+
+      // 1) Remove admissions section by searching for common headings/blocks
+      // We'll try multiple approaches: remove blocks between headings "Admissions" and next section,
+      // and also any element containing "Create New Admission" text.
+      // This is a best-effort sanitize; if schoolerp.html changes structure we can adapt.
+
+      // Remove large block between "<!-- Admin Tools -->" or headings containing 'Admissions'
+      html = html.replace(/<section[^>]*id=["']?admin-tools["']?[\s\S]*?<\/section>/gi, '');
+      html = html.replace(/<section[^>]*>[\s\S]*?Admissions[\s\S]*?<\/section>/gi, function(m){
+        // if admission block detected -> remove
+        return '';
+      });
+
+      // Remove any small fragments that mention "Create New Admission" or "Quick Admission"
+      html = html.replace(/[\s\S]*?(Create New Admission|Quick Admission|New Applications|Admission number auto-fills)[\s\S]*?/gi, function(m){
+        // too broad might wipe all; instead remove specifically tags that contain these words
+        return m;
+      });
+
+      // Safer: remove elements containing "Create New Admission" via DOM parsing below.
+
+      // create a DOM parser of the fetched html
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      // remove nodes which contain the key phrases (admission related)
+      const admissionKeywords = ['Create New Admission','Quick Admission','New Applications','Admission number auto-fills','Admissions','Transfer Requests'];
+      admissionKeywords.forEach(k => {
+        doc.querySelectorAll("*:contains('" + k + "')"); // NOT supported
+      });
+
+      // Because :contains not supported, we'll search all elements and remove parent sections
+      const allElems = doc.querySelectorAll('section, div, article, aside');
+      allElems.forEach(el => {
+        const text = (el.textContent || '').trim();
+        // if matches a keyword and it's a sizeable block remove it
+        for (const kw of admissionKeywords) {
+          if (text.includes(kw) && (text.length < 2000)) {
+            // remove the nearest section or the element itself
+            let toRemove = el;
+            // if element is small, escalate to parent section
+            if (toRemove.tagName.toLowerCase() !== 'section') {
+              const sec = toRemove.closest('section') || toRemove.closest('div');
+              if (sec) toRemove = sec;
+            }
+            toRemove.remove();
+            break;
           }
-        });
+        }
+      });
 
-        new Chart(document.getElementById("attendanceChart"), {
-          type: "line",
-          data: {
-            labels: labels,
-            datasets: [{ label: "Attendance %", data: dataScores.map(x=>Math.min(100,x+10)), borderColor: "#16a34a", fill: false }]
+      // Additionally remove any forms that have "admission" in name/id/class
+      doc.querySelectorAll('form').forEach(f => {
+        const x = (f.id || f.name || f.className || '').toLowerCase();
+        if (x.includes('admis') || x.includes('admission')) f.remove();
+      });
+
+      // Remove any element with button text "Create New Admission" or similar
+      doc.querySelectorAll('button, a').forEach(btn => {
+        if ((btn.textContent || '').toLowerCase().includes('create new admission') || (btn.textContent || '').toLowerCase().includes('quick admission')) {
+          btn.remove();
+        }
+      });
+
+      // Remove attendance input forms if present (teacher should not have extra form)
+      doc.querySelectorAll('form, .attendance, #attendance-form, .mark-attendance').forEach(el => {
+        // only remove if it looks like a manual fill block (has inputs)
+        if (el.querySelector('input, select, textarea')) el.remove();
+      });
+
+      // Insert a small message where admissions were removed
+      const notice = doc.createElement('div');
+      notice.className = 'p-4 bg-yellow-50 text-yellow-800 rounded';
+      notice.innerHTML = '<strong>Admissions area restricted:</strong> Teachers cannot create admissions here. Contact admin@yourschool (or use School ERP as admin).';
+      // append to top of ERP content
+      const bodyContainer = doc.body || doc;
+      bodyContainer.insertBefore(notice, bodyContainer.firstChild);
+
+      // We may want to restrict other areas as well; hide links/buttons with admission keywords
+      doc.querySelectorAll('a, button').forEach(el => {
+        const t = (el.textContent || '').toLowerCase();
+        if (t.includes('admis') || t.includes('create new admission') || t.includes('quick admission')) el.remove();
+      });
+
+      // Final sanitized html
+      const sanitized = doc.body.innerHTML;
+
+      // Inject sanitized content into page
+      erpContainer.innerHTML = sanitized;
+
+      // small extra: ensure links inside ERP that point to admission do not navigate
+      erpContainer.querySelectorAll('a, button').forEach(el => {
+        el.addEventListener('click', (e) => {
+          const txt = (el.textContent || '').toLowerCase();
+          if (txt.includes('admis') || txt.includes('create new admission') || txt.includes('quick admission')) {
+            e.preventDefault();
+            alert('Admissions are restricted for teachers. Contact admin.');
           }
         });
       });
+
+      pageStatus.textContent = 'ERP loaded (admissions hidden).';
+
+      // If ERP contains scripts that must run, attempt to run them (best effort)
+      // Extract inline scripts and eval them - caution: only do if same origin and you trust the file
+      doc.querySelectorAll('script').forEach(s => {
+        try {
+          if (!s.src) {
+            // inline script - execute
+            const code = s.textContent;
+            if (code && code.trim() !== '') {
+              // run in a timeout to avoid blocking
+              setTimeout(() => { try { eval(code); } catch(e){ console.warn('ERM script error', e); } }, 0);
+            }
+          } else {
+            // external script - create a new script tag to load it
+            const newS = document.createElement('script');
+            newS.src = s.src;
+            document.body.appendChild(newS);
+          }
+        } catch (err) {
+          console.warn('Error executing ERP script', err);
+        }
+      });
+
+      // Remove attendance input form if by chance still present in the injected content
+      const toRemove = erpContainer.querySelector('#attendance-form, form.attendance-form, .attendance-form, .mark-attendance');
+      if (toRemove) toRemove.remove();
+
+      // NOTE: If the ERP uses event handlers attached when the file was initially loaded,
+      // injecting sanitized HTML will not automatically rewire those handlers.
+      // But common links/buttons will still work and refer to other pages.
+
+    } catch (err) {
+      console.error('ERP load error', err);
+      erpContainer.innerHTML = `<div class="p-4 text-red-600">Failed to load ERP: ${err.message}</div>`;
+      pageStatus.textContent = 'ERP load failed.';
     }
-    loadDashboardData();
+  }
+
+  // small polyfill: DOMParser querySelectorAll with :contains is not available, but code handled it manually.
+  // End of script
   </script>
+
 </body>
 </html>

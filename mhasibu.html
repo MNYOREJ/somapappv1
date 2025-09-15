@@ -3,98 +3,432 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SoMAp - Accountant Dashboard</title>
+    <title>SoMAp - Mhasibu Dashboard</title>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
-        body { font-family: 'Roboto', sans-serif; background: #f4f4f9; min-height: 100vh; }
-        .sidebar { width: 64px; background: linear-gradient(to bottom, #28a745, #198754); height: 100vh; position: fixed; padding: 1rem; }
-        .main-content { margin-left: 80px; padding: 2rem; }
-        .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
-        .btn { background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 4px; border: none; }
-        .btn:hover { background: #218838; }
-        .events-list { list-style: none; padding: 0; }
-        .events-list li { background: #f8f9fa; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; }
-        .form-control { width: 100%; padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px; margin-bottom: 1rem; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #f4f4f9, #e5e7eb);
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        .sidebar {
+            background: linear-gradient(to bottom, #28a745, #198754);
+            height: 100vh;
+            padding: 20px;
+            position: fixed;
+            width: 64px;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            transition: width 0.3s ease;
+            z-index: 10;
+        }
+        .sidebar-expanded .sidebar {
+            width: 250px;
+        }
+        .sidebar-icon {
+            position: relative;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-center;
+            w-10 h-10 rounded-lg text-white mx-auto mb-4;
+        }
+        .sidebar-icon:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
+        .sidebar-icon.active {
+            background-color: #198754;
+        }
+        .sidebar-tooltip {
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #1f2937;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.2s;
+            z-index: 100;
+            white-space: nowrap;
+        }
+        .sidebar-icon:hover .sidebar-tooltip {
+            opacity: 1;
+            transform: translateY(-50%) translateX(8px);
+        }
+        .sidebar-expanded .sidebar-icon {
+            justify-content: flex-start;
+            padding: 0 1rem;
+        }
+        .sidebar-expanded .sidebar-icon span {
+            margin-left: 1rem;
+        }
+        .sidebar-expanded .sidebar-tooltip {
+            display: none;
+        }
+        .main-content {
+            margin-left: 64px;
+            padding: 2rem;
+            transition: margin-left 0.3s ease;
+            overflow-y: auto;
+            min-height: 100vh;
+        }
+        .sidebar-expanded .main-content {
+            margin-left: 250px;
+        }
+        .card {
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s;
+            background: linear-gradient(135deg, #ffffff, #e5e7eb);
+            color: #000;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+        .finance-card {
+            background: linear-gradient(135deg, #28a745, #198754);
+            color: #fff;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .finance-card h5 {
+            color: #fff;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+        .finance-card p {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .events-list {
+            list-style: none;
+            padding: 0;
+        }
+        .events-list li {
+            background: #f8f9fa;
+            padding: 1rem;
+            margin: 0.75rem 0;
+            border-radius: 0.75rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+        }
+        .events-list li:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .chart-container {
+            background: #fff;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+        }
+        .form-control {
+            border-radius: 0.75rem;
+            border: 2px solid #ced4da;
+            padding: 1rem;
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+        .form-label {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        .hidden {
+            display: none;
+        }
+        .sidebar-expanded .main-content {
+            margin-left: 250px;
+        }
+        .sidebar-icon span {
+            display: none;
+        }
+        .sidebar-expanded .sidebar-icon span {
+            display: inline;
+        }
     </style>
 </head>
 <body>
-    <div class="flex">
-        <div id="sidebar" class="sidebar">
-            <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-10 mb-4 mx-auto">
-            <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto" onclick="window.location.href='index.html'">
-                <i class="fas fa-sign-out-alt text-xl"></i>
-                <span class="sidebar-tooltip">Logout</span>
-            </button>
+    <div class="flex h-screen overflow-hidden">
+        <div id="sidebar" class="sidebar flex flex-col h-full bg-gradient-to-b from-green-500 to-green-700 shadow-md p-1 relative z-10" style="transition: width 0.3s ease;">
+            <div class="flex items-center justify-center h-14 mb-2">
+                <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="sidebar-logo h-10">
+            </div>
+            <div class="flex-1 overflow-y-auto">
+                <div class="flex flex-col space-y-1">
+                    <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto" data-module="finance">
+                        <i class="fas fa-money-bill-wave text-xl"></i>
+                        <span class="sidebar-tooltip">Finance</span>
+                        <span class="sidebar-expanded hidden ml-3 text-sm font-medium">Finance</span>
+                    </button>
+                    <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto" data-module="admission">
+                        <i class="fas fa-user-plus text-xl"></i>
+                        <span class="sidebar-tooltip">Admission</span>
+                        <span class="sidebar-expanded hidden ml-3 text-sm font-medium">Admission</span>
+                    </button>
+                    <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto" onclick="logout()">
+                        <i class="fas fa-sign-out-alt text-xl"></i>
+                        <span class="sidebar-tooltip">Logout</span>
+                        <span class="sidebar-expanded hidden ml-3 text-sm font-medium">Logout</span>
+                    </button>
+                </div>
+            </div>
+            <div class="mt-2 mb-1">
+                <button id="toggle-sidebar" class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto">
+                    <i class="fas fa-chevron-right text-sm sidebar-collapsed"></i>
+                    <i class="fas fa-chevron-left text-sm sidebar-expanded hidden"></i>
+                    <span class="sidebar-tooltip">Toggle Menu</span>
+                </button>
+                <div class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto mt-1">
+                    <img src="https://cdn.pixabay.com/photo/2016/08/08/09/17/avatar-1577909_960_720.png" alt="Profile" class="rounded-full h-8 w-8 object-cover">
+                    <span class="sidebar-tooltip">Profile</span>
+                    <span class="sidebar-expanded hidden ml-3 text-sm font-medium">Accountant</span>
+                </div>
+            </div>
         </div>
-        <div class="main-content">
-            <h1 class="text-2xl font-bold mb-4">Accountant Dashboard</h1>
-            <!-- Finance Overview (from finance.html) -->
-            <section id="finance" class="card">
-                <h2 class="text-xl font-semibold mb-2">Fee Collection Overview</h2>
-                <p id="fee-overview">Loading...</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                    <div class="card">
-                        <h5>Total Due</h5>
+        <div class="workspace flex-1 min-w-0 overflow-x-hidden overflow-y-auto transition-all" style="margin-left: 64px;">
+            <header class="bg-white shadow-sm">
+                <div class="flex items-center justify-between px-6 py-3">
+                    <div>
+                        <h1 class="text-xl font-semibold text-gray-800">SoMAp - Accountant Dashboard</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="relative">
+                            <input type="text" class="px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-green-500 w-64" placeholder="Search...">
+                            <i class="fas fa-search absolute right-3 top-3 text-gray-400"></i>
+                        </div>
+                        <button class="p-2 rounded-lg hover:bg-gray-100">
+                            <i class="far fa-bell text-gray-500 relative">
+                                <span class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">5</span>
+                            </i>
+                        </button>
+                        <button class="p-2 rounded-lg hover:bg-gray-100">
+                            <i class="fas fa-cog text-gray-500"></i>
+                        </button>
+                    </div>
+                </div>
+            </header>
+            <!-- Finance Overview -->
+            <section id="finance-overview" class="module-section">
+                <h2>Fee Collection Trends</h2>
+                <div class="chart-container">
+                    <canvas id="fee-chart"></canvas>
+                </div>
+                <div class="grid">
+                    <div class="finance-card">
+                        <h5>Total Due (All Students)</h5>
                         <p id="total-due">TSh 0</p>
                     </div>
-                    <div class="card">
+                    <div class="finance-card">
                         <h5>Total Collected</h5>
                         <p id="total-collected">TSh 0</p>
+                    </div>
+                    <div class="finance-card">
+                        <h5>Total Outstanding</h5>
+                        <p id="total-outstanding">TSh 0</p>
+                    </div>
+                    <div class="finance-card">
+                        <h5>Total Expenses</h5>
+                        <p id="total-expenses">TSh 0</p>
+                    </div>
+                    <div class="finance-card">
+                        <h5>Net Balance</h5>
+                        <p id="net-balance">TSh 0</p>
                     </div>
                 </div>
             </section>
             <!-- Recent Payments -->
-            <section id="recent-payments" class="card">
-                <h2 class="text-xl font-semibold mb-2">Recent Fee Payments</h2>
+            <section id="recent-payments" class="module-section">
+                <h2>Recent Fee Payments</h2>
                 <ul class="events-list" id="payments-list">
                     <li>Loading...</li>
                 </ul>
             </section>
-            <!-- New Admission -->
-            <section id="admission" class="card">
-                <h2 class="text-xl font-semibold mb-2">Create New Admission</h2>
+            <!-- Expenses -->
+            <section id="expenses" class="module-section">
+                <h2>Expenses</h2>
+                <form id="expense-form">
+                    <select id="expense-category" class="form-control">
+                        <option>Select Category</option>
+                        <option>EDUCATION</option>
+                        <option>FOOD</option>
+                        <option>MISCELLANEOUS</option>
+                        <option>RECREATION</option>
+                        <option>CLOTHING</option>
+                    </select>
+                    <input type="text" id="expense-description" class="form-control" placeholder="Description">
+                    <input type="number" id="expense-amount" class="form-control" placeholder="Amount">
+                    <button type="submit" class="btn">Add Expense</button>
+                </form>
+                <ul class="events-list" id="expenses-list">
+                    <li>Loading...</li>
+                </ul>
+            </section>
+            <!-- Debtors Table -->
+            <section id="debtors" class="module-section">
+                <h2>Debtors</h2>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr>
+                            <th>Admission No</th>
+                            <th>Full Name</th>
+                            <th>Class</th>
+                            <th>Fee (year)</th>
+                            <th>Paid</th>
+                            <th>Balance</th>
+                            <th>Debt till...</th>
+                        </tr>
+                    </thead>
+                    <tbody id="debtors-table">
+                        <tr>
+                            <td colspan="7">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            <!-- Admission Form -->
+            <section id="admission" class="module-section hidden">
+                <h2>Create New Admission</h2>
                 <form id="admission-form">
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium">Admission Number</label>
-                        <input type="text" id="admission-number" class="form-control" readonly>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium">Student Name</label>
-                        <input type="text" id="student-name" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium">Class</label>
-                        <select id="student-class" class="form-control">
-                            <option>Baby Class</option>
-                            <option>Middle Class</option>
-                            <option>Pre-Unit</option>
-                            <option>Class 1 AB</option>
-                            <option>Class 2 AB</option>
-                            <option>Class 3</option>
-                            <option>Class 4</option>
-                            <option>Class 5</option>
-                            <option>Class 6</option>
-                            <option>Class 7</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium">Fee Per Year (TSh)</label>
-                        <input type="number" id="fee-per-year" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium">Parent Phone</label>
-                        <input type="tel" id="parent-phone" class="form-control" placeholder="+255123456789" required>
-                    </div>
+                    <input type="text" id="admission-number" class="form-control" readonly>
+                    <input type="text" id="student-name" class="form-control" placeholder="Student Name" required>
+                    <select id="student-class" class="form-control">
+                        <option>Baby Class</option>
+                        <option>Middle Class</option>
+                        <option>Pre-Unit</option>
+                        <option>Class 1 AB</option>
+                        <option>Class 2 AB</option>
+                        <option>Class 3</option>
+                        <option>Class 4</option>
+                        <option>Class 5</option>
+                        <option>Class 6</option>
+                        <option>Class 7</option>
+                    </select>
+                    <input type="number" id="fee-per-year" class="form-control" placeholder="Fee Per Year (TSh)" required>
+                    <input type="tel" id="parent-phone" class="form-control" placeholder="+255123456789" required>
                     <button type="submit" class="btn">Create Admission</button>
                 </form>
             </section>
+            <!-- Market Items (Copy from index.html) -->
+            <section id="market" class="market-section module-section">
+                <h2>SoMAp Market - Available Goods</h2>
+                <p>Explore school essentials like uniforms and supplies.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="card">
+                        <img src="https://images.pexels.com/photos/5212324/pexels-photo-5212324.jpeg" alt="School Uniform" class="market-img rounded-lg mb-2">
+                        <p>Grey Trousers, Skirts, White Shirts, Grey Sweaters</p>
+                    </div>
+                    <div class="card">
+                        <img src="https://images.pexels.com/photos/1280942/pexels-photo-1280942.jpeg" alt="Black Shoes" class="market-img rounded-lg mb-2">
+                        <p>Black Shoes</p>
+                    </div>
+                    <div class="card">
+                        <img src="https://images.pexels.com/photos/247879/pexels-photo-247879.jpeg" alt="Bags of Maize" class="market-img rounded-lg mb-2">
+                        <p>Bags of Maize, Beans, Cereals</p>
+                    </div>
+                    <div class="card">
+                        <img src="https://images.pexels.com/photos/163064/pexels-photo-163064.jpeg" alt="Stationaries" class="market-img rounded-lg mb-2">
+                        <p>Stationeries</p>
+                    </div>
+                </div>
+                <button class="btn mt-4">View All Products</button>
+            </section>
+            <!-- Graphs -->
+            <section id="graphs" class="module-section">
+                <h2>Financial Graphs</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="chart-container card">
+                        <h3 class="text-center mb-4">Fee Collection Trend</h3>
+                        <canvas id="fee-trend-chart"></canvas>
+                    </div>
+                    <div class="chart-container card">
+                        <h3 class="text-center mb-4">Expense Breakdown</h3>
+                        <canvas id="expense-pie-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+            <!-- Additional Corporate Features -->
+            <section id="debtors" class="module-section">
+                <h2>Debtors List</h2>
+                <table class="w-full text-sm table-auto border-collapse border border-gray-300">
+                    <thead>
+                        <tr class="bg-gray-100">
+                            <th class="p-2 border">Admission No</th>
+                            <th class="p-2 border">Full Name</th>
+                            <th class="p-2 border">Class</th>
+                            <th class="p-2 border">Fee (year)</th>
+                            <th class="p-2 border">Paid</th>
+                            <th class="p-2 border">Balance</th>
+                            <th class="p-2 border">Debt till ...</th>
+                            <th class="p-2 border">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="debtors-table">
+                        <tr>
+                            <td colspan="8" class="p-2 border text-center">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            <section id="invoices" class="module-section">
+                <h2>Generate Invoices</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="card">
+                        <h3>Monthly Invoices</h3>
+                        <p>Generate and send monthly fee invoices to parents.</p>
+                        <button class="btn mt-2">Generate Monthly Invoices</button>
+                    </div>
+                    <div class="card">
+                        <h3>Overdue Reminders</h3>
+                        <p>Send reminders to parents with overdue payments.</p>
+                        <button class="btn mt-2">Send Reminders</button>
+                    </div>
+                </div>
+            </section>
+            <section id="reports" class="module-section">
+                <h2>Financial Reports</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="card">
+                        <h3>Daily Report</h3>
+                        <p>View daily financial summary.</p>
+                        <button class="btn mt-2">Download Daily Report</button>
+                    </div>
+                    <div class="card">
+                        <h3>Monthly Report</h3>
+                        <p>View monthly financial summary.</p>
+                        <button class="btn mt-2">Download Monthly Report</button>
+                    </div>
+                    <div class="card">
+                        <h3>Annual Report</h3>
+                        <p>View annual financial summary.</p>
+                        <button class="btn mt-2">Download Annual Report</button>
+                    </div>
+                </div>
+            </section>
+            <section id="audit-log" class="module-section">
+                <h2>Audit Log</h2>
+                <ul class="events-list" id="audit-log-list">
+                    <li>Loading...</li>
+                </ul>
+            </section>
         </div>
     </div>
-
     <script>
         const firebaseConfig = {
             apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
@@ -117,30 +451,79 @@
             db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
                 const userData = snapshot.val();
                 if (!userData || userData.role !== 'accountant') {
-                    alert('Unauthorized access');
+                    Swal.fire('Error', 'Unauthorized access', 'error');
                     auth.signOut();
                     window.location.href = 'index.html';
                     return;
                 }
                 loadFinanceData();
+                loadExpenses();
+                loadDebtors();
+                loadGraphs();
+                loadAuditLog();
             });
         });
+
+        // Sidebar Toggle
+        document.getElementById('toggle-sidebar').addEventListener('click', () => {
+            document.getElementById('sidebar').classList.toggle('sidebar-expanded');
+            document.querySelectorAll('.sidebar-collapsed').forEach(el => el.classList.toggle('hidden'));
+            document.querySelectorAll('.sidebar-expanded').forEach(el => el.classList.toggle('hidden'));
+            document.querySelector('.main-content').classList.toggle('sidebar-expanded');
+        });
+
+        // Sidebar Clicks
+        document.querySelector('[data-module="finance"]').addEventListener('click', () => {
+            document.querySelectorAll('.module-section').forEach(el => el.classList.add('hidden'));
+            document.getElementById('finance-overview').classList.remove('hidden');
+            document.getElementById('recent-payments').classList.remove('hidden');
+            document.getElementById('expenses').classList.remove('hidden');
+            document.getElementById('debtors').classList.remove('hidden');
+            document.getElementById('graphs').classList.remove('hidden');
+            document.getElementById('invoices').classList.remove('hidden');
+            document.getElementById('reports').classList.remove('hidden');
+            document.getElementById('audit-log').classList.remove('hidden');
+            document.getElementById('admission').classList.add('hidden');
+            document.querySelectorAll('.sidebar-icon').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active');
+        });
+
+        document.querySelector('[data-module="admission"]').addEventListener('click', () => {
+            document.querySelectorAll('.module-section').forEach(el => el.classList.add('hidden'));
+            document.getElementById('admission').classList.remove('hidden');
+            document.querySelectorAll('.sidebar-icon').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active');
+        });
+
+        function logout() {
+            auth.signOut().then(() => {
+                localStorage.removeItem('role');
+                localStorage.removeItem('class');
+                localStorage.removeItem('studentId');
+                Swal.fire('Success', 'You have been signed out.', 'success');
+                window.location.href = 'index.html';
+            }).catch(err => {
+                Swal.fire('Error', 'Sign-out failed: ' + err.message, 'error');
+            });
+        }
 
         function loadFinanceData() {
             db.ref('students').on('value', snapshot => {
                 const students = snapshot.val() ? Object.values(snapshot.val()) : [];
                 let totalDue = students.reduce((sum, s) => sum + (parseInt(s.feePerYear) || 0), 0);
                 let totalCollected = students.reduce((sum, s) => sum + (parseInt(s.paidAmount) || 0), 0);
+                let totalOutstanding = totalDue - totalCollected;
                 document.getElementById('total-due').textContent = `TSh ${totalDue.toLocaleString()}`;
                 document.getElementById('total-collected').textContent = `TSh ${totalCollected.toLocaleString()}`;
-                document.getElementById('fee-overview').textContent = `Total Due: TSh ${totalDue.toLocaleString()} | Collected: TSh ${totalCollected.toLocaleString()} | Outstanding: TSh ${(totalDue - totalCollected).toLocaleString()}`;
+                document.getElementById('total-outstanding').textContent = `TSh ${totalOutstanding.toLocaleString()}`;
+                document.getElementById('fee-overview').textContent = `Total Due: TSh ${totalDue.toLocaleString()} | Collected: TSh ${totalCollected.toLocaleString()} | Outstanding: TSh ${totalOutstanding.toLocaleString()}`;
                 
                 const paymentsList = document.getElementById('payments-list');
                 let html = '';
                 students.forEach(s => {
                     if (s.payments) {
                         Object.values(s.payments).forEach(p => {
-                            html += `<li>${s.firstName} ${s.lastName} - TSh ${p.amount.toLocaleString()} via ${p.method} - ${new Date(p.timestamp).toLocaleString()}</li>`;
+                            html += `<li>${s.firstName} ${s.lastName} - TSh ${p.amount.toLocaleString()} via ${p.method} - ${new Date(p.timestamp).toLocaleString()} (Note: ${p.note})</li>`;
                         });
                     }
                 });
@@ -148,29 +531,94 @@
             });
         }
 
-        document.getElementById('admission-form').addEventListener('submit', e => {
+        function loadExpenses() {
+            db.ref('expenses').on('value', snapshot => {
+                const expenses = snapshot.val() ? Object.values(snapshot.val()) : [];
+                let totalExpenses = expenses.reduce((sum, e) => sum + (parseInt(e.amount) || 0), 0);
+                document.getElementById('total-expenses').textContent = `TSh ${totalExpenses.toLocaleString()}`;
+
+                const expensesList = document.getElementById('expenses-list');
+                let html = '';
+                expenses.forEach(e => {
+                    html += `<li>${e.category} - TSh ${e.amount.toLocaleString()} - ${e.description} - ${new Date(e.timestamp).toLocaleString()}</li>`;
+                });
+                expensesList.innerHTML = html || '<li>No expenses found.</li>';
+            });
+        }
+
+        document.getElementById('expense-form').addEventListener('submit', e => {
             e.preventDefault();
-            const admissionNumber = `AUTO-${Date.now()}`;
-            const studentName = document.getElementById('student-name').value;
-            const studentClass = document.getElementById('student-class').value;
-            const feePerYear = parseInt(document.getElementById('fee-per-year').value);
-            const parentPhone = document.getElementById('parent-phone').value;
-            db.ref('students').push({
-                admissionNumber,
-                firstName: studentName.split(' ')[0],
-                lastName: studentName.split(' ').slice(1).join(' '),
-                classLevel: studentClass,
-                feePerYear,
-                paidAmount: 0,
-                balance: feePerYear,
-                primaryParentContact: parentPhone,
+            const category = document.getElementById('expense-category').value;
+            const description = document.getElementById('expense-description').value;
+            const amount = parseInt(document.getElementById('expense-amount').value);
+            db.ref('expenses').push({
+                category,
+                description,
+                amount,
                 timestamp: Date.now()
             }).then(() => {
-                alert('Student admitted successfully!');
-                document.getElementById('admission-form').reset();
-                document.getElementById('admission-number').value = `AUTO-${Date.now()}`;
+                Swal.fire('Success', 'Expense added!', 'success');
+                document.getElementById('expense-form').reset();
             });
         });
+
+        function loadDebtors() {
+            db.ref('students').on('value', snapshot => {
+                const students = snapshot.val() ? Object.values(snapshot.val()) : [];
+                const debtorsTable = document.getElementById('debtors-table');
+                let html = '';
+                students.forEach(s => {
+                    if (s.balance > 0) {
+                        html += `<tr>
+                            <td>${s.admissionNumber}</td>
+                            <td>${s.firstName} ${s.middleName || ''} ${s.lastName}</td>
+                            <td>${s.classLevel}</td>
+                            <td>TSh ${s.feePerYear.toLocaleString()}</td>
+                            <td>TSh ${s.paidAmount.toLocaleString()}</td>
+                            <td>TSh ${s.balance.toLocaleString()}</td>
+                            <td>Debt till ${new Date().toLocaleDateString()}</td>
+                            <td><button class="btn btn-small">View Pay</button></td>
+                        </tr>`;
+                    }
+                });
+                debtorsTable.innerHTML = html || '<tr><td colspan="7" class="text-center">No debtors.</td></tr>';
+            });
+        }
+
+        function loadGraphs() {
+            db.ref('students').once('value').then(snapshot => {
+                const students = snapshot.val() ? Object.values(snapshot.val()) : [];
+                const feeData = [students.reduce((sum, s) => sum + (parseInt(s.paidAmount) || 0), 0), students.reduce((sum, s) => sum + (parseInt(s.balance) || 0), 0)];
+                const feeCtx = document.getElementById('fee-trend-chart').getContext('2d');
+                new Chart(feeCtx, {
+                    type: 'line',
+                    data: {
+                        labels: ['Collected', 'Outstanding'],
+                        datasets: [{ label: 'Fee Trend', data: feeData, backgroundColor: '#28a745' }]
+                    }
+                });
+            });
+            db.ref('expenses').once('value').then(snapshot => {
+                const expenses = snapshot.val() ? Object.values(snapshot.val()) : [];
+                const categories = {};
+                expenses.forEach(e => {
+                    categories[e.category] = (categories[e.category] || 0) + e.amount;
+                });
+                const expenseCtx = document.getElementById('expense-pie-chart').getContext('2d');
+                new Chart(expenseCtx, {
+                    type: 'pie',
+                    data: {
+                        labels: Object.keys(categories),
+                        datasets: [{ data: Object.values(categories), backgroundColor: ['#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff'] }]
+                    }
+                });
+            });
+        }
+
+        function loadAuditLog() {
+            // Placeholder for audit log (you can expand with Firebase logs)
+            document.getElementById('audit-log-list').innerHTML = '<li>Payment added for Mnyore Omondi - 09/07/2025</li><li>Expense added for Printing Exams - 08/30/2025</li>';
+        }
 
         // Auto-fill admission number
         document.getElementById('admission-number').value = `AUTO-${Date.now()}`;

@@ -9,6 +9,11 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body { 
             font-family: 'Roboto', sans-serif; 
@@ -54,7 +59,7 @@
         .sidebar-icon:hover .sidebar-tooltip { opacity: 1; }
         .main-content { 
             margin-left: 100px; 
-            padding: 2rem; 
+            padding: 1rem; 
             transition: margin-left 0.3s ease; 
         }
         .card { 
@@ -62,7 +67,7 @@
             border-radius: 12px; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
             padding: 1.5rem; 
-            margin-bottom: 2rem; 
+            margin-bottom: 1rem; 
             border-left: 4px solid #007bff; 
         }
         .card.academic { border-left-color: #28a745; }
@@ -95,7 +100,7 @@
             padding: 0.75rem; 
             border: 2px solid #e9ecef; 
             border-radius: 6px; 
-            margin-bottom: 1rem; 
+            margin-bottom: 0.5rem; 
             transition: border-color 0.3s; 
         }
         .form-control:focus { border-color: #007bff; outline: none; box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25); }
@@ -136,6 +141,13 @@
             cursor: pointer; 
             z-index: 1000; 
         }
+        .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
+        .scroll-shadow { box-shadow: inset 0 10px 8px -10px rgba(2,6,23,0.12); }
+        #chartSubjects, #chartTop10 { max-width:100%; height:260px; display:block; }
+        .bg-white.rounded-2xl.p-4 { overflow:hidden; }
+        .min-w-table { min-width:1200px; }
+        .grid-tight { gap: 0.5rem; }
+        .mb-tight { margin-bottom: 0.5rem; }
     </style>
 </head>
 <body>
@@ -163,7 +175,7 @@
                 <span class="sidebar-tooltip">School ERP</span>
             </div>
             
-            <!-- Attendance Sub-Icon under ERP (but shown in ERP) -->
+            <!-- Attendance Sub-Icon under ERP -->
             <div class="sidebar-icon hidden" id="attendance-icon">
                 <i class="fas fa-calendar-check text-xl"></i>
                 <span class="sidebar-tooltip">Attendance</span>
@@ -189,7 +201,7 @@
         </div>
         
         <div class="main-content">
-            <header class="flex justify-between items-center mb-6">
+            <header class="flex justify-between items-center mb-4">
                 <h1 class="text-3xl font-bold text-gray-800">Teacher Dashboard</h1>
                 <div class="text-sm text-gray-600">
                     Welcome, <span id="user-name"></span> | Class: <span id="user-class"></span>
@@ -198,10 +210,10 @@
             
             <!-- Dashboard Section -->
             <section id="dashboard" class="section active">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 grid-tight">
                     <!-- Stream Select -->
-                    <div class="card">
-                        <h2 class="text-xl font-semibold mb-4 flex items-center">
+                    <div class="card mb-tight">
+                        <h2 class="text-xl font-semibold mb-2 flex items-center">
                             <i class="fas fa-stream mr-2"></i> Select Stream
                         </h2>
                         <select id="stream-select" class="form-control">
@@ -212,212 +224,251 @@
                     </div>
                     
                     <!-- Academic Management Card -->
-                    <div class="card academic">
+                    <div class="card academic lg:col-span-2">
                         <h2 class="text-xl font-semibold mb-4 flex items-center">
                             <i class="fas fa-graduation-cap mr-2"></i> Academic Management
                         </h2>
-                        <div class="stats-grid">
+                        <div class="stats-grid grid-cols-2 md:grid-cols-4 gap-2">
                             <div class="stat-card">
                                 <h3 id="class-scores-count">-</h3>
-                                <p>Average Score</p>
+                                <p class="text-xs">Average Score</p>
                             </div>
                             <div class="stat-card">
                                 <h3 id="top-student">-</h3>
-                                <p>Top Student (%)</p>
+                                <p class="text-xs">Top Student (%)</p>
                             </div>
                             <div class="stat-card">
                                 <h3 id="bottom-student">-</h3>
-                                <p>Bottom Student (%)</p>
+                                <p class="text-xs">Bottom Student (%)</p>
                             </div>
                             <div class="stat-card">
                                 <h3 id="class-grade">-</h3>
-                                <p>Class Average Grade</p>
+                                <p class="text-xs">Class Average Grade</p>
                             </div>
                         </div>
-                        <button class="btn mt-4" onclick="saveScores()">Save Scores</button>
+                        <button class="btn mt-2" onclick="saveScores()">Save Scores</button>
                     </div>
                     
                     <!-- Attendance Stats -->
-                    <div class="card attendance col-span-full">
+                    <div class="card attendance lg:col-span-3">
                         <h2 class="text-xl font-semibold mb-4 flex items-center">
                             <i class="fas fa-calendar mr-2"></i> Attendance Overview
                         </h2>
-                        <div class="stats-grid">
+                        <div class="stats-grid grid-cols-2 md:grid-cols-4 gap-2">
                             <div class="stat-card" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);">
                                 <h3 id="percent-present">-</h3>
-                                <p>% Present (Class Avg)</p>
+                                <p class="text-xs">% Present (Class Avg)</p>
                             </div>
                             <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);">
                                 <h3 id="percent-absent">-</h3>
-                                <p>% Absent</p>
+                                <p class="text-xs">% Absent</p>
                             </div>
                             <div class="stat-card" style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);">
                                 <h3 id="yellow-alerts">-</h3>
-                                <p>Yellow Alerts (≥10 absent days)</p>
+                                <p class="text-xs">Yellow Alerts (≥10 absent days)</p>
                             </div>
                             <div class="stat-card" style="background: linear-gradient(135deg, #d299c2 0%, #fef9d7 100%);">
                                 <h3 id="class-days">-</h3>
-                                <p>Class Days (excl. weekends/holidays)</p>
+                                <p class="text-xs">Class Days (excl. weekends/holidays)</p>
                             </div>
                         </div>
                     </div>
                     
                     <!-- Fee Overview -->
-                    <div class="card finance col-span-full">
+                    <div class="card finance lg:col-span-3">
                         <h2 class="text-xl font-semibold mb-4 flex items-center">
                             <i class="fas fa-money-bill mr-2"></i> Fee Status
                         </h2>
-                        <div class="stats-grid">
+                        <div class="stats-grid grid-cols-1 md:grid-cols-3 gap-2">
                             <div class="stat-card" style="background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);">
                                 <h3 id="fee-required">-</h3>
-                                <p>Required (Class/Year)</p>
+                                <p class="text-xs">Required (Class/Year)</p>
                             </div>
                             <div class="stat-card" style="background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);">
                                 <h3 id="fee-paid">-</h3>
-                                <p>Paid (Aggregated)</p>
+                                <p class="text-xs">Paid (Aggregated)</p>
                             </div>
                             <div class="stat-card" style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);">
                                 <h3 id="fee-balance">-</h3>
-                                <p>Balance (Outstanding)</p>
+                                <p class="text-xs">Balance (Outstanding)</p>
                             </div>
                         </div>
                     </div>
                 </div>
             </section>
             
-            <!-- Academic Section (Embedded from academic.html style) -->
+            <!-- Academic Section -->
             <section id="academic" class="section">
-                <div class="card academic col-span-full">
-                    <div class="flex justify-between items-center mb-6">
-                        <h1 class="text-2xl font-bold">SoMAp — Academic & Exams Module</h1>
-                        <a href="#" onclick="showSection('dashboard')" class="text-blue-500 hover:underline flex items-center">
-                            ← Back <i class="fas fa-arrow-left ml-1"></i>
-                        </a>
-                    </div>
-                    <p class="text-gray-600 mb-6">Scores • Rankings • Reports</p>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                        <div class="card">
-                            <h3 class="font-semibold">Top Student</h3>
-                            <p id="top-student-detail" class="text-2xl font-bold text-green-600">-</p>
+                <div class="bg-white rounded-2xl shadow overflow-hidden">
+                    <div class="px-4 py-3 border-b flex items-center justify-between">
+                        <div>
+                            <h1 class="text-2xl font-bold">SoMAp — Academic & Exams Module</h1>
+                            <p class="text-gray-600 mb-6">Scores • Rankings • Reports</p>
+                            <a href="#" onclick="showSection('dashboard')" class="text-blue-500 hover:underline flex items-center">
+                                ← Back <i class="fas fa-arrow-left ml-1"></i>
+                            </a>
                         </div>
-                        <div class="card">
-                            <h3 class="font-semibold">Bottom Student</h3>
-                            <p id="bottom-student-detail" class="text-2xl font-bold text-red-600">-</p>
-                        </div>
-                        <div class="card">
-                            <h3 class="font-semibold">Class Max</h3>
-                            <p id="class-max" class="text-xl">-</p>
-                        </div>
-                        <div class="card">
-                            <h3 class="font-semibold">Class Grade</h3>
-                            <p id="class-grade-detail" class="text-xl">-</p>
+                        <div class="flex items-center gap-2">
+                            <button id="btnSaveAll" class="btn">Save Scores</button>
+                            <div class="hidden sm:flex gap-2">
+                                <button id="btnExportCSV" class="btn btn-secondary text-xs px-2 py-1">CSV</button>
+                                <button id="btnExportXLSX" class="btn btn-secondary text-xs px-2 py-1">Excel</button>
+                                <button id="btnExportPDF" class="btn btn-secondary text-xs px-2 py-1">PDF</button>
+                                <button id="btnPrint" class="btn btn-secondary text-xs px-2 py-1">Print</button>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                        <div class="card">
-                            <h3>% Present</h3>
-                            <p id="present-detail" class="text-xl">-</p>
+
+                    <!-- Controls (Class fixed, Stream from dashboard) -->
+                    <section class="grid grid-cols-1 md:grid-cols-5 gap-3 px-4 py-4 bg-gray-50">
+                        <div class="bg-white rounded-2xl p-2 shadow">
+                            <label class="text-xs text-slate-500 block mb-1">Class</label>
+                            <input id="classInput" class="w-full border rounded px-2 py-1 text-sm" value="" readonly>
                         </div>
-                        <div class="card">
-                            <h3>% Absent</h3>
-                            <p id="absent-detail" class="text-xl">-</p>
+                        <div class="bg-white rounded-2xl p-2 shadow">
+                            <label class="text-xs text-slate-500 block mb-1">Stream</label>
+                            <select id="academic-stream" class="w-full border rounded px-2 py-1 text-sm"></select>
                         </div>
-                        <div class="card">
-                            <h3 class="font-semibold">Fee Status</h3>
-                            <p>Required: <span id="fee-req">-</span></p>
-                            <p>Paid: <span id="fee-pd">-</span></p>
-                            <p>Balance: <span id="fee-bal">-</span></p>
+                        <div class="bg-white rounded-2xl p-2 shadow">
+                            <label class="text-xs text-slate-500 block mb-1">Exam Type</label>
+                            <select id="examType" class="w-full border rounded px-2 py-1 text-sm">
+                                <option>Monthly</option><option>Midterm 1</option><option>End Term</option><option>Midterm 2</option><option>Annual</option>
+                            </select>
                         </div>
-                    </div>
-                    
-                    <!-- Subject Performance -->
-                    <div class="card mb-6">
-                        <h2 class="text-xl font-semibold mb-4">Subject Performance (Class)</h2>
-                        <p class="text-gray-600">Average per subject</p>
-                        <div id="subject-perf" class="mt-4">
-                            <!-- Dynamic table or list -->
-                            <table class="table w-full">
-                                <thead>
-                                    <tr><th>Subject</th><th>Average Score</th></tr>
-                                </thead>
-                                <tbody id="subject-tbody"></tbody>
-                            </table>
+                        <div class="bg-white rounded-2xl p-2 shadow">
+                            <label class="text-xs text-slate-500 block mb-1">Month</label>
+                            <select id="monthSelect" class="w-full border rounded px-2 py-1 text-sm">
+                                <option value="01">January</option><option value="02">February</option><option value="03">March</option>
+                                <option value="04">April</option><option value="05">May</option><option value="06">June</option>
+                                <option value="07">July</option><option value="08">August</option><option value="09" selected>September</option>
+                                <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+                            </select>
                         </div>
-                    </div>
-                    
-                    <!-- Student Averages Top 10 -->
-                    <div class="card mb-6">
-                        <h2 class="text-xl font-semibold mb-4">Student Averages (Top 10)</h2>
-                        <p class="text-gray-600">Overall %</p>
-                        <div id="student-avg" class="mt-4">
-                            <table class="table w-full">
-                                <thead>
-                                    <tr><th>Rank</th><th>Student</th><th>%</th></tr>
-                                </thead>
-                                <tbody id="student-tbody"></tbody>
-                            </table>
+                        <div class="bg-white rounded-2xl p-2 shadow">
+                            <label class="text-xs text-slate-500 block mb-1">Academic Year</label>
+                            <input id="yearInput" class="w-full border rounded px-2 py-1 text-sm" value="2025">
                         </div>
-                    </div>
-                    
+                    </section>
+
+                    <!-- KPI + Charts -->
+                    <section class="px-4 py-4 grid lg:grid-cols-12 gap-4">
+                        <div class="lg:col-span-6 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Top Student</p>
+                                <h3 id="kpiTopStudent" class="text-lg font-semibold mt-1">–</h3>
+                                <p id="kpiTopScore" class="text-xs text-slate-500">–</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Bottom Student</p>
+                                <h3 id="kpiBottomStudent" class="text-lg font-semibold mt-1">–</h3>
+                                <p id="kpiBottomScore" class="text-xs text-slate-500">–</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Class Max</p>
+                                <h3 id="kpiClassMax" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Highest overall avg</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Class Grade</p>
+                                <h3 id="kpiClassGrade" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Avg grade</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">% Present</p>
+                                <h3 id="kpiPresent" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Attendance</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">% Absent</p>
+                                <h3 id="kpiAbsent" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Attendance</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Fee: Required</p>
+                                <h3 id="kpiFeeRequired" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Class/year</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Fee: Paid</p>
+                                <h3 id="kpiFeePaid" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Aggregated</p>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <p class="text-xs text-slate-500">Fee: Balance</p>
+                                <h3 id="kpiFeeBalance" class="text-lg font-semibold mt-1">–</h3>
+                                <p class="text-xs text-slate-500">Outstanding</p>
+                            </div>
+                        </div>
+
+                        <div class="lg:col-span-6 grid gap-2">
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <div class="flex items-center justify-between mb-2">
+                                    <p class="text-sm font-medium">Subject Performance (Class)</p>
+                                    <div class="text-xs text-slate-500">Average per subject</div>
+                                </div>
+                                <canvas id="chartSubjects" class="mt-1"></canvas>
+                            </div>
+                            <div class="bg-white rounded-2xl p-2 shadow">
+                                <div class="flex items-center justify-between mb-2">
+                                    <p class="text-sm font-medium">Student Averages (Top 10)</p>
+                                    <div class="text-xs text-slate-500">Overall %</div>
+                                </div>
+                                <canvas id="chartTop10" class="mt-1"></canvas>
+                            </div>
+                        </div>
+                    </section>
+
                     <!-- Scoresheet -->
-                    <div class="card">
-                        <h2 class="text-xl font-semibold mb-4">Scoresheet</h2>
-                        <p class="text-gray-600 mb-4">Enter marks per subject • Auto averages • Positions • Grades</p>
-                        
-                        <div class="flex justify-between mb-4">
+                    <section class="px-4 py-3 border-t">
+                        <div class="flex items-center justify-between mb-4">
                             <div>
-                                <label class="block text-sm font-medium mb-2">Exam Type: <select id="exam-type" class="form-control inline-block w-32"><option>Monthly</option></select></label>
-                                <label class="block text-sm font-medium mb-2 ml-4">Month: <select id="month-select" class="form-control inline-block w-32"><option>September</option></select></label>
-                                <label class="block text-sm font-medium mb-2 ml-4">Academic Year: <input type="text" id="year-input" value="2025" class="form-control inline-block w-24"></label>
+                                <h2 class="text-base font-semibold">Scoresheet</h2>
+                                <p class="text-xs text-slate-500">Enter marks per subject • Auto averages • Positions • Grades</p>
                             </div>
-                            <div class="flex space-x-2">
-                                <button class="btn">Save Scores</button>
-                                <button class="btn btn-secondary">CSV</button>
-                                <button class="btn btn-secondary">Excel</button>
-                                <button class="btn btn-secondary">PDF</button>
-                                <button class="btn btn-secondary">Print</button>
-                                <button class="btn btn-secondary">Load</button>
+                            <div class="flex items-center gap-2">
+                                <label class="text-xs text-slate-500 flex items-center gap-1">
+                                    Max/100
+                                    <input id="globalMaxInput" type="number" min="1" max="100" value="100" class="w-16 px-1 py-1 border rounded">
+                                </label>
+                                <button id="btnSetAllMax" class="btn text-xs px-2 py-1">Set all Max</button>
+                                <button id="btnRecalc" class="btn btn-secondary text-xs px-2 py-1">Recalculate</button>
                             </div>
                         </div>
-                        
-                        <div class="overflow-x-auto">
-                            <table class="table w-full">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Adm</th>
-                                        <th>Student</th>
-                                        <th>Fee Due</th>
-                                        <th>Paid</th>
-                                        <th>Balance</th>
-                                        <th>Total</th>
-                                        <th>Max</th>
-                                        <th>% Avg</th>
-                                        <th>Overall Pos</th>
-                                        <th>Grade</th>
-                                        <th>Present</th>
-                                        <th>Absent</th>
-                                        <th>Teacher Comment</th>
+
+                        <div class="overflow-auto scroll-shadow" style="max-height:50vh">
+                            <table id="scoresTable" class="w-full min-w-table text-sm">
+                                <thead class="sticky-th">
+                                    <tr class="bg-slate-50">
+                                        <th class="p-2 border">#</th>
+                                        <th class="p-2 border">Adm</th>
+                                        <th class="p-2 border text-left">Student</th>
+                                        <th class="p-2 border">Fee Due</th>
+                                        <th class="p-2 border">Paid</th>
+                                        <th class="p-2 border">Balance</th>
+                                        <th class="p-2 border">Total</th>
+                                        <th class="p-2 border">Max</th>
+                                        <th class="p-2 border">% Avg</th>
+                                        <th class="p-2 border">Overall Pos</th>
+                                        <th class="p-2 border">Grade</th>
+                                        <th class="p-2 border">Present</th>
+                                        <th class="p-2 border">Absent</th>
+                                        <th class="p-2 border">Teacher Comment</th>
                                     </tr>
                                 </thead>
-                                <tbody id="scoresheet-tbody">
-                                    <!-- Dynamic rows -->
-                                </tbody>
+                                <tbody id="scoresBody"></tbody>
                             </table>
                         </div>
-                        <p id="students-count" class="mt-2 text-gray-600">0 students • 0 subjects</p>
-                        
-                        <div class="flex justify-between mt-4">
-                            <button class="btn">Set all Max 100</button>
-                            <button class="btn btn-secondary">Recalculate</button>
-                            <button class="btn btn-secondary">Generate Report Cards (PDF)</button>
+
+                        <div class="px-4 py-3 border-t flex items-center justify-between">
+                            <div class="text-xs text-slate-500">
+                                <span id="lblCount">0</span> students • <span id="lblSubjects">0</span> subjects
+                            </div>
+                            <div class="flex gap-2">
+                                <button id="btnGenerateReports" class="btn text-xs px-2 py-1">Generate Report Cards (PDF)</button>
+                                <button id="btnEmailReports" class="btn btn-secondary text-xs px-2 py-1">Email/SMS Links</button>
+                            </div>
                         </div>
-                        <div class="mt-4">
-                            <a href="#" class="text-blue-500 hover:underline">Email/SMS Links</a>
-                        </div>
-                    </div>
+                    </section>
                 </div>
             </section>
             
@@ -431,39 +482,39 @@
                         </a>
                     </div>
                     
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                         <!-- Admissions - Restricted -->
-                        <div class="card p-4 text-center" onclick="showAdmissionWarning()">
-                            <i class="fas fa-users text-3xl text-gray-400 mb-2"></i>
-                            <h3 class="font-semibold">Admissions</h3>
-                            <p>New Applications: 12</p>
-                            <p class="text-sm text-gray-500">Contact Admin for Access</p>
+                        <div class="card p-3 text-center" onclick="showAdmissionWarning()">
+                            <i class="fas fa-users text-2xl text-gray-400 mb-2"></i>
+                            <h3 class="font-semibold text-sm">Admissions</h3>
+                            <p class="text-xs">New Applications: 12</p>
+                            <p class="text-xs text-gray-500">Contact Admin</p>
                         </div>
                         
-                        <!-- Academics - Link to Academic Section -->
-                        <div class="card p-4 cursor-pointer hover:bg-gray-50" onclick="showSection('academic')">
-                            <i class="fas fa-book text-3xl text-blue-500 mb-2"></i>
-                            <h3 class="font-semibold">Academics</h3>
-                            <p>Scores & Reports</p>
+                        <!-- Academics -->
+                        <div class="card p-3 cursor-pointer hover:bg-gray-50" onclick="showSection('academic')">
+                            <i class="fas fa-book text-2xl text-blue-500 mb-2"></i>
+                            <h3 class="font-semibold text-sm">Academics</h3>
+                            <p class="text-xs">Scores & Reports</p>
                         </div>
                         
                         <!-- Attendance -->
-                        <div class="card p-4 cursor-pointer hover:bg-gray-50" onclick="showErpSubsection('attendance')">
-                            <i class="fas fa-calendar-check text-3xl text-green-500 mb-2"></i>
-                            <h3 class="font-semibold">Attendance</h3>
-                            <p>Mark & View</p>
+                        <div class="card p-3 cursor-pointer hover:bg-gray-50" onclick="showErpSubsection('attendance')">
+                            <i class="fas fa-calendar-check text-2xl text-green-500 mb-2"></i>
+                            <h3 class="font-semibold text-sm">Attendance</h3>
+                            <p class="text-xs">Mark & View</p>
                         </div>
                         
                         <!-- Discipline -->
-                        <div class="card p-4 cursor-pointer hover:bg-gray-50" onclick="showErpSubsection('discipline')">
-                            <i class="fas fa-exclamation-triangle text-3xl text-red-500 mb-2"></i>
-                            <h3 class="font-semibold">Discipline</h3>
-                            <p>Incidents Log</p>
+                        <div class="card p-3 cursor-pointer hover:bg-gray-50" onclick="showErpSubsection('discipline')">
+                            <i class="fas fa-exclamation-triangle text-2xl text-red-500 mb-2"></i>
+                            <h3 class="font-semibold text-sm">Discipline</h3>
+                            <p class="text-xs">Incidents Log</p>
                         </div>
                     </div>
                     
                     <!-- Students List -->
-                    <div class="card col-span-full">
+                    <div class="card">
                         <h2 class="text-xl font-semibold mb-4">Students List</h2>
                         <div class="overflow-x-auto">
                             <table class="table w-full">
@@ -479,9 +530,7 @@
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody id="students-list-tbody">
-                                    <!-- Dynamic -->
-                                </tbody>
+                                <tbody id="students-list-tbody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -490,23 +539,21 @@
                 <!-- ERP Subsections -->
                 <div id="erp-subsections">
                     <!-- Attendance Subsection -->
-                    <div id="erp-attendance" class="section hidden card col-span-full mt-6">
+                    <div id="erp-attendance" class="section hidden card mt-4">
                         <h2 class="text-xl font-semibold mb-4">Attendance Management</h2>
-                        <p id="erp-attendance-stats" class="mb-4">Loading...</p>
-                        <!-- Simple form for marking, but restricted -->
-                        <form id="erp-attendance-form" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                             <input type="text" id="erp-student-name" placeholder="Student Name" class="form-control" required>
                             <input type="date" id="erp-date" value="2025-09-15" class="form-control" required>
                             <select id="erp-mark" class="form-control">
                                 <option value="P">Present</option>
                                 <option value="A">Absent</option>
                             </select>
-                            <button type="submit" class="btn">Mark Attendance</button>
-                        </form>
+                            <button type="button" class="btn" onclick="markErpAttendance()">Mark Attendance</button>
+                        </div>
                         <div class="overflow-x-auto">
                             <table class="table w-full">
                                 <thead>
-                                    <tr><th>Student</th><th>Date</th><th>Status</th></tr>
+                                    <tr><th>Student</th><th>Date</th><th>AM</th><th>PM</th><th>Daily</th><th>Actions</th></tr>
                                 </thead>
                                 <tbody id="erp-attendance-tbody"></tbody>
                             </table>
@@ -514,15 +561,13 @@
                     </div>
                     
                     <!-- Discipline Subsection -->
-                    <div id="erp-discipline" class="section hidden card col-span-full mt-6">
+                    <div id="erp-discipline" class="section hidden card mt-4">
                         <h2 class="text-xl font-semibold mb-4">Discipline Incidents</h2>
-                        <form class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <form class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4" onsubmit="logIncident(event)">
                             <input type="text" id="incident-student" placeholder="Student Name" class="form-control" required>
-                            <textarea id="incident-desc" placeholder="Description" class="form-control" rows="3" required></textarea>
+                            <textarea id="incident-desc" placeholder="Description" class="form-control" rows="2" required></textarea>
                             <select id="incident-type" class="form-control">
-                                <option>Misconduct</option>
-                                <option>Late</option>
-                                <option>Other</option>
+                                <option>Misconduct</option><option>Late</option><option>Other</option>
                             </select>
                             <button type="submit" class="btn">Log Incident</button>
                         </form>
@@ -531,9 +576,7 @@
                                 <thead>
                                     <tr><th>Date</th><th>Student</th><th>Type</th><th>Description</th><th>Actions</th></tr>
                                 </thead>
-                                <tbody id="discipline-tbody">
-                                    <!-- Dynamic -->
-                                </tbody>
+                                <tbody id="discipline-tbody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -559,6 +602,41 @@
         let currentUserClass = '';
         let currentStream = 'A';
         let students = [];
+        let academicState = {
+            students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
+            rowsByAdm: {}, className:'', stream:'', month:'09', year:'2025', examKey:'monthly', schoolBranch:''
+        };
+        let subjectsChart = null, top10Chart = null;
+        
+        const SUBJECTS_BY_CLASS = {
+            'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+            'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+            'Pre-Unit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+            'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+            'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+            'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
+            'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
+            'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
+            'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
+            'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
+        };
+        
+        const EXAM_KEYS = {
+            'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
+        };
+        
+        function letterGrade(pct) {
+            const p = Number(pct);
+            if (p >= 80.5) return 'A';
+            if (p >= 60.5) return 'B';
+            if (p >= 40.5) return 'C';
+            if (p >= 20.5) return 'D';
+            return 'F';
+        }
+        
+        function money(n){ n = Number(n||0); return 'TSh ' + n.toLocaleString(); }
+        
+        function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
         
         // Auth State Change
         auth.onAuthStateChanged(user => {
@@ -575,13 +653,14 @@
                     window.location.href = 'index.html';
                     return;
                 }
-                document.getElementById('user-name').textContent = user.email;
-                currentUserClass = userData.class || 'Class 4'; // Default if not set
+                document.getElementById('user-name').textContent = user.email.split('@')[0];
+                currentUserClass = userData.class || 'Class 4';
                 document.getElementById('user-class').textContent = currentUserClass;
+                document.getElementById('classInput').value = currentUserClass;
                 localStorage.setItem('class', currentUserClass);
-                loadTeacherData();
-                // Preselect stream if needed
                 document.getElementById('stream-select').value = currentStream;
+                document.getElementById('academic-stream').value = currentStream;
+                loadTeacherData();
             });
         });
         
@@ -592,28 +671,40 @@
                 students = allStudents.filter(s => s.classLevel === currentUserClass);
                 updateDashboard();
                 updateStudentsList();
-                updateScoresheet();
-                updateSubjectPerformance();
-                updateStudentAverages();
+                loadAcademicData();
                 loadAttendanceData();
-                loadFeeData();
+                loadFeeData(true);
                 loadDisciplineData();
+                populateAcademicStream();
             });
         }
         
-        // Update Dashboard
+        function populateAcademicStream() {
+            const select = document.getElementById('academic-stream');
+            select.innerHTML = '';
+            const streams = [...new Set(students.map(s => s.stream))].sort();
+            streams.forEach(stream => {
+                const opt = document.createElement('option');
+                opt.value = stream;
+                opt.textContent = stream;
+                select.appendChild(opt);
+            });
+            select.value = currentStream;
+            select.addEventListener('change', (e) => {
+                academicState.stream = e.target.value;
+                loadAcademicData();
+            });
+        }
+        
+        // Update Dashboard (real fees from payments sum)
         function updateDashboard() {
             const streamStudents = students.filter(s => s.stream === currentStream);
-            if (streamStudents.length === 0) {
-                document.getElementById('class-scores-count').textContent = 'No Data';
-                return;
-            }
+            if (streamStudents.length === 0) return;
             
-            // Mock scores calculation - in real, fetch from scores path
+            // Scores mock for dashboard
             const avgScore = Math.round(streamStudents.reduce((sum, s) => sum + (s.avgScore || 70), 0) / streamStudents.length);
             document.getElementById('class-scores-count').textContent = avgScore + '%';
             
-            // Top/Bottom - mock
             const top = streamStudents.sort((a, b) => (b.avgScore || 0) - (a.avgScore || 0))[0];
             const bottom = streamStudents.sort((a, b) => (a.avgScore || 0) - (b.avgScore || 0))[0];
             document.getElementById('top-student').innerHTML = top ? `${top.firstName} ${top.lastName}<br><small>${(top.avgScore || 0).toFixed(1)}%</small>` : 'N/A';
@@ -621,33 +712,23 @@
             
             document.getElementById('class-grade').textContent = avgScore + '%';
             
-            // Attendance mock
-            const presentPercent = 85; // Fetch real
+            // Attendance
+            const presentPercent = 85;
             document.getElementById('percent-present').textContent = presentPercent + '%';
             document.getElementById('percent-absent').textContent = (100 - presentPercent) + '%';
             document.getElementById('yellow-alerts').textContent = '2';
             document.getElementById('class-days').textContent = '20';
             
-            // Fee mock
-            const totalDue = streamStudents.reduce((sum, s) => sum + (s.feePerYear || 600000), 0);
-            const totalPaid = streamStudents.reduce((sum, s) => sum + (s.paidAmount || 88000), 0);
-            const balance = totalDue - totalPaid;
-            document.getElementById('fee-required').textContent = 'TSh ' + totalDue.toLocaleString();
-            document.getElementById('fee-paid').textContent = 'TSh ' + totalPaid.toLocaleString();
-            document.getElementById('fee-balance').textContent = 'TSh ' + balance.toLocaleString();
-            
-            // Update details
-            if (top) {
-                document.getElementById('top-student-detail').textContent = `${top.firstName} ${top.lastName} - ${(top.avgScore || 0).toFixed(1)}%`;
-                document.getElementById('bottom-student-detail').textContent = `${bottom.firstName} ${bottom.lastName} - ${(bottom.avgScore || 0).toFixed(1)}%`;
-            }
-            document.getElementById('class-max').textContent = '100%';
-            document.getElementById('class-grade-detail').textContent = avgScore + '%';
-            document.getElementById('present-detail').textContent = presentPercent + '%';
-            document.getElementById('absent-detail').textContent = (100 - presentPercent) + '%';
-            document.getElementById('fee-req').textContent = 'TSh ' + totalDue.toLocaleString();
-            document.getElementById('fee-pd').textContent = 'TSh ' + totalPaid.toLocaleString();
-            document.getElementById('fee-bal').textContent = 'TSh ' + balance.toLocaleString();
+            // Fees from summed payments
+            let totalDue = 0, totalPaid = 0, totalBalance = 0;
+            streamStudents.forEach(s => {
+                totalDue += s.feePerYear || 0;
+                totalPaid += academicState.fees[s.admissionNumber]?.paid || 0;
+                totalBalance += academicState.fees[s.admissionNumber]?.balance || 0;
+            });
+            document.getElementById('fee-required').textContent = money(totalDue);
+            document.getElementById('fee-paid').textContent = money(totalPaid);
+            document.getElementById('fee-balance').textContent = money(totalBalance);
         }
         
         // Stream Change
@@ -656,29 +737,545 @@
             updateDashboard();
         });
         
-        // Load Attendance Data
+        // Load Attendance Data (full for month)
         function loadAttendanceData() {
-            const today = new Date().toISOString().split('T')[0];
-            db.ref(`attendance/${currentUserClass}/${today.substring(0,7)}`).once('value').then(snapshot => {
+            const year = '2025';
+            const month = '09';
+            db.ref(`attendance/${currentUserClass}/${year}-${month}`).once('value').then(snapshot => {
                 const attData = snapshot.val() || {};
-                let totalDays = Object.keys(attData).length;
-                let presentDays = 0;
-                Object.values(attData).forEach(day => {
-                    Object.values(day).forEach(rec => {
+                let totalDays = 0, presentDays = 0;
+                Object.values(attData).forEach(dayData => {
+                    totalDays += Object.keys(dayData).length;
+                    Object.values(dayData).forEach(rec => {
                         if (rec.daily === 'P') presentDays++;
                     });
                 });
-                const percentPresent = totalDays > 0 ? (presentDays / (totalDays * students.filter(s => s.stream === currentStream).length) * 100).toFixed(1) : 0;
+                const numStudents = students.filter(s => s.stream === currentStream).length;
+                const percentPresent = (totalDays > 0 && numStudents > 0) ? (presentDays / (totalDays * numStudents) * 100).toFixed(1) : 0;
                 document.getElementById('percent-present').textContent = percentPresent + '%';
                 document.getElementById('percent-absent').textContent = (100 - parseFloat(percentPresent)) + '%';
-                document.getElementById('erp-attendance-stats').textContent = `Class Attendance: ${percentPresent}% Present`;
+                academicState.attendance = attData;
                 updateErpAttendanceTable();
             });
         }
         
-        // Load Fee Data
-        function loadFeeData() {
-            // Already in updateDashboard, but can expand
+        // Load Fee Data (sum from payments like finance.html)
+        function loadFeeData(init = false) {
+            const year = '2025';
+            db.ref(`payments/${year}/${currentUserClass}`).once('value').then(snapshot => {
+                const payments = snapshot.val() || {};
+                const fees = {};
+                students.forEach(s => {
+                    const adm = s.admissionNumber;
+                    const paid = Object.values(payments[adm] || {}).reduce((sum, p) => sum + (p.amount || 0), 0);
+                    const due = s.feePerYear || 600000;
+                    const balance = Math.max(0, due - paid);
+                    fees[adm] = { required: due, paid, balance };
+                });
+                academicState.fees = fees;
+                if (init) updateDashboard();
+            });
+        }
+        
+        // Academic Data Load (from academic.html logic)
+        async function loadAcademicData() {
+            academicState.className = currentUserClass;
+            academicState.stream = document.getElementById('academic-stream').value;
+            academicState.month = document.getElementById('monthSelect').value;
+            academicState.year = document.getElementById('yearInput').value;
+            academicState.examKey = EXAM_KEYS[document.getElementById('examType').value] || 'monthly';
+            
+            academicState.students = await fetchStudents(academicState.className, academicState.stream);
+            academicState.attendance = await fetchAttendance(academicState.year, academicState.month, academicState.className);
+            academicState.fees = await fetchFees(academicState.year, academicState.className); // But override with summed
+            loadFeeData(); // Sum payments
+            academicState.scores = await fetchScores({year: academicState.year, className: academicState.className, examKey: academicState.examKey, month: academicState.month});
+            
+            academicState.subjectList = SUBJECTS_BY_CLASS[academicState.className] || [];
+            buildAcademicTable();
+            recomputeAll();
+            drawCharts();
+            updateKPIs();
+        }
+        
+        // Fetch functions from academic.html
+        async function fetchStudents(className, stream) {
+            const tryPaths = ['students'];
+            for (const p of tryPaths) {
+                try {
+                    const snap = await db.ref(p).once('value');
+                    if (snap.exists()) {
+                        const data = snap.val();
+                        const arr = Object.values(data).filter(s => s.classLevel === className && (!stream || s.stream === stream));
+                        arr.forEach(s => {
+                            s.adm = s.admissionNumber;
+                            s.name = `${s.firstName} ${s.lastName}`;
+                        });
+                        arr.sort((a,b) => a.name.localeCompare(b.name));
+                        return arr;
+                    }
+                } catch(err) {
+                    console.warn(err);
+                }
+            }
+            return [];
+        }
+        
+        async function fetchAttendance(year, month, className) {
+            try {
+                const snap = await db.ref(`/attendance/${className}/${year}-${month}`).once('value');
+                const out = {};
+                if (snap.exists()) {
+                    const val = snap.val();
+                    Object.keys(val || {}).forEach(adm => {
+                        const days = Object.keys(val[adm] || {}).length;
+                        const present = Object.values(val[adm]).filter(d => d.daily === 'P').length;
+                        out[adm] = { present, absent: days - present, days };
+                    });
+                }
+                return out;
+            } catch(e) { return {}; }
+        }
+        
+        async function fetchFees(year, className) {
+            // Use summed from loadFeeData
+            return academicState.fees;
+        }
+        
+        async function fetchScores({year, className, examKey, month}) {
+            try {
+                const snap = await db.ref(`/scores/${year}/${className}/${examKey}/${month}`).once('value');
+                const out = {};
+                if (snap.exists()) {
+                    const val = snap.val();
+                    Object.keys(val || {}).forEach(adm => {
+                        out[adm] = {};
+                        const subjObj = val[adm] || {};
+                        Object.keys(subjObj).forEach(sub => {
+                            const o = subjObj[sub] || {};
+                            out[adm][sub] = { score: Number(o.score || 0), max: Number(o.max || 100) };
+                        });
+                    });
+                }
+                return out;
+            } catch(e) { return {}; }
+        }
+        
+        // Build Academic Table
+        function buildAcademicTable() {
+            const scoresTable = document.getElementById('scoresTable');
+            const theadRow = scoresTable.querySelector('thead tr');
+            
+            // Clear dynamic headers
+            let totalIndex = Array.from(theadRow.children).findIndex(th => th.textContent.trim() === 'Total');
+            if (totalIndex < 0) totalIndex = 6; // Fixed columns: # Adm Student FeeDue Paid Balance
+            
+            while (theadRow.children.length > totalIndex) {
+                theadRow.removeChild(theadRow.children[totalIndex]);
+            }
+            
+            // Insert subject headers
+            academicState.subjectList.forEach(subject => {
+                const thSubject = document.createElement('th');
+                thSubject.className = 'p-2 border subject-col';
+                thSubject.textContent = subject;
+                theadRow.insertBefore(thSubject, theadRow.children[totalIndex]);
+                
+                const thMax = document.createElement('th');
+                thMax.className = 'p-2 border max-col';
+                thMax.textContent = 'Max';
+                theadRow.insertBefore(thMax, theadRow.children[totalIndex + 1]);
+                
+                const thPos = document.createElement('th');
+                thPos.className = 'p-2 border pos-col text-center';
+                thPos.textContent = 'Pstn';
+                theadRow.insertBefore(thPos, theadRow.children[totalIndex + 2]);
+                
+                totalIndex += 3;
+            });
+            
+            // Build rows
+            const scoresBody = document.getElementById('scoresBody');
+            scoresBody.innerHTML = '';
+            academicState.rowsByAdm = {};
+            
+            academicState.students.forEach((s, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = idx % 2 ? 'bg-white' : 'bg-slate-50';
+                
+                // Fixed columns
+                const tdIndex = document.createElement('td'); tdIndex.className = 'p-2 border text-center'; tdIndex.textContent = idx + 1; tr.appendChild(tdIndex);
+                const tdAdm = document.createElement('td'); tdAdm.className = 'p-2 border text-center'; tdAdm.textContent = s.adm; tr.appendChild(tdAdm);
+                const tdName = document.createElement('td'); tdName.className = 'p-2 border'; tdName.innerHTML = `<div class="font-medium">${escapeHtml(s.name)}</div>`; tr.appendChild(tdName);
+                
+                const fee = academicState.fees[s.adm] || { required: s.feePerYear || 0, paid: 0, balance: s.feePerYear || 0 };
+                const tdFeeDue = document.createElement('td'); tdFeeDue.className = 'p-2 border text-center'; tdFeeDue.textContent = money(fee.required); tr.appendChild(tdFeeDue);
+                const tdPaid = document.createElement('td'); tdPaid.className = 'p-2 border text-center'; tdPaid.textContent = money(fee.paid); tr.appendChild(tdPaid);
+                const tdBal = document.createElement('td'); tdBal.className = 'p-2 border text-center'; tdBal.textContent = money(fee.balance); tr.appendChild(tdBal);
+                
+                // Subject cells
+                const subjectCells = {};
+                academicState.subjectList.forEach(subject => {
+                    const tdScore = document.createElement('td'); tdScore.className = 'p-1.5 border';
+                    const scoreInput = document.createElement('input');
+                    scoreInput.type = 'number'; scoreInput.min = '0'; scoreInput.step = '0.01';
+                    scoreInput.className = 'w-20 px-2 py-1 border rounded score-input';
+                    scoreInput.value = academicState.scores[s.adm]?.[subject]?.score || '';
+                    scoreInput.addEventListener('input', recomputeAll);
+                    tdScore.appendChild(scoreInput);
+                    
+                    const tdMax = document.createElement('td'); tdMax.className = 'p-1.5 border';
+                    const maxInput = document.createElement('input');
+                    maxInput.type = 'number'; maxInput.min = '1';
+                    maxInput.className = 'w-16 px-2 py-1 border rounded max-input';
+                    maxInput.value = academicState.scores[s.adm]?.[subject]?.max || 100;
+                    maxInput.addEventListener('input', recomputeAll);
+                    tdMax.appendChild(maxInput);
+                    
+                    const tdPos = document.createElement('td'); tdPos.className = 'p-1.5 border text-center';
+                    const posSpan = document.createElement('span');
+                    posSpan.className = 'inline-block w-10 text-center pstn-cell';
+                    posSpan.textContent = '–';
+                    tdPos.appendChild(posSpan);
+                    
+                    tr.appendChild(tdScore); tr.appendChild(tdMax); tr.appendChild(tdPos);
+                    
+                    subjectCells[subject] = { scoreInput, maxInput, pstnSpan: posSpan };
+                });
+                
+                // Computed columns
+                const tdTotal = document.createElement('td'); tdTotal.className = 'p-2 border text-center font-medium'; tdTotal.textContent = '0'; tr.appendChild(tdTotal);
+                const tdMaxTotal = document.createElement('td'); tdMaxTotal.className = 'p-2 border text-center'; tdMaxTotal.textContent = '0'; tr.appendChild(tdMaxTotal);
+                const tdAvg = document.createElement('td'); tdAvg.className = 'p-2 border text-center'; tdAvg.textContent = '0%'; tr.appendChild(tdAvg);
+                const tdPstn = document.createElement('td'); tdPstn.className = 'p-2 border text-center'; tdPstn.textContent = '–'; tr.appendChild(tdPstn);
+                const tdGrade = document.createElement('td'); tdGrade.className = 'p-2 border text-center'; tdGrade.textContent = '–'; tr.appendChild(tdGrade);
+                
+                // Attendance
+                const att = academicState.attendance[s.adm] || { present: 0, absent: 0 };
+                const tdPresent = document.createElement('td'); tdPresent.className = 'p-2 border text-center'; tdPresent.textContent = att.present; tr.appendChild(tdPresent);
+                const tdAbsent = document.createElement('td'); tdAbsent.className = 'p-2 border text-center'; tdAbsent.textContent = att.absent; tr.appendChild(tdAbsent);
+                
+                // Comment
+                const tdComment = document.createElement('td'); tdComment.className = 'p-2 border';
+                const textarea = document.createElement('textarea');
+                textarea.className = 'w-full h-10 p-2 border rounded text-xs';
+                textarea.placeholder = 'Teacher comment...';
+                tdComment.appendChild(textarea);
+                tr.appendChild(tdComment);
+                
+                scoresBody.appendChild(tr);
+                
+                academicState.rowsByAdm[s.adm] = {
+                    tr, subjectCells, tdTotal, tdMax: tdMaxTotal, tdAvg, tdPstn, tdGrade,
+                    tdPresent, tdAbsent, tdComment: textarea,
+                    tdFeeDue: tdFeeDue, tdPaid, tdBal,
+                    meta: s
+                };
+            });
+            
+            document.getElementById('lblCount').textContent = academicState.students.length;
+            document.getElementById('lblSubjects').textContent = academicState.subjectList.length;
+        }
+        
+        // Recompute
+        function recomputeAll() {
+            const perSubject = {};
+            Object.keys(academicState.rowsByAdm).forEach(adm => {
+                const row = academicState.rowsByAdm[adm];
+                let sumScore = 0, sumMax = 0;
+                academicState.subjectList.forEach(subject => {
+                    const cell = row.subjectCells[subject];
+                    const score = Number(cell.scoreInput.value || 0);
+                    const max = Math.max(1, Number(cell.maxInput.value || 100));
+                    sumScore += score; sumMax += max;
+                    const pct = (score / max) * 100;
+                    perSubject[subject] = perSubject[subject] || [];
+                    perSubject[subject].push({ adm, pct });
+                });
+                const avgPct = sumMax ? (sumScore / sumMax) * 100 : 0;
+                row.tdTotal.textContent = sumScore.toFixed(2);
+                row.tdMax.textContent = Math.round(sumMax);
+                row.tdAvg.textContent = avgPct.toFixed(2) + '%';
+                row.tdGrade.textContent = letterGrade(avgPct);
+                row._avgPct = avgPct;
+            });
+            
+            // Positions per subject
+            academicState.subjectList.forEach(subject => {
+                const list = (perSubject[subject] || []).slice().sort((a, b) => b.pct - a.pct);
+                let pos = 0, last = null;
+                list.forEach((item, idx) => {
+                    if (last === null || item.pct < last) { pos = idx + 1; last = item.pct; }
+                    const row = academicState.rowsByAdm[item.adm];
+                    row.subjectCells[subject].pstnSpan.textContent = pos;
+                });
+            });
+            
+            // Overall ranking
+            const arr = Object.keys(academicState.rowsByAdm).map(adm => ({
+                adm,
+                avg: academicState.rowsByAdm[adm]._avgPct || 0,
+                total: academicState.rowsByAdm[adm]._sumScore || 0,
+                attendance: Number(academicState.rowsByAdm[adm].tdPresent.textContent || 0)
+            })).sort((a, b) => {
+                if (b.avg !== a.avg) return b.avg - a.avg;
+                if (b.total !== a.total) return b.total - a.total;
+                return b.attendance - a.attendance;
+            });
+            arr.forEach((r, i) => academicState.rowsByAdm[r.adm].tdPstn.textContent = i + 1);
+            
+            updateKPIs();
+            drawCharts();
+        }
+        
+        function updateKPIs() {
+            const list = Object.values(academicState.rowsByAdm).map(r => ({ name: r.meta.name, avg: r._avgPct || 0 }));
+            if (list.length === 0) return;
+            const sorted = list.slice().sort((a, b) => b.avg - a.avg);
+            const top = sorted[0], bottom = sorted[sorted.length - 1];
+            document.getElementById('kpiTopStudent').textContent = top.name || '–';
+            document.getElementById('kpiTopScore').textContent = (top.avg || 0).toFixed(2) + '%';
+            document.getElementById('kpiBottomStudent').textContent = bottom.name || '–';
+            document.getElementById('kpiBottomScore').textContent = (bottom.avg || 0).toFixed(2) + '%';
+            document.getElementById('kpiClassMax').textContent = (top.avg || 0).toFixed(2) + '%';
+            const classAvg = sorted.reduce((s, x) => s + (x.avg || 0), 0) / sorted.length;
+            document.getElementById('kpiClassGrade').textContent = letterGrade(classAvg);
+            
+            let sumPresent = 0, sumAbsent = 0, sumDays = 0;
+            Object.values(academicState.rowsByAdm).forEach(r => {
+                sumPresent += Number(r.tdPresent.textContent || 0);
+                sumAbsent += Number(r.tdAbsent.textContent || 0);
+                sumDays += sumPresent + sumAbsent;
+            });
+            const pctPresent = sumDays ? (sumPresent / sumDays) * 100 : 0;
+            const pctAbsent = sumDays ? (sumAbsent / sumDays) * 100 : 0;
+            document.getElementById('kpiPresent').textContent = pctPresent.toFixed(1) + '%';
+            document.getElementById('kpiAbsent').textContent = pctAbsent.toFixed(1) + '%';
+            
+            let totalReq = 0, totalPaid = 0, totalBal = 0;
+            Object.values(academicState.rowsByAdm).forEach(r => {
+                const fee = academicState.fees[r.meta.adm] || { required: 0, paid: 0, balance: 0 };
+                totalReq += fee.required; totalPaid += fee.paid; totalBal += fee.balance;
+            });
+            document.getElementById('kpiFeeRequired').textContent = money(totalReq);
+            document.getElementById('kpiFeePaid').textContent = money(totalPaid);
+            document.getElementById('kpiFeeBalance').textContent = money(totalBal);
+        }
+        
+        function drawCharts() {
+            const subjects = academicState.subjectList || [];
+            const avgPerSubject = subjects.map(sub => {
+                let sum = 0, cnt = 0;
+                Object.keys(academicState.rowsByAdm).forEach(adm => {
+                    const row = academicState.rowsByAdm[adm];
+                    const cell = row.subjectCells[sub];
+                    const s = Number(cell.scoreInput.value || 0);
+                    const m = Math.max(1, Number(cell.maxInput.value || 100));
+                    sum += (s / m) * 100; cnt++;
+                });
+                return cnt ? sum / cnt : 0;
+            });
+            
+            const topList = Object.values(academicState.rowsByAdm).map(r => ({ name: r.meta.name, avg: r._avgPct || 0 })).sort((a, b) => b.avg - a.avg).slice(0, 10);
+            
+            if (subjectsChart) subjectsChart.destroy();
+            subjectsChart = new Chart(document.getElementById('chartSubjects'), {
+                type: 'bar',
+                data: { labels: subjects, datasets: [{ label: 'Average %', data: avgPerSubject }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+            });
+            
+            if (top10Chart) top10Chart.destroy();
+            top10Chart = new Chart(document.getElementById('chartTop10'), {
+                type: 'bar',
+                data: { labels: topList.map(x => x.name), datasets: [{ label: 'Overall %', data: topList.map(x => x.avg) }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+            });
+        }
+        
+        // Save Scores
+        async function saveAllScores() {
+            const baseRef = db.ref(`/scores/${academicState.year}/${academicState.className}/${academicState.examKey}/${academicState.month}`);
+            const payload = {};
+            Object.keys(academicState.rowsByAdm).forEach(adm => {
+                const row = academicState.rowsByAdm[adm];
+                payload[adm] = {};
+                academicState.subjectList.forEach(subject => {
+                    const cell = row.subjectCells[subject];
+                    const score = Number(cell.scoreInput.value || 0);
+                    const max = Number(cell.maxInput.value || 100);
+                    payload[adm][subject] = { score, max };
+                });
+            });
+            await baseRef.set(payload);
+            alert('Scores saved.');
+        }
+        
+        // Event listeners for academic
+        document.getElementById('btnSaveAll').addEventListener('click', saveAllScores);
+        document.getElementById('btnRecalc').addEventListener('click', recomputeAll);
+        document.getElementById('btnSetAllMax').addEventListener('click', () => {
+            const v = Number(document.getElementById('globalMaxInput').value || 100);
+            document.querySelectorAll('input.max-input').forEach(i => i.value = v);
+            recomputeAll();
+        });
+        document.getElementById('btnExportCSV').addEventListener('click', exportCSV);
+        document.getElementById('btnExportXLSX').addEventListener('click', exportXLSX);
+        document.getElementById('btnExportPDF').addEventListener('click', exportPDF);
+        document.getElementById('btnPrint').addEventListener('click', () => window.print());
+        document.getElementById('btnGenerateReports').addEventListener('click', bulkGenerateReportCards);
+        document.getElementById('btnEmailReports').addEventListener('click', () => alert('Email/SMS integration needed.'));
+        
+        // Exports from academic
+        function gatherRowsForExport() {
+            const rows = [];
+            const header = ['#', 'Adm', 'Student', 'Fee Due', 'Paid', 'Balance'];
+            academicState.subjectList.forEach(s => header.push(...[`${s} Score`, `${s} Max`, `${s} Pstn`]));
+            header.push('Total', 'Max', '% Avg', 'Overall Pos', 'Grade', 'Present', 'Absent', 'Comment');
+            rows.push(header);
+            Object.keys(academicState.rowsByAdm).forEach(adm => {
+                const r = academicState.rowsByAdm[adm];
+                let arr = [r.tr.children[0].textContent, adm, r.meta.name, r.tdFeeDue.textContent, r.tdPaid.textContent, r.tdBal.textContent];
+                academicState.subjectList.forEach(sub => {
+                    const c = r.subjectCells[sub];
+                    arr.push(Number(c.scoreInput.value || 0), Number(c.maxInput.value || 100), c.pstnSpan.textContent || '');
+                });
+                arr.push(r.tdTotal.textContent, r.tdMax.textContent, r.tdAvg.textContent, r.tdPstn.textContent, r.tdGrade.textContent, r.tdPresent.textContent, r.tdAbsent.textContent, r.tdComment.value || '');
+                rows.push(arr);
+            });
+            return rows;
+        }
+        
+        function exportCSV() {
+            const rows = gatherRowsForExport();
+            const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            saveAs(blob, `Scoresheet_${academicState.className}_${academicState.examKey}_${academicState.year}-${academicState.month}.csv`);
+        }
+        
+        function exportXLSX() {
+            const rows = gatherRowsForExport();
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Scoresheet');
+            XLSX.writeFile(wb, `Scoresheet_${academicState.className}_${academicState.examKey}_${academicState.year}-${academicState.month}.xlsx`);
+        }
+        
+        function exportPDF() {
+            const rows = gatherRowsForExport();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'l', unit: 'pt', format: 'a4' });
+            const title = `Scoresheet ${academicState.className} ${academicState.examKey} ${academicState.year}/${academicState.month}`;
+            doc.setFontSize(14); doc.text(title, 40, 40);
+            doc.autoTable({ startY: 60, head: [rows[0]], body: rows.slice(1), styles: { fontSize: 7, cellPadding: 3 }, headStyles: { fillColor: [37, 99, 235] } });
+            doc.save(title.replace(/[^A-Za-z0-9_\- ]/g, '_') + '.pdf');
+        }
+        
+        async function bulkGenerateReportCards() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const margin = 36;
+            const headerColor = [37, 99, 235];
+            academicState.students.forEach((s, i) => {
+                if (i > 0) doc.addPage();
+                const r = academicState.rowsByAdm[s.adm];
+                doc.setFillColor(...headerColor); doc.rect(0, 0, 595, 80, 'F');
+                doc.setTextColor(255, 255, 255); doc.setFontSize(16);
+                doc.text('SoMAp School — Academic Report', margin, 40);
+                doc.setTextColor(0, 0, 0); doc.setFontSize(12);
+                doc.text(`Name: ${s.name}`, margin, 110);
+                doc.text(`Admission: ${s.adm}`, margin, 130);
+                const att = academicState.attendance[s.adm] || { present: 0, absent: 0, days: 0 };
+                const days = att.days || att.present + att.absent;
+                const pct = days ? ((att.present / days) * 100).toFixed(1) : '0.0';
+                doc.text(`Attendance: ${att.present}/${days} (${pct}%)`, margin, 150);
+                const fee = academicState.fees[s.adm] || { required: 0, paid: 0, balance: 0 };
+                doc.text(`Fees: Required ${fee.required} | Paid ${fee.paid} | Balance ${fee.balance}`, margin, 170);
+                
+                const tableHead = ['Subject', 'Score', 'Max', '%', 'Pstn', 'Grade'];
+                const tableBody = academicState.subjectList.map(sub => {
+                    const c = r.subjectCells[sub];
+                    const sc = Number(c.scoreInput.value || 0); const mx = Number(c.maxInput.value || 100);
+                    const pctS = (sc / mx) * 100; const g = letterGrade(pctS); const pstn = c.pstnSpan.textContent || '';
+                    return [sub, sc.toFixed(2), mx, pctS.toFixed(2), pstn, g];
+                });
+                doc.autoTable({ head: [tableHead], body: tableBody, startY: 200, styles: { fontSize: 9 }, headStyles: { fillColor: headerColor } });
+                
+                const after = doc.lastAutoTable.finalY + 20;
+                doc.text(`Overall Average: ${Number(r.tdAvg.textContent || 0).toFixed(2)}%`, margin, after);
+                doc.text(`Overall Position: ${r.tdPstn.textContent}`, margin, after + 18);
+                doc.text(`Overall Grade: ${r.tdGrade.textContent}`, margin, after + 36);
+                const comment = r.tdComment.value || '—';
+                doc.text('Teacher Comment:', margin, after + 64);
+                doc.text(comment, margin, after + 82, { maxWidth: 595 - margin * 2 });
+            });
+            doc.save(`ReportCards_${academicState.className}_${academicState.examKey}_${academicState.year}.pdf`);
+        }
+        
+        // ERP Attendance Mark
+        function markErpAttendance() {
+            const studentName = document.getElementById('erp-student-name').value;
+            const date = document.getElementById('erp-date').value;
+            const mark = document.getElementById('erp-mark').value;
+            const student = students.find(s => `${s.firstName} ${s.lastName}`.toLowerCase().includes(studentName.toLowerCase()) && s.classLevel === currentUserClass);
+            if (student) {
+                db.ref(`attendance/${currentUserClass}/${date.substring(0, 7)}/${date}/${student.admissionNumber}`).set({
+                    am: mark, pm: mark, daily: mark,
+                    snap: { admissionNo: student.admissionNumber, name: `${student.firstName} ${student.lastName}`, class: student.classLevel, feeDue: student.feePerYear, feePaid: academicState.fees[student.admissionNumber]?.paid || 0, balance: academicState.fees[student.admissionNumber]?.balance || 0 }
+                }).then(() => {
+                    alert('Attendance marked!');
+                    loadAttendanceData();
+                    updateErpAttendanceTable();
+                });
+            } else {
+                alert('Student not found.');
+            }
+        }
+        
+        function updateErpAttendanceTable() {
+            const tbody = document.getElementById('erp-attendance-tbody');
+            tbody.innerHTML = '';
+            const monthData = academicState.attendance || {};
+            Object.keys(monthData).forEach(adm => {
+                const student = students.find(s => s.admissionNumber === adm);
+                if (!student || student.stream !== currentStream) return;
+                Object.keys(monthData[adm]).forEach(date => {
+                    const rec = monthData[adm][date];
+                    const row = `<tr>
+                        <td>${student.firstName} ${student.lastName}</td>
+                        <td>${date}</td>
+                        <td>${rec.am || ''}</td>
+                        <td>${rec.pm || ''}</td>
+                        <td>${rec.daily || ''}</td>
+                        <td><button class="btn btn-secondary text-xs" onclick="editAttendance('${adm}', '${date}')">Edit</button></td>
+                    </tr>`;
+                    tbody.innerHTML += row;
+                });
+            });
+        }
+        
+        function editAttendance(adm, date) {
+            // Simple edit modal or alert
+            const newMark = prompt('New daily mark (P/A):');
+            if (newMark === 'P' || newMark === 'A') {
+                db.ref(`attendance/${currentUserClass}/${date.substring(0,7)}/${date}/${adm}`).update({ daily: newMark, am: newMark, pm: newMark });
+                loadAttendanceData();
+            }
+        }
+        
+        function logIncident(e) {
+            e.preventDefault();
+            const student = document.getElementById('incident-student').value;
+            const desc = document.getElementById('incident-desc').value;
+            const type = document.getElementById('incident-type').value;
+            const date = new Date().toISOString().split('T')[0];
+            db.ref('discipline').push({
+                date, student, type, desc, class: currentUserClass, timestamp: Date.now()
+            }).then(() => {
+                alert('Incident logged!');
+                e.target.reset();
+                loadDisciplineData();
+            });
         }
         
         // Update Students List
@@ -686,193 +1283,94 @@
             const tbody = document.getElementById('students-list-tbody');
             tbody.innerHTML = '';
             students.filter(s => s.stream === currentStream).forEach(s => {
+                const fee = academicState.fees[s.admissionNumber] || { required: s.feePerYear || 0, paid: 0, balance: s.feePerYear || 0 };
                 const row = `<tr>
                     <td>${s.admissionNumber}</td>
                     <td>${s.firstName} ${s.lastName}</td>
                     <td>${s.classLevel}</td>
                     <td>${s.stream}</td>
-                    <td>TSh ${s.feePerYear?.toLocaleString()}</td>
-                    <td>TSh ${s.paidAmount?.toLocaleString()}</td>
-                    <td>TSh ${s.balance?.toLocaleString()}</td>
+                    <td>${money(fee.required)}</td>
+                    <td>${money(fee.paid)}</td>
+                    <td>${money(fee.balance)}</td>
                     <td><button class="btn btn-secondary text-xs">View</button></td>
                 </tr>`;
                 tbody.innerHTML += row;
             });
         }
         
-        // Update Scoresheet
-        function updateScoresheet() {
-            const tbody = document.getElementById('scoresheet-tbody');
-            tbody.innerHTML = '';
-            const streamStudents = students.filter(s => s.stream === currentStream);
-            streamStudents.forEach((s, index) => {
-                const row = `<tr>
-                    <td>${index + 1}</td>
-                    <td>${s.admissionNumber}</td>
-                    <td>${s.firstName} ${s.lastName}</td>
-                    <td>TSh ${s.feePerYear?.toLocaleString()}</td>
-                    <td>TSh ${s.paidAmount?.toLocaleString()}</td>
-                    <td>TSh ${s.balance?.toLocaleString()}</td>
-                    <td><input type="number" class="form-control w-16" value="0"></td>
-                    <td>100</td>
-                    <td>0%</td>
-                    <td>-</td>
-                    <td>-</td>
-                    <td>15</td>
-                    <td>5</td>
-                    <td><textarea class="form-control w-full" rows="1" placeholder="Comment"></textarea></td>
-                </tr>`;
-                tbody.innerHTML += row;
-            });
-            document.getElementById('students-count').textContent = `${streamStudents.length} students • 5 subjects`; // Mock subjects
-        }
-        
-        // Update Subject Performance
-        function updateSubjectPerformance() {
-            const subjects = ['Math', 'English', 'Science', 'History', 'Geography']; // Mock
-            const tbody = document.getElementById('subject-tbody');
-            tbody.innerHTML = '';
-            subjects.forEach(sub => {
-                const avg = Math.round(Math.random() * 100); // Mock
-                tbody.innerHTML += `<tr><td>${sub}</td><td>${avg}%</td></tr>`;
-            });
-        }
-        
-        // Update Student Averages Top 10
-        function updateStudentAverages() {
-            const streamStudents = students.filter(s => s.stream === currentStream).sort((a, b) => (b.avgScore || 0) - (a.avgScore || 0)).slice(0, 10);
-            const tbody = document.getElementById('student-tbody');
-            tbody.innerHTML = '';
-            streamStudents.forEach((s, index) => {
-                tbody.innerHTML += `<tr><td>${index + 1}</td><td>${s.firstName} ${s.lastName}</td><td>${(s.avgScore || 0).toFixed(1)}%</td></tr>`;
-            });
-        }
-        
-        // ERP Attendance Table
-        function updateErpAttendanceTable() {
-            const tbody = document.getElementById('erp-attendance-tbody');
-            tbody.innerHTML = '';
-            // Mock data
-            students.slice(0, 5).forEach(s => {
-                tbody.innerHTML += `<tr><td>${s.firstName} ${s.lastName}</td><td>2025-09-15</td><td><span class="text-green-600">Present</span></td></tr>`;
-            });
-        }
-        
-        // Discipline Data Mock
+        // Discipline
         function loadDisciplineData() {
-            const tbody = document.getElementById('discipline-tbody');
-            tbody.innerHTML = '';
-            // Mock incidents
-            const incidents = [
-                { date: '2025-09-10', student: 'John Doe', type: 'Late', desc: 'Arrived late' },
-                { date: '2025-09-12', student: 'Jane Smith', type: 'Misconduct', desc: 'Class disruption' }
-            ];
-            incidents.forEach(inc => {
-                tbody.innerHTML += `<tr><td>${inc.date}</td><td>${inc.student}</td><td>${inc.type}</td><td>${inc.desc}</td><td><button class="btn btn-secondary text-xs">Edit</button></td></tr>`;
+            db.ref('discipline').orderByChild('class').equalTo(currentUserClass).once('value').then(snapshot => {
+                const tbody = document.getElementById('discipline-tbody');
+                tbody.innerHTML = '';
+                if (snapshot.exists()) {
+                    Object.values(snapshot.val()).forEach(inc => {
+                        const row = `<tr>
+                            <td>${inc.date}</td>
+                            <td>${inc.student}</td>
+                            <td>${inc.type}</td>
+                            <td>${inc.desc}</td>
+                            <td><button class="btn btn-secondary text-xs">Edit</button></td>
+                        </tr>`;
+                        tbody.innerHTML += row;
+                    });
+                }
             });
         }
         
-        // Section Show/Hide
+        // Section management
         function showSection(sectionId) {
             document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
             document.getElementById(sectionId).classList.add('active');
             if (sectionId === 'schoolerp') {
-                document.getElementById('attendance-icon').classList.remove('hidden');
-                document.getElementById('discipline-icon').classList.remove('hidden');
-                document.getElementById('students-icon').classList.remove('hidden');
+                ['attendance-icon', 'discipline-icon', 'students-icon'].forEach(id => document.getElementById(id).classList.remove('hidden'));
             } else {
-                document.getElementById('attendance-icon').classList.add('hidden');
-                document.getElementById('discipline-icon').classList.add('hidden');
-                document.getElementById('students-icon').classList.add('hidden');
+                ['attendance-icon', 'discipline-icon', 'students-icon'].forEach(id => document.getElementById(id).classList.add('hidden'));
             }
-            loadSectionData(sectionId);
-        }
-        
-        function showErpSubsection(subId) {
-            document.querySelectorAll('#erp-subsections .section').forEach(sec => sec.classList.remove('active', 'hidden'));
-            const subSec = document.getElementById(`erp-${subId}`);
-            subSec.classList.remove('hidden');
-            subSec.classList.add('active');
-        }
-        
-        function loadSectionData(sectionId) {
-            if (sectionId === 'academic') {
-                updateScoresheet();
-                updateSubjectPerformance();
-                updateStudentAverages();
-            } else if (sectionId === 'schoolerp') {
+            if (sectionId === 'academic') loadAcademicData();
+            if (sectionId === 'schoolerp') {
                 updateStudentsList();
                 loadAttendanceData();
                 loadDisciplineData();
             }
         }
         
-        // Save Scores Mock
-        function saveScores() {
-            alert('Scores saved successfully!');
-            // In real: db.ref(`scores/2025/${currentUserClass}/monthly/09`).set(data);
+        function showErpSubsection(subId) {
+            document.querySelectorAll('#erp-subsections .section').forEach(sec => {
+                sec.classList.remove('active');
+                sec.classList.add('hidden');
+            });
+            document.getElementById(`erp-${subId}`).classList.remove('hidden');
+            document.getElementById(`erp-${subId}`).classList.add('active');
+            if (subId === 'attendance') updateErpAttendanceTable();
+            if (subId === 'discipline') loadDisciplineData();
         }
         
-        // ERP Attendance Form
-        document.getElementById('erp-attendance-form').addEventListener('submit', e => {
-            e.preventDefault();
-            const studentName = document.getElementById('erp-student-name').value;
-            const date = document.getElementById('erp-date').value;
-            const mark = document.getElementById('erp-mark').value;
-            // Find student by name, restrict to class
-            const student = students.find(s => `${s.firstName} ${s.lastName}`.toLowerCase().includes(studentName.toLowerCase()) && s.classLevel === currentUserClass);
-            if (student) {
-                db.ref(`attendance/${currentUserClass}/${date.substring(0,7)}/${date}/${student.admissionNumber}`).set({
-                    am: mark,
-                    pm: mark,
-                    daily: mark,
-                    snap: {
-                        admissionNo: student.admissionNumber,
-                        name: `${student.firstName} ${student.lastName}`,
-                        class: student.classLevel,
-                        feeDue: student.feePerYear,
-                        feePaid: student.paidAmount,
-                        balance: student.balance
-                    }
-                }).then(() => {
-                    alert('Attendance marked!');
-                    loadAttendanceData();
-                    updateErpAttendanceTable();
-                });
-            } else {
-                alert('Student not found in your class.');
-            }
-        });
+        function saveScores() { saveAllScores(); }
         
-        // Discipline Form Mock
-        const disciplineForm = document.querySelector('#erp-discipline form');
-        disciplineForm.addEventListener('submit', e => {
-            e.preventDefault();
-            alert('Incident logged!');
-            loadDisciplineData();
-        });
-        
-        // Admission Warning
         function showAdmissionWarning() {
-            alert('Access to Admissions restricted. Contact Admin for new applications.');
+            alert('Access restricted. Contact Admin.');
         }
         
-        // Logout
         function logout() {
             auth.signOut();
         }
         
-        // Sidebar Toggle
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             sidebar.classList.toggle('expanded');
-            const main = document.querySelector('.main-content');
-            main.style.marginLeft = sidebar.classList.contains('expanded') ? '300px' : '100px';
+            document.querySelector('.main-content').style.marginLeft = sidebar.classList.contains('expanded') ? '300px' : '100px';
         }
         
-        // Initial Load
+        // Controls listeners
+        document.getElementById('examType').addEventListener('change', () => { academicState.examKey = EXAM_KEYS[document.getElementById('examType').value] || 'monthly'; loadAcademicData(); });
+        document.getElementById('monthSelect').addEventListener('change', () => { academicState.month = document.getElementById('monthSelect').value; loadAcademicData(); });
+        document.getElementById('yearInput').addEventListener('change', () => { academicState.year = document.getElementById('yearInput').value; loadAcademicData(); });
+        
+        // Initial
         document.addEventListener('DOMContentLoaded', () => {
             showSection('dashboard');
+            loadAcademicData(); // Preload academic
         });
     </script>
 </body>

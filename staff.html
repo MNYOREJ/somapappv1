@@ -1,1084 +1,853 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SoMAp - Professional Teacher Dashboard</title>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.32/jspdf.plugin.autotable.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { 
-            font-family: 'Roboto', sans-serif; 
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); 
-            min-height: 100vh; 
-        }
-        .sidebar { 
-            width: 70px; 
-            background: linear-gradient(to bottom, #007bff, #6610f2); 
-            height: 100vh; 
-            position: fixed; 
-            padding: 1rem 0; 
-            transition: width 0.3s ease; 
-            z-index: 1000;
-        }
-        .sidebar:hover { width: 250px; }
-        .sidebar-icon { 
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            width: 50px; 
-            height: 50px; 
-            background: rgba(255,255,255,0.1); 
-            border-radius: 8px; 
-            color: white; 
-            margin: 0 auto 1rem; 
-            cursor: pointer; 
-            transition: all 0.3s; 
-            position: relative;
-        }
-        .sidebar-icon:hover { background: rgba(255,255,255,0.2); transform: scale(1.05); }
-        .sidebar-icon i { font-size: 1.2rem; }
-        .sidebar-tooltip {
-            position: absolute;
-            left: 60px;
-            background: #333;
-            color: white;
-            padding: 0.5rem;
-            border-radius: 4px;
-            white-space: nowrap;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-        }
-        .sidebar:hover .sidebar-tooltip { opacity: 1; }
-        .main-content { 
-            margin-left: 70px; 
-            padding: 2rem; 
-            transition: margin-left 0.3s ease;
-        }
-        .sidebar:hover ~ .main-content { margin-left: 250px; }
-        .card { 
-            background: white; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-            padding: 1.5rem; 
-            margin-bottom: 1.5rem; 
-            border-left: 4px solid #007bff;
-        }
-        .card.academic { border-left-color: #28a745; }
-        .card.attendance { border-left-color: #ffc107; }
-        .card.finance { border-left-color: #dc3545; }
-        .btn { 
-            background: linear-gradient(45deg, #007bff, #0056b3); 
-            color: white; 
-            padding: 0.75rem 1.5rem; 
-            border-radius: 6px; 
-            border: none; 
-            cursor: pointer; 
-            transition: all 0.3s;
-            margin: 0.25rem;
-        }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,123,255,0.3); }
-        .btn-secondary { background: #6c757d; }
-        .btn-secondary:hover { background: #545b62; }
-        .events-list { list-style: none; padding: 0; }
-        .events-list li { 
-            background: #f8f9fa; 
-            padding: 0.75rem; 
-            margin: 0.5rem 0; 
-            border-radius: 6px; 
-            border-left: 3px solid #007bff;
-        }
-        .form-control { 
-            width: 100%; 
-            padding: 0.5rem; 
-            border: 1px solid #dadce0; 
-            border-radius: 6px; 
-            margin-bottom: 0.5rem; 
-            transition: border-color 0.3s;
-        }
-        .form-control:focus { border-color: #007bff; outline: none; }
-        .table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin-top: 1rem;
-            font-size: 0.875rem;
-        }
-        .table th, .table td { 
-            padding: 0.5rem 0.75rem; 
-            text-align: left; 
-            border-bottom: 1px solid #dee2e6;
-        }
-        .table th { background: #f8f9fa; font-weight: 600; position: sticky; top: 0; }
-        .table tr:hover { background: #f8f9fa; }
-        .stat-card { 
-            text-align: center; 
-            padding: 1rem; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-            color: white; 
-            border-radius: 8px; 
-            margin: 0.5rem;
-        }
-        .hidden { display: none; }
-        #academic-section, #schoolerp-section, #dashboard-section { display: none; }
-        #dashboard-section.active, #academic-section.active, #schoolerp-section.active { display: block; }
-        .loading { text-align: center; color: #6c757d; font-style: italic; }
-        .alert { padding: 0.75rem; margin: 1rem 0; border-radius: 6px; }
-        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .chart-container { position: relative; height: 300px; width: 100%; margin: 1rem 0; }
-        .form-group { margin-bottom: 1rem; }
-        #scoresheet-thead { display: block; }
-        .sub-score { width: 60px !important; }
-        .w-12 { width: 3rem; }
-        .w-16 { width: 4rem; }
-        .w-20 { width: 5rem; }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SoMAp — Teacher Dashboard</title>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Firebase (compat for simplicity) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <style>
+    /* Custom visual polish */
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: linear-gradient(180deg,#f6f8fb 0%, #eef2ff 100%); }
+    .sidebar { width: 72px; min-width:72px; background: linear-gradient(180deg,#0f172a,#312e81); height:100vh; position:fixed; left:0; top:0; padding:1rem 0; display:flex; flex-direction:column; align-items:center; gap:0.75rem; z-index:40 }
+    .sidebar .icon { width:48px; height:48px; border-radius:10px; display:flex; align-items:center; justify-content:center; color:white; cursor:pointer; }
+    .sidebar .icon:hover { background: rgba(255,255,255,0.06); transform: translateY(-2px); }
+    .tooltip { position:absolute; left:80px; padding:6px 10px; background:rgba(15,23,42,0.95); color:#fff; font-size:13px; border-radius:6px; display:none; }
+    .main { margin-left:96px; padding:1.5rem; }
+    .card { background: white; border-radius:12px; box-shadow: 0 6px 18px rgba(16,24,40,0.06); padding:1rem; }
+    .accent { background: linear-gradient(90deg,#06b6d4,#7c3aed); color:white }
+    .muted { color:#6b7280 }
+    .small { font-size:13px }
+    /* Responsive big table styles */
+    .table { width:100%; border-collapse:collapse }
+    .table th, .table td { padding:0.6rem 0.6rem; border-bottom:1px solid #eef2ff; text-align:left; font-size:13px }
+    .sticky-top { position:sticky; top:0; background:white; z-index:10 }
+    .badge { display:inline-block; padding:6px 10px; border-radius:9999px; font-weight:600; font-size:12px }
+    .hidden-by-teacher { opacity:0.45; pointer-events:none }
+    /* Modal */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:60 }
+    .modal { background:white; border-radius:12px; padding:1.25rem; width:560px; max-width:94% }
+  </style>
 </head>
 <body>
-    <div class="flex">
-        <!-- Enhanced Sidebar with more icons if needed -->
-        <div id="sidebar" class="sidebar">
-            <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-10 mb-4 mx-auto rounded-full shadow-lg">
-            <div class="sidebar-icon" onclick="showSection('dashboard')">
-                <i class="fas fa-home"></i>
-                <span class="sidebar-tooltip">Dashboard Overview</span>
-            </div>
-            <div class="sidebar-icon" onclick="showSection('academic')">
-                <i class="fas fa-book-open"></i>
-                <span class="sidebar-tooltip">Academic & Exams</span>
-            </div>
-            <div class="sidebar-icon" onclick="showSection('schoolerp')">
-                <i class="fas fa-users-cog"></i>
-                <span class="sidebar-tooltip">ERP: Attendance & Discipline</span>
-            </div>
-            <div class="sidebar-icon" onclick="logout()">
-                <i class="fas fa-sign-out-alt"></i>
-                <span class="sidebar-tooltip">Logout</span>
-            </div>
-        </div>
+  <div class="sidebar" id="leftSidebar">
+    <img src="images/somap-logo.png.jpg" alt="SoMAp" class="w-10 h-10 rounded-md" style="object-fit:cover;">
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <header class="mb-6 flex justify-between items-center">
-                <div>
-                    <h1 class="text-3xl font-bold text-gray-800 mb-2">Teacher Dashboard - <span id="teacher-class"></span></h1>
-                    <p class="text-gray-600">Professional management for your class: Academics, Attendance, and Insights.</p>
-                </div>
-                <div class="text-sm text-gray-500">Current Date: September 15, 2025</div>
-            </header>
-
-            <!-- Dashboard Section -->
-            <section id="dashboard-section" class="active">
-                <!-- Stat Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div class="stat-card">
-                        <i class="fas fa-trophy text-2xl mb-2"></i>
-                        <h3 class="text-lg font-bold">Top Student</h3>
-                        <p id="top-student" class="text-2xl">-</p>
-                    </div>
-                    <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                        <i class="fas fa-chart-line-down text-2xl mb-2"></i>
-                        <h3>Bottom Student</h3>
-                        <p id="bottom-score" class="text-2xl">-</p>
-                    </div>
-                    <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                        <i class="fas fa-calendar-check text-2xl mb-2"></i>
-                        <h3>% Present</h3>
-                        <p id="percent-present" class="text-2xl">-</p>
-                    </div>
-                    <div class="stat-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
-                        <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
-                        <h3>Alerts</h3>
-                        <p id="yellow-alerts" class="text-2xl">0</p>
-                    </div>
-                </div>
-
-                <!-- Charts -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    <div class="card attendance">
-                        <h3 class="font-semibold mb-3">Attendance Pie Chart</h3>
-                        <div class="chart-container">
-                            <canvas id="attendanceChart"></canvas>
-                        </div>
-                    </div>
-                    <div class="card finance">
-                        <h3 class="font-semibold mb-3">Fee Status Bar Chart</h3>
-                        <div class="chart-container">
-                            <canvas id="feeChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Academic Management Card -->
-                <div class="card academic">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-graduation-cap mr-2"></i>Academic Snapshot</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="card p-4">
-                            <h5 class="font-medium mb-2">Student Fees Overview</h5>
-                            <div id="class-scores" class="loading">Loading...</div>
-                        </div>
-                        <div class="card p-4">
-                            <h5 class="font-medium mb-2">Subject Averages</h5>
-                            <ul id="subject-perf" class="loading list-disc pl-4"></ul>
-                        </div>
-                    </div>
-                    <button class="btn mt-4" onclick="generateReport()">Quick Report (PDF)</button>
-                </div>
-
-                <!-- Attendance Analytics -->
-                <div class="card attendance">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-chart-bar mr-2"></i>Attendance Analytics</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div class="stat-card" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); height: 120px; padding: 1rem;">
-                            <h4>Class Days</h4>
-                            <p id="class-days" class="text-2xl font-bold">20</p>
-                        </div>
-                        <div class="stat-card" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); height: 120px; padding: 1rem;">
-                            <h4>Class Avg Present</h4>
-                            <p id="avg-present" class="text-2xl font-bold">-</p>
-                        </div>
-                        <div class="stat-card" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); height: 120px; padding: 1rem;">
-                            <h4>High Absent Alerts</h4>
-                            <p id="alert-count" class="text-2xl font-bold">0</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center">
-                        <label class="block text-sm font-medium mr-2">Date Range:</label>
-                        <input type="date" id="start-date" class="form-control w-32 mr-2" value="2025-09-01">
-                        <input type="date" id="end-date" class="form-control w-32 mr-2" value="2025-09-15">
-                        <button class="btn" onclick="loadAttendanceAnalytics()">Refresh Analytics</button>
-                    </div>
-                </div>
-
-                <!-- Finance Overview -->
-                <div class="card finance">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-coins mr-2"></i>Class Finances</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                            <h4>Total Due</h4>
-                            <p id="fee-required" class="text-xl">TSh 0</p>
-                        </div>
-                        <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-                            <h4>Total Paid</h4>
-                            <p id="fee-paid" class="text-xl">TSh 0</p>
-                        </div>
-                        <div class="stat-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
-                            <h4>Outstanding Balance</h4>
-                            <p id="fee-balance" class="text-xl">TSh 0</p>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Academic Section -->
-            <section id="academic-section">
-                <div class="card academic">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-semibold flex items-center"><i class="fas fa-clipboard-list mr-2"></i>Academic & Exams Module: Scores • Rankings • Reports</h2>
-                        <div class="flex">
-                            <button class="btn mr-2" onclick="saveAllScores()">Save All Scores</button>
-                            <button class="btn-secondary mr-2" onclick="exportCSV()">CSV Export</button>
-                            <button class="btn-secondary mr-2" onclick="exportExcel()">Excel</button>
-                            <button class="btn-secondary mr-2" onclick="printScoresheet()">Print</button>
-                            <button class="btn" onclick="generateReportCards()">PDF Report Cards</button>
-                        </div>
-                    </div>
-                    <!-- Filters -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
-                        <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Branch</label>
-                            <select id="school-branch" class="form-control" disabled>
-                                <option>Socrates Main</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Class</label>
-                            <select id="class-select-acad" class="form-control" disabled>
-                                <option id="current-class-opt"></option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Stream</label>
-                            <select id="stream-select-acad" class="form-control">
-                                <option value="A">A</option>
-                                <option value="B">B</option>
-                                <option value="Red">Red</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Exam Type</label>
-                            <select id="exam-type" class="form-control">
-                                <option value="monthly">Monthly</option>
-                                <option value="terminal">Terminal</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Month</label>
-                            <select id="month-select" class="form-control">
-                                <option value="01">January</option>
-                                <option value="02">February</option>
-                                <option value="03">March</option>
-                                <option value="04">April</option>
-                                <option value="05">May</option>
-                                <option value="06">June</option>
-                                <option value="07">July</option>
-                                <option value="08">August</option>
-                                <option value="09" selected>September</option>
-                                <option value="10">October</option>
-                                <option value="11">November</option>
-                                <option value="12">December</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="block text-sm font-medium mb-1">Year</label>
-                            <input type="number" id="academic-year" class="form-control" value="2025" min="2020" max="2030">
-                        </div>
-                    </div>
-                    <!-- Quick Stats -->
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
-                        <div class="card p-3 text-center">
-                            <h5 class="font-medium text-sm">Top Student</h5>
-                            <p id="top-student-detail" class="text-lg font-bold">-</p>
-                        </div>
-                        <div class="card p-3 text-center">
-                            <h5 class="font-medium text-sm">Bottom Student</h5>
-                            <p id="bottom-student-detail" class="text-lg font-bold">-</p>
-                        </div>
-                        <div class="card p-3 text-center">
-                            <h5 class="font-medium text-sm">Class Max Avg</h5>
-                            <p id="class-max" class="text-lg">-</p>
-                        </div>
-                        <div class="card p-3 text-center">
-                            <h5 class="font-medium text-sm">Class Avg Grade</h5>
-                            <p id="class-grade" class="text-lg">-</p>
-                        </div>
-                        <div class="card p-3 text-center">
-                            <h5 class="font-medium text-sm">% Present</h5>
-                            <p id="percent-present-detail" class="text-lg">-</p>
-                        </div>
-                        <div class="card p-3 text-center">
-                            <h5 class="font-medium text-sm">% Absent</h5>
-                            <p id="percent-absent-detail" class="text-lg">-</p>
-                        </div>
-                    </div>
-                    <!-- Scoresheet -->
-                    <div class="card">
-                        <h3 class="text-lg font-semibold mb-3">Scoresheet: Enter Marks • Auto-Calculate Averages • Positions • Grades</h3>
-                        <div class="flex items-center mb-4">
-                            <label class="mr-4 text-sm font-medium">Max Score per Subject:</label>
-                            <input type="number" id="max-score" value="100" class="form-control w-20 mr-2" min="1" max="100">
-                            <button class="btn mr-2" onclick="setAllMax()">Set All Max</button>
-                            <button class="btn" onclick="recalculateAll()">Recalculate Positions & Grades</button>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <table class="table" id="scores-table">
-                                <thead id="scores-thead">
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Adm No</th>
-                                        <th>Student Name</th>
-                                        <th>Fee Due</th>
-                                        <th>Paid</th>
-                                        <th>Balance</th>
-                                        <!-- Subjects will be inserted here -->
-                                        <th>Total</th>
-                                        <th>Max</th>
-                                        <th>% Avg</th>
-                                        <th>Pos</th>
-                                        <th>Grade</th>
-                                        <th>Present Days</th>
-                                        <th>Absent Days</th>
-                                        <th>Comment</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="scoresheet-body">
-                                    <tr>
-                                        <td colspan="20" class="text-center py-4">Loading students and scores...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="flex mt-4">
-                            <button class="btn" onclick="generateReportCards()">Generate Report Cards (PDF)</button>
-                            <button class="btn-secondary ml-2" onclick="sendEmailSMS()">Email/SMS to Parents</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- School ERP Section -->
-            <section id="schoolerp-section">
-                <div class="card">
-                    <h2 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-building mr-2"></i>School ERP Management</h2>
-                    <div class="alert alert-error mb-4">
-                        <i class="fas fa-lock mr-2"></i>Admissions restricted to Admin/Accountant only. Teachers cannot access or modify admissions.
-                    </div>
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <!-- Attendance -->
-                        <div class="card attendance">
-                            <h3 class="font-semibold mb-3 flex items-center"><i class="fas fa-calendar-alt mr-2"></i>Daily Attendance</h3>
-                            <div id="attendance-list" class="loading mb-4">Loading recent attendance...</div>
-                            <form id="mark-attendance-form">
-                                <h4 class="font-medium mb-2">Mark Today's Attendance</h4>
-                                <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
-                                    <input type="text" id="att-student-name" placeholder="Enter Student Name" class="form-control" required>
-                                    <input type="date" id="att-date" class="form-control" value="2025-09-15" required>
-                                    <select id="att-mark" class="form-control">
-                                        <option value="P">Present</option>
-                                        <option value="A">Absent</option>
-                                        <option value="L">Late</option>
-                                    </select>
-                                    <button type="submit" class="btn">Submit Mark</button>
-                                </div>
-                            </form>
-                        </div>
-                        <!-- Discipline -->
-                        <div class="card" style="border-left-color: #6f42c1;">
-                            <h3 class="font-semibold mb-3 flex items-center"><i class="fas fa-gavel mr-2"></i>Discipline Records</h3>
-                            <div id="discipline-list" class="loading mb-4">Loading discipline logs...</div>
-                            <form id="discipline-form">
-                                <h4 class="font-medium mb-2">Record Incident</h4>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    <input type="text" id="disc-student" placeholder="Student Name" class="form-control" required>
-                                    <select id="disc-action" class="form-control">
-                                        <option value="Warning">Verbal Warning</option>
-                                        <option value="Detention">Detention</option>
-                                        <option value="Suspension">Suspension</option>
-                                    </select>
-                                    <textarea id="disc-comment" placeholder="Details of Incident" class="form-control col-span-2" rows="3" required></textarea>
-                                    <button type="submit" class="btn md:col-span-2">Record Entry</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                    <!-- Students List -->
-                    <div class="card mt-6">
-                        <h3 class="font-semibold mb-3 flex items-center"><i class="fas fa-list mr-2"></i>Class Students Directory</h3>
-                        <div class="overflow-x-auto">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Adm No</th>
-                                        <th>Name</th>
-                                        <th>Stream</th>
-                                        <th>Balance</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="students-table-body">
-                                    <tr><td colspan="5" class="text-center">Loading students...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </div>
+    <div title="Dashboard" class="icon" id="nav-dashboard">
+      <i class="fa-solid fa-chart-simple fa-lg"></i>
     </div>
 
-    <script>
-        // Firebase Initialization
-        const firebaseConfig = {
-            apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-            authDomain: "somaptestt.firebaseapp.com",
-            databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-            projectId: "somaptestt",
-            storageBucket: "somaptestt.appspot.com",
-            messagingSenderId: "105526245138",
-            appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.database();
+    <div title="Academic (ERP view)" class="icon" id="nav-academic">
+      <i class="fa-solid fa-graduation-cap fa-lg"></i>
+    </div>
 
-        // Global Variables
-        let currentUser = null;
-        let currentClass = '';
-        let currentStream = 'A';
-        let currentYear = 2025;
-        let currentMonth = '09';
-        let currentExamType = 'monthly';
-        let studentsData = [];
-        let scoresData = {};
-        let attendanceData = {};
-        let chartAttendance = null;
-        let chartFee = null;
-        const subjects = ['Mathematics', 'English', 'Science', 'Kiswahili', 'Social Studies']; // Fixed subjects for professionalism
-        const gradeScale = { 'A': 80, 'B': 60, 'C': 50, 'D': 40, 'E': 0 }; // Simple grading
+    <div title="Attendance" class="icon" id="nav-attendance">
+      <i class="fa-solid fa-calendar-check fa-lg"></i>
+    </div>
 
-        // Authentication and User Setup
-        auth.onAuthStateChanged((user) => {
-            if (!user) {
-                window.location.href = 'index.html';
-                return;
+    <div title="School ERP (restricted admissions)" class="icon" id="nav-schoolerp">
+      <i class="fa-solid fa-building-columns fa-lg"></i>
+    </div>
+
+    <div title="Messages" class="icon" id="nav-messages">
+      <i class="fa-solid fa-comment-dots fa-lg"></i>
+    </div>
+
+    <div title="Logout" class="icon" id="nav-logout">
+      <i class="fa-solid fa-right-from-bracket fa-lg"></i>
+    </div>
+
+  </div>
+
+  <main class="main">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold">Teacher Dashboard</h1>
+        <p class="muted small">Personalised view for your class, connected realtime with SoMAp ERP</p>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="text-right">
+          <div id="teacher-name" class="font-semibold">Loading...</div>
+          <div id="teacher-class" class="muted small">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top quick cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="card">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="muted small">Class</div>
+            <div id="card-class" class="font-semibold text-lg">—</div>
+          </div>
+          <div>
+            <div class="muted small">Stream</div>
+            <div id="card-stream" class="font-semibold">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div>
+          <div class="muted small">% Present (This month)</div>
+          <div id="card-present" class="font-semibold text-lg">—</div>
+          <div class="muted small mt-1" id="present-details">—</div>
+        </div>
+      </div>
+      <div class="card">
+        <div>
+          <div class="muted small">Fee Summary (Class)</div>
+          <div id="card-fee-summary" class="font-semibold text-lg">—</div>
+          <div class="muted small mt-1" id="fees-details">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Left column: Academic controls -->
+      <section class="card lg:col-span-2" id="academicSection">
+        <div class="flex items-start justify-between mb-4">
+          <div>
+            <h2 class="text-xl font-semibold">Academic & Exams</h2>
+            <p class="muted small">Scores • Rankings • Reports — only for your class</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <select id="select-exam-type" class="form-select small p-2 rounded border" style="min-width:140px">
+              <option value="monthly">Monthly</option>
+              <option value="term">Term</option>
+              <option value="annual">Annual</option>
+            </select>
+            <select id="select-month" class="form-select small p-2 rounded border">
+              <option value="">Select Month</option>
+              <option value="01">January</option>
+              <option value="02">February</option>
+              <option value="03">March</option>
+              <option value="04">April</option>
+              <option value="05">May</option>
+              <option value="06">June</option>
+              <option value="07">July</option>
+              <option value="08">August</option>
+              <option value="09">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
+            <input id="academic-year" type="number" class="form-input small p-2 rounded border" placeholder="2025" style="width:100px" />
+          </div>
+        </div>
+
+        <div class="mb-4 flex items-center gap-3">
+          <button id="btn-save-scores" class="btn accent px-4 py-2 rounded shadow">Save Scores</button>
+          <button id="btn-export-csv" class="px-4 py-2 rounded border">CSV</button>
+          <button id="btn-export-excel" class="px-4 py-2 rounded border">Excel</button>
+          <button id="btn-print" class="px-4 py-2 rounded border">Print</button>
+          <div class="ml-auto muted small">Top Student: <span id="top-student">—</span></div>
+        </div>
+
+        <!-- Scoresheet table -->
+        <div class="overflow-x-auto">
+          <table class="table" id="scoresheetTable">
+            <thead class="sticky-top">
+              <tr>
+                <th>#</th>
+                <th>Adm</th>
+                <th>Student</th>
+                <th class="text-center">Fee Due</th>
+                <th class="text-center">Paid</th>
+                <th class="text-center">Balance</th>
+                <th class="text-center">Total</th>
+                <th class="text-center">Max</th>
+                <th class="text-center">% Avg</th>
+                <th class="text-center">Overall Pos</th>
+                <th class="text-center">Grade</th>
+                <th class="text-center">Present</th>
+                <th class="text-center">Absent</th>
+                <th>Teacher Comment</th>
+              </tr>
+            </thead>
+            <tbody id="scoresheetBody">
+              <tr><td colspan="14" class="muted small p-4">Loading scores for your class…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </section>
+
+      <!-- Right column: Analytics & quick stats -->
+      <aside class="space-y-6">
+        <div class="card">
+          <h3 class="font-semibold">Subject Performance (Class)</h3>
+          <div id="subject-performance" class="mt-2 muted small">Calculating…</div>
+        </div>
+
+        <div class="card">
+          <h3 class="font-semibold">Attendance Snapshot</h3>
+          <div id="attendanceSnapshot">Loading…</div>
+          <div class="mt-3">
+            <button id="openFullAttendance" class="px-3 py-2 rounded border small">Open Attendance (ERP)</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="font-semibold">Fee quick actions</h3>
+          <div class="mt-2 muted small" id="feeQuick">Loading…</div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- School ERP embedded view (but with Admissions hidden for teachers) -->
+    <section id="schoolerpView" class="card mt-6 hidden">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">SoMAp ERP (limited for teachers)</h2>
+        <div class="muted small">Manage academic and admin parts (Admissions restricted)</div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card">
+          <h4 class="font-semibold">Admissions</h4>
+          <p class="muted small">Admissions area is restricted for Teacher accounts.</p>
+          <div class="mt-3">
+            <button id="openAdmissions" class="px-3 py-2 rounded border hidden-by-teacher">Open Admissions</button>
+            <button id="openAdmissionsRestricted" class="px-3 py-2 rounded border">Request Access</button>
+          </div>
+        </div>
+        <div class="card">
+          <h4 class="font-semibold">Academics</h4>
+          <p class="muted small">Open full academic module (read/write for your class only).</p>
+          <div class="mt-3">
+            <button id="openERPAcademic" class="px-3 py-2 rounded border">Open Academics</button>
+          </div>
+        </div>
+        <div class="card">
+          <h4 class="font-semibold">Attendance</h4>
+          <p class="muted small">View class attendance analytics and mark for your class.</p>
+          <div class="mt-3">
+            <button id="openERPAttendance" class="px-3 py-2 rounded border">Open Attendance</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <h4 class="font-semibold">Quick links</h4>
+        <div class="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="card small">Students List <span class="muted">(view only)</span></div>
+          <div class="card small">Discipline <span class="muted">(view & comment)</span></div>
+          <div class="card small">Transfer Requests <span class="muted">(3 pending)</span></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal area -->
+  <div id="modalRoot" style="display:none"></div>
+
+  <script>
+    // ---------- Firebase config (same project used by your earlier file) ----------
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.database();
+
+    // ---------- Local state ----------
+    let currentUser = null;
+    let teacherClass = null;
+    let teacherEmailKey = null;
+    let currentStream = 'A';
+    let currentExamType = 'monthly';
+    let currentMonth = (new Date()).toISOString().slice(5,7); // e.g. '09'
+    let currentYear = (new Date()).getFullYear().toString();
+
+    // Utility: convert email to firebase key used in your DB
+    function emailToKey(email) {
+      return email.replaceAll('.', '_');
+    }
+
+    // Tiny modal utility
+    function showModal(title, html) {
+      const root = document.getElementById('modalRoot');
+      root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class='flex items-center justify-between mb-2'><h3 class='font-semibold'>${title}</h3><button id='closeModal' class='px-2 py-1 rounded border'>Close</button></div><div>${html}</div></div></div>`;
+      root.style.display = 'block';
+      document.getElementById('closeModal').onclick = () => { root.style.display='none'; root.innerHTML=''; };
+    }
+
+    // On auth state change: ensure teacher role, load class
+    auth.onAuthStateChanged(async (user) => {
+      if (!user) {
+        // Not signed in - redirect to login
+        window.location.href = 'index.html';
+        return;
+      }
+      currentUser = user;
+      teacherEmailKey = emailToKey(user.email || user.providerData?.[0]?.email || 'unknown');
+
+      const userRef = db.ref('users/' + teacherEmailKey);
+      const snap = await userRef.once('value');
+      const userData = snap.val();
+      if (!userData) {
+        alert('No user record found. Contact admin.');
+        auth.signOut();
+        return;
+      }
+      if (!userData.role || userData.role !== 'teacher') {
+        alert('Unauthorized: you are not a teacher.');
+        auth.signOut();
+        return;
+      }
+
+      teacherClass = userData.class || userData.classLevel || userData.className || null;
+      if (!teacherClass) {
+        alert('No class assigned to your teacher account. Contact admin.');
+        auth.signOut();
+        return;
+      }
+
+      // Set up UI header
+      document.getElementById('teacher-name').innerText = (user.displayName || user.email).split('@')[0];
+      document.getElementById('teacher-class').innerText = teacherClass;
+      document.getElementById('card-class').innerText = teacherClass;
+      currentStream = 'A';
+      document.getElementById('card-stream').innerText = currentStream;
+
+      // Save to local storage for other components
+      localStorage.setItem('class', teacherClass);
+
+      // Default year and month
+      document.getElementById('academic-year').value = currentYear;
+      document.getElementById('select-month').value = currentMonth;
+
+      // Load initial data
+      subscribeToClassData();
+    });
+
+    // Subscription: listens for students, scores, attendance and updates UI in realtime
+    function subscribeToClassData() {
+      if (!teacherClass) return;
+
+      // Students
+      db.ref('students').on('value', (snap) => {
+        const all = snap.val() || {};
+        // Filter by class and stream
+        const students = Object.values(all).filter(s => s.classLevel === teacherClass && (s.stream || 'A') === currentStream);
+        window.__classStudents = students; // global for debugging
+        renderScoresheet(students);
+        renderFeeSummary(students);
+      });
+
+      // Scores: listen on many possible paths (flexible) — we'll listen to scores/<year>/<class> and scores/<year>/<class>/<exam>
+      db.ref('scores').on('value', (snap) => {
+        // We'll just re-render metrics; scoresheet will pull when needed
+        computeTopBottom();
+        renderSubjectPerformance();
+      });
+
+      // Attendance: listen to relevant class month
+      db.ref('attendance').on('value', (snap) => {
+        renderAttendanceSnapshot();
+        computeTopBottom();
+      });
+    }
+
+    // ---------- Core renderers ----------
+    async function renderScoresheet(students) {
+      const tbody = document.getElementById('scoresheetBody');
+      tbody.innerHTML = '';
+
+      // Determine subjects by looking at existing 'scores' entries for this class/year/exam
+      const year = document.getElementById('academic-year').value || currentYear;
+      const examType = document.getElementById('select-exam-type').value || currentExamType;
+      const month = document.getElementById('select-month').value || currentMonth;
+
+      // Try to find subjects from DB (scores structure is flexible in your project). We'll attempt multiple paths.
+      let subjects = [];
+      try {
+        const snapshots = [];
+        // monthly path
+        const monthlyRef = db.ref(`scores/${year}/${teacherClass}/${examType}/${month}`);
+        const snapMonthly = await monthlyRef.once('value');
+        if (snapMonthly.exists()) snapshots.push(snapMonthly.val());
+        // maybe scores stored as scores/<year>/<class>/monthly/<month>/<admissionNo>
+        const alternativeRef = db.ref(`scores/${year}/${teacherClass}/${examType}`);
+        const snapAlt = await alternativeRef.once('value');
+        if (snapAlt.exists()) snapshots.push(snapAlt.val());
+        // General fallback: entire scores/year/class
+        const generalRef = db.ref(`scores/${year}/${teacherClass}`);
+        const snapGen = await generalRef.once('value');
+        if (snapGen.exists()) snapshots.push(snapGen.val());
+
+        // Extract keys out of nested objects
+        snapshots.forEach(obj => {
+          if (!obj) return;
+          Object.values(obj).forEach(p => {
+            if (typeof p !== 'object') return;
+            Object.values(p).forEach(record => {
+              if (typeof record === 'object') {
+                Object.keys(record).forEach(subject => {
+                  if (!subjects.includes(subject) && subject !== 'snap') subjects.push(subject);
+                });
+              }
+            });
+          });
+        });
+      } catch (err) {
+        console.warn('Unable to detect subjects automatically', err);
+      }
+
+      // If no subjects found, make a small default placeholder so teacher can enter
+      if (subjects.length === 0) {
+        subjects = ['Math', 'English', 'Science'];
+      }
+
+      // Build header columns dynamically: We'll insert columns for each subject between student and Total
+      // For simplicity we will not change the original header but we will include total and max etc.
+
+      // Render rows
+      if (!students || students.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="14" class="muted small p-4">0 students • ${subjects.length} subjects</td></tr>`;
+        return;
+      }
+
+      students.sort((a,b)=> (a.lastName || '').localeCompare(b.lastName || ''));
+
+      // We'll fetch current scores snapshot for each student to prefill if available
+      const yearRef = db.ref(`scores/${year}/${teacherClass}/${examType}`);
+      const yearSnap = await yearRef.once('value');
+      const scoresData = yearSnap.val() || {};
+
+      // Create row for each student
+      students.forEach((s, idx) => {
+        const admissionNo = s.admissionNumber || `ADM-${idx+1}`;
+        const row = document.createElement('tr');
+
+        // Basic columns
+        row.innerHTML = `
+          <td class="small">${idx+1}</td>
+          <td class="small">${admissionNo}</td>
+          <td>${s.firstName || ''} ${s.lastName || ''}</td>
+          <td class="text-center small">${s.feePerYear || 0}</td>
+          <td class="text-center small">${s.paidAmount || 0}</td>
+          <td class="text-center small">${s.balance || 0}</td>
+          <td class="text-center small"><input data-adm="${admissionNo}" class="score-total small p-1 text-center" value="0" style="width:70px"/></td>
+          <td class="text-center small"><input data-adm-max="${admissionNo}" class="score-max small p-1 text-center" value="100" style="width:70px"/></td>
+          <td class="text-center small"><span class="pct-avg">0%</span></td>
+          <td class="text-center small pos-col">-</td>
+          <td class="text-center small grade-col">-</td>
+          <td class="text-center small present-col">-</td>
+          <td class="text-center small absent-col">-</td>
+          <td><input data-adm-comment="${admissionNo}" class="comment-input small p-1" placeholder="Comment" style="width:100%"/></td>
+        `;
+
+        tbody.appendChild(row);
+
+        // Pre-fill totals if there is saved data: try to compute from scoresData
+        const adScores = findStudentScoreForAdmission(scoresData, admissionNo);
+        if (adScores) {
+          // adScores expected to have individual subject keys with {score:..., max:...}
+          let total = 0; let maxTotal = 0; let count = 0;
+          Object.keys(adScores).forEach(k => {
+            if (k === 'snap') return;
+            const val = adScores[k];
+            if (val && typeof val === 'object' && val.score != null) {
+              total += Number(val.score || 0);
+              maxTotal += Number(val.max != null ? val.max : 100);
+              count++;
             }
-            const emailKey = user.email.replace('.', '_');
-            db.ref(`users/${emailKey}`).once('value').then((snapshot) => {
-                const userData = snapshot.val();
-                if (!userData || userData.role !== 'teacher') {
-                    alert('Access Denied: Teacher privileges required.');
-                    auth.signOut();
-                    window.location.href = 'index.html';
-                    return;
+          });
+          const pct = maxTotal ? (total / maxTotal * 100) : 0;
+          row.querySelector('.score-total').value = total.toFixed(1);
+          row.querySelector('.score-max').value = maxTotal;
+          row.querySelector('.pct-avg').innerText = pct.toFixed(1) + '%';
+          row.querySelector('.comment-input').value = (adScores.snap && adScores.snap.teacherComment) || '';
+        }
+
+      });
+
+      // After rows created compute present/absent
+      renderPresentAbsentForRows();
+      computeOverallPositions();
+      renderSubjectPerformance();
+    }
+
+    // Helper: find student score block in scoresData for a given admissionNo
+    function findStudentScoreForAdmission(scoresData, admissionNo) {
+      // ScoresData can be nested several levels depending on how the DB was structured.
+      // We'll search recursively for an object that has a key matching admissionNo.
+
+      if (!scoresData || typeof scoresData !== 'object') return null;
+      // Direct child by admissionNo
+      if (scoresData[admissionNo]) return scoresData[admissionNo];
+
+      // Otherwise search nested
+      for (const k of Object.keys(scoresData)) {
+        const v = scoresData[k];
+        if (typeof v === 'object') {
+          if (v[admissionNo]) return v[admissionNo];
+          // one more level
+          for (const k2 of Object.keys(v)) {
+            const w = v[k2];
+            if (w && typeof w === 'object' && w[admissionNo]) return w[admissionNo];
+          }
+        }
+      }
+      return null;
+    }
+
+    // Render present/absent info for rows by checking attendance DB
+    async function renderPresentAbsentForRows() {
+      const tbody = document.getElementById('scoresheetBody');
+      const rows = tbody.querySelectorAll('tr');
+      const year = document.getElementById('academic-year').value || currentYear;
+      const month = document.getElementById('select-month').value || currentMonth;
+
+      // Build a simple map of admission -> {present, absent}
+      const attRef = db.ref(`attendance/${teacherClass}/${year}-${month}`);
+      const attSnap = await attRef.once('value');
+      const attData = attSnap.val() || {};
+      // attData may contain days -> admissions
+      const perStudent = {};
+      Object.values(attData).forEach(dayBlock => {
+        if (!dayBlock) return;
+        Object.values(dayBlock).forEach(entry => {
+          if (!entry || !entry.snap) return;
+          const adm = entry.snap.admissionNo || entry.admissionNo || 'unknown';
+          perStudent[adm] = perStudent[adm] || {present:0, absent:0};
+          if (entry.daily === 'P' || entry.am === 'P' || entry.pm === 'P') perStudent[adm].present += 1;
+          else perStudent[adm].absent += 1;
+        });
+      });
+
+      rows.forEach(row => {
+        const adm = row.querySelector('[data-adm]')?.getAttribute('data-adm') || row.querySelector('[data-adm]')?.value;
+        const presentCol = row.querySelector('.present-col');
+        const absentCol = row.querySelector('.absent-col');
+        const stats = perStudent[adm] || {present:0, absent:0};
+        if (presentCol) presentCol.innerText = stats.present;
+        if (absentCol) absentCol.innerText = stats.absent;
+      });
+    }
+
+    // Compute overall positions (simple sort by percent) and grades
+    function computeOverallPositions() {
+      const tbody = document.getElementById('scoresheetBody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const students = [];
+      rows.forEach(r => {
+        const admInput = r.querySelector('[data-adm]');
+        if (!admInput) return;
+        const adm = admInput.getAttribute('data-adm');
+        const total = Number(r.querySelector('.score-total')?.value || 0);
+        const max = Number(r.querySelector('.score-max')?.value || 100);
+        const pct = max ? (total / max * 100) : 0;
+        students.push({adm, row:r, total, max, pct});
+      });
+      // Sort by pct desc
+      students.sort((a,b) => b.pct - a.pct);
+      students.forEach((s, idx) => {
+        s.row.querySelector('.pos-col').innerText = idx+1;
+        s.row.querySelector('.grade-col').innerText = percentToGrade(s.pct);
+        s.row.querySelector('.pct-avg').innerText = s.pct.toFixed(1) + '%';
+      });
+      // Update top-student
+      document.getElementById('top-student').innerText = students[0] ? students[0].row.children[2].innerText : '—';
+    }
+
+    function percentToGrade(p) {
+      if (p >= 90) return 'A+';
+      if (p >= 80) return 'A';
+      if (p >= 70) return 'B';
+      if (p >= 60) return 'C';
+      if (p >= 50) return 'D';
+      return 'E';
+    }
+
+    // Compute top and bottom students from scores DB
+    async function computeTopBottom() {
+      const year = document.getElementById('academic-year').value || currentYear;
+      const examType = document.getElementById('select-exam-type').value || currentExamType;
+      const month = document.getElementById('select-month').value || currentMonth;
+
+      try {
+        const ref = db.ref(`scores/${year}/${teacherClass}/${examType}`);
+        const snap = await ref.once('value');
+        const data = snap.val() || {};
+        const scores = [];
+        // Flatten
+        function walk(obj) {
+          if (!obj || typeof obj !== 'object') return;
+          Object.keys(obj).forEach(k => {
+            const v = obj[k];
+            if (v && typeof v === 'object' && (v.score !== undefined || v.snap)) {
+              // assume this is a student-level object
+              let total = 0; let maxTotal = 0; let count = 0;
+              Object.keys(v).forEach(sub => {
+                if (sub === 'snap') return;
+                const sc = v[sub];
+                if (sc && typeof sc === 'object' && sc.score != null) {
+                  total += Number(sc.score || 0);
+                  maxTotal += Number(sc.max != null ? sc.max : 100);
+                  count++;
                 }
-                currentUser = userData;
-                currentClass = userData.class || 'Class 4'; // Default from research
-                document.getElementById('teacher-class').textContent = currentClass;
-                document.getElementById('current-class-opt').textContent = currentClass;
-                document.getElementById('class-select-acad').value = currentClass;
-                // Set stream listener for academic
-                document.getElementById('stream-select-acad').value = currentStream;
-                loadInitialData();
-            }).catch((err) => {
-                console.error('User data error:', err);
-                alert('Profile load failed. Please log in again.');
-            });
-        });
-
-        // Initial Data Load
-        function loadInitialData() {
-            Promise.all([
-                db.ref('students').once('value'),
-                db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}`).once('value'),
-                db.ref(`attendance/${currentClass}/${currentYear}-${currentMonth}`).once('value')
-            ]).then(([studentsSnap, scoresSnap, attSnap]) => {
-                studentsData = studentsSnap.val() ? Object.values(studentsSnap.val()).filter(s => s.classLevel === currentClass && s.stream === currentStream) : [];
-                scoresData = scoresSnap.val() || {};
-                attendanceData = attSnap.val() || {};
-                showSection('dashboard');
-            });
+              });
+              const pct = maxTotal ? (total / maxTotal * 100) : 0;
+              scores.push({key:k, total, max: maxTotal, pct});
+            } else if (typeof v === 'object') {
+              walk(v);
+            }
+          });
         }
+        walk(data);
+        scores.sort((a,b)=> b.pct - a.pct);
+        const top = scores[0];
+        const bottom = scores[scores.length-1];
+        const topText = top ? `${top.key} (${top.pct.toFixed(1)}%)` : '—';
+        const bottomText = bottom ? `${bottom.key} (${bottom.pct.toFixed(1)}%)` : '—';
+        // Try to resolve student names if possible
+        document.getElementById('top-student').innerText = topText;
+      } catch (err) {
+        console.warn('Top/bottom compute error', err);
+      }
+    }
 
-        // Section Navigation
-        function showSection(section) {
-            document.querySelectorAll('section').forEach(s => {
-                s.classList.remove('active');
-                s.style.display = 'none';
-            });
-            const target = document.getElementById(`${section}-section`);
-            if (target) {
-                target.style.display = 'block';
-                target.classList.add('active');
-            }
-            // Load specific data
-            switch (section) {
-                case 'dashboard':
-                    loadDashboardData();
-                    break;
-                case 'academic':
-                    loadAcademicData();
-                    break;
-                case 'schoolerp':
-                    loadSchoolERPData();
-                    break;
-            }
-        }
+    // Render subject performance (quick averages)
+    async function renderSubjectPerformance() {
+      const year = document.getElementById('academic-year').value || currentYear;
+      const examType = document.getElementById('select-exam-type').value || currentExamType;
+      const month = document.getElementById('select-month').value || currentMonth;
+      const subjectDiv = document.getElementById('subject-performance');
+      subjectDiv.innerHTML = 'Calculating…';
 
-        // Enhanced Dashboard Load with Charts and Real Calculations
-        function loadDashboardData(startDate = null, endDate = null) {
-            if (studentsData.length === 0) {
-                document.getElementById('class-scores').innerHTML = '<p class="text-red-500">No students in class.</p>';
-                return;
-            }
-
-            // Fees Overview
-            const totalDue = studentsData.reduce((sum, s) => sum + parseFloat(s.feePerYear || 0), 0);
-            const totalPaid = studentsData.reduce((sum, s) => sum + parseFloat(s.paidAmount || 0), 0);
-            const totalBalance = studentsData.reduce((sum, s) => sum + parseFloat(s.balance || 0), 0);
-            document.getElementById('fee-required').textContent = `TSh ${totalDue.toLocaleString()}`;
-            document.getElementById('fee-paid').textContent = `TSh ${totalPaid.toLocaleString()}`;
-            document.getElementById('fee-balance').textContent = `TSh ${totalBalance.toLocaleString()}`;
-
-            // Scores and Top/Bottom
-            const studentScores = [];
-            Object.entries(scoresData).forEach(([id, subs]) => {
-                const student = studentsData.find(s => s.admissionNumber == id);
-                if (student) {
-                    const avg = Object.values(subs).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / Object.keys(subs).length || 0;
-                    studentScores.push({ name: `${student.firstName} ${student.lastName}`, avg, id, student });
-                }
-            });
-            const sortedScores = studentScores.sort((a, b) => b.avg - a.avg);
-            const top = sortedScores[0];
-            const bottom = sortedScores[sortedScores.length - 1];
-            document.getElementById('top-student').innerHTML = top ? `${top.name}<br><small>${top.avg.toFixed(1)}%</small>` : 'N/A';
-            document.getElementById('bottom-score').innerHTML = bottom ? `${bottom.name}<br><small>${bottom.avg.toFixed(1)}%</small>` : 'N/A';
-            const classAvg = sortedScores.reduce((sum, s) => sum + s.avg, 0) / sortedScores.length || 0;
-
-            // Subject Performance
-            const subjectAvgs = {};
-            subjects.forEach(sub => {
-                let sum = 0, count = 0;
-                Object.values(scoresData).forEach(subs => {
-                    if (subs[sub]) {
-                        sum += (subs[sub].score / subs[sub].max * 100);
-                        count++;
-                    }
+      try {
+        const ref = db.ref(`scores/${year}/${teacherClass}/${examType}`);
+        const snap = await ref.once('value');
+        const data = snap.val() || {};
+        const subjTotals = {}; // subj -> {sum, maxSum, count}
+        function walk(o) {
+          if (!o || typeof o !== 'object') return;
+          Object.values(o).forEach(v => {
+            if (v && typeof v === 'object') {
+              // assume v contains subjects
+              const keys = Object.keys(v).filter(k => k !== 'snap');
+              if (keys.length > 0 && keys.some(k => v[k] && v[k].score != null)) {
+                keys.forEach(k => {
+                  const sc = v[k];
+                  if (!sc || typeof sc !== 'object') return;
+                  subjTotals[k] = subjTotals[k] || {sum:0, max:0, count:0};
+                  subjTotals[k].sum += Number(sc.score || 0);
+                  subjTotals[k].max += Number(sc.max != null ? sc.max : 100);
+                  subjTotals[k].count++;
                 });
-                subjectAvgs[sub] = count ? sum / count : 0;
-            });
-            const perfHtml = Object.entries(subjectAvgs).map(([sub, avg]) => `<li>${sub}: <strong>${avg.toFixed(1)}%</strong></li>`).join('');
-            document.getElementById('subject-perf').innerHTML = perfHtml;
-
-            // Fees List
-            const feesHtml = studentsData.map(s => 
-                `<div class="text-sm">${s.firstName} ${s.lastName}: Due TSh ${s.feePerYear}, Paid TSh ${s.paidAmount}, Bal TSh ${s.balance}</div>`
-            ).join('');
-            document.getElementById('class-scores').innerHTML = feesHtml;
-
-            // Attendance
-            let filteredAtt = Object.values(attendanceData).flatMap(day => Object.values(day || {}));
-            if (startDate && endDate) {
-                const sDate = new Date(startDate);
-                const eDate = new Date(endDate);
-                filteredAtt = filteredAtt.filter(rec => {
-                    const recDate = new Date(rec.date || Object.keys(attendanceData).find(d => d.includes(rec.id)));
-                    return recDate >= sDate && recDate <= eDate;
-                });
+              } else {
+                walk(v);
+              }
             }
-            const totalDays = filteredAtt.length / studentsData.length || 0; // Approx
-            const presentCount = filteredAtt.filter(a => a.daily === 'P').length;
-            const totalRecords = filteredAtt.length;
-            const percentPresent = totalRecords ? (presentCount / totalRecords * 100).toFixed(1) : 0;
-            document.getElementById('percent-present').textContent = `${percentPresent}%`;
-            document.getElementById('avg-present').textContent = `${percentPresent}%`;
-            document.getElementById('class-days').textContent = Math.floor(totalDays);
-
-            // Alerts: Students with >=10 absent
-            const alerts = studentsData.filter(s => {
-                const studentAtt = filteredAtt.filter(a => a.snap.admissionNo === s.admissionNumber);
-                const absent = studentAtt.filter(a => a.daily === 'A').length;
-                return absent >= 10;
-            }).length;
-            document.getElementById('yellow-alerts').textContent = alerts;
-            document.getElementById('alert-count').textContent = alerts;
-
-            // Charts Update
-            updateCharts(percentPresent, totalRecords - presentCount, totalDue, totalPaid, totalBalance);
+          });
         }
-
-        // Update Charts
-        function updateCharts(present, absent, due, paid, balance) {
-            // Attendance Pie
-            const attCtx = document.getElementById('attendanceChart')?.getContext('2d');
-            if (attCtx && chartAttendance) chartAttendance.destroy();
-            if (attCtx) {
-                chartAttendance = new Chart(attCtx, {
-                    type: 'pie',
-                    data: {
-                        labels: ['Present', 'Absent'],
-                        datasets: [{
-                            data: [present, absent],
-                            backgroundColor: ['#28a745', '#dc3545']
-                        }]
-                    },
-                    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
-                });
-            }
-
-            // Fee Bar
-            const feeCtx = document.getElementById('feeChart')?.getContext('2d');
-            if (feeCtx && chartFee) chartFee.destroy();
-            if (feeCtx) {
-                chartFee = new Chart(feeCtx, {
-                    type: 'bar',
-                    data: {
-                        labels: ['Due', 'Paid', 'Balance'],
-                        datasets: [{
-                            label: 'TSh',
-                            data: [due, paid, balance],
-                            backgroundColor: ['#ffc107', '#28a745', '#dc3545']
-                        }]
-                    },
-                    options: { responsive: true, scales: { y: { beginAtZero: true } } }
-                });
-            }
-        }
-
-        // Load Academic Data with Dynamic Table
-        function loadAcademicData() {
-            currentStream = document.getElementById('stream-select-acad').value;
-            currentMonth = document.getElementById('month-select').value;
-            currentExamType = document.getElementById('exam-type').value;
-            currentYear = parseInt(document.getElementById('academic-year').value);
-            // Reload data if changed
-            db.ref('students').once('value').then((snap) => {
-                studentsData = Object.values(snap.val() || {}).filter(s => s.classLevel === currentClass && s.stream === currentStream);
-                if (studentsData.length === 0) {
-                    document.getElementById('scoresheet-body').innerHTML = '<tr><td colspan="20" class="text-center text-red-500">No students found for selected stream.</td></tr>';
-                    return;
-                }
-                loadScoresForAcademic();
-                loadAttendanceForAcademic();
-            });
-        }
-
-        function loadScoresForAcademic() {
-            db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}`).once('value').then((snap) => {
-                scoresData = snap.val() || {};
-                buildScoresTable();
-                calculateClassStats();
-            });
-        }
-
-        function loadAttendanceForAcademic() {
-            db.ref(`attendance/${currentClass}/${currentYear}-${currentMonth}`).once('value').then((snap) => {
-                attendanceData = snap.val() || {};
-                // Update present/absent in table after build
-                updateAttendanceInTable();
-            });
-        }
-
-        // Build Dynamic Scores Table
-        function buildScoresTable() {
-            // Insert subject headers
-            const thead = document.getElementById('scores-thead');
-            let headerRow = thead.querySelector('tr');
-            // Clear existing subject th
-            const balanceTh = headerRow.querySelector('th:nth-child(6)'); // Balance
-            let insertPoint = balanceTh.nextSibling;
-            // Remove old subjects if any
-            while (insertPoint && insertPoint.textContent.trim() !== 'Total') {
-                insertPoint.remove();
-                insertPoint = balanceTh.nextSibling;
-            }
-            // Add new
-            subjects.forEach(sub => {
-                const th = document.createElement('th');
-                th.textContent = sub;
-                th.className = 'text-center';
-                balanceTh.parentNode.insertBefore(th, insertPoint);
-            });
-
-            // Build body
-            let bodyHtml = '';
-            studentsData.forEach((student, index) => {
-                const id = student.admissionNumber;
-                const subs = scoresData[id] || {};
-                let total = 0, maxTotal = 0;
-                subjects.forEach(sub => {
-                    const score = subs[sub] ? subs[sub].score : 0;
-                    const max = subs[sub] ? subs[sub].max : 100;
-                    total += score;
-                    maxTotal += max;
-                });
-                const avg = maxTotal ? (total / maxTotal * 100) : 0;
-                bodyHtml += `
-                    <tr>
-                        <td>${index + 1}</td>
-                        <td>${id}</td>
-                        <td>${student.firstName} ${student.lastName}</td>
-                        <td>TSh ${parseFloat(student.feePerYear || 0).toLocaleString()}</td>
-                        <td>TSh ${parseFloat(student.paidAmount || 0).toLocaleString()}</td>
-                        <td>TSh ${parseFloat(student.balance || 0).toLocaleString()}</td>
-                `;
-                subjects.forEach(sub => {
-                    const score = subs[sub] ? subs[sub].score : 0;
-                    const max = subs[sub] ? subs[sub].max : document.getElementById('max-score').value;
-                    bodyHtml += `<td class="text-center"><input type="number" class="form-control sub-score w-16 text-center" data-student="${id}" data-sub="${sub}" value="${score}" max="${max}" min="0" onchange="updateSubjectScore(${id}, '${sub}', this.value, ${max})"></td>`;
-                });
-                bodyHtml += `
-                        <td class="font-bold">${total}</td>
-                        <td>${maxTotal}</td>
-                        <td id="avg-${id}" class="font-bold">${avg.toFixed(1)}%</td>
-                        <td id="pos-${id}">-${td>
-                        <td id="grade-${id}">-</td>
-                        <td id="present-${id}">0</td>
-                        <td id="absent-${id}">0</td>
-                        <td><textarea class="form-control" rows="1" placeholder="Teacher notes..."></textarea></td>
-                    </tr>
-                `;
-            });
-            document.getElementById('scoresheet-body').innerHTML = bodyHtml;
-        }
-
-        // Update Subject Score and Recalc
-        function updateSubjectScore(studentId, sub, score, max) {
-            // Save to Firebase
-            db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}/${studentId}/${sub}`).set({ score: parseInt(score), max: parseInt(max) }).then(() => {
-                // Recalc row
-                recalculateRow(studentId);
-                // Recalc all for pos/grade
-                setTimeout(recalculateAll, 100);
-            });
-        }
-
-        function recalculateRow(studentId) {
-            const inputs = document.querySelectorAll(`.sub-score[data-student="${studentId}"]`);
-            let total = 0, maxTotal = 0;
-            inputs.forEach(input => {
-                total += parseInt(input.value) || 0;
-                maxTotal += parseInt(input.max) || 100;
-            });
-            const avg = maxTotal ? (total / maxTotal * 100) : 0;
-            document.getElementById(`avg-${studentId}`).textContent = `${avg.toFixed(1)}%`;
-        }
-
-        // Recalculate All Positions and Grades
-        function recalculateAll() {
-            const avgs = studentsData.map(s => {
-                const avgEl = document.getElementById(`avg-${s.admissionNumber}`);
-                return { id: s.admissionNumber, avg: parseFloat(avgEl ? avgEl.textContent : '0').replace('%', '') };
-            });
-            const sortedAvgs = avgs.sort((a, b) => b.avg - a.avg);
-            sortedAvgs.forEach((s, index) => {
-                document.getElementById(`pos-${s.id}`).textContent = index + 1;
-                const grade = getGrade(s.avg);
-                document.getElementById(`grade-${s.id}`).textContent = grade;
-            });
-            calculateClassStats(); // Update class stats
-        }
-
-        function getGrade(avg) {
-            if (avg >= 80) return 'A';
-            if (avg >= 60) return 'B';
-            if (avg >= 50) return 'C';
-            if (avg >= 40) return 'D';
-            return 'E';
-        }
-
-        // Update Attendance Counts in Table
-        function updateAttendanceInTable() {
-            studentsData.forEach(s => {
-                const studentAtt = Object.values(attendanceData).flatMap(day => Object.values(day || {})).filter(rec => rec.snap.admissionNo === s.admissionNumber);
-                const present = studentAtt.filter(a => a.daily === 'P').length;
-                const absent = studentAtt.filter(a => a.daily === 'A').length;
-                document.getElementById(`present-${s.admissionNumber}`).textContent = present;
-                document.getElementById(`absent-${s.admissionNumber}`).textContent = absent;
-            });
-            const totalRec = studentsData.length * Object.keys(attendanceData).length;
-            const totalPresent = studentsData.reduce((sum, s) => sum + parseInt(document.getElementById(`present-${s.admissionNumber}`).textContent), 0);
-            const percentPresent = totalRec ? (totalPresent / totalRec * 100).toFixed(1) : 0;
-            const percentAbsent = 100 - parseFloat(percentPresent);
-            document.getElementById('percent-present-detail').textContent = `${percentPresent}%`;
-            document.getElementById('percent-absent-detail').textContent = `${percentAbsent}%`;
-        }
-
-        // Calculate Class Stats
-        function calculateClassStats() {
-            const avgs = studentsData.map(s => parseFloat(document.getElementById(`avg-${s.admissionNumber}`)?.textContent.replace('%', '') || 0));
-            const classAvg = avgs.reduce((sum, a) => sum + a, 0) / avgs.length || 0;
-            const classMax = Math.max(...avgs) || 0;
-            const sorted = studentsData.map(s => ({ name: `${s.firstName} ${s.lastName}`, avg: parseFloat(document.getElementById(`avg-${s.admissionNumber}`)?.textContent.replace('%', '') || 0 }));
-            const sortedClass = sorted.sort((a, b) => b.avg - a.avg);
-            const top = sortedClass[0];
-            const bottom = sortedClass[sortedClass.length - 1];
-
-            document.getElementById('top-student-detail').textContent = top ? `${top.name} (${top.avg.toFixed(1)}%)` : 'N/A';
-            document.getElementById('bottom-student-detail').textContent = bottom ? `${bottom.name} (${bottom.avg.toFixed(1)}%)` : 'N/A';
-            document.getElementById('class-max').textContent = `${classMax.toFixed(1)}% Highest Avg`;
-            document.getElementById('class-grade').textContent = `${classAvg.toFixed(1)}% Class Avg`;
-        }
-
-        // Set All Max Scores
-        function setAllMax() {
-            const maxVal = parseInt(document.getElementById('max-score').value);
-            document.querySelectorAll('.sub-score').forEach(input => {
-                input.max = maxVal;
-                if (!input.value) input.value = 0;
-            });
-            alert(`Max score set to ${maxVal} for all subjects.`);
-        }
-
-        // Save All Scores
-        function saveAllScores() {
-            studentsData.forEach(s => {
-                const id = s.admissionNumber;
-                const subs = {};
-                subjects.forEach(sub => {
-                    const input = document.querySelector(`[data-student="${id}"][data-sub="${sub}"]`);
-                    if (input) {
-                        subs[sub] = { score: parseInt(input.value), max: parseInt(input.max) };
-                    }
-                });
-                db.ref(`scores/${currentYear}/${currentClass}/${currentExamType}/${currentMonth}/${id}`).set(subs);
-            });
-            alert('All scores saved to database!');
-            loadInitialData(); // Refresh global data
-        }
-
-        // Export Functions (Stub for professional touch)
-        function exportCSV() { alert('CSV export initiated. (Implement download logic)'); }
-        function exportExcel() { alert('Excel export. (Use SheetJS)'); }
-        function printScoresheet() { window.print(); }
-
-        // Generate PDF Report Cards
-        function generateReportCards() {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            doc.setFontSize(16);
-            doc.text(`Class ${currentClass} Report - ${currentMonth}/${currentYear}`, 20, 20);
-            const tableData = [];
-            studentsData.forEach(s => {
-                const avgEl = document.getElementById(`avg-${s.admissionNumber}`);
-                const posEl = document.getElementById(`pos-${s.admissionNumber}`);
-                const gradeEl = document.getElementById(`grade-${s.admissionNumber}`);
-                tableData.push([
-                    s.admissionNumber,
-                    `${s.firstName} ${s.lastName}`,
-                    avgEl ? avgEl.textContent : '0%',
-                    posEl ? posEl.textContent : '-',
-                    gradeEl ? gradeEl.textContent : '-',
-                    document.getElementById(`balance for ${s.admissionNumber}`) ? `TSh ${s.balance}` : 'TSh 0'
-                ]);
-            });
-            doc.autoTable({
-                head: [['Adm', 'Name', '% Avg', 'Position', 'Grade', 'Balance']],
-                body: tableData,
-                startY: 30,
-                theme: 'grid'
-            });
-            doc.save(`report_${currentClass}_${currentMonth}.pdf`);
-        }
-
-        // Send Email/SMS (Stub)
-        function sendEmailSMS() { alert('Links generated for parents. (Integrate email/SMS API)'); }
-
-        // School ERP Load
-        function loadSchoolERPData() {
-            // Attendance List (Recent 5 days)
-            let attListHtml = '';
-            const recentDates = Object.keys(attendanceData).slice(-5).reverse();
-            recentDates.forEach(date => {
-                const dayData = attendanceData[date];
-                if (dayData) {
-                    Object.values(dayData).forEach(rec => {
-                        attListHtml += `<li class="flex justify-between"><span>${rec.snap.name}: ${rec.daily}</span><small>${date}</small></li>`;
-                    });
-                }
-            });
-            document.getElementById('attendance-list').innerHTML = attListHtml || '<p>No recent attendance.</p>';
-
-            // Discipline (Assume path exists or create)
-            db.ref(`discipline/${currentClass}`).once('value').then((snap) => {
-                const disc = snap.val() || {};
-                let discHtml = '';
-                Object.values(disc).slice(-10).reverse().forEach(rec => {
-                    discHtml += `<li class="flex justify-between"><span>${rec.student}: ${rec.action}</span><small>${rec.date}</small> - ${rec.comment}</li>`;
-                });
-                document.getElementById('discipline-list').innerHTML = discHtml || '<p>No discipline records.</p>';
-            });
-
-            // Students Table
-            let stuHtml = '';
-            studentsData.forEach(s => {
-                stuHtml += `
-                    <tr>
-                        <td>${s.admissionNumber}</td>
-                        <td>${s.firstName} ${s.lastName}</td>
-                        <td>${s.stream}</td>
-                        <td class="text-red-500">TSh ${s.balance}</td>
-                        <td><button class="btn-secondary text-xs" onclick="viewStudent('${s.admissionNumber}')">View</button></td>
-                    </tr>
-                `;
-            });
-            document.getElementById('students-table-body').innerHTML = stuHtml || '<tr><td colspan="5" class="text-center">No students.</td></tr>';
-        }
-
-        function viewStudent(id) {
-            alert(`Viewing details for student ${id}. (Modal implementation)`);
-        }
-
-        // Form Submissions
-        document.getElementById('mark-attendance-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const name = document.getElementById('att-student-name').value.trim();
-            const date = document.getElementById('att-date').value;
-            const mark = document.getElementById('att-mark').value;
-            const student = studentsData.find(s => `${s.firstName} ${s.lastName}`.toLowerCase().includes(name.toLowerCase()));
-            if (!student) {
-                alert('Student not found in your class.');
-                return;
-            }
-            const path = `attendance/${currentClass}/${currentYear}-${currentMonth}/${date}/${student.admissionNumber}`;
-            db.ref(path).set({
-                am: mark, pm: mark, daily: mark,
-                date,
-                snap: {
-                    admissionNo: student.admissionNumber,
-                    name: `${student.firstName} ${student.lastName}`,
-                    class: currentClass,
-                    feeDue: student.feePerYear,
-                    feePaid: student.paidAmount,
-                    balance: student.balance
-                }
-            }).then(() => {
-                alert('Attendance marked successfully!');
-                loadSchoolERPData();
-                loadInitialData(); // Refresh globals for dashboard reflection
-                document.getElementById('att-student-name').value = '';
-            }).catch(err => alert('Error: ' + err.message));
+        walk(data);
+        const lines = [];
+        Object.keys(subjTotals).forEach(sub => {
+          const s = subjTotals[sub];
+          const avg = s.max ? (s.sum / s.max * 100) : 0;
+          lines.push(`<div><strong>${sub}</strong> — Avg: ${avg.toFixed(1)}% (${Math.round(s.sum/s.count || 0)} / avg of ${Math.round(s.max/s.count || 100)})</div>`);
         });
+        subjectDiv.innerHTML = lines.length ? lines.join('') : '<div class="muted small">No subjects found yet</div>';
+      } catch (err) {
+        subjectDiv.innerHTML = '<div class="muted small">Error fetching subject performance</div>';
+      }
+    }
 
-        document.getElementById('discipline-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const student = document.getElementById('disc-student').value.trim();
-            const action = document.getElementById('disc-action').value;
-            const comment = document.getElementById('disc-comment').value.trim();
-            if (!student || !comment) {
-                alert('Please fill student and comment.');
-                return;
-            }
-            const entry = {
-                student,
-                action,
-                comment,
-                date: new Date().toISOString().split('T')[0],
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-            };
-            db.ref(`discipline/${currentClass}/${Date.now()}`).set(entry).then(() => {
-                alert('Discipline entry recorded.');
-                document.getElementById('disc-student').value = '';
-                document.getElementById('disc-comment').value = '';
-                loadSchoolERPData();
-            }).catch(err => alert('Error: ' + err.message));
-        });
+    // Attendance snapshot
+    async function renderAttendanceSnapshot() {
+      const year = document.getElementById('academic-year').value || currentYear;
+      const month = document.getElementById('select-month').value || currentMonth;
+      const snapshotDiv = document.getElementById('attendanceSnapshot');
+      snapshotDiv.innerHTML = 'Loading…';
 
-        // Event Listeners for Filters
-        document.getElementById('stream-select-acad').addEventListener('change', (e) => {
-            currentStream = e.target.value;
-            loadAcademicData();
+      try {
+        const attRef = db.ref(`attendance/${teacherClass}/${year}-${month}`);
+        const attSnap = await attRef.once('value');
+        const att = attSnap.val() || {};
+        let present = 0, total = 0;
+        Object.values(att).forEach(day => {
+          if (!day) return;
+          Object.values(day).forEach(entry => {
+            if (!entry) return;
+            total++;
+            if (entry.daily === 'P' || entry.am === 'P' || entry.pm === 'P') present++;
+          });
         });
-        document.getElementById('month-select').addEventListener('change', (e) => {
-            currentMonth = e.target.value;
-            loadAcademicData();
-        });
-        document.getElementById('exam-type').addEventListener('change', (e) => {
-            currentExamType = e.target.value;
-            loadAcademicData();
-        });
-        document.getElementById('academic-year').addEventListener('change', (e) => {
-            currentYear = parseInt(e.target.value);
-            loadAcademicData();
-        });
+        const pct = total ? (present / total * 100) : 0;
+        snapshotDiv.innerHTML = `<div class="font-semibold text-lg">${present}/${total} present</div><div class="muted small">${pct.toFixed(1)}% present this month</div>`;
+        document.getElementById('card-present').innerText = `${pct.toFixed(1)}%`;
+        document.getElementById('present-details').innerText = `${present} present • ${total-present} absent`;
+      } catch (err) {
+        snapshotDiv.innerHTML = '<div class="muted small">Unable to load attendance</div>';
+      }
+    }
 
-        // Analytics Refresh
-        function loadAttendanceAnalytics() {
-            const start = document.getElementById('start-date').value;
-            const end = document.getElementById('end-date').value;
-            if (start && end) {
-                loadDashboardData(start, end);
-            }
-        }
+    // Fee summary
+    function renderFeeSummary(students) {
+      const el = document.getElementById('card-fee-summary');
+      const feesDetails = document.getElementById('fees-details');
+      if (!students) { el.innerText = '—'; feesDetails.innerText='—'; return; }
+      let due = 0, paid = 0;
+      students.forEach(s => { due += Number(s.feePerYear||0); paid += Number(s.paidAmount||0); });
+      const bal = due - paid;
+      el.innerText = `${due.toLocaleString()} TSh due • ${paid.toLocaleString()} paid`;
+      feesDetails.innerText = `Balance: ${bal.toLocaleString()} TSh`;
+      document.getElementById('feeQuick').innerText = `${students.length} students • Balance ${bal.toLocaleString()} TSh`;
+    }
 
-        // Logout
-        function logout() {
-            auth.signOut().then(() => {
-                window.location.href = 'index.html';
-            });
-        }
+    // ---------- Actions: Save scores, export CSV, print ----------
+    document.getElementById('btn-save-scores').addEventListener('click', async () => {
+      if (!teacherClass) return alert('Teacher class not loaded');
+      const year = document.getElementById('academic-year').value || currentYear;
+      const examType = document.getElementById('select-exam-type').value || currentExamType;
+      const month = document.getElementById('select-month').value || currentMonth;
+      const tbody = document.getElementById('scoresheetBody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      if (rows.length === 0) return alert('No data to save');
 
-        // Initial Setup
-        document.addEventListener('DOMContentLoaded', () => {
-            showSection('dashboard');
-        });
-    </script>
+      const updates = {};
+      rows.forEach(r => {
+        const adm = r.querySelector('[data-adm]')?.getAttribute('data-adm');
+        if (!adm) return;
+        // Here we save a compact structure: scores/<year>/<class>/<examType>/<month>/<adm>/snap and totals
+        const total = Number(r.querySelector('.score-total')?.value || 0);
+        const max = Number(r.querySelector('.score-max')?.value || 0);
+        const pctText = r.querySelector('.pct-avg')?.innerText || '0%';
+        const pct = Number(pctText.replace('%','')) || 0;
+        const comment = r.querySelector('.comment-input')?.value || '';
+        // For simplicity we only save 'snapshot' totals at the admission key. Real per-subject saves would require subject inputs.
+        const path = `scores/${year}/${teacherClass}/${examType}/${month}/${adm}`;
+        updates[path] = { snap: { admissionNo: adm, total, max, pct, teacherComment: comment } };
+      });
+
+      // Push updates in one batch
+      const promises = [];
+      Object.keys(updates).forEach(p => {
+        promises.push(db.ref(p).set(updates[p]));
+      });
+      Promise.all(promises).then(() => {
+        alert('Scores saved successfully');
+        computeTopBottom();
+      }).catch(err => {
+        console.error(err);
+        alert('Error saving scores');
+      });
+    });
+
+    // CSV export (simple) — exports current visible scoresheet
+    document.getElementById('btn-export-csv').addEventListener('click', () => {
+      const rows = Array.from(document.querySelectorAll('#scoresheetBody tr'));
+      if (!rows || rows.length === 0) return alert('Nothing to export');
+      const lines = [];
+      lines.push(['#','Adm','Student','Fee Due','Paid','Balance','Total','Max','% Avg','Position','Grade','Present','Absent','Comment'].join(','));
+      rows.forEach(r => {
+        const cols = Array.from(r.children).map(td => td.innerText.replace(/,/g,' '));
+        lines.push(cols.join(','));
+      });
+      const csv = lines.join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${teacherClass || 'class'}-scores.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Excel: same CSV but .xls extension for quick open in Excel
+    document.getElementById('btn-export-excel').addEventListener('click', () => {
+      const rows = Array.from(document.querySelectorAll('#scoresheetBody tr'));
+      if (!rows || rows.length === 0) return alert('Nothing to export');
+      const lines = [];
+      lines.push(['#','Adm','Student','Fee Due','Paid','Balance','Total','Max','% Avg','Position','Grade','Present','Absent','Comment'].join('\t'));
+      rows.forEach(r => {
+        const cols = Array.from(r.children).map(td => td.innerText.replace(/\t/g,' '));
+        lines.push(cols.join('\t'));
+      });
+      const tsv = lines.join('\n');
+      const blob = new Blob([tsv], { type: 'application/vnd.ms-excel' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${teacherClass || 'class'}-scores.xls`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('btn-print').addEventListener('click', () => {
+      window.print();
+    });
+
+    // ---------- Navigation and ERP View logic ----------
+    document.getElementById('nav-dashboard').addEventListener('click', () => {
+      // Scroll to top/main dashboard
+      window.scrollTo({top:0, behavior:'smooth'});
+    });
+    document.getElementById('nav-academic').addEventListener('click', () => {
+      // Show academic section and hide schoolerp view
+      document.getElementById('academicSection').scrollIntoView({behavior:'smooth'});
+    });
+    document.getElementById('nav-attendance').addEventListener('click', () => {
+      // Scroll to attendance snapshot
+      document.getElementById('attendanceSnapshot').scrollIntoView({behavior:'smooth'});
+    });
+    document.getElementById('nav-schoolerp').addEventListener('click', () => {
+      // Toggle embedded limited ERP view (admissions hidden)
+      const v = document.getElementById('schoolerpView');
+      v.classList.toggle('hidden');
+      if (!v.classList.contains('hidden')) v.scrollIntoView({behavior:'smooth'});
+    });
+
+    // Buttons inside ERP area
+    document.getElementById('openERPAcademic').addEventListener('click', () => {
+      document.getElementById('academicSection').scrollIntoView({behavior:'smooth'});
+    });
+    document.getElementById('openERPAttendance').addEventListener('click', () => {
+      document.getElementById('attendanceSnapshot').scrollIntoView({behavior:'smooth'});
+    });
+    document.getElementById('openAdmissionsRestricted').addEventListener('click', () => {
+      showModal('Admissions Restricted', `<p class='muted small'>Admissions is restricted for Teacher accounts. Please contact the school administrator to request access. Email: socratesschool2020@gmail.com</p>`);
+    });
+
+    // Open full attendance view (same as ERP attendance but focused)
+    document.getElementById('openFullAttendance').addEventListener('click', () => {
+      document.getElementById('schoolerpView').classList.remove('hidden');
+      document.getElementById('schoolerpView').scrollIntoView({behavior:'smooth'});
+    });
+
+    // Logout
+    document.getElementById('nav-logout').addEventListener('click', () => {
+      auth.signOut().then(()=> window.location.href = 'index.html');
+    });
+
+    // When exam/year/month change, re-render
+    document.getElementById('select-exam-type').addEventListener('change', () => { computeTopBottom(); renderSubjectPerformance(); renderScoresheet(window.__classStudents || []); });
+    document.getElementById('select-month').addEventListener('change', () => { renderAttendanceSnapshot(); renderScoresheet(window.__classStudents || []); });
+    document.getElementById('academic-year').addEventListener('change', () => { renderScoresheet(window.__classStudents || []); renderAttendanceSnapshot(); });
+
+    // Helper: compute grades and other operations can be added here
+
+    // Initial small actions: focus
+    document.addEventListener('DOMContentLoaded', () => {
+      // show a one-time tip for teachers
+      const tip = `<div class='muted small'>Tip: Use the Academic icon (left) to open the full ERP academic view. Admissions actions are disabled for teacher accounts.</div>`;
+      //console.log(tip);
+    });
+
+  </script>
 </body>
 </html>

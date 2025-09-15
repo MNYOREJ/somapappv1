@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SoMAp - Accountant Dashboard</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { font-family: 'Roboto', sans-serif; background: #f4f4f9; min-height: 100vh; }
+        .sidebar { width: 64px; background: linear-gradient(to bottom, #28a745, #198754); height: 100vh; position: fixed; padding: 1rem; }
+        .main-content { margin-left: 80px; padding: 2rem; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
+        .btn { background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 4px; border: none; }
+        .btn:hover { background: #218838; }
+        .events-list { list-style: none; padding: 0; }
+        .events-list li { background: #f8f9fa; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; }
+        .form-control { width: 100%; padding: 0.5rem; border: 1px solid #dadce0; border-radius: 4px; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="flex">
+        <div id="sidebar" class="sidebar">
+            <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-10 mb-4 mx-auto">
+            <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto" onclick="window.location.href='index.html'">
+                <i class="fas fa-sign-out-alt text-xl"></i>
+                <span class="sidebar-tooltip">Logout</span>
+            </button>
+        </div>
+        <div class="main-content">
+            <h1 class="text-2xl font-bold mb-4">Accountant Dashboard</h1>
+            <!-- Finance Overview (from finance.html) -->
+            <section id="finance" class="card">
+                <h2 class="text-xl font-semibold mb-2">Fee Collection Overview</h2>
+                <p id="fee-overview">Loading...</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div class="card">
+                        <h5>Total Due</h5>
+                        <p id="total-due">TSh 0</p>
+                    </div>
+                    <div class="card">
+                        <h5>Total Collected</h5>
+                        <p id="total-collected">TSh 0</p>
+                    </div>
+                </div>
+            </section>
+            <!-- Recent Payments -->
+            <section id="recent-payments" class="card">
+                <h2 class="text-xl font-semibold mb-2">Recent Fee Payments</h2>
+                <ul class="events-list" id="payments-list">
+                    <li>Loading...</li>
+                </ul>
+            </section>
+            <!-- New Admission -->
+            <section id="admission" class="card">
+                <h2 class="text-xl font-semibold mb-2">Create New Admission</h2>
+                <form id="admission-form">
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium">Admission Number</label>
+                        <input type="text" id="admission-number" class="form-control" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium">Student Name</label>
+                        <input type="text" id="student-name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium">Class</label>
+                        <select id="student-class" class="form-control">
+                            <option>Baby Class</option>
+                            <option>Middle Class</option>
+                            <option>Pre-Unit</option>
+                            <option>Class 1 AB</option>
+                            <option>Class 2 AB</option>
+                            <option>Class 3</option>
+                            <option>Class 4</option>
+                            <option>Class 5</option>
+                            <option>Class 6</option>
+                            <option>Class 7</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium">Fee Per Year (TSh)</label>
+                        <input type="number" id="fee-per-year" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium">Parent Phone</label>
+                        <input type="tel" id="parent-phone" class="form-control" placeholder="+255123456789" required>
+                    </div>
+                    <button type="submit" class="btn">Create Admission</button>
+                </form>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+            authDomain: "somaptestt.firebaseapp.com",
+            databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+            projectId: "somaptestt",
+            storageBucket: "somaptestt.appspot.com",
+            messagingSenderId: "105526245138",
+            appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.database();
+
+        auth.onAuthStateChanged(user => {
+            if (!user) {
+                window.location.href = 'index.html';
+                return;
+            }
+            db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
+                const userData = snapshot.val();
+                if (!userData || userData.role !== 'accountant') {
+                    alert('Unauthorized access');
+                    auth.signOut();
+                    window.location.href = 'index.html';
+                    return;
+                }
+                loadFinanceData();
+            });
+        });
+
+        function loadFinanceData() {
+            db.ref('students').on('value', snapshot => {
+                const students = snapshot.val() ? Object.values(snapshot.val()) : [];
+                let totalDue = students.reduce((sum, s) => sum + (parseInt(s.feePerYear) || 0), 0);
+                let totalCollected = students.reduce((sum, s) => sum + (parseInt(s.paidAmount) || 0), 0);
+                document.getElementById('total-due').textContent = `TSh ${totalDue.toLocaleString()}`;
+                document.getElementById('total-collected').textContent = `TSh ${totalCollected.toLocaleString()}`;
+                document.getElementById('fee-overview').textContent = `Total Due: TSh ${totalDue.toLocaleString()} | Collected: TSh ${totalCollected.toLocaleString()} | Outstanding: TSh ${(totalDue - totalCollected).toLocaleString()}`;
+                
+                const paymentsList = document.getElementById('payments-list');
+                let html = '';
+                students.forEach(s => {
+                    if (s.payments) {
+                        Object.values(s.payments).forEach(p => {
+                            html += `<li>${s.firstName} ${s.lastName} - TSh ${p.amount.toLocaleString()} via ${p.method} - ${new Date(p.timestamp).toLocaleString()}</li>`;
+                        });
+                    }
+                });
+                paymentsList.innerHTML = html || '<li>No payments found.</li>';
+            });
+        }
+
+        document.getElementById('admission-form').addEventListener('submit', e => {
+            e.preventDefault();
+            const admissionNumber = `AUTO-${Date.now()}`;
+            const studentName = document.getElementById('student-name').value;
+            const studentClass = document.getElementById('student-class').value;
+            const feePerYear = parseInt(document.getElementById('fee-per-year').value);
+            const parentPhone = document.getElementById('parent-phone').value;
+            db.ref('students').push({
+                admissionNumber,
+                firstName: studentName.split(' ')[0],
+                lastName: studentName.split(' ').slice(1).join(' '),
+                classLevel: studentClass,
+                feePerYear,
+                paidAmount: 0,
+                balance: feePerYear,
+                primaryParentContact: parentPhone,
+                timestamp: Date.now()
+            }).then(() => {
+                alert('Student admitted successfully!');
+                document.getElementById('admission-form').reset();
+                document.getElementById('admission-number').value = `AUTO-${Date.now()}`;
+            });
+        });
+
+        // Auto-fill admission number
+        document.getElementById('admission-number').value = `AUTO-${Date.now()}`;
+    </script>
+</body>
+</html>

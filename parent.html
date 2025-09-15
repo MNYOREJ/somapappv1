@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SoMAp - Parent Dashboard</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        body { font-family: 'Roboto', sans-serif; background: #f4f4f9; min-height: 100vh; }
+        .sidebar { width: 64px; background: linear-gradient(to bottom, #ff6b6b, #ff8e53); height: 100vh; position: fixed; padding: 1rem; }
+        .main-content { margin-left: 80px; padding: 2rem; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
+        .events-list { list-style: none; padding: 0; }
+        .events-list li { background: #f8f9fa; padding: 0.75rem; margin: 0.5rem 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="flex">
+        <div id="sidebar" class="sidebar">
+            <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-10 mb-4 mx-auto">
+            <button class="sidebar-icon flex items-center justify-center w-10 h-10 rounded-lg text-white mx-auto" onclick="window.location.href='index.html'">
+                <i class="fas fa-sign-out-alt text-xl"></i>
+                <span class="sidebar-tooltip">Logout</span>
+            </button>
+        </div>
+        <div class="main-content">
+            <h1 class="text-2xl font-bold mb-4">Parent Dashboard</h1>
+            <h2 id="student-name" class="text-xl font-semibold mb-2">Loading...</h2>
+            <!-- Fees -->
+            <section id="fees" class="card">
+                <h3 class="text-lg font-semibold mb-2">Fee Status</h3>
+                <p id="fee-status">Loading...</p>
+            </section>
+            <!-- Attendance -->
+            <section id="attendance" class="card">
+                <h3 class="text-lg font-semibold mb-2">Attendance</h3>
+                <p id="attendance-stats">Loading...</p>
+            </section>
+            <!-- Scores -->
+            <section id="scores" class="card">
+                <h3 class="text-lg font-semibold mb-2">Exam Scores</h3>
+                <ul id="scores-list" class="events-list">
+                    <li>Loading...</li>
+                </ul>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+            authDomain: "somaptestt.firebaseapp.com",
+            databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+            projectId: "somaptestt",
+            storageBucket: "somaptestt.appspot.com",
+            messagingSenderId: "105526245138",
+            appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        const studentId = localStorage.getItem('studentId');
+        const role = localStorage.getItem('role');
+        if (role !== 'parent' || !studentId) {
+            alert('Unauthorized access');
+            window.location.href = 'index.html';
+            return;
+        }
+
+        db.ref('students').orderByChild('admissionNumber').equalTo(studentId).once('value').then(snapshot => {
+            const student = snapshot.val() ? Object.values(snapshot.val())[0] : null;
+            if (!student) {
+                alert('Student data not found');
+                window.location.href = 'index.html';
+                return;
+            }
+            document.getElementById('student-name').textContent = `${student.firstName} ${student.middleName || ''} ${student.lastName}`;
+            document.getElementById('fee-status').textContent = `Fee Due: TSh ${student.feePerYear.toLocaleString()} | Paid: TSh ${student.paidAmount.toLocaleString()} | Balance: TSh ${student.balance.toLocaleString()}`;
+
+            // Attendance
+            db.ref(`attendance/${student.classLevel}/2025-09`).once('value').then(attSnapshot => {
+                const attendance = attSnapshot.val() ? Object.values(attSnapshot.val()).flatMap(day => Object.values(day)) : [];
+                let present = attendance.filter(a => a.daily === 'P' && a.snap.admissionNo === studentId).length;
+                let total = attendance.filter(a => a.snap.admissionNo === studentId).length;
+                document.getElementById('attendance-stats').textContent = `Present: ${present}/${total} (${total ? (present/total*100).toFixed(1) : 0}%)`;
+            });
+
+            // Scores
+            db.ref(`scores/2025/${student.classLevel}/monthly/08`).once('value').then(scoreSnapshot => {
+                const scores = scoreSnapshot.val() && scoreSnapshot.val()[studentId] ? scoreSnapshot.val()[studentId] : {};
+                let html = '';
+                for (let subject in scores) {
+                    html += `<li>${subject}: ${scores[subject].score}/${scores[subject].max} (${(scores[subject].score/scores[subject].max*100).toFixed(1)}%)</li>`;
+                }
+                document.getElementById('scores-list').innerHTML = html || '<li>No scores available.</li>';
+            });
+        });
+    </script>
+</body>
+</html>

@@ -638,12 +638,18 @@
         messagingSenderId: "105526245138",
         appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
     };
+    
     // Initialize Firebase - This sets up the Firebase app if not already initialized
     if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
     }
     const auth = firebase.auth();
     const db = firebase.database();
+
+    // Global flag to prevent multiple redirections
+    let isRedirecting = false;
+    let authStateChecked = false;
+
     // Language Translations - Object containing English and Swahili translations for UI elements
     const translations = {
         en: {
@@ -689,6 +695,7 @@
             logout: "Toka"
         }
     };
+
     // Language Select - Event listener to change language on selection
     document.getElementById('language-select').addEventListener('change', (e) => {
         const lang = e.target.value;
@@ -696,18 +703,21 @@
         document.getElementById('welcome-text').textContent = translations[lang].welcomeText;
         document.getElementById('get-started').textContent = translations[lang].getStarted;
     });
+
     // Get Started - Event listener to show login page
     document.getElementById('get-started').addEventListener('click', () => {
         document.getElementById('welcome-page').classList.add('hidden');
         document.getElementById('login-page').classList.remove('hidden');
         document.getElementById('sign-out').classList.remove('hidden');
     });
+
     // Start Trial - Event listener to show login page
     document.getElementById('start-trial').addEventListener('click', () => {
         document.getElementById('welcome-page').classList.add('hidden');
         document.getElementById('login-page').classList.remove('hidden');
         document.getElementById('sign-out').classList.remove('hidden');
     });
+
     // Sign-Out - Event listener to sign out user
     document.getElementById('sign-out').addEventListener('click', () => {
         auth.signOut().then(() => {
@@ -717,19 +727,25 @@
             document.getElementById('login-page').classList.add('hidden');
             document.getElementById('welcome-page').classList.remove('hidden');
             document.getElementById('sign-out').classList.add('hidden');
+            isRedirecting = false;
+            authStateChecked = false;
             Swal.fire('Success', 'You have been signed out.', 'success');
         }).catch(err => {
             Swal.fire('Error', 'Sign-out failed: ' + err.message, 'error');
         });
     });
+
     // Staff Sign-In (Google) - Using popup for better user experience on most devices
     document.getElementById('google-signin').addEventListener('click', () => {
+        if (isRedirecting) return;
+        
         const response = grecaptcha.getResponse();
         if (!response) {
             document.getElementById('error-message').textContent = 'Please complete the CAPTCHA';
             document.getElementById('error-message').classList.remove('hidden');
             return;
         }
+        
         const provider = new firebase.auth.GoogleAuthProvider();
         auth.signInWithPopup(provider)
             .then(result => {
@@ -742,8 +758,11 @@
                         auth.signOut();
                         return;
                     }
+                    
+                    isRedirecting = true;
                     localStorage.setItem('role', userData.role);
                     localStorage.setItem('class', userData.class || '');
+                    
                     if (userData.role === 'accountant') {
                         window.location.href = 'mhasibu.html';
                     } else if (userData.role === 'teacher') {
@@ -758,9 +777,13 @@
                 document.getElementById('error-message').classList.remove('hidden');
             });
     });
+
     // Parent Sign-In - Enhanced with flexible name matching and phone validation
     document.getElementById('parent-signin').addEventListener('submit', e => {
         e.preventDefault();
+        
+        if (isRedirecting) return;
+        
         const childName = document.getElementById('child-name').value.trim().toLowerCase();
         const phone = document.getElementById('parent-phone').value.trim();
         const errorMessage = document.getElementById('error-message');
@@ -821,9 +844,10 @@
             submitButton.textContent = 'Sign In as Parent';
 
             if (foundStudent) {
+                isRedirecting = true;
                 localStorage.setItem('role', 'parent');
                 localStorage.setItem('studentId', foundStudent.admissionNumber || foundKey);
-                localStorage.setItem('parentSessionValid', 'true'); // Flag to prevent loops
+                // Redirect to parent dashboard immediately
                 window.location.href = 'parent.html';
             } else {
                 errorMessage.textContent = 'Invalid child names or phone number. Please check your input.';
@@ -836,47 +860,55 @@
             errorMessage.classList.remove('hidden');
         });
     });
-    // Initial Auth State Check - Optimized to prevent flashing and loops
-    const storedRole = localStorage.getItem('role');
-    const storedStudentId = localStorage.getItem('studentId');
-    const parentSessionValid = localStorage.getItem('parentSessionValid') === 'true';
 
-    if (storedRole === 'parent' && storedStudentId && parentSessionValid) {
-        // For valid parent session, directly redirect without further checks to prevent loop
-        window.location.href = 'parent.html';
-    } else if (storedRole === 'parent' && storedStudentId) {
-        // Verify parent session only if flag not set (first time or invalid)
-        db.ref('students').once('value').then(snapshot => {
-            const students = snapshot.val() ? Object.entries(snapshot.val()) : [];
-            const isValidParent = students.some(([key, s]) => 
-                (s.admissionNumber === storedStudentId || key === storedStudentId) && s.primaryParentContact
-            );
-            if (isValidParent) {
-                localStorage.setItem('parentSessionValid', 'true');
-                window.location.href = 'parent.html';
-            } else {
-                // Invalid, clear and show welcome
+    // Initial Auth State Check - FIXED to prevent infinite loops
+    function checkInitialAuthState() {
+        if (authStateChecked || isRedirecting) return;
+        authStateChecked = true;
+
+        const storedRole = localStorage.getItem('role');
+        const storedStudentId = localStorage.getItem('studentId');
+
+        // Handle parent authentication
+        if (storedRole === 'parent' && storedStudentId) {
+            // Only verify once and redirect immediately
+            db.ref('students').once('value').then(snapshot => {
+                const students = snapshot.val() ? Object.entries(snapshot.val()) : [];
+                const isValidParent = students.some(([key, s]) => 
+                    (s.admissionNumber === storedStudentId || key === storedStudentId) && s.primaryParentContact
+                );
+                
+                if (isValidParent) {
+                    isRedirecting = true;
+                    window.location.href = 'parent.html';
+                } else {
+                    // Clear invalid session
+                    localStorage.removeItem('role');
+                    localStorage.removeItem('studentId');
+                    showWelcomePage();
+                }
+            }).catch(() => {
+                // Clear session on error
                 localStorage.removeItem('role');
                 localStorage.removeItem('studentId');
-                localStorage.removeItem('parentSessionValid');
                 showWelcomePage();
-            }
-        }).catch(() => {
-            localStorage.removeItem('role');
-            localStorage.removeItem('studentId');
-            localStorage.removeItem('parentSessionValid');
-            showWelcomePage();
-        });
-    } else {
-        // Not parent, set up staff auth listener
+            });
+            return;
+        }
+
+        // Handle Firebase authenticated users (staff)
         auth.onAuthStateChanged(user => {
+            if (authStateChecked && isRedirecting) return;
+            
             if (user && !user.isAnonymous) {
                 db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
                     const userData = snapshot.val();
                     if (userData) {
+                        isRedirecting = true;
                         localStorage.setItem('role', userData.role);
                         localStorage.setItem('class', userData.class || '');
                         document.getElementById('sign-out').classList.remove('hidden');
+                        
                         if (userData.role === 'accountant') {
                             window.location.href = 'mhasibu.html';
                         } else if (userData.role === 'teacher') {
@@ -886,35 +918,37 @@
                         }
                     } else {
                         auth.signOut();
-                        clearStorageAndShowWelcome();
+                        clearAuthData();
+                        showWelcomePage();
                     }
                 }).catch(() => {
                     auth.signOut();
-                    clearStorageAndShowWelcome();
+                    clearAuthData();
+                    showWelcomePage();
                 });
             } else {
-                clearStorageAndShowWelcome();
+                clearAuthData();
+                showWelcomePage();
             }
         });
-        // Default to welcome if no auth
-        showWelcomePage();
     }
 
-    // Helper function to clear storage and show welcome
-    function clearStorageAndShowWelcome() {
+    function clearAuthData() {
         localStorage.removeItem('role');
         localStorage.removeItem('class');
         localStorage.removeItem('studentId');
-        localStorage.removeItem('parentSessionValid');
-        showWelcomePage();
     }
 
-    // Helper function to show welcome page
     function showWelcomePage() {
         document.getElementById('welcome-page').classList.remove('hidden');
         document.getElementById('login-page').classList.add('hidden');
         document.getElementById('sign-out').classList.add('hidden');
     }
+
+    // Initialize the app
+    document.addEventListener('DOMContentLoaded', () => {
+        checkInitialAuthState();
+    });
     </script>
 </body>
 </html>

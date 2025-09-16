@@ -861,50 +861,20 @@
         });
     });
 
-    // Initial Auth State Check - FIXED to prevent infinite loops
-    function checkInitialAuthState() {
-        if (authStateChecked || isRedirecting) return;
-        authStateChecked = true;
+    // Simple Initial Check - NO MORE FLASHING!
+    const storedRole = localStorage.getItem('role');
+    const storedStudentId = localStorage.getItem('studentId');
 
-        const storedRole = localStorage.getItem('role');
-        const storedStudentId = localStorage.getItem('studentId');
-
-        // Handle parent authentication
-        if (storedRole === 'parent' && storedStudentId) {
-            // Only verify once and redirect immediately
-            db.ref('students').once('value').then(snapshot => {
-                const students = snapshot.val() ? Object.entries(snapshot.val()) : [];
-                const isValidParent = students.some(([key, s]) => 
-                    (s.admissionNumber === storedStudentId || key === storedStudentId) && s.primaryParentContact
-                );
-                
-                if (isValidParent) {
-                    isRedirecting = true;
-                    window.location.href = 'parent.html';
-                } else {
-                    // Clear invalid session
-                    localStorage.removeItem('role');
-                    localStorage.removeItem('studentId');
-                    showWelcomePage();
-                }
-            }).catch(() => {
-                // Clear session on error
-                localStorage.removeItem('role');
-                localStorage.removeItem('studentId');
-                showWelcomePage();
-            });
-            return;
-        }
-
-        // Handle Firebase authenticated users (staff)
+    // If parent is already logged in, go straight to parent.html - NO CHECKING, NO VALIDATION
+    if (storedRole === 'parent' && storedStudentId) {
+        window.location.href = 'parent.html';
+    } else {
+        // Only check Firebase auth for staff users (Google sign-in)
         auth.onAuthStateChanged(user => {
-            if (authStateChecked && isRedirecting) return;
-            
-            if (user && !user.isAnonymous) {
+            if (user && !user.isAnonymous && storedRole !== 'parent') {
                 db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
                     const userData = snapshot.val();
                     if (userData) {
-                        isRedirecting = true;
                         localStorage.setItem('role', userData.role);
                         localStorage.setItem('class', userData.class || '');
                         document.getElementById('sign-out').classList.remove('hidden');
@@ -916,39 +886,11 @@
                         } else if (userData.role === 'admin') {
                             window.location.href = 'dashboard.html';
                         }
-                    } else {
-                        auth.signOut();
-                        clearAuthData();
-                        showWelcomePage();
                     }
-                }).catch(() => {
-                    auth.signOut();
-                    clearAuthData();
-                    showWelcomePage();
                 });
-            } else {
-                clearAuthData();
-                showWelcomePage();
             }
         });
     }
-
-    function clearAuthData() {
-        localStorage.removeItem('role');
-        localStorage.removeItem('class');
-        localStorage.removeItem('studentId');
-    }
-
-    function showWelcomePage() {
-        document.getElementById('welcome-page').classList.remove('hidden');
-        document.getElementById('login-page').classList.add('hidden');
-        document.getElementById('sign-out').classList.add('hidden');
-    }
-
-    // Initialize the app
-    document.addEventListener('DOMContentLoaded', () => {
-        checkInitialAuthState();
-    });
     </script>
 </body>
 </html>

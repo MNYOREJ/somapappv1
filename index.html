@@ -758,7 +758,7 @@
                 document.getElementById('error-message').classList.remove('hidden');
             });
     });
-    // Parent Sign-In - Enhanced with flexible name matching, phone validation, no auth required
+    // Parent Sign-In - Enhanced with flexible name matching, phone validation, using anonymous auth
     document.getElementById('parent-signin').addEventListener('submit', e => {
         e.preventDefault();
         const childName = document.getElementById('child-name').value.trim().toLowerCase();
@@ -794,7 +794,7 @@
                     (s.lastName || '').toLowerCase()
                 ].filter(n => n.length > 0);
 
-                // Check if all input names match at least one child name, and at least two matches
+                // Check if at least two input names match child's names
                 const matches = inputNames.filter(name => childNames.includes(name)).length;
                 if (matches >= 2 && s.primaryParentContact === phone) {
                     foundStudent = s;
@@ -803,9 +803,17 @@
             }
 
             if (foundStudent) {
-                localStorage.setItem('role', 'parent');
-                localStorage.setItem('studentId', foundStudent.admissionNumber);
-                window.location.href = 'parent.html';
+                // Sign in anonymously for parent session
+                auth.signInAnonymously()
+                    .then(() => {
+                        localStorage.setItem('role', 'parent');
+                        localStorage.setItem('studentId', foundStudent.admissionNumber);
+                        window.location.href = 'parent.html';
+                    })
+                    .catch(err => {
+                        errorMessage.textContent = 'Authentication failed: ' + err.message;
+                        errorMessage.classList.remove('hidden');
+                    });
             } else {
                 errorMessage.textContent = 'Invalid child names or phone number.';
                 errorMessage.classList.remove('hidden');
@@ -815,38 +823,48 @@
             errorMessage.classList.remove('hidden');
         });
     });
-    // Initial Auth State Check - Redirect based on auth or localStorage role to prevent flashing
+    // Initial Auth State Check - Handle anonymous auth for parents to prevent flashing
     auth.onAuthStateChanged(user => {
         if (user) {
-            db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
-                const userData = snapshot.val();
-                if (userData) {
-                    localStorage.setItem('role', userData.role);
-                    localStorage.setItem('class', userData.class || '');
-                    document.getElementById('sign-out').classList.remove('hidden');
-                    if (userData.role === 'accountant') {
-                        window.location.href = 'mhasibu.html';
-                    } else if (userData.role === 'teacher') {
-                        window.location.href = 'staff.html';
-                    } else if (userData.role === 'admin') {
-                        window.location.href = 'dashboard.html';
-                    }
+            if (user.isAnonymous) {
+                const storedRole = localStorage.getItem('role');
+                if (storedRole === 'parent') {
+                    window.location.href = 'parent.html';
                 } else {
-                    // If no user data, sign out
                     auth.signOut();
+                    localStorage.removeItem('role');
+                    localStorage.removeItem('studentId');
                 }
-            }).catch(() => {
-                auth.signOut();
-            });
-        } else {
-            const storedRole = localStorage.getItem('role');
-            if (storedRole === 'parent') {
-                window.location.href = 'parent.html';
+            } else if (user.email) {
+                db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
+                    const userData = snapshot.val();
+                    if (userData) {
+                        localStorage.setItem('role', userData.role);
+                        localStorage.setItem('class', userData.class || '');
+                        document.getElementById('sign-out').classList.remove('hidden');
+                        if (userData.role === 'accountant') {
+                            window.location.href = 'mhasibu.html';
+                        } else if (userData.role === 'teacher') {
+                            window.location.href = 'staff.html';
+                        } else if (userData.role === 'admin') {
+                            window.location.href = 'dashboard.html';
+                        }
+                    } else {
+                        auth.signOut();
+                    }
+                }).catch(() => {
+                    auth.signOut();
+                });
             } else {
-                document.getElementById('welcome-page').classList.remove('hidden');
-                document.getElementById('login-page').classList.add('hidden');
-                document.getElementById('sign-out').classList.add('hidden');
+                auth.signOut();
             }
+        } else {
+            localStorage.removeItem('role');
+            localStorage.removeItem('class');
+            localStorage.removeItem('studentId');
+            document.getElementById('welcome-page').classList.remove('hidden');
+            document.getElementById('login-page').classList.add('hidden');
+            document.getElementById('sign-out').classList.add('hidden');
         }
     });
     </script>

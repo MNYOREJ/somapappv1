@@ -1,140 +1,842 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SoMAp Parent Login</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Parent Dashboard</title>
 
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-
-  <!-- Tailwind + Icons -->
+  <!-- Tailwind CSS CDN for quick styling -->
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Font Awesome for icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-  <!-- SweetAlert -->
+  <!-- Firebase compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+
+  <!-- jsPDF + autoTable for PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- SheetJS for CSV/Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- SweetAlert2 for nicer alerts -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+  <!-- Chart.js for charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+
   <style>
+    /* Custom visual polish */
+    :root{
+      --bg1: #0ea5e9;
+      --bg2: #7c3aed;
+      --card-bg: rgba(255,255,255,0.98);
+      --accent: #4f46e5;
+      --muted: #6b7280;
+    }
+    html,body { height:100%; }
     body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background: linear-gradient(135deg, #007bff, #6610f2);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(135deg, var(--bg1), var(--bg2));
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+    .sidebar {
+      width:72px;
+      background: linear-gradient(180deg,#ff7a50,#ffb86b);
+      height:100vh;
+      position:fixed;
+      left:0;
+      top:0;
+      bottom:0;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:10px;
+      z-index:40;
+      box-shadow: 2px 0 12px rgba(0,0,0,0.15);
+    }
+    .sidebar .icon {
+      width:54px;
+      height:54px;
+      border-radius:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+      cursor:pointer;
+      transition: transform .15s ease;
+    }
+    .sidebar .icon:hover { transform: translateY(-4px); background: rgba(255,255,255,0.08); }
+    .main {
+      margin-left:92px;
+      padding:24px;
+      min-height:100vh;
+      color:#0b1220;
     }
     .card {
-      background: #fff;
-      border-radius: 1rem;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-      padding: 2rem;
-      max-width: 450px;
-      width: 100%;
+      background: var(--card-bg);
+      border-radius:12px;
+      box-shadow: 0 6px 18px rgba(2,6,23,0.12);
+      padding:18px;
+      overflow:hidden;
     }
-    h2 {
-      color: #4f46e5;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      text-align: center;
+    .glass {
+      background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,250,250,0.96));
+      border-radius:12px;
+      padding:16px;
+      box-shadow: 0 6px 18px rgba(2,6,23,0.08);
+    }
+    .stat-value { font-weight:700; font-size:1.25rem; }
+    .small-muted { color:var(--muted); font-size:0.9rem; }
+    .ts { color: #065f46; font-weight:700; }
+    .btn {
+      background:var(--accent);
+      color:white;
+      padding:10px 14px;
+      border-radius:8px;
+      font-weight:600;
+      border:none;
+    }
+    .btn-ghost {
+      background:transparent;
+      border:1px solid rgba(0,0,0,0.06);
+      padding:8px 12px;
+      border-radius:8px;
+    }
+    table { width:100%; border-collapse:collapse; }
+    table thead th { text-align:left; padding:8px; font-weight:700; color: #374151; }
+    table tbody td { padding:8px; border-top:1px solid #e6e7eb; color:#0f172a; }
+    .payments-list li { padding:10px 0; border-bottom:1px dashed #eef2f7; display:flex; justify-content:space-between; align-items:center;}
+    .chart-wrap { height:220px; }
+    .footer-note { color:#ffffff66; margin-top:18px; font-size:0.9rem; }
+    @media (max-width:900px) {
+      .sidebar { position:relative; width:100%; height:auto; flex-direction:row; padding:10px 8px; gap:8px; }
+      .main { margin-left:0; padding:12px; }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>Parent Sign-In</h2>
-    <p class="text-gray-600 text-center mb-4">Use any two or more of your child's names + your phone number</p>
 
-    <form id="parent-signin" class="space-y-4">
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <img src="images/somap-logo.png.jpg" alt="SoMAp" style="width:48px;height:48px;border-radius:10px;object-fit:cover;">
+    <div title="Market" class="icon" data-action="market" id="icon-market"><i class="fas fa-store"></i></div>
+    <div title="Academics" class="icon" data-action="academics" id="icon-acad"><i class="fas fa-user-graduate"></i></div>
+    <div title="Fees" class="icon" data-action="fees" id="icon-fees"><i class="fas fa-money-bill-wave"></i></div>
+    <div title="Generate ID" class="icon" data-action="generate-id" id="icon-id"><i class="fas fa-id-card"></i></div>
+    <div title="Report Card" class="icon" data-action="reportcard" id="icon-report"><i class="fas fa-file-export"></i></div>
+    <div style="flex:1"></div>
+    <div id="icon-logout" class="icon" title="Logout"><i class="fas fa-sign-out-alt"></i></div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main" id="main">
+    <!-- header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;">
       <div>
-        <label for="child-name" class="block font-medium text-gray-700">Child's Names</label>
-        <div class="flex items-center border rounded-lg">
-          <span class="px-3 text-gray-500"><i class="fas fa-user"></i></span>
-          <input type="text" id="child-name" required placeholder="e.g. Mnyore Joseph Omondi"
-            class="flex-1 px-3 py-2 rounded-r-lg focus:outline-none" />
+        <h1 id="studentName" style="font-size:22px;font-weight:800;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,0.18);">Parent Dashboard</h1>
+        <div id="studentMeta" class="small-muted" style="color:#fff">Loading student details…</div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <div style="text-align:right;color:#fff;">
+          <div class="small-muted">Role</div>
+          <div style="font-weight:700">Parent</div>
         </div>
+        <button class="btn" id="openMarketTop">Open Market</button>
+      </div>
+    </div>
+
+    <!-- STATS ROW -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:16px;">
+      <div class="card">
+        <div class="small-muted">Total Fee (Year)</div>
+        <div class="stat-value ts" id="statFeeDue">TSh 0</div>
+        <div class="small-muted">Payment plan: <span id="statPaymentPlan">-</span></div>
+      </div>
+      <div class="card">
+        <div class="small-muted">Total Paid</div>
+        <div class="stat-value ts" id="statPaid">TSh 0</div>
+        <div class="small-muted">To date</div>
+      </div>
+      <div class="card">
+        <div class="small-muted">Balance</div>
+        <div class="stat-value ts" id="statBalance">TSh 0</div>
+        <div class="small-muted">Outstanding</div>
+      </div>
+      <div class="card">
+        <div class="small-muted">Attendance (this student)</div>
+        <div class="stat-value ts" id="statAttendancePct">0%</div>
+        <div class="small-muted">Present / Total days</div>
+      </div>
+    </div>
+
+    <!-- GRID: left - main details, right - small cards -->
+    <div style="display:grid;grid-template-columns: 1fr 360px; gap:16px;">
+      <!-- LEFT MAIN COLUMN -->
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <!-- Recent payments -->
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h3 style="margin:0;font-weight:700">Recent Payments</h3>
+              <div class="small-muted">Last 10 payments</div>
+            </div>
+            <div>
+              <button class="btn-ghost" id="refreshPayments">Refresh</button>
+            </div>
+          </div>
+          <div style="margin-top:12px;">
+            <ul class="payments-list" id="paymentsList">
+              <li class="text-muted">Loading payments…</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Scores + charts -->
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h3 style="margin:0;font-weight:700">Exam Scores (latest)</h3>
+              <div class="small-muted">Auto average • Exportable</div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-ghost" id="exportCsvBtn"><i class="fas fa-file-csv"></i> CSV</button>
+              <button class="btn" id="exportPdfBtn"><i class="fas fa-file-pdf"></i> PDF</button>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;">
+            <div style="overflow:auto;">
+              <table id="scoresTable" class="min-w-full">
+                <thead>
+                  <tr><th>Subject</th><th>Score</th><th>Max</th><th>%</th></tr>
+                </thead>
+                <tbody id="scoresTbody">
+                  <tr><td colspan="4" class="small-muted">No scores loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="margin-top:12px;">
+              <div class="chart-wrap card" style="padding:12px;">
+                <canvas id="scoresChart" style="width:100%;height:200px;"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Report Card generator -->
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h3 style="margin:0;font-weight:700">Report Card</h3>
+              <div class="small-muted">Generate downloadable report</div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <select id="reportExamSelect" class="btn-ghost" style="padding:8px;border-radius:8px;">
+                <option value="monthly">Monthly</option>
+                <option value="term">Term</option>
+              </select>
+              <select id="reportMonth" class="btn-ghost" style="padding:8px;border-radius:8px;">
+                <option value="08">August</option>
+                <option value="09">September</option>
+                <option value="01">January</option>
+              </select>
+              <button class="btn" id="genReportBtn"><i class="fas fa-download"></i> Download</button>
+            </div>
+          </div>
+          <div style="margin-top:12px" id="reportPreview">
+            <div class="small-muted">Preview not available — click Generate to create PDF.</div>
+          </div>
+        </div>
+
       </div>
 
-      <div>
-        <label for="parent-phone" class="block font-medium text-gray-700">Parent Phone Number</label>
-        <div class="flex items-center border rounded-lg">
-          <span class="px-3 text-gray-500"><i class="fas fa-phone"></i></span>
-          <input type="tel" id="parent-phone" required placeholder="e.g. +255123456789"
-            class="flex-1 px-3 py-2 rounded-r-lg focus:outline-none" />
+      <!-- RIGHT SMALL COLUMN -->
+      <aside style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card">
+          <h4 style="margin:0;font-weight:700">Quick Actions</h4>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+            <button class="btn" id="quickGenerateId">Generate ID</button>
+            <button class="btn-ghost" id="quickReportCard">Report Card PDF</button>
+            <button class="btn-ghost" id="quickFees">View Fees Info</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin:0;font-weight:700">Student Details</h4>
+          <div style="margin-top:10px;" class="small-muted">
+            <div><strong>Class:</strong> <span id="detailClass">-</span></div>
+            <div><strong>Stream:</strong> <span id="detailStream">-</span></div>
+            <div><strong>Admission #:</strong> <span id="detailAdm">-</span></div>
+            <div><strong>Parent phone:</strong> <span id="detailParentPhone">-</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin:0;font-weight:700">Attendance Trend</h4>
+          <div style="margin-top:10px;">
+            <canvas id="attendanceChart" style="width:100%;height:160px;"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4 style="margin:0;font-weight:700">Market</h4>
+          <div class="small-muted" style="margin-top:8px;">View uniforms, supplies and orders.</div>
+          <button class="btn" id="viewMarketSmall">Open Market</button>
+        </div>
+      </aside>
+    </div>
+
+    <div class="footer-note">SoMAp — All monetary values are shown in Tanzanian shillings (TSh).</div>
+  </main>
+
+  <!-- Hidden ID print area -->
+  <div id="idCardTemplate" style="display:none;">
+    <div style="width:360px;padding:14px;border:1px solid #222;font-family:Arial;">
+      <div style="display:flex;gap:12px;align-items:center;">
+        <img src="images/somap-logo.png.jpg" style="width:70px;height:70px;object-fit:cover;border-radius:8px;">
+        <div>
+          <div style="font-size:18px;font-weight:700;">SoMAp Student ID</div>
+          <div id="idPrintName" style="font-size:16px;margin-top:6px;"></div>
+          <div id="idPrintClass" style="font-size:13px;margin-top:4px;"></div>
+          <div id="idPrintAdm" style="font-size:12px;margin-top:4px;"></div>
         </div>
       </div>
-
-      <button type="submit"
-        class="w-full py-3 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition">
-        Sign In as Parent
-      </button>
-    </form>
+    </div>
   </div>
 
   <script>
-    // 🔹 Firebase Config
-    const firebaseConfig = {
-      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-      authDomain: "somaptestt.firebaseapp.com",
-      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-      projectId: "somaptestt",
-      storageBucket: "somaptestt.appspot.com",
-      messagingSenderId: "105526245138",
-      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
-    };
+  /*************************************************************************
+   * Parent Dashboard - full implementation
+   * - No login form here. Expects index.html to set localStorage.studentKey
+   * - Replace firebase config only if you intend to point to a different project
+   *************************************************************************/
+  const firebaseConfig = {
+    apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+    authDomain: "somaptestt.firebaseapp.com",
+    databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+    projectId: "somaptestt",
+    storageBucket: "somaptestt.appspot.com",
+    messagingSenderId: "105526245138",
+    appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+    measurementId: "G-4HKX7KN6Q3"
+  };
+
+  // Initialize Firebase (compat)
+  if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
+  }
+  const db = firebase.database();
 
-    // 🔹 Parent Sign-In Logic
-    document.getElementById("parent-signin").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const childName = document.getElementById("child-name").value.trim().toLowerCase();
-      const parentPhone = document.getElementById("parent-phone").value.trim();
+  // Utilities
+  function fmtTsh(n){
+    const num = Number(n) || 0;
+    return 'TSh ' + num.toLocaleString();
+  }
+  function safe(s){ return s === undefined || s === null ? '' : String(s); }
+  function q(sel){ return document.querySelector(sel); }
+  function qa(sel){ return Array.from(document.querySelectorAll(sel)); }
 
-      try {
-        const snapshot = await db.ref("parents").once("value");
-        let found = false;
+  // Element refs
+  const studentNameEl = q('#studentName');
+  const studentMetaEl = q('#studentMeta');
+  const statFeeDue = q('#statFeeDue');
+  const statPaid = q('#statPaid');
+  const statBalance = q('#statBalance');
+  const statAttendancePct = q('#statAttendancePct');
+  const statPaymentPlan = q('#statPaymentPlan');
 
-        snapshot.forEach((child) => {
-          const data = child.val();
-          if (
-            data.childName &&
-            data.phone &&
-            data.childName.toLowerCase().includes(childName) &&
-            data.phone === parentPhone
-          ) {
-            found = true;
-            localStorage.setItem("parentSession", JSON.stringify(data));
+  const paymentsList = q('#paymentsList');
+  const scoresTbody = q('#scoresTbody');
+  const scoresChartCanvas = q('#scoresChart');
+  const attendanceChartCanvas = q('#attendanceChart');
+
+  const exportCsvBtn = q('#exportCsvBtn');
+  const exportPdfBtn = q('#exportPdfBtn');
+  const genReportBtn = q('#genReportBtn');
+
+  const detailClass = q('#detailClass');
+  const detailStream = q('#detailStream');
+  const detailAdm = q('#detailAdm');
+  const detailParentPhone = q('#detailParentPhone');
+
+  const quickGenerateId = q('#quickGenerateId');
+  const quickReportCard = q('#quickReportCard');
+  const quickFees = q('#quickFees');
+  const openMarketTop = q('#openMarketTop');
+  const viewMarketSmall = q('#viewMarketSmall');
+
+  // icons
+  qa('.sidebar .icon').forEach(el => el.addEventListener('click', onSidebarIcon));
+
+  q('#icon-logout').addEventListener('click', ()=> {
+    // clear session for parent only
+    localStorage.removeItem('studentKey');
+    // If you use role + other keys from index, remove them too
+    localStorage.removeItem('role');
+    // redirect to index
+    window.location.href = 'index.html';
+  });
+
+  // Global state
+  let currentStudentKey = null;
+  let currentStudent = null;
+  let scoresChart = null;
+  let attendanceChart = null;
+
+  // On page load: restore session (studentKey)
+  (async function init(){
+    try {
+      // Try URL param first (convenience), then localStorage
+      const urlParams = new URLSearchParams(window.location.search);
+      const keyParam = urlParams.get('studentKey');
+      const storageKey = localStorage.getItem('studentKey');
+
+      if (keyParam) {
+        currentStudentKey = keyParam;
+        // Persist for subsequent loads
+        localStorage.setItem('studentKey', keyParam);
+      } else if (storageKey) {
+        currentStudentKey = storageKey;
+      } else {
+        // No session — redirect to index for login
+        console.warn('No parent session found, redirecting to index.html');
+        window.location.href = 'index.html';
+        return;
+      }
+
+      // Validate student exists
+      const snap = await db.ref('students/' + currentStudentKey).once('value');
+      if (!snap.exists()) {
+        console.warn('Student key not found in DB, clearing session and redirecting.');
+        localStorage.removeItem('studentKey');
+        window.location.href = 'index.html';
+        return;
+      }
+
+      currentStudent = snap.val();
+      // show dashboard
+      await showParentDashboard();
+      bindUI();
+    } catch (err) {
+      console.error('Init error', err);
+      Swal.fire('Error', 'Failed to initialize dashboard. Please refresh the page.', 'error');
+    }
+  })();
+
+  // Show main dashboard using currentStudent & currentStudentKey
+  async function showParentDashboard(){
+    if (!currentStudent) {
+      const snap = await db.ref('students/' + currentStudentKey).once('value');
+      if (!snap.exists()) { window.location.href = 'index.html'; return; }
+      currentStudent = snap.val();
+    }
+
+    // Header
+    studentNameEl.textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.middleName || '')} ${safe(currentStudent.lastName)}`.replace(/\s+/g,' ').trim();
+    studentMetaEl.textContent = `School: ${safe(currentStudent.schoolName || '-')}`;
+
+    // Summary stats
+    statFeeDue.textContent = fmtTsh(currentStudent.feePerYear || currentStudent.feeDue || 0);
+    statPaid.textContent = fmtTsh(currentStudent.paidAmount || calculateTotalPayments(currentStudent) || 0);
+    statBalance.textContent = fmtTsh(currentStudent.balance || ((currentStudent.feePerYear || 0) - (currentStudent.paidAmount || calculateTotalPayments(currentStudent) || 0)));
+    statPaymentPlan.textContent = safe(currentStudent.paymentPlan || '-');
+
+    detailClass.textContent = safe(currentStudent.classLevel || '-');
+    detailStream.textContent = safe(currentStudent.stream || '-');
+    detailAdm.textContent = safe(currentStudent.admissionNumber || currentStudent.pupilId || '-');
+    detailParentPhone.textContent = safe(currentStudent.primaryParentContact || '-');
+
+    // Load details
+    await loadPayments(currentStudentKey);
+    await loadAttendanceForStudent(currentStudent.admissionNumber);
+    await loadScoresForStudent(currentStudent.admissionNumber);
+
+    // Render charts
+    renderAttendanceChart();
+    renderScoresChart();
+  }
+
+  // Calculate total payments from the student.payments object (fallback)
+  function calculateTotalPayments(student){
+    if (!student) return 0;
+    const payments = student.payments || {};
+    let sum = 0;
+    Object.values(payments).forEach(p => { sum += Number(p.amount || 0); });
+    return sum;
+  }
+
+  // Load payments for the student
+  async function loadPayments(studentKey){
+    paymentsList.innerHTML = '<li class="small-muted">Loading payments…</li>';
+    try {
+      const paymentsSnap = await db.ref('students/' + studentKey + '/payments').once('value');
+      const paymentsObj = paymentsSnap.val() || {};
+      const arr = Object.entries(paymentsObj).map(([k,v]) => ({ id:k, ...v }));
+      // sort by timestamp desc if available else by insertion
+      arr.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
+      if (arr.length === 0) {
+        paymentsList.innerHTML = '<li class="small-muted">No payments recorded.</li>';
+        return;
+      }
+      const max = Math.min(arr.length, 50);
+      let html = '';
+      for (let i=0;i<max;i++){
+        const p = arr[i];
+        const date = p.timestamp ? new Date(p.timestamp).toLocaleString() : '—';
+        html += `<li>
+                  <div>
+                    <div style="font-weight:700">${fmtTsh(p.amount)}</div>
+                    <div class="small-muted">${safe(p.method || '-') } • ${safe(p.note || '')}</div>
+                  </div>
+                  <div class="small-muted" style="text-align:right">${date}</div>
+                 </li>`;
+      }
+      paymentsList.innerHTML = html;
+    } catch (err) {
+      console.error('loadPayments error', err);
+      paymentsList.innerHTML = '<li class="small-muted">Error loading payments.</li>';
+    }
+  }
+
+  // Attendance loader - returns aggregated present/total and per-month counts
+  async function loadAttendanceForStudent(admNo){
+    statAttendancePct.textContent = 'Calculating...';
+    try {
+      const snap = await db.ref('attendance').once('value');
+      const obj = snap.val() || {};
+      let present = 0, total = 0;
+      // per-month buckets for chart (YYYY-MM)
+      const monthCounts = {};
+      Object.values(obj).forEach(classObj => {
+        Object.values(classObj || {}).forEach(monthObj => {
+          Object.values(monthObj || {}).forEach(dayObj => {
+            Object.values(dayObj || {}).forEach(rec => {
+              try {
+                const s = rec.snap;
+                if (s && String(s.admissionNo) === String(admNo)) {
+                  total++;
+                  const daily = rec.daily || '';
+                  if (daily === 'P' || daily === 'PS' || daily === 'PA' || daily === 'PS') present++;
+                  // date bucket inference: many of your attendance nodes don't include full date key; we'll attempt to read parent's path if available
+                  // To create simple monthly bucket, we try to get timestamp if exists else skip
+                  const ts = rec.timestamp || rec.ts || null;
+                  if (ts) {
+                    const d = new Date(ts);
+                    const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                    monthCounts[m] = monthCounts[m] || {present:0,total:0};
+                    monthCounts[m].total++;
+                    if (daily === 'P' || daily === 'PS') monthCounts[m].present++;
+                  }
+                }
+              } catch(e){}
+            });
+          });
+        });
+      });
+      const pct = total ? Math.round((present/total)*100) : 0;
+      statAttendancePct.textContent = pct + '%';
+      // store monthCounts for attendance chart
+      window.__soMap_attendance_months = monthCounts;
+      renderAttendanceChart(); // update chart
+    } catch (err){
+      console.error('loadAttendanceForStudent error', err);
+      statAttendancePct.textContent = '—';
+    }
+  }
+
+  // Load latest scores for the student - finds first occurrence in your structure (latest year/month)
+  async function loadScoresForStudent(admNo){
+    try {
+      scoresTbody.innerHTML = '<tr><td colspan="4" class="small-muted">Loading scores…</td></tr>';
+      const snap = await db.ref('scores').once('value');
+      const root = snap.val() || {};
+      let found = null;
+      outer:
+      for (const year of Object.keys(root).sort().reverse()){
+        const classes = root[year] || {};
+        for (const className of Object.keys(classes || {})){
+          const examKeys = classes[className] || {};
+          for (const examKey of Object.keys(examKeys || {})){
+            const months = examKeys[examKey] || {};
+            for (const monthKey of Object.keys(months || {}).sort().reverse()){
+              const mdata = months[monthKey] || {};
+              if (mdata && mdata[admNo]) {
+                found = { year, className, examKey, monthKey, data: mdata[admNo] };
+                break outer;
+              }
+            }
           }
-        });
-
-        if (found) {
-          Swal.fire({
-            icon: "success",
-            title: "Login Successful",
-            text: "Redirecting...",
-            timer: 2000,
-            showConfirmButton: false,
-          }).then(() => {
-            window.location.href = "dashboard.html"; // 🔹 Change destination if needed
-          });
-        } else {
-          Swal.fire({
-            icon: "error",
-            title: "Login Failed",
-            text: "No matching parent record found. Check child names & phone.",
-          });
         }
-      } catch (error) {
-        Swal.fire({
-          icon: "error",
-          title: "Error",
-          text: error.message,
-        });
+      }
+      if (!found){
+        scoresTbody.innerHTML = '<tr><td colspan="4" class="small-muted">No scores found for this student.</td></tr>';
+        window.__soMap_scores_for_chart = null;
+        renderScoresChart();
+        return;
+      }
+      // populate table and chart dataset
+      const data = found.data;
+      let rows = '';
+      const labels = [];
+      const values = [];
+      Object.keys(data).forEach(subject => {
+        const subj = data[subject] || {};
+        const score = Number(subj.score || 0);
+        const max = Number(subj.max || 100);
+        const pct = max ? ((score/max)*100) : 0;
+        rows += `<tr>
+                   <td>${subject}</td>
+                   <td>${score}</td>
+                   <td>${max}</td>
+                   <td>${pct.toFixed(1)}%</td>
+                 </tr>`;
+        labels.push(subject);
+        values.push(Number(pct.toFixed(1)));
+      });
+      scoresTbody.innerHTML = rows || '<tr><td colspan="4" class="small-muted">No subjects found.</td></tr>';
+      window.__soMap_scores_for_chart = { labels, values, meta: found };
+      renderScoresChart();
+    } catch (err) {
+      console.error('loadScoresForStudent error', err);
+      scoresTbody.innerHTML = '<tr><td colspan="4" class="small-muted">Error loading scores.</td></tr>';
+    }
+  }
+
+  // Render scores chart
+  function renderScoresChart(){
+    const ctx = scoresChartCanvas.getContext('2d');
+    if (scoresChart) scoresChart.destroy();
+    const ds = window.__soMap_scores_for_chart;
+    const labels = ds ? ds.labels : [];
+    const values = ds ? ds.values : [];
+    scoresChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: '% (score / max)',
+          data: values,
+          backgroundColor: labels.map(()=> 'rgba(79,70,229,0.8)'),
+          borderColor: labels.map(()=> 'rgba(79,70,229,1)'),
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive:true,
+        scales: {
+          y: { beginAtZero:true, max:100 }
+        },
+        plugins:{ legend:{ display:false } }
       }
     });
+  }
+
+  // Render attendance chart from monthCounts
+  function renderAttendanceChart(){
+    const ctx = attendanceChartCanvas.getContext('2d');
+    if (attendanceChart) attendanceChart.destroy();
+    const months = window.__soMap_attendance_months || {};
+    const keys = Object.keys(months).sort();
+    const labels = keys;
+    const values = keys.map(k => {
+      const m = months[k] || {};
+      const pct = (m.total && m.present) ? Math.round((m.present/m.total)*100) : 0;
+      return pct;
+    });
+    attendanceChart = new Chart(ctx, {
+      type:'line',
+      data:{
+        labels,
+        datasets:[{
+          label: 'Attendance %',
+          data: values,
+          tension:0.35,
+          borderColor:'rgba(16,185,129,0.9)',
+          backgroundColor:'rgba(16,185,129,0.15)',
+          pointRadius:4
+        }]
+      },
+      options:{
+        responsive:true,
+        scales:{ y: { beginAtZero:true, max:100 } },
+        plugins:{ legend:{ display:false } }
+      }
+    });
+  }
+
+  // Export CSV of current scores table (SheetJS)
+  exportCsvBtn.addEventListener('click', () => {
+    if (!window.__soMap_scores_for_chart) { Swal.fire('No data','No scores to export','info'); return; }
+    const labels = window.__soMap_scores_for_chart.labels;
+    const values = window.__soMap_scores_for_chart.values;
+    const arr = [['Subject','%']];
+    for (let i=0;i<labels.length;i++) arr.push([labels[i], values[i]]);
+    const ws = XLSX.utils.aoa_to_sheet(arr);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Scores');
+    const wbout = XLSX.write(wb,{bookType:'csv', type:'array'});
+    const blob = new Blob([wbout], {type:'text/csv;charset=utf-8;'});
+    const filename = `${currentStudent.admissionNumber || 'student'}_scores.csv`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // Export PDF of current scores (jsPDF + autoTable)
+  exportPdfBtn.addEventListener('click', async () => {
+    if (!currentStudent) { Swal.fire('No student','Please sign in first','warning'); return; }
+    const rows = [];
+    document.querySelectorAll('#scoresTbody tr').forEach(tr => {
+      const cols = Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
+      if (cols.length) rows.push(cols);
+    });
+    if (!rows.length) { Swal.fire('No scores','No scores to export','info'); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.text(`${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)} — Scores`, 14, 20);
+    doc.autoTable({ startY: 30, head: [['Subject','Score','Max','%']], body: rows, styles:{fontSize:10} });
+    const filename = `${currentStudent.admissionNumber||'student'}_scores.pdf`;
+    doc.save(filename);
+  });
+
+  // Generate full Report Card PDF
+  genReportBtn.addEventListener('click', async () => {
+    if (!currentStudent) { Swal.fire('No student','Please sign in first','warning'); return; }
+    try {
+      const exam = q('#reportExamSelect').value || 'monthly';
+      const month = q('#reportMonth').value || '08';
+      Swal.fire({ title:'Generating report...', willOpen: ()=> Swal.showLoading() });
+      // collect score rows
+      const rows = [];
+      document.querySelectorAll('#scoresTbody tr').forEach(tr=>{
+        const cols = Array.from(tr.querySelectorAll('td')).map(td=>td.textContent.trim());
+        if (cols.length) rows.push(cols);
+      });
+      if (rows.length === 0){ Swal.close(); Swal.fire('No scores','Cannot build report — no scores available','info'); return; }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({unit:'pt', format:'A4'});
+      doc.setFontSize(18);
+      doc.text('SoMAp Report Card', 40, 50);
+      doc.setFontSize(12);
+      doc.text(`Student: ${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`, 40, 80);
+      doc.text(`Admission: ${safe(currentStudent.admissionNumber)}`, 40, 96);
+      doc.text(`Class: ${safe(currentStudent.classLevel)} • Stream: ${safe(currentStudent.stream)}`, 40, 112);
+      doc.text(`Exam: ${exam} • Month: ${month}`, 40, 128);
+      doc.autoTable({ startY: 150, head: [['Subject','Score','Max','%']], body: rows, styles:{fontSize:10} });
+      const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 16 : 260;
+      doc.setFontSize(11);
+      doc.text(`Attendance (this month): ${statAttendancePct.textContent}`, 40, finalY);
+      doc.text(`Fee Due: ${statFeeDue.textContent} • Paid: ${statPaid.textContent} • Balance: ${statBalance.textContent}`, 40, finalY + 14);
+      const filename = `${currentStudent.admissionNumber || 'report'}_reportcard.pdf`;
+      doc.save(filename);
+      Swal.close();
+    } catch (err) {
+      console.error('genReport error', err);
+      Swal.fire('Error','Failed to generate report.','error');
+    }
+  });
+
+  // Generate ID card (print)
+  quickGenerateId.addEventListener('click', () => generateIdCard());
+  function generateIdCard(){
+    if (!currentStudent){ Swal.fire('No student','Please sign in first','warning'); return; }
+    const el = q('#idCardTemplate').innerHTML;
+    // fill placeholders
+    const tmp = document.createElement('div');
+    tmp.innerHTML = el;
+    tmp.querySelector('#idPrintName').textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`;
+    tmp.querySelector('#idPrintClass').textContent = `Class: ${safe(currentStudent.classLevel)} • Stream: ${safe(currentStudent.stream)}`;
+    tmp.querySelector('#idPrintAdm').textContent = `ADM: ${safe(currentStudent.admissionNumber)}`;
+    // open print window
+    const w = window.open('', '_blank', 'width=420,height=320');
+    w.document.write('<html><head><title>ID</title></head><body>');
+    w.document.write(tmp.innerHTML);
+    w.document.write('</body></html>');
+    w.document.close();
+    w.focus();
+    setTimeout(()=> w.print(), 600);
+  }
+
+  // Quick actions wiring
+  quickReportCard.addEventListener('click', ()=> genReportBtn.click());
+  quickFees.addEventListener('click', ()=> {
+    Swal.fire({ title: 'Fees', html: `<div style="text-align:left">${statFeeDue.textContent}<br>${statPaid.textContent}<br>${statBalance.textContent}</div>` });
+  });
+  openMarketTop.addEventListener('click', ()=> window.open('market.html', '_blank'));
+  viewMarketSmall.addEventListener('click', ()=> window.open('market.html', '_blank'));
+  q('#refreshPayments').addEventListener('click', ()=> loadPayments(currentStudentKey));
+
+  // Sidebar icon actions
+  function onSidebarIcon(ev){
+    const action = ev.currentTarget.dataset.action;
+    handleAction(action);
+  }
+  function handleAction(action){
+    switch(action){
+      case 'market': window.open('market.html','_blank'); break;
+      case 'academics': // open schoolerp but restricted view (parents should not access admissions)
+        Swal.fire('Academics','Opening academics for the student class (read-only)', 'info').then(()=> {
+          // If you have a page that accepts class/admission as params:
+          const url = `schoolerp.html?view=academics&class=${encodeURIComponent(currentStudent.classLevel||'')}&adm=${encodeURIComponent(currentStudent.admissionNumber||'')}`;
+          window.open(url,'_blank');
+        });
+        break;
+      case 'fees':
+        // open finance page but read-only - or show inline list:
+        Swal.fire({ title: 'Payments', html: paymentsList.innerHTML, width:800 });
+        break;
+      case 'generate-id': generateIdCard(); break;
+      case 'reportcard': genReportBtn.click(); break;
+      default: console.log('unknown action', action);
+    }
+  }
+
+  // Bind UI events (some already bound)
+  function bindUI(){
+    // Export PDF button already wired
+    // Additional keyboard shortcuts (optional)
+    document.addEventListener('keydown', (ev)=>{
+      if (ev.ctrlKey && ev.key === 'p') {
+        ev.preventDefault();
+        generateIdCard();
+      }
+    });
+  }
+
+  // Safety: If student record changes in db we listen for updates and refresh UI
+  db.ref('students').child(currentStudentKey).on('value', snap => {
+    if (!snap.exists()){
+      // removed - sign out parent
+      Swal.fire('Student removed', 'Student data was removed. You will be redirected to the login page.', 'warning').then(()=>{
+        localStorage.removeItem('studentKey');
+        window.location.href = 'index.html';
+      });
+      return;
+    }
+    currentStudent = snap.val();
+    // update important fields
+    statFeeDue.textContent = fmtTsh(currentStudent.feePerYear || 0);
+    statPaid.textContent = fmtTsh(currentStudent.paidAmount || calculateTotalPayments(currentStudent) || 0);
+    statBalance.textContent = fmtTsh(currentStudent.balance || ((currentStudent.feePerYear||0)-(currentStudent.paidAmount||calculateTotalPayments(currentStudent)||0)));
+    statPaymentPlan.textContent = safe(currentStudent.paymentPlan || '-');
+    studentNameEl.textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`;
+    detailClass.textContent = safe(currentStudent.classLevel || '-');
+    detailStream.textContent = safe(currentStudent.stream || '-');
+    detailAdm.textContent = safe(currentStudent.admissionNumber || '-');
+    detailParentPhone.textContent = safe(currentStudent.primaryParentContact || '-');
+    // reload parts
+    loadPayments(currentStudentKey);
+  });
+
   </script>
 </body>
 </html>

@@ -823,6 +823,7 @@
             if (foundStudent) {
                 localStorage.setItem('role', 'parent');
                 localStorage.setItem('studentId', foundStudent.admissionNumber || foundKey);
+                localStorage.setItem('parentSessionValid', 'true'); // Flag to prevent loops
                 window.location.href = 'parent.html';
             } else {
                 errorMessage.textContent = 'Invalid child names or phone number. Please check your input.';
@@ -835,14 +836,41 @@
             errorMessage.classList.remove('hidden');
         });
     });
-    // Initial Auth State Check - Optimized to prevent flashing
+    // Initial Auth State Check - Optimized to prevent flashing and loops
     const storedRole = localStorage.getItem('role');
     const storedStudentId = localStorage.getItem('studentId');
-    if (storedRole === 'parent' && storedStudentId) {
+    const parentSessionValid = localStorage.getItem('parentSessionValid') === 'true';
+
+    if (storedRole === 'parent' && storedStudentId && parentSessionValid) {
+        // For valid parent session, directly redirect without further checks to prevent loop
         window.location.href = 'parent.html';
+    } else if (storedRole === 'parent' && storedStudentId) {
+        // Verify parent session only if flag not set (first time or invalid)
+        db.ref('students').once('value').then(snapshot => {
+            const students = snapshot.val() ? Object.entries(snapshot.val()) : [];
+            const isValidParent = students.some(([key, s]) => 
+                (s.admissionNumber === storedStudentId || key === storedStudentId) && s.primaryParentContact
+            );
+            if (isValidParent) {
+                localStorage.setItem('parentSessionValid', 'true');
+                window.location.href = 'parent.html';
+            } else {
+                // Invalid, clear and show welcome
+                localStorage.removeItem('role');
+                localStorage.removeItem('studentId');
+                localStorage.removeItem('parentSessionValid');
+                showWelcomePage();
+            }
+        }).catch(() => {
+            localStorage.removeItem('role');
+            localStorage.removeItem('studentId');
+            localStorage.removeItem('parentSessionValid');
+            showWelcomePage();
+        });
     } else {
+        // Not parent, set up staff auth listener
         auth.onAuthStateChanged(user => {
-            if (user) {
+            if (user && !user.isAnonymous) {
                 db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
                     const userData = snapshot.val();
                     if (userData) {
@@ -858,31 +886,34 @@
                         }
                     } else {
                         auth.signOut();
-                        localStorage.removeItem('role');
-                        localStorage.removeItem('class');
-                        localStorage.removeItem('studentId');
-                        document.getElementById('welcome-page').classList.remove('hidden');
-                        document.getElementById('login-page').classList.add('hidden');
-                        document.getElementById('sign-out').classList.add('hidden');
+                        clearStorageAndShowWelcome();
                     }
                 }).catch(() => {
                     auth.signOut();
-                    localStorage.removeItem('role');
-                    localStorage.removeItem('class');
-                    localStorage.removeItem('studentId');
-                    document.getElementById('welcome-page').classList.remove('hidden');
-                    document.getElementById('login-page').classList.add('hidden');
-                    document.getElementById('sign-out').classList.add('hidden');
+                    clearStorageAndShowWelcome();
                 });
             } else {
-                localStorage.removeItem('role');
-                localStorage.removeItem('class');
-                localStorage.removeItem('studentId');
-                document.getElementById('welcome-page').classList.remove('hidden');
-                document.getElementById('login-page').classList.add('hidden');
-                document.getElementById('sign-out').classList.add('hidden');
+                clearStorageAndShowWelcome();
             }
         });
+        // Default to welcome if no auth
+        showWelcomePage();
+    }
+
+    // Helper function to clear storage and show welcome
+    function clearStorageAndShowWelcome() {
+        localStorage.removeItem('role');
+        localStorage.removeItem('class');
+        localStorage.removeItem('studentId');
+        localStorage.removeItem('parentSessionValid');
+        showWelcomePage();
+    }
+
+    // Helper function to show welcome page
+    function showWelcomePage() {
+        document.getElementById('welcome-page').classList.remove('hidden');
+        document.getElementById('login-page').classList.add('hidden');
+        document.getElementById('sign-out').classList.add('hidden');
     }
     </script>
 </body>

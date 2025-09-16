@@ -758,7 +758,7 @@
                 document.getElementById('error-message').classList.remove('hidden');
             });
     });
-    // Parent Sign-In - Enhanced with flexible name matching, phone validation, using anonymous auth
+    // Parent Sign-In - Enhanced with flexible name matching and phone validation
     document.getElementById('parent-signin').addEventListener('submit', e => {
         e.preventDefault();
         const childName = document.getElementById('child-name').value.trim().toLowerCase();
@@ -782,60 +782,88 @@
             return;
         }
 
+        // Show loading state
+        const submitButton = document.querySelector('#parent-signin button');
+        submitButton.disabled = true;
+        submitButton.textContent = 'Signing In...';
+
         // Fetch students from Firebase
         db.ref('students').once('value').then(snapshot => {
-            const students = snapshot.val() ? Object.values(snapshot.val()) : [];
+            const students = snapshot.val() ? Object.entries(snapshot.val()) : [];
             let foundStudent = null;
+            let foundKey = null;
 
-            for (const s of students) {
+            for (const [key, s] of students) {
                 const childNames = [
-                    (s.firstName || '').toLowerCase(),
-                    (s.middleName || '').toLowerCase(),
-                    (s.lastName || '').toLowerCase()
+                    (s.firstName || '').toLowerCase().trim(),
+                    (s.middleName || '').toLowerCase().trim(),
+                    (s.lastName || '').toLowerCase().trim()
                 ].filter(n => n.length > 0);
 
-                // Check if at least two input names match child's names
-                const matches = inputNames.filter(name => childNames.includes(name)).length;
+                // Enhanced matching: Check if input names are substrings of child names
+                let matches = 0;
+                for (const inputName of inputNames) {
+                    if (childNames.some(childName => childName.includes(inputName))) {
+                        matches++;
+                    }
+                }
+
+                // Check if at least two names match and phone matches
                 if (matches >= 2 && s.primaryParentContact === phone) {
                     foundStudent = s;
+                    foundKey = key;
                     break;
                 }
             }
 
+            // Reset button state
+            submitButton.disabled = false;
+            submitButton.textContent = 'Sign In as Parent';
+
             if (foundStudent) {
-                // Sign in anonymously for parent session
-                auth.signInAnonymously()
-                    .then(() => {
-                        localStorage.setItem('role', 'parent');
-                        localStorage.setItem('studentId', foundStudent.admissionNumber);
-                        window.location.href = 'parent.html';
-                    })
-                    .catch(err => {
-                        errorMessage.textContent = 'Authentication failed: ' + err.message;
-                        errorMessage.classList.remove('hidden');
-                    });
+                localStorage.setItem('role', 'parent');
+                localStorage.setItem('studentId', foundStudent.admissionNumber || foundKey);
+                window.location.href = 'parent.html';
             } else {
-                errorMessage.textContent = 'Invalid child names or phone number.';
+                errorMessage.textContent = 'Invalid child names or phone number. Please check your input.';
                 errorMessage.classList.remove('hidden');
             }
         }).catch(err => {
+            submitButton.disabled = false;
+            submitButton.textContent = 'Sign In as Parent';
             errorMessage.textContent = 'Sign-in failed: ' + err.message;
             errorMessage.classList.remove('hidden');
         });
     });
-    // Initial Auth State Check - Handle anonymous auth for parents to prevent flashing
-    auth.onAuthStateChanged(user => {
-        if (user) {
-            if (user.isAnonymous) {
-                const storedRole = localStorage.getItem('role');
-                if (storedRole === 'parent') {
-                    window.location.href = 'parent.html';
-                } else {
-                    auth.signOut();
-                    localStorage.removeItem('role');
-                    localStorage.removeItem('studentId');
-                }
-            } else if (user.email) {
+    // Initial Auth State Check - Optimized to prevent flashing
+    const storedRole = localStorage.getItem('role');
+    const storedStudentId = localStorage.getItem('studentId');
+    if (storedRole === 'parent' && storedStudentId) {
+        // Verify parent session with Firebase database
+        db.ref('students').once('value').then(snapshot => {
+            const students = snapshot.val() ? Object.entries(snapshot.val()) : [];
+            const isValidParent = students.some(([key, s]) => 
+                (s.admissionNumber === storedStudentId || key === storedStudentId) && s.primaryParentContact
+            );
+            if (isValidParent) {
+                window.location.href = 'parent.html';
+            } else {
+                localStorage.removeItem('role');
+                localStorage.removeItem('studentId');
+                document.getElementById('welcome-page').classList.remove('hidden');
+                document.getElementById('login-page').classList.add('hidden');
+                document.getElementById('sign-out').classList.add('hidden');
+            }
+        }).catch(() => {
+            localStorage.removeItem('role');
+            localStorage.removeItem('studentId');
+            document.getElementById('welcome-page').classList.remove('hidden');
+            document.getElementById('login-page').classList.add('hidden');
+            document.getElementById('sign-out').classList.add('hidden');
+        });
+    } else {
+        auth.onAuthStateChanged(user => {
+            if (user && !user.isAnonymous) {
                 db.ref('users/' + user.email.replace('.', '_')).once('value').then(snapshot => {
                     const userData = snapshot.val();
                     if (userData) {
@@ -851,22 +879,32 @@
                         }
                     } else {
                         auth.signOut();
+                        localStorage.removeItem('role');
+                        localStorage.removeItem('class');
+                        localStorage.removeItem('studentId');
+                        document.getElementById('welcome-page').classList.remove('hidden');
+                        document.getElementById('login-page').classList.add('hidden');
+                        document.getElementById('sign-out').classList.add('hidden');
                     }
                 }).catch(() => {
                     auth.signOut();
+                    localStorage.removeItem('role');
+                    localStorage.removeItem('class');
+                    localStorage.removeItem('studentId');
+                    document.getElementById('welcome-page').classList.remove('hidden');
+                    document.getElementById('login-page').classList.add('hidden');
+                    document.getElementById('sign-out').classList.add('hidden');
                 });
             } else {
-                auth.signOut();
+                localStorage.removeItem('role');
+                localStorage.removeItem('class');
+                localStorage.removeItem('studentId');
+                document.getElementById('welcome-page').classList.remove('hidden');
+                document.getElementById('login-page').classList.add('hidden');
+                document.getElementById('sign-out').classList.add('hidden');
             }
-        } else {
-            localStorage.removeItem('role');
-            localStorage.removeItem('class');
-            localStorage.removeItem('studentId');
-            document.getElementById('welcome-page').classList.remove('hidden');
-            document.getElementById('login-page').classList.add('hidden');
-            document.getElementById('sign-out').classList.add('hidden');
-        }
-    });
+        });
+    }
     </script>
 </body>
 </html>

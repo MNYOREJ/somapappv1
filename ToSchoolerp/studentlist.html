@@ -1,4 +1,3 @@
-<!-- studentlist.html: Independent Students List with tables, downloads, and details -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,7 +31,7 @@
 
   <!-- Back to Dashboard -->
   <div class="mb-4">
-    <a href="schoolerp.html" class="text-indigo-600 hover:underline flex items-center gap-2 mb-4">
+    <a href="../schoolerp.html" class="text-indigo-600 hover:underline flex items-center gap-2 mb-4">
       <i class="fas fa-arrow-left"></i> Back to Dashboard
     </a>
   </div>
@@ -187,16 +186,20 @@
   <!-- Firebase SDKs (compat) + your config -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-  <script src="firebase.js"></script> <!-- ensure this file exists and initializes Firebase -->
+  <script src="../firebase.js"></script> <!-- Adjusted path to firebase.js in root -->
 
   <!-- Students List Logic -->
   <script>
-    (function () {
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('studentlist.html loaded'); // Debug log
+
       // ---- Resolve Firebase handles gracefully ----
       const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
 
       if (!db) {
-        console.error('Firebase Realtime Database not available. Ensure firebase.js and Firebase SDKs are loaded.');
+        console.error('Firebase Realtime Database not available. Ensure ../firebase.js and Firebase SDKs are loaded.');
+      } else {
+        console.log('Firebase DB initialized successfully');
       }
 
       // ---- Live cache + rendering ----
@@ -204,19 +207,28 @@
 
       if (db) {
         db.ref('students').on('value', (snapshot) => {
+          console.log('Students data received:', snapshot.val()); // Debug log
           const raw = snapshot.val() || {};
           cachedStudents = Object.entries(raw).map(([key, s]) => ({ key, ...s }));
+          console.log('Cached students:', cachedStudents.length); // Debug log
           renderAllTables(); // render with current cache + filter
         });
+      } else {
+        console.warn('No DB, using empty students list');
+        renderAllTables();
       }
 
       // ---- Students rendering ----
       function renderAllTables() {
-        const classFilter = document.getElementById('student-list-class').value || '';
+        console.log('Rendering tables with', cachedStudents.length, 'students'); // Debug log
+        const classFilter = document.getElementById('student-list-class') ? document.getElementById('student-list-class').value || '' : '';
         const listBody = document.getElementById('studentListBody');
         const schoolReportBody = document.getElementById('schoolReportBody');
         const reportFormBody = document.getElementById('reportFormBody');
-        if (!listBody || !schoolReportBody || !reportFormBody) return;
+        if (!listBody || !schoolReportBody || !reportFormBody) {
+          console.error('Table bodies not found');
+          return;
+        }
 
         listBody.innerHTML = '';
         const filtered = cachedStudents.filter(s => !classFilter || s.classLevel === classFilter);
@@ -236,43 +248,58 @@
             <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
             <td>${escapeHtml(String(s.feePerYear || 0))}</td>
             <td>${escapeHtml(s.paymentPlan || 'N/A')}</td>
-            <td><button class="py-1 px-2 border rounded text-indigo-600" data-view="${s.key}">
+            <td><button class="py-1 px-2 border rounded text-indigo-600 view-btn" data-view="${s.key}">
                   <i class="fas fa-eye"></i>
                 </button></td>
           `;
           listBody.appendChild(tr);
         });
 
-        // Attach one delegated listener for view buttons
-        listBody.onclick = (e) => {
-          const btn = e.target.closest('button[data-view]');
-          if (!btn) return;
-          const key = btn.getAttribute('data-view');
-          openDetails(key);
-        };
+        // Attach delegated listener for view buttons
+        if (listBody) {
+          listBody.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-view]');
+            if (!btn) return;
+            const key = btn.getAttribute('data-view');
+            console.log('View button clicked for key:', key); // Debug log
+            openDetails(key);
+          });
+        } else {
+          console.error('listBody not found for event listener');
+        }
 
-        // School Reports + Report Forms (same structure)
+        // School Reports + Report Forms (same structure, with payment calculation)
         schoolReportBody.innerHTML = '';
         reportFormBody.innerHTML = '';
         cachedStudents.forEach(s => {
+          // Calculate paidAmount and debt based on finance trend (assuming payments node exists)
+          const feePerYear = s.feePerYear || 0;
+          const paidAmount = s.paidAmount || 0; // From student or fetch from payments
+          const debt = feePerYear - paidAmount;
           const rowHtml = `
             <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
             <td>${escapeHtml((s.firstName || '') + ' ' + (s.lastName || ''))}</td>
             <td>${escapeHtml(s.classLevel || 'N/A')}</td>
             <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
-            <td>${escapeHtml(String(s.feePerYear || 0))}</td>
-            <td>${escapeHtml(String(s.paidAmount || 0))}</td>
-            <td>${escapeHtml(String(s.debt || 0))}</td>
+            <td>${escapeHtml(String(feePerYear))}</td>
+            <td>${escapeHtml(String(paidAmount))}</td>
+            <td>${escapeHtml(String(debt))}</td>
           `;
           const tr1 = document.createElement('tr'); tr1.innerHTML = rowHtml;
           const tr2 = document.createElement('tr'); tr2.innerHTML = rowHtml;
           schoolReportBody.appendChild(tr1);
           reportFormBody.appendChild(tr2);
         });
+        console.log('Reports rendered with', cachedStudents.length, 'students'); // Debug log
       }
 
-      document.getElementById('student-list-class')
-        .addEventListener('change', renderAllTables);
+      // Class filter change listener
+      const classSelect = document.getElementById('student-list-class');
+      if (classSelect) {
+        classSelect.addEventListener('change', renderAllTables);
+      } else {
+        console.error('student-list-class select not found');
+      }
 
       function escapeHtml(text) {
         if (text === undefined || text === null) return '';
@@ -284,37 +311,70 @@
 
       // ---- Details Modal ----
       async function openDetails(key) {
-        if (!db) return alert('DB not ready');
+        console.log('Opening details for key:', key); // Debug log
+        if (!db) {
+          alert('DB not ready');
+          return;
+        }
         try {
           const snap = await db.ref('students/' + key).once('value');
           const s = snap.val() || {};
           const details = document.getElementById('studentDetails');
+          if (!details) {
+            console.error('studentDetails div not found');
+            return;
+          }
           const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
           const photoURL = s.passportPhotoURL || 'https://via.placeholder.com/120';
+          // Calculate debt for details
+          const feePerYear = s.feePerYear || 0;
+          const paidAmount = s.paidAmount || 0;
+          const debt = feePerYear - paidAmount;
           details.innerHTML = `
             <p><strong>Full Name:</strong> ${escapeHtml(fullName)}</p>
             <p><strong>Class:</strong> ${escapeHtml(s.classLevel || 'N/A')}</p>
             <p><strong>Date of Registration:</strong> ${s.timestamp ? new Date(s.timestamp).toLocaleDateString() : (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A')}</p>
             <p><strong>Passport Photo:</strong><br/><img src="${escapeHtml(photoURL)}" alt="photo" style="width:120px;height:120px;object-fit:cover;border-radius:6px"/></p>
             <p><strong>Parent Contact:</strong> ${escapeHtml(s.primaryParentContact || 'N/A')}</p>
-            <p><strong>Fee Total:</strong> ${escapeHtml(String(s.feePerYear || 0))}</p>
+            <p><strong>Fee Total:</strong> ${escapeHtml(String(feePerYear))}</p>
+            <p><strong>Paid Amount:</strong> ${escapeHtml(String(paidAmount))}</p>
+            <p><strong>Debt:</strong> ${escapeHtml(String(debt))}</p>
             <p><strong>Payment Plan:</strong> ${escapeHtml(s.paymentPlan || 'N/A')}</p>
             <p><strong>Residential Address:</strong> ${escapeHtml(s.residentialAddress || 'N/A')}</p>
             <p><strong>Admission Number:</strong> ${escapeHtml(s.admissionNumber || 'N/A')}</p>
           `;
-          document.getElementById('generateIDCard').onclick = () => generateIDCard(s);
-          document.getElementById('detailsModal').style.display = 'block';
+          const generateBtn = document.getElementById('generateIDCard');
+          if (generateBtn) {
+            generateBtn.onclick = () => generateIDCard(s);
+          }
+          const detailsModal = document.getElementById('detailsModal');
+          if (detailsModal) {
+            detailsModal.style.display = 'block';
+          }
         } catch (err) {
           console.error('Error fetching details:', err);
+          alert('Error loading student details: ' + err.message);
         }
       }
-      document.getElementById('closeDetailsModal').addEventListener('click', () => {
-        document.getElementById('detailsModal').style.display = 'none';
-      });
+
+      const closeDetailsBtn = document.getElementById('closeDetailsModal');
+      if (closeDetailsBtn) {
+        closeDetailsBtn.addEventListener('click', () => {
+          const detailsModal = document.getElementById('detailsModal');
+          if (detailsModal) detailsModal.style.display = 'none';
+        });
+      } else {
+        console.error('closeDetailsModal button not found');
+      }
 
       // ---- ID Card PDF ----
       function generateIDCard(student) {
+        console.log('Generating ID card for student:', student); // Debug log
         const { jsPDF } = window.jspdf;
+        if (!jsPDF) {
+          alert('jsPDF not loaded');
+          return;
+        }
         const doc = new jsPDF("landscape", "mm", "credit-card");
 
         // Colors
@@ -332,11 +392,11 @@
         doc.setFontSize(10);
         doc.text("STUDENT ID CARD", 42.8, 7, { align: "center" });
 
-        // School Logo (already in your folder, e.g. "assets/logo.png")
+        // School Logo (adjust path if needed)
         try {
-          doc.addImage("images/somap-logo.png.jpg", "PNG", 2, 2, 8, 8);
+          doc.addImage("../images/somap-logo.png.jpg", "PNG", 2, 2, 8, 8);
         } catch (e) {
-          console.warn("⚠️ Logo not found, ensure 'assets/logo.png' exists.");
+          console.warn("⚠️ Logo not found, ensure '../images/somap-logo.png.jpg' exists.");
         }
 
         // Student Photo
@@ -354,7 +414,7 @@
           doc.text("Photo", 12, 25, { align: "center" });
         }
 
-        // Student Details (correct mapping to your DB fields)
+        // Student Details
         const fullName = `${student.firstName || ""} ${student.middleName || ""} ${student.lastName || ""}`.trim();
         const admissionNo = student.admissionNumber || "N/A";
         const classLevel = student.classLevel || "N/A";
@@ -381,26 +441,37 @@
         // Save PDF
         const safeName = (fullName || "student").replace(/\s+/g, "_");
         doc.save(`${safeName}_ID.pdf`);
+        console.log('ID card generated and saved'); // Debug log
       }
 
       // ---- CSV & PDF downloads for tables ----
       async function downloadCSVforTab(filenameBase) {
-        if (!cachedStudents.length) return alert('No data to download');
-        const classFilter = document.getElementById('student-list-class').value || '';
+        console.log('Download CSV clicked for:', filenameBase); // Debug log
+        if (!cachedStudents.length) {
+          alert('No data to download');
+          return;
+        }
+        const classFilter = document.getElementById('student-list-class') ? document.getElementById('student-list-class').value || '' : '';
         const list = (filenameBase === 'student-list')
           ? cachedStudents.filter(s => !classFilter || s.classLevel === classFilter)
           : cachedStudents;
 
-        const arr = list.map(s => ({
-          'Admission No': s.admissionNumber || 'N/A',
-          'Full Name': `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
-          'Class': s.classLevel || 'N/A',
-          'Date of Registration': s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
-                                 (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'),
-          'Parent Contact': s.primaryParentContact || 'N/A',
-          'Fee Total': s.feePerYear || 0,
-          'Payment Plan': s.paymentPlan || 'N/A'
-        }));
+        const arr = list.map(s => {
+          const paidAmount = s.paidAmount || 0;
+          const debt = (s.feePerYear || 0) - paidAmount;
+          return {
+            'Admission No': s.admissionNumber || 'N/A',
+            'Full Name': `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
+            'Class': s.classLevel || 'N/A',
+            'Date of Registration': s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
+                                   (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'),
+            'Parent Contact': s.primaryParentContact || 'N/A',
+            'Fee Total': s.feePerYear || 0,
+            'Paid Amount': paidAmount,
+            'Debt': debt,
+            'Payment Plan': s.paymentPlan || 'N/A'
+          };
+        });
 
         const csv = Papa.unparse(arr);
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -408,47 +479,73 @@
         const a = document.createElement('a');
         a.href = url;
         a.download = `${filenameBase}.csv`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        console.log('CSV downloaded'); // Debug log
       }
 
       async function downloadPDFforTab(filenameBase) {
-        if (!cachedStudents.length) return alert('No data to download');
-        const classFilter = document.getElementById('student-list-class').value || '';
+        console.log('Download PDF clicked for:', filenameBase); // Debug log
+        if (!cachedStudents.length) {
+          alert('No data to download');
+          return;
+        }
+        const classFilter = document.getElementById('student-list-class') ? document.getElementById('student-list-class').value || '' : '';
         const list = (filenameBase === 'student-list')
           ? cachedStudents.filter(s => !classFilter || s.classLevel === classFilter)
           : cachedStudents;
 
-        const rows = list.map(s => [
-          s.admissionNumber || 'N/A',
-          `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
-          s.classLevel || 'N/A',
-          s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
-            (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'),
-          s.primaryParentContact || 'N/A',
-          s.feePerYear || 0,
-          s.paymentPlan || 'N/A'
-        ]);
+        const rows = list.map(s => {
+          const paidAmount = s.paidAmount || 0;
+          const debt = (s.feePerYear || 0) - paidAmount;
+          return [
+            s.admissionNumber || 'N/A',
+            `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
+            s.classLevel || 'N/A',
+            s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
+              (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'),
+            s.primaryParentContact || 'N/A',
+            s.feePerYear || 0,
+            paidAmount,
+            debt,
+            s.paymentPlan || 'N/A'
+          ];
+        });
         const { jsPDF } = window.jspdf;
+        if (!jsPDF) {
+          alert('jsPDF not loaded');
+          return;
+        }
         const doc = new jsPDF({ orientation: 'landscape' });
         doc.setFontSize(14);
         doc.text(`${filenameBase.replace('-', ' ')} Report`, 14, 10);
         doc.autoTable({
-          head: [['Admission No','Full Name','Class','Date of Registration','Parent Contact','Fee Total','Payment Plan']],
+          head: [['Admission No','Full Name','Class','Date of Registration','Parent Contact','Fee Total','Paid Amount','Debt','Payment Plan']],
           body: rows,
           startY: 18,
           styles: { fontSize: 8 }
         });
         doc.save(`${filenameBase}.pdf`);
+        console.log('PDF downloaded'); // Debug log
       }
 
-      document.getElementById('downloadCsvBtn').addEventListener('click', () => downloadCSVforTab('student-list'));
-      document.getElementById('downloadPdfBtn').addEventListener('click', () => downloadPDFforTab('student-list'));
-      document.getElementById('schoolDownloadCsv').addEventListener('click', () => downloadCSVforTab('school-reports'));
-      document.getElementById('schoolDownloadPdf').addEventListener('click', () => downloadPDFforTab('school-reports'));
-      document.getElementById('reportDownloadCsv').addEventListener('click', () => downloadCSVforTab('report-forms'));
-      document.getElementById('reportDownloadPdf').addEventListener('click', () => downloadPDFforTab('report-forms'));
-    })();
+      // Event listeners for download buttons
+      const downloadCsvBtn = document.getElementById('downloadCsvBtn');
+      const downloadPdfBtn = document.getElementById('downloadPdfBtn');
+      const schoolDownloadCsv = document.getElementById('schoolDownloadCsv');
+      const schoolDownloadPdf = document.getElementById('schoolDownloadPdf');
+      const reportDownloadCsv = document.getElementById('reportDownloadCsv');
+      const reportDownloadPdf = document.getElementById('reportDownloadPdf');
+
+      if (downloadCsvBtn) downloadCsvBtn.addEventListener('click', () => downloadCSVforTab('student-list'));
+      if (downloadPdfBtn) downloadPdfBtn.addEventListener('click', () => downloadPDFforTab('student-list'));
+      if (schoolDownloadCsv) schoolDownloadCsv.addEventListener('click', () => downloadCSVforTab('school-reports'));
+      if (schoolDownloadPdf) schoolDownloadPdf.addEventListener('click', () => downloadPDFforTab('school-reports'));
+      if (reportDownloadCsv) reportDownloadCsv.addEventListener('click', () => downloadCSVforTab('report-forms'));
+      if (reportDownloadPdf) reportDownloadPdf.addEventListener('click', () => downloadPDFforTab('report-forms'));
+    });
   </script>
 </body>
 </html>

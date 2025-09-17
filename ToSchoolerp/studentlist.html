@@ -73,6 +73,7 @@
       <table id="student-list-table" class="min-w-full text-sm">
         <thead>
           <tr>
+            <th></th> <!-- For toggle button -->
             <th>Admission No</th>
             <th>Full Name</th>
             <th>Class</th>
@@ -83,7 +84,6 @@
             <th>Paid Amount</th>
             <th>Debt</th>
             <th>Payment Plan</th>
-            <th>View</th>
           </tr>
         </thead>
         <tbody id="studentListBody">
@@ -262,6 +262,9 @@
                           s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A';
           const photoURL = s.passportPhotoURL || 'https://via.placeholder.com/50';
           tr.innerHTML = `
+            <td class="p-2 border text-center align-top">
+              <button class="expander text-indigo-600 hover:text-indigo-800 toggle-details" data-key="${s.key}" title="Expand/Collapse"><i class="fas fa-chevron-down"></i></button>
+            </td>
             <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
             <td>${escapeHtml(fullName)}</td>
             <td>${escapeHtml(s.classLevel || 'N/A')}</td>
@@ -272,9 +275,6 @@
             <td>${escapeHtml(String(paidAmount))}</td>
             <td>${escapeHtml(String(debt))}</td>
             <td>${escapeHtml(s.paymentPlan || 'N/A')}</td>
-            <td><button class="py-1 px-2 border rounded text-indigo-600 toggle-details" data-key="${s.key}">
-                  <i class="fas fa-eye"></i> ${debt > 0 ? 'View Debt' : 'View'}
-                </button></td>
           `;
           listBody.appendChild(tr);
 
@@ -311,7 +311,7 @@
                     <p class="text-sm">Year: ${escapeHtml(s.academicYear || 'N/A')}</p>
                   </div>
                 </div>
-                <button class="text-sm text-indigo-600 underline" onclick="generateIDCard('${s.key}')">Generate ID Card</button>
+                <button class="text-sm text-indigo-600 underline generate-id-btn" data-key="${s.key}">Generate ID Card</button>
               </div>
             </td>
           `;
@@ -319,22 +319,27 @@
         });
 
         // Attach toggle listener for expandable rows
-        document.querySelectorAll('.toggle-details').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            const key = e.currentTarget.dataset.key;
+        listBody.addEventListener('click', (e) => {
+          const btn = e.target.closest('.toggle-details');
+          if (btn) {
+            const key = btn.dataset.key;
             const detailRow = document.getElementById(`detail-${key}`);
             if (detailRow) {
               detailRow.classList.toggle('hidden');
-              const icon = e.currentTarget.querySelector('i');
+              const icon = btn.querySelector('i');
               if (detailRow.classList.contains('hidden')) {
-                icon.className = 'fas fa-eye';
-                e.currentTarget.textContent = `${debt > 0 ? 'View Debt' : 'View'}`;
+                icon.className = 'fas fa-chevron-down';
               } else {
-                icon.className = 'fas fa-eye-slash';
-                e.currentTarget.textContent = 'Hide Details';
+                icon.className = 'fas fa-chevron-up';
               }
             }
-          });
+          }
+          const idBtn = e.target.closest('.generate-id-btn');
+          if (idBtn) {
+            const key = idBtn.dataset.key;
+            const student = cachedStudents.find(s => s.key === key);
+            if (student) generateIDCard(student);
+          }
         });
 
         // School Reports + Report Forms (same structure, with calculated payments)
@@ -431,18 +436,22 @@
         console.error('closeDetailsModal button not found');
       }
 
-      // ---- ID Card PDF ----
+      // ---- ID Card PDF (Restored) ----
       function generateIDCard(student) {
         console.log('Generating ID card for student:', student); // Debug log
         const { jsPDF } = window.jspdf;
         if (!jsPDF) {
-          alert('jsPDF not loaded');
+          alert('jsPDF not loaded. Please ensure the jsPDF library is included.');
           return;
         }
-        const doc = new jsPDF("landscape", "mm", "credit-card");
+        const doc = new jsPDF({
+          orientation: "landscape",
+          unit: "mm",
+          format: [85.6, 54] // Credit card size
+        });
 
         // Colors
-        const primaryColor = "#0b3d91"; // dark blue
+        const primaryColor = "#0b3d91"; // Dark blue
         const textColor = "#000000";
 
         // Background
@@ -456,7 +465,7 @@
         doc.setFontSize(10);
         doc.text("STUDENT ID CARD", 42.8, 7, { align: "center" });
 
-        // School Logo (adjust path if needed)
+        // School Logo
         try {
           doc.addImage("../images/somap-logo.png.jpg", "PNG", 2, 2, 8, 8);
         } catch (e) {
@@ -468,13 +477,18 @@
           try {
             doc.addImage(student.passportPhotoURL, "JPEG", 2, 12, 20, 25);
           } catch (e) {
+            console.error('Error loading student photo:', e);
             doc.setDrawColor(0);
             doc.rect(2, 12, 20, 25);
+            doc.setTextColor(textColor);
+            doc.setFontSize(8);
             doc.text("Photo", 12, 25, { align: "center" });
           }
         } else {
           doc.setDrawColor(0);
           doc.rect(2, 12, 20, 25);
+          doc.setTextColor(textColor);
+          doc.setFontSize(8);
           doc.text("Photo", 12, 25, { align: "center" });
         }
 

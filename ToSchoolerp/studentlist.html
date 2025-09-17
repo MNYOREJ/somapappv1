@@ -25,6 +25,11 @@
     .modal-content { position:relative; background:#fff; margin:0 auto; padding:20px;
       border-radius:10px; width:95%; max-width:920px; height:90vh; overflow-y:auto; margin-top:20px; }
     .close { position:absolute; top:10px; right:16px; font-size:24px; cursor:pointer; }
+    .expandable-row { background: #f9fafb; }
+    .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
+    .status-paid { background:#dcfce7; color:#166534; }
+    .status-partial { background:#fef9c3; color:#854d0e; }
+    .status-overdue { background:#fee2e2; color:#991b1b; }
   </style>
 </head>
 <body class="bg-gray-50 p-4">
@@ -75,6 +80,8 @@
             <th>Passport Photo</th>
             <th>Parent Contact</th>
             <th>Fee Total</th>
+            <th>Paid Amount</th>
+            <th>Debt</th>
             <th>Payment Plan</th>
             <th>View</th>
           </tr>
@@ -218,6 +225,19 @@
         renderAllTables();
       }
 
+      // Utility to calculate paid amount from payments (matching finance.html)
+      function calculatePaidAmount(student) {
+        if (!student.payments) return 0;
+        return Object.values(student.payments).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+      }
+
+      // Utility to calculate debt
+      function calculateDebt(student) {
+        const feePerYear = Number(student.feePerYear) || 0;
+        const paidAmount = calculatePaidAmount(student);
+        return Math.max(0, feePerYear - paidAmount);
+      }
+
       // ---- Students rendering ----
       function renderAllTables() {
         console.log('Rendering tables with', cachedStudents.length, 'students'); // Debug log
@@ -230,10 +250,12 @@
           return;
         }
 
+        // Main Student List Table with expandable rows
         listBody.innerHTML = '';
         const filtered = cachedStudents.filter(s => !classFilter || s.classLevel === classFilter);
-
         filtered.forEach(s => {
+          const paidAmount = calculatePaidAmount(s);
+          const debt = calculateDebt(s);
           const tr = document.createElement('tr');
           const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
           const dateReg = s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
@@ -247,48 +269,92 @@
             <td><img src="${escapeHtml(photoURL)}" alt="photo" style="width:50px;height:50px;object-fit:cover;border-radius:4px"/></td>
             <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
             <td>${escapeHtml(String(s.feePerYear || 0))}</td>
+            <td>${escapeHtml(String(paidAmount))}</td>
+            <td>${escapeHtml(String(debt))}</td>
             <td>${escapeHtml(s.paymentPlan || 'N/A')}</td>
-            <td><button class="py-1 px-2 border rounded text-indigo-600 view-btn" data-view="${s.key}">
-                  <i class="fas fa-eye"></i>
+            <td><button class="py-1 px-2 border rounded text-indigo-600 toggle-details" data-key="${s.key}">
+                  <i class="fas fa-eye"></i> ${debt > 0 ? 'View Debt' : 'View'}
                 </button></td>
           `;
           listBody.appendChild(tr);
+
+          // Expandable row for payment details (dropdown)
+          const detailRow = document.createElement('tr');
+          detailRow.className = 'hidden expandable-row';
+          detailRow.id = `detail-${s.key}`;
+          detailRow.innerHTML = `
+            <td colspan="11" class="p-0">
+              <div class="bg-gray-50 p-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <strong>Payment Breakdown</strong>
+                    <ul class="text-sm mt-2 space-y-1">
+                      ${Object.entries(s.payments || {}).map(([payId, payment]) => {
+                        const payDate = payment.timestamp ? new Date(payment.timestamp).toLocaleDateString() : 'N/A';
+                        const payMethod = payment.method || 'N/A';
+                        const payNote = payment.note || '';
+                        return `<li class="flex justify-between"><span>${payDate} (${payMethod})</span><span class="font-semibold">${escapeHtml(String(payment.amount || 0))}</span></li>`;
+                      }).join('') || '<li class="text-gray-500 italic">No payments recorded</li>'}
+                    </ul>
+                  </div>
+                  <div>
+                    <strong>Status</strong>
+                    <div class="mt-2 space-y-1">
+                      <span class="status-pill ${debt > 0 ? 'status-overdue' : 'status-paid'}">${debt > 0 ? 'Overdue' : 'Paid'}</span>
+                      <p class="text-sm">Total Paid: ${escapeHtml(String(paidAmount))}</p>
+                      <p class="text-sm">Balance: ${escapeHtml(String(debt))}</p>
+                    </div>
+                  </div>
+                  <div>
+                    <strong>Plan Details</strong>
+                    <p class="text-sm mt-2">${escapeHtml(s.paymentPlan || 'N/A')}</p>
+                    <p class="text-sm">Year: ${escapeHtml(s.academicYear || 'N/A')}</p>
+                  </div>
+                </div>
+                <button class="text-sm text-indigo-600 underline" onclick="generateIDCard('${s.key}')">Generate ID Card</button>
+              </div>
+            </td>
+          `;
+          listBody.appendChild(detailRow);
         });
 
-        // Attach delegated listener for view buttons
-        if (listBody) {
-          listBody.addEventListener('click', (e) => {
-            const btn = e.target.closest('button[data-view]');
-            if (!btn) return;
-            const key = btn.getAttribute('data-view');
-            console.log('View button clicked for key:', key); // Debug log
-            openDetails(key);
+        // Attach toggle listener for expandable rows
+        document.querySelectorAll('.toggle-details').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const key = e.currentTarget.dataset.key;
+            const detailRow = document.getElementById(`detail-${key}`);
+            if (detailRow) {
+              detailRow.classList.toggle('hidden');
+              const icon = e.currentTarget.querySelector('i');
+              if (detailRow.classList.contains('hidden')) {
+                icon.className = 'fas fa-eye';
+                e.currentTarget.textContent = `${debt > 0 ? 'View Debt' : 'View'}`;
+              } else {
+                icon.className = 'fas fa-eye-slash';
+                e.currentTarget.textContent = 'Hide Details';
+              }
+            }
           });
-        } else {
-          console.error('listBody not found for event listener');
-        }
+        });
 
-        // School Reports + Report Forms (same structure, with payment calculation)
-        schoolReportBody.innerHTML = '';
-        reportFormBody.innerHTML = '';
-        cachedStudents.forEach(s => {
-          // Calculate paidAmount and debt based on finance trend (assuming payments node exists)
-          const feePerYear = s.feePerYear || 0;
-          const paidAmount = s.paidAmount || 0; // From student or fetch from payments
-          const debt = feePerYear - paidAmount;
-          const rowHtml = `
-            <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
-            <td>${escapeHtml((s.firstName || '') + ' ' + (s.lastName || ''))}</td>
-            <td>${escapeHtml(s.classLevel || 'N/A')}</td>
-            <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
-            <td>${escapeHtml(String(feePerYear))}</td>
-            <td>${escapeHtml(String(paidAmount))}</td>
-            <td>${escapeHtml(String(debt))}</td>
-          `;
-          const tr1 = document.createElement('tr'); tr1.innerHTML = rowHtml;
-          const tr2 = document.createElement('tr'); tr2.innerHTML = rowHtml;
-          schoolReportBody.appendChild(tr1);
-          reportFormBody.appendChild(tr2);
+        // School Reports + Report Forms (same structure, with calculated payments)
+        [schoolReportBody, reportFormBody].forEach(body => {
+          body.innerHTML = '';
+          cachedStudents.forEach(s => {
+            const paidAmount = calculatePaidAmount(s);
+            const debt = calculateDebt(s);
+            const rowHtml = `
+              <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
+              <td>${escapeHtml((s.firstName || '') + ' ' + (s.lastName || ''))}</td>
+              <td>${escapeHtml(s.classLevel || 'N/A')}</td>
+              <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
+              <td>${escapeHtml(String(s.feePerYear || 0))}</td>
+              <td>${escapeHtml(String(paidAmount))}</td>
+              <td>${escapeHtml(String(debt))}</td>
+            `;
+            const tr = document.createElement('tr'); tr.innerHTML = rowHtml;
+            body.appendChild(tr);
+          });
         });
         console.log('Reports rendered with', cachedStudents.length, 'students'); // Debug log
       }
@@ -324,19 +390,17 @@
             console.error('studentDetails div not found');
             return;
           }
+          const paidAmount = calculatePaidAmount(s);
+          const debt = calculateDebt(s);
           const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
           const photoURL = s.passportPhotoURL || 'https://via.placeholder.com/120';
-          // Calculate debt for details
-          const feePerYear = s.feePerYear || 0;
-          const paidAmount = s.paidAmount || 0;
-          const debt = feePerYear - paidAmount;
           details.innerHTML = `
             <p><strong>Full Name:</strong> ${escapeHtml(fullName)}</p>
             <p><strong>Class:</strong> ${escapeHtml(s.classLevel || 'N/A')}</p>
             <p><strong>Date of Registration:</strong> ${s.timestamp ? new Date(s.timestamp).toLocaleDateString() : (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A')}</p>
             <p><strong>Passport Photo:</strong><br/><img src="${escapeHtml(photoURL)}" alt="photo" style="width:120px;height:120px;object-fit:cover;border-radius:6px"/></p>
             <p><strong>Parent Contact:</strong> ${escapeHtml(s.primaryParentContact || 'N/A')}</p>
-            <p><strong>Fee Total:</strong> ${escapeHtml(String(feePerYear))}</p>
+            <p><strong>Fee Total:</strong> ${escapeHtml(String(s.feePerYear || 0))}</p>
             <p><strong>Paid Amount:</strong> ${escapeHtml(String(paidAmount))}</p>
             <p><strong>Debt:</strong> ${escapeHtml(String(debt))}</p>
             <p><strong>Payment Plan:</strong> ${escapeHtml(s.paymentPlan || 'N/A')}</p>
@@ -457,8 +521,8 @@
           : cachedStudents;
 
         const arr = list.map(s => {
-          const paidAmount = s.paidAmount || 0;
-          const debt = (s.feePerYear || 0) - paidAmount;
+          const paidAmount = calculatePaidAmount(s);
+          const debt = calculateDebt(s);
           return {
             'Admission No': s.admissionNumber || 'N/A',
             'Full Name': `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
@@ -498,8 +562,8 @@
           : cachedStudents;
 
         const rows = list.map(s => {
-          const paidAmount = s.paidAmount || 0;
-          const debt = (s.feePerYear || 0) - paidAmount;
+          const paidAmount = calculatePaidAmount(s);
+          const debt = calculateDebt(s);
           return [
             s.admissionNumber || 'N/A',
             `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),

@@ -1,4 +1,3 @@
-<!-- admission.html: Independent Admissions with registration modal and search -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -53,7 +52,7 @@
         <h3 class="font-medium text-gray-800">Quick Admission</h3>
         <p class="text-sm text-gray-500 mb-3">Register a new student directly.</p>
         <button id="openRegistrationModal"
-                class="w-full md:w-1/2 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                class="w-full md:w-1/2 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition cursor-pointer">
           Create New Admission
         </button>
         <p class="hint mt-2">Admission number auto-fills when the form opens.</p>
@@ -108,7 +107,7 @@
             </div>
             <div>
               <label for="admissionNumber" class="block text-sm text-gray-600">Admission Number (Auto-generated)</label>
-              <input type="text" id="admissionNumber" name="admissionNumber" readonly class="border p-2 rounded w-full"/>
+              <input type="text" id="admissionNumber" name="admissionNumber" readonly class="border p-2 rounded w-full bg-gray-100"/>
             </div>
 
             <!-- Fee fields -->
@@ -219,7 +218,7 @@
             </div>
             <div class="md:col-span-2">
               <label for="residentialAddress" class="block text-sm text-gray-600">Residential Address *</label>
-              <textarea id="residentialAddress" name="residentialAddress" required class="border p-2 rounded w-full"></textarea>
+              <textarea id="residentialAddress" name="residentialAddress" required class="border p-2 rounded w-full h-20"></textarea>
             </div>
             <div class="md:col-span-2">
               <label for="employmentStatus" class="block text-sm text-gray-600">Employment Status (if needed)</label>
@@ -284,233 +283,242 @@
 
   <!-- Admissions Logic -->
   <script>
-    (function () {
-      // ---- Resolve Firebase handles gracefully ----
-      const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-      const storage = window.storage || (window.firebase && firebase.storage ? firebase.storage() : null);
+    document.addEventListener('DOMContentLoaded', function() {
+      (function () {
+        // ---- Resolve Firebase handles gracefully ----
+        const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+        const storage = window.storage || (window.firebase && firebase.storage ? firebase.storage() : null);
 
-      if (!db) {
-        console.error('Firebase Realtime Database not available. Ensure firebase.js and Firebase SDKs are loaded.');
-      }
-      if (!storage) {
-        console.warn('Firebase Storage not available. File uploads will be skipped.');
-      }
-
-      // ---- Modal open/close ----
-      const openModalBtn = document.getElementById('openRegistrationModal');
-      const closeModalBtn = document.getElementById('closeModal');
-      const modal = document.getElementById('registrationModal');
-      const form = document.getElementById('registrationForm');
-      const registerBtn = document.getElementById('registerBtn');
-
-      if (openModalBtn) openModalBtn.addEventListener('click', () => {
-        const adm = document.getElementById('admissionNumber');
-        if (adm) adm.value = `AUTO-${Date.now()}`;
-        modal.style.display = 'block';
-        checkFormValidity();
-      });
-      if (closeModalBtn) closeModalBtn.addEventListener('click', () => closeRegistrationModal());
-      window.addEventListener('click', (e) => { if (e.target === modal) closeRegistrationModal(); });
-
-      function closeRegistrationModal() {
-        modal.style.display = 'none';
-        form.reset();
-        registerBtn.disabled = true;
-      }
-
-      // ---- Required fields -> enable/disable register ----
-      const requiredFields = [
-        'firstName', 'lastName', 'gender', 'dob',
-        'schoolName', 'classLevel', 'academicYear', 'boardingStatus',
-        'primaryParentName', 'primaryParentContact', 'residentialAddress',
-        'feePerYear', 'paymentPlan'
-      ];
-      const requiredFiles = ['passportPhoto','birthCertUpload','reportCardUpload','joiningLetterUpload'];
-
-      function checkFormValidity() {
-        const fieldsOk = requiredFields.every(id => {
-          const el = document.getElementById(id);
-          return el && String(el.value || '').trim() !== '';
-        });
-        const filesOk = requiredFiles.every(id => {
-          const el = document.getElementById(id);
-          return el && el.files && el.files.length > 0;
-        });
-        registerBtn.disabled = !(fieldsOk && filesOk);
-      }
-      [...requiredFields, ...requiredFiles].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('input', checkFormValidity);
-        if (el && el.type === 'file') el.addEventListener('change', checkFormValidity);
-      });
-      registerBtn.disabled = true;
-
-      // ---- Utils ----
-      function escapeHtml(text) {
-        if (text === undefined || text === null) return '';
-        return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
-      }
-
-      async function uploadIfPresent(inputId, folder, newKey) {
-        // Skip entirely if Storage handle is missing
-        if (!storage) return null;
-
-        const el = document.getElementById(inputId);
-        if (!el || !el.files || el.files.length === 0) return null;
-
-        try {
-          const file = el.files[0];
-          const path = `students/${newKey}/${folder}/${Date.now()}_${file.name}`;
-          const sref = storage.ref(path);
-          await sref.put(file);
-          const url = await sref.getDownloadURL();
-          return url;
-        } catch (err) {
-          console.warn(`[Storage] Skipping ${inputId} upload:`, err);
-          return null; // <— IMPORTANT: do not throw, keep registration flowing
+        if (!db) {
+          console.error('Firebase Realtime Database not available. Ensure firebase.js and Firebase SDKs are loaded.');
         }
-      }
+        if (!storage) {
+          console.warn('Firebase Storage not available. File uploads will be skipped.');
+        }
 
-      // ---- Registration submit ----
-      if (form) {
-        form.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          registerBtn.disabled = true;
+        // ---- Modal open/close ----
+        const openModalBtn = document.getElementById('openRegistrationModal');
+        const closeModalBtn = document.getElementById('closeModal');
+        const modal = document.getElementById('registrationModal');
+        const form = document.getElementById('registrationForm');
+        const registerBtn = document.getElementById('registerBtn');
 
-          const fd = new FormData(form);
-          const studentData = {
-            firstName: fd.get('firstName'),
-            middleName: fd.get('middleName') || '',
-            lastName: fd.get('lastName'),
-            gender: fd.get('gender'),
-            dob: fd.get('dob'),
-            admissionNumber: document.getElementById('admissionNumber').value || `AUTO-${Date.now()}`,
-            pupilId: fd.get('pupilId') || '',
-            birthCertNumber: fd.get('birthCertNumber') || '',
-            religion: fd.get('religion') || '',
-            tribe: fd.get('tribe') || '',
-            schoolName: fd.get('schoolName'),
-            classLevel: fd.get('classLevel'),
-            stream: fd.get('stream') || '',
-            academicYear: fd.get('academicYear'),
-            academicTrack: fd.get('academicTrack') || '',
-            boardingStatus: fd.get('boardingStatus'),
-            shiftedFrom: fd.get('shiftedFrom') || '',
-            primaryParentName: fd.get('primaryParentName'),
-            primaryParentContact: fd.get('primaryParentContact'),
-            secondaryGuardian: fd.get('secondaryGuardian') || '',
-            relationshipToStudent: fd.get('relationshipToStudent') || '',
-            residentialAddress: fd.get('residentialAddress'),
-            employmentStatus: fd.get('employmentStatus') || '',
-            feePerYear: Number(fd.get('feePerYear') || 0),
-            paymentPlan: fd.get('paymentPlan'),
-            timestamp: firebase.database.ServerValue.TIMESTAMP
-          };
+        if (openModalBtn) {
+          openModalBtn.addEventListener('click', function() {
+            console.log('Open modal clicked'); // Debug log
+            const adm = document.getElementById('admissionNumber');
+            if (adm) adm.value = `AUTO-${Date.now()}`;
+            if (modal) modal.style.display = 'block';
+            checkFormValidity();
+          });
+        }
+        if (closeModalBtn) closeModalBtn.addEventListener('click', () => closeRegistrationModal());
+        if (modal) {
+          window.addEventListener('click', (e) => { if (e.target === modal) closeRegistrationModal(); });
+        }
 
-          try {
-            if (!db) throw new Error('Database not available');
+        function closeRegistrationModal() {
+          if (modal) modal.style.display = 'none';
+          if (form) form.reset();
+          if (registerBtn) registerBtn.disabled = true;
+        }
 
-            // Duplicate check by (first,last,dob,class,parentContact)
-            let duplicate = false;
-            const dupSnap = await db.ref('students')
-              .orderByChild('primaryParentContact')
-              .equalTo(studentData.primaryParentContact)
-              .once('value');
-            dupSnap.forEach(child => {
-              const s = child.val();
-              if (s &&
-                  (s.firstName||'') === studentData.firstName &&
-                  (s.lastName||'') === studentData.lastName &&
-                  (s.dob||'') === studentData.dob &&
-                  (s.classLevel||'') === studentData.classLevel) {
-                duplicate = true;
-              }
-            });
-            if (duplicate) {
-              alert("Duplicate student detected (same name, DOB, class & parent contact).");
-              registerBtn.disabled = false;
-              return;
-            }
+        // ---- Required fields -> enable/disable register ----
+        const requiredFields = [
+          'firstName', 'lastName', 'gender', 'dob',
+          'schoolName', 'classLevel', 'academicYear', 'boardingStatus',
+          'primaryParentName', 'primaryParentContact', 'residentialAddress',
+          'feePerYear', 'paymentPlan'
+        ];
+        const requiredFiles = ['passportPhoto','birthCertUpload','reportCardUpload','joiningLetterUpload'];
 
-            // 1) Create DB record FIRST (so we never lose the student)
-            const newRef = db.ref('students').push();
-            const newKey = newRef.key;
-
-            await newRef.set({
-              createdAt: firebase.database.ServerValue.TIMESTAMP,
-              ...studentData
-            });
-
-            // 2) Try uploads AFTER — never fail registration if Storage errors
-            const urls = {};
-            urls.passportPhotoURL = await uploadIfPresent('passportPhoto','passport', newKey);
-            urls.birthCertURL     = await uploadIfPresent('birthCertUpload','birth-cert', newKey);
-            urls.reportCardURL    = await uploadIfPresent('reportCardUpload','report-card', newKey);
-            urls.joiningLetterURL = await uploadIfPresent('joiningLetterUpload','joining-letter', newKey);
-            urls.medicalDocsURL   = await uploadIfPresent('medicalDocsUpload','medical-docs', newKey);
-
-            // Only write non-null URLs
-            const clean = Object.fromEntries(Object.entries(urls).filter(([,v]) => !!v));
-            if (Object.keys(clean).length) {
-              await newRef.update(clean);
-            }
-            alert('✅ Student registered successfully!');
-            closeRegistrationModal();
-          } catch (err) {
-            console.error(err);
-            alert('❌ Error registering student: ' + (err.message || err));
-            registerBtn.disabled = false;
+        function checkFormValidity() {
+          const fieldsOk = requiredFields.every(id => {
+            const el = document.getElementById(id);
+            return el && String(el.value || '').trim() !== '';
+          });
+          const filesOk = requiredFiles.every(id => {
+            const el = document.getElementById(id);
+            return el && el.files && el.files.length > 0;
+          });
+          if (registerBtn) registerBtn.disabled = !(fieldsOk && filesOk);
+        }
+        [...requiredFields, ...requiredFiles].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.addEventListener('input', checkFormValidity);
+            if (el.type === 'file') el.addEventListener('change', checkFormValidity);
           }
         });
-      }
+        if (registerBtn) registerBtn.disabled = true;
 
-      // ---- Live cache + rendering for search ----
-      let cachedStudents = []; // array of { key, ...data }
+        // ---- Utils ----
+        function escapeHtml(text) {
+          if (text === undefined || text === null) return '';
+          return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
+        }
 
-      if (db) {
-        db.ref('students').on('value', (snapshot) => {
-          const raw = snapshot.val() || {};
-          cachedStudents = Object.entries(raw).map(([key, s]) => ({ key, ...s }));
-          // update search list always
-          renderSearchList(cachedStudents);
-        });
-      }
+        async function uploadIfPresent(inputId, folder, newKey) {
+          // Skip entirely if Storage handle is missing
+          if (!storage) return null;
 
-      // ---- Quick Search (live) ----
-      const searchBox = document.getElementById('search-box');
-      const searchList = document.getElementById('student-list');
+          const el = document.getElementById(inputId);
+          if (!el || !el.files || el.files.length === 0) return null;
 
-      function renderSearchList(students) {
-        if (!searchList) return;
-        const term = (searchBox.value || '').toLowerCase();
-        const filtered = !term ? students : students.filter(s =>
-          ((s.firstName||'').toLowerCase().includes(term)) ||
-          ((s.lastName||'').toLowerCase().includes(term)) ||
-          ((s.pupilId||'').toLowerCase().includes(term)) ||
-          ((s.admissionNumber||'').toLowerCase().includes(term))
-        );
-        searchList.innerHTML = '';
-        filtered.forEach(stu => {
-          const div = document.createElement('div');
-          div.className = 'student-card';
-          div.innerHTML = `
-            <strong>${escapeHtml((stu.firstName||'') + ' ' + (stu.lastName||''))}</strong><br>
-            ID: ${escapeHtml(stu.pupilId || stu.admissionNumber || 'N/A')}<br>
-            Class: ${escapeHtml(stu.classLevel || 'N/A')}<br>
-            Fee: ${escapeHtml(String(stu.feePerYear || 0))}
-          `;
-          searchList.appendChild(div);
-        });
-      }
-      if (searchBox) searchBox.addEventListener('input', () => renderSearchList(cachedStudents));
+          try {
+            const file = el.files[0];
+            const path = `students/${newKey}/${folder}/${Date.now()}_${file.name}`;
+            const sref = storage.ref(path);
+            await sref.put(file);
+            const url = await sref.getDownloadURL();
+            return url;
+          } catch (err) {
+            console.warn(`[Storage] Skipping ${inputId} upload:`, err);
+            return null; // <— IMPORTANT: do not throw, keep registration flowing
+          }
+        }
 
-      // ---- Connectivity sanity check (non-destructive) ----
-      if (db) {
-        db.ref('z_test_write').set({ ok: true, ts: Date.now() })
-          .then(() => console.log('DB test write OK'))
-          .catch(err => console.warn('DB test write failed (ignore if rules block):', err.message));
-      }
-    })();
+        // ---- Registration submit ----
+        if (form) {
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (registerBtn) registerBtn.disabled = true;
+
+            const fd = new FormData(form);
+            const studentData = {
+              firstName: fd.get('firstName'),
+              middleName: fd.get('middleName') || '',
+              lastName: fd.get('lastName'),
+              gender: fd.get('gender'),
+              dob: fd.get('dob'),
+              admissionNumber: document.getElementById('admissionNumber').value || `AUTO-${Date.now()}`,
+              pupilId: fd.get('pupilId') || '',
+              birthCertNumber: fd.get('birthCertNumber') || '',
+              religion: fd.get('religion') || '',
+              tribe: fd.get('tribe') || '',
+              schoolName: fd.get('schoolName'),
+              classLevel: fd.get('classLevel'),
+              stream: fd.get('stream') || '',
+              academicYear: fd.get('academicYear'),
+              academicTrack: fd.get('academicTrack') || '',
+              boardingStatus: fd.get('boardingStatus'),
+              shiftedFrom: fd.get('shiftedFrom') || '',
+              primaryParentName: fd.get('primaryParentName'),
+              primaryParentContact: fd.get('primaryParentContact'),
+              secondaryGuardian: fd.get('secondaryGuardian') || '',
+              relationshipToStudent: fd.get('relationshipToStudent') || '',
+              residentialAddress: fd.get('residentialAddress'),
+              employmentStatus: fd.get('employmentStatus') || '',
+              feePerYear: Number(fd.get('feePerYear') || 0),
+              paymentPlan: fd.get('paymentPlan'),
+              timestamp: firebase.database.ServerValue.TIMESTAMP
+            };
+
+            try {
+              if (!db) throw new Error('Database not available');
+
+              // Duplicate check by (first,last,dob,class,parentContact)
+              let duplicate = false;
+              const dupSnap = await db.ref('students')
+                .orderByChild('primaryParentContact')
+                .equalTo(studentData.primaryParentContact)
+                .once('value');
+              dupSnap.forEach(child => {
+                const s = child.val();
+                if (s &&
+                    (s.firstName||'') === studentData.firstName &&
+                    (s.lastName||'') === studentData.lastName &&
+                    (s.dob||'') === studentData.dob &&
+                    (s.classLevel||'') === studentData.classLevel) {
+                  duplicate = true;
+                }
+              });
+              if (duplicate) {
+                alert("Duplicate student detected (same name, DOB, class & parent contact).");
+                if (registerBtn) registerBtn.disabled = false;
+                return;
+              }
+
+              // 1) Create DB record FIRST (so we never lose the student)
+              const newRef = db.ref('students').push();
+              const newKey = newRef.key;
+
+              await newRef.set({
+                createdAt: firebase.database.ServerValue.TIMESTAMP,
+                ...studentData
+              });
+
+              // 2) Try uploads AFTER — never fail registration if Storage errors
+              const urls = {};
+              urls.passportPhotoURL = await uploadIfPresent('passportPhoto','passport', newKey);
+              urls.birthCertURL     = await uploadIfPresent('birthCertUpload','birth-cert', newKey);
+              urls.reportCardURL    = await uploadIfPresent('reportCardUpload','report-card', newKey);
+              urls.joiningLetterURL = await uploadIfPresent('joiningLetterUpload','joining-letter', newKey);
+              urls.medicalDocsURL   = await uploadIfPresent('medicalDocsUpload','medical-docs', newKey);
+
+              // Only write non-null URLs
+              const clean = Object.fromEntries(Object.entries(urls).filter(([,v]) => !!v));
+              if (Object.keys(clean).length) {
+                await newRef.update(clean);
+              }
+              alert('✅ Student registered successfully!');
+              closeRegistrationModal();
+            } catch (err) {
+              console.error(err);
+              alert('❌ Error registering student: ' + (err.message || err));
+              if (registerBtn) registerBtn.disabled = false;
+            }
+          });
+        }
+
+        // ---- Live cache + rendering for search ----
+        let cachedStudents = []; // array of { key, ...data }
+
+        if (db) {
+          db.ref('students').on('value', (snapshot) => {
+            const raw = snapshot.val() || {};
+            cachedStudents = Object.entries(raw).map(([key, s]) => ({ key, ...s }));
+            // update search list always
+            renderSearchList(cachedStudents);
+          });
+        }
+
+        // ---- Quick Search (live) ----
+        const searchBox = document.getElementById('search-box');
+        const searchList = document.getElementById('student-list');
+
+        function renderSearchList(students) {
+          if (!searchList) return;
+          const term = (searchBox ? searchBox.value || '' : '').toLowerCase();
+          const filtered = !term ? students : students.filter(s =>
+            ((s.firstName||'').toLowerCase().includes(term)) ||
+            ((s.lastName||'').toLowerCase().includes(term)) ||
+            ((s.pupilId||'').toLowerCase().includes(term)) ||
+            ((s.admissionNumber||'').toLowerCase().includes(term))
+          );
+          searchList.innerHTML = '';
+          filtered.forEach(stu => {
+            const div = document.createElement('div');
+            div.className = 'student-card';
+            div.innerHTML = `
+              <strong>${escapeHtml((stu.firstName||'') + ' ' + (stu.lastName||''))}</strong><br>
+              ID: ${escapeHtml(stu.pupilId || stu.admissionNumber || 'N/A')}<br>
+              Class: ${escapeHtml(stu.classLevel || 'N/A')}<br>
+              Fee: ${escapeHtml(String(stu.feePerYear || 0))}
+            `;
+            searchList.appendChild(div);
+          });
+        }
+        if (searchBox) searchBox.addEventListener('input', () => renderSearchList(cachedStudents));
+
+        // ---- Connectivity sanity check (non-destructive) ----
+        if (db) {
+          db.ref('z_test_write').set({ ok: true, ts: Date.now() })
+            .then(() => console.log('DB test write OK'))
+            .catch(err => console.warn('DB test write failed (ignore if rules block):', err.message));
+        }
+      })();
+    });
   </script>
 </body>
 </html>

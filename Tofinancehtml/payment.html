@@ -3,10 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Installment Breakdown</title>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-  <script src="../firebase.js"></script>
-  <title>Installment Breakdown</title>
+  <script>
+    // Fallback if firebase.js fails to load
+    if (!window.firebase) {
+      console.error('Firebase SDK not loaded. Check CDN URLs or internet connection.');
+      document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Firebase SDK failed to load. Please check your internet connection.</p>';
+      });
+    }
+  </script>
+  <script src="../firebase.js" onerror="console.error('Failed to load ../firebase.js. Check file path or GitHub Pages deployment.');"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
   <style>
@@ -18,26 +27,25 @@
   </style>
 </head>
 <body>
-  <div id="breakdownContent" class="text-sm"></div>
+  <div id="breakdownContent" class="text-sm p-4"></div>
   <script>
     (function () {
-      // Check Firebase initialization
-      if (typeof firebase === 'undefined') {
-        console.error('Firebase SDK not loaded. Check CDN scripts.');
-        document.getElementById('breakdownContent').innerHTML = '<p>Error: Firebase SDK not loaded. Check internet connection or CDN.</p>';
+      console.log('Checking Firebase initialization...');
+      if (!window.firebase) {
+        console.error('Firebase SDK not available.');
+        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Firebase SDK not loaded. Check internet or CDN URLs.</p>';
         return;
       }
       const db = window.db;
       if (!db) {
-        console.error('Firebase DB not initialized. Check ../firebase.js path and initialization.');
-        document.getElementById('breakdownContent').innerHTML = '<p>Error: Database not initialized. Ensure firebase.js is correctly set up.</p>';
+        console.error('Firebase DB not initialized. Verify ../firebase.js exists in root and initializes window.db.');
+        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Database not initialized. Ensure firebase.js is in the root folder and correctly set up.</p>';
         return;
       }
-      // Utilities
-      function fmt(n) {
-        n = Number(n) || 0;
-        return n.toLocaleString();
-      }
+      console.log('Firebase DB ready:', db);
+
+      // Utility functions
+      function fmt(n) { return (Number(n) || 0).toLocaleString(); }
       function clamp(n) { return Math.max(0, Math.round(Number(n) || 0)); }
       function todayYMD() {
         const d = new Date();
@@ -59,58 +67,9 @@
         }
         return amounts;
       }
-      // Configs
+
+      // Installment configuration (monthly only for Joseph)
       const installmentConfigs = {
-        lower: {
-          type: '6',
-          weights: [44, 13, 12, 22, 22, 16],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
-          windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-            { from: [7, 1], to: [7, 15] },
-            { from: [9, 1], to: [9, 15] },
-          ]
-        },
-        class4_7: {
-          type: '4',
-          weights: [27, 20, 20, 15],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4'],
-          windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-          ]
-        },
-        class5: {
-          type: '6',
-          weights: [44, 23, 22, 32, 26, 17],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
-          windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-            { from: [7, 1], to: [7, 15] },
-            { from: [9, 1], to: [9, 15] },
-          ]
-        },
-        class6: {
-          type: '6',
-          weights: [236, 115, 110, 160, 160, 100],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
-          windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-            { from: [7, 1], to: [7, 15] },
-            { from: [9, 1], to: [9, 15] },
-          ]
-        },
         monthly: {
           type: 'monthly',
           weights: [2, 1, 1, 1, 1, 1, 2, 1, 1, 1],
@@ -127,41 +86,14 @@
             { from: [9, 1], to: [9, 30] },
             { from: [10, 1], to: [10, 31] },
           ]
-        },
-        '2inst': {
-          type: '2',
-          discount: 0.96,
-          weights: [1, 1],
-          labels: ['1st Half (48%)', '2nd Half (48%)'],
-          windows: [
-            { from: [1, 1], to: [1, 10] },
-            { from: [7, 1], to: [7, 5] },
-          ]
-        },
-        full: {
-          type: 'full',
-          discount: 0.95,
-          weights: [1],
-          labels: ['Full Year (5% off)'],
-          windows: [
-            { from: [1, 1], to: [1, 10] },
-          ]
         }
       };
+
       function getConfig(student) {
         const plan = (student.paymentPlan || '').toLowerCase();
-        const c = (student.classLevel || '').toLowerCase();
-        if (plan.includes('monthly')) return installmentConfigs.monthly;
-        if (plan.includes('2')) return installmentConfigs['2inst'];
-        if (plan.includes('full')) return installmentConfigs.full;
-        if (plan.includes('4') || (plan.includes('inst') && (c === 'class 4' || c === 'class 7'))) return installmentConfigs.class4_7;
-        if (plan.includes('inst')) {
-          if (c === 'class 1' || c === 'class 2' || c === 'class 3') return installmentConfigs.lower;
-          if (c === 'class 5') return installmentConfigs.class5;
-          if (c === 'class 6') return installmentConfigs.class6;
-        }
-        return installmentConfigs.full;
+        return plan.includes('monthly') ? installmentConfigs.monthly : installmentConfigs.monthly;
       }
+
       function buildSchedule(student) {
         const config = getConfig(student);
         const { y } = todayYMD();
@@ -192,6 +124,7 @@
         sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
         return { items: sc, periodLabelNow: periodLabel, expectedToDate };
       }
+
       function allocatePayments(student, schedule) {
         const payList = [];
         if (student.payments) {
@@ -232,6 +165,7 @@
         const debtTillNow = Math.max(0, expectedToDate - paidConsumed);
         return { scheduleItems: schedule.items, prevDebtAfter: prevDebt, credit, totalPaid, debtTillNow };
       }
+
       function computeStudentFinancials(student) {
         const feePerYear = Number(student.feePerYear) || 0;
         const previousDebt = clamp(student.previousDebt || student.debt);
@@ -250,85 +184,85 @@
           scheduleItems: alloc.scheduleItems
         };
       }
-      // Render
+
+      // Fetch and render
       const urlParams = new URLSearchParams(window.location.search);
       const studentId = urlParams.get('student');
       console.log('Student ID:', studentId);
-      if (studentId) {
-        db.ref(`students/${studentId}`).once('value').then(snap => {
-          const student = snap.val();
-          console.log('Student Data:', student);
-          if (student) {
-            const fin = computeStudentFinancials(student);
-            let rows = '';
-            let totalsExp = 0, totalsPaid = 0;
-            fin.scheduleItems.forEach(it => {
-              const need = it.amount;
-              const got = it.paidAllocated;
-              const bal = Math.max(0, need - got);
-              let statusClass = 'status-partial';
-              if (it.status === 'Cleared') statusClass = 'status-paid';
-              if (it.status.includes('Overdue')) statusClass = 'status-overdue';
-              rows += `
-                <tr>
-                  <td class="p-1 border">${it.label}</td>
-                  <td class="p-1 border text-right">${fmt(need)}</td>
-                  <td class="p-1 border text-right">${fmt(got)}</td>
-                  <td class="p-1 border text-right">${fmt(bal)}</td>
-                  <td class="p-1 border"><span class="status-pill ${statusClass}">${it.status}</span></td>
-                  <td class="p-1 border text-xs">${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}</td>
-                </tr>
-              `;
-              totalsExp += need;
-              totalsPaid += got;
-            });
-            const rem = Math.max(0, totalsExp - totalsPaid);
-            const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-            const html = `
-              <div class="p-4">
-                <h2 class="font-semibold text-indigo-700 mb-2">Installment Breakdown for ${fullName}</h2>
-                <div class="flex items-center justify-between mb-2">
-                  <div>
-                    <span class="mr-3">Admission: ${student.admissionNumber || ''}</span>
-                    <span class="mr-3">Class: ${student.classLevel || ''}</span>
-                    <span>Plan: ${student.paymentPlan || ''}</span>
-                  </div>
-                  <div>
-                    <span class="mr-3">Expected: <strong>${fmt(totalsExp)}</strong></span>
-                    <span class="mr-3">Paid: <strong>${fmt(totalsPaid)}</strong></span>
-                    <span>Remaining: <strong>${fmt(rem)}</strong></span>
-                  </div>
-                </div>
-                <div class="overflow-auto">
-                  <table class="min-w-full text-xs">
-                    <thead>
-                      <tr class="table-header">
-                        <th class="p-1 border">Period</th>
-                        <th class="p-1 border">Expected</th>
-                        <th class="p-1 border">Allocated Paid</th>
-                        <th class="p-1 border">Remaining</th>
-                        <th class="p-1 border">Status</th>
-                        <th class="p-1 border">Window</th>
-                      </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                  </table>
-                </div>
-              </div>
-            `;
-            document.getElementById('breakdownContent').innerHTML = html;
-          } else {
-            console.warn('Student not found for ID:', studentId);
-            document.getElementById('breakdownContent').innerHTML = '<p>Student not found. Check Firebase data.</p>';
-          }
-        }).catch(err => {
-          console.error('Error loading student:', err);
-          document.getElementById('breakdownContent').innerHTML = '<p>Error loading data: ' + err.message + '</p>';
-        });
-      } else {
-        console.warn('No student ID provided in URL');
-        document.getElementById('breakdownContent').innerHTML = '<p>No student selected.</p>';
+      if (!studentId) {
+        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: No student ID provided in URL.</p>';
+        return;
       }
+
+      db.ref(`students/${studentId}`).once('value').then(snap => {
+        const student = snap.val();
+        console.log('Student data:', student);
+        if (!student) {
+          console.warn('Student not found for ID:', studentId);
+          document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Student not found in Firebase.</p>';
+          return;
+        }
+
+        const fin = computeStudentFinancials(student);
+        let rows = '';
+        let totalsExp = 0, totalsPaid = 0;
+        fin.scheduleItems.forEach(it => {
+          const need = it.amount;
+          const got = it.paidAllocated;
+          const bal = Math.max(0, need - got);
+          let statusClass = 'status-partial';
+          if (it.status === 'Cleared') statusClass = 'status-paid';
+          if (it.status.includes('Overdue')) statusClass = 'status-overdue';
+          rows += `
+            <tr>
+              <td class="p-1 border">${it.label}</td>
+              <td class="p-1 border text-right">${fmt(need)}</td>
+              <td class="p-1 border text-right">${fmt(got)}</td>
+              <td class="p-1 border text-right">${fmt(bal)}</td>
+              <td class="p-1 border"><span class="status-pill ${statusClass}">${it.status}</span></td>
+              <td class="p-1 border text-xs">${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}</td>
+            </tr>
+          `;
+          totalsExp += need;
+          totalsPaid += got;
+        });
+        const rem = Math.max(0, totalsExp - totalsPaid);
+        const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+        const html = `
+          <h2 class="font-semibold text-indigo-700 mb-2">Installment Breakdown for ${fullName}</h2>
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <span class="mr-3">Admission: ${student.admissionNumber || ''}</span>
+              <span class="mr-3">Class: ${student.classLevel || ''}</span>
+              <span>Plan: ${student.paymentPlan || ''}</span>
+            </div>
+            <div>
+              <span class="mr-3">Expected: <strong>${fmt(totalsExp)}</strong></span>
+              <span class="mr-3">Paid: <strong>${fmt(totalsPaid)}</strong></span>
+              <span>Remaining: <strong>${fmt(rem)}</strong></span>
+            </div>
+          </div>
+          <div class="overflow-auto">
+            <table class="min-w-full text-xs">
+              <thead>
+                <tr class="table-header">
+                  <th class="p-1 border">Period</th>
+                  <th class="p-1 border">Expected</th>
+                  <th class="p-1 border">Allocated Paid</th>
+                  <th class="p-1 border">Remaining</th>
+                  <th class="p-1 border">Status</th>
+                  <th class="p-1 border">Window</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+        document.getElementById('breakdownContent').innerHTML = html;
+      }).catch(err => {
+        console.error('Error fetching student:', err);
+        document.getElementById('breakdownContent').innerHTML = `<p class="text-red-600">Error loading data: ${err.message}</p>`;
+      });
     })();
   </script>
 </body>

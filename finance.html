@@ -3,15 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <!-- Firebase SDKs (same as index.html, version 9 compat) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
-  <!-- Your Firebase config wrapper -->
   <script src="firebase.js"></script>
   <title>SoMAp - Finance</title>
-  <!-- Tailwind + FontAwesome (same style as your app) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
   <style>
@@ -22,11 +19,10 @@
     .modal-content { background:#fff; max-width:800px; margin:4% auto; padding:18px; border-radius:8px; height:80vh; overflow:auto; }
     .expander { cursor: pointer; }
     .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
-    .status-paid { background:#dcfce7; color:#166534; } /* green */
-    .status-partial { background:#fef9c3; color:#854d0e; } /* amber */
-    .status-overdue { background:#fee2e2; color:#991b1b; } /* red */
+    .status-paid { background:#dcfce7; color:#166534; }
+    .status-partial { background:#fef9c3; color:#854d0e; }
+    .status-overdue { background:#fee2e2; color:#991b1b; }
   </style>
-  <!-- Third-party libs for export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
@@ -40,7 +36,6 @@
         <a href="index.html" class="px-3 py-1 border rounded text-sm">Back to Dashboard</a>
       </div>
     </header>
-    <!-- Summary cards -->
     <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
       <div class="bg-white p-4 rounded shadow">
         <h3 class="text-sm text-gray-500">Total Due (All Students)</h3>
@@ -51,9 +46,9 @@
         <div id="totalCollected" class="text-xl font-semibold mt-2">--</div>
       </div>
       <div class="bg-white p-4 rounded shadow">
-  <h3 class="text-sm text-gray-500">Total Outstanding (Due – Collected)</h3>
-  <div id="totalOutstanding" class="text-xl font-semibold mt-2">--</div>
-</div>
+        <h3 class="text-sm text-gray-500">Total Outstanding (Due – Collected)</h3>
+        <div id="totalOutstanding" class="text-xl font-semibold mt-2">--</div>
+      </div>
       <div class="bg-white p-4 rounded shadow">
         <h3 class="text-sm text-gray-500">Total Expenses</h3>
         <div id="totalExpenses" class="text-xl font-semibold mt-2">--</div>
@@ -63,7 +58,6 @@
         <div id="netBalance" class="text-xl font-semibold mt-2">--</div>
       </div>
     </div>
-    <!-- Action Row -->
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-3">
         <label class="text-sm text-gray-600">Filter by class</label>
@@ -89,7 +83,6 @@
         <button id="downloadBreakdownPdf" class="px-3 py-1 bg-teal-700 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Breakdown PDF</button>
       </div>
     </div>
-    <!-- Finance table -->
     <div class="bg-white rounded shadow overflow-x-auto">
       <table id="financeTable" class="min-w-full text-sm">
         <thead>
@@ -109,7 +102,6 @@
         <tbody></tbody>
       </table>
     </div>
-    <!-- Expenses Management -->
     <div class="bg-white rounded shadow p-4 mt-6">
       <h2 class="text-lg font-semibold text-indigo-700 mb-3">Expenses</h2>
       <form id="expenseForm" class="grid md:grid-cols-4 gap-3 mb-4">
@@ -160,7 +152,6 @@
         <tbody></tbody>
       </table>
     </div>
-    <!-- Payment modal -->
     <div id="paymentModal" class="modal">
       <div class="modal-content">
         <span id="closePaymentModal" class="float-right cursor-pointer text-2xl">&times;</span>
@@ -196,7 +187,6 @@
         </form>
       </div>
     </div>
-    <!-- Details modal (kept for ledger view) -->
     <div id="detailsModal" class="modal">
       <div class="modal-content">
         <span id="closeDetailsModal" class="float-right cursor-pointer text-2xl">&times;</span>
@@ -206,17 +196,8 @@
     </div>
   </div>
 <script>
-/*
-  finance.html — enhanced
-  - Strict installment/monthly windows
-  - Payment allocation (previous debt → oldest open installment → next → credit)
-  - “Debt till X” column + downloadable debt list for the current period
-  - Expandable, color-coded per-student breakdown via iframe to payment.html
-  - Exports with totals (main, debt, breakdown)
-*/
 (function () {
   const db = window.db || null;
-  // DOM handles
   const tbody = document.querySelector('#financeTable tbody');
   const studentSelect = document.getElementById('studentSelect');
   const paymentModal = document.getElementById('paymentModal');
@@ -235,128 +216,125 @@
   const downloadBreakdownCsvBtn = document.getElementById('downloadBreakdownCsv');
   const downloadBreakdownPdfBtn = document.getElementById('downloadBreakdownPdf');
   const reloadBtn = document.getElementById('reloadBtn');
-  let cachedStudents = {}; // key => student
+  let cachedStudents = {};
   let showingDebtorsOnly = false;
   if (!db) {
     console.error('DB not found.');
     alert('DB not ready. Ensure firebase.js initializes window.db.');
   }
-  // ====================== UTILITIES ======================
   function fmt(n) {
     n = Number(n) || 0;
     return n.toLocaleString();
   }
-  function clamp(n){ return Math.max(0, Math.round(Number(n)||0)); }
+  function clamp(n) { return Math.max(0, Math.round(Number(n) || 0)); }
   function todayYMD() {
     const d = new Date();
-    return { y: d.getFullYear(), m: d.getMonth()+1, d: d.getDate() };
+    return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
   }
-  function dateFromYMD(y,m,d){ return new Date(y, m-1, d).getTime(); }
-  function isPast(ts){ return Date.now() > ts; }
+  function dateFromYMD(y, m, d) { return new Date(y, m - 1, d).getTime(); }
+  function isPast(ts) { return Date.now() > ts; }
   function apportion(total, weights) {
     if (!weights.length) return [];
-    const sumW = weights.reduce((a,b)=>a + b, 0);
+    const sumW = weights.reduce((a, b) => a + b, 0);
     let amounts = weights.map(w => Math.floor((w * total) / sumW));
-    let sumA = amounts.reduce((a,b)=>a + b, 0);
+    let sumA = amounts.reduce((a, b) => a + b, 0);
     let rem = total - sumA;
     if (rem > 0) {
-      const sortedIdx = [...weights.keys()].sort((a,b) => weights[b] - weights[a]);
+      const sortedIdx = [...weights.keys()].sort((a, b) => weights[b] - weights[a]);
       for (let i = 0; i < rem; i++) {
         amounts[sortedIdx[i % sortedIdx.length]]++;
       }
     }
     return amounts;
   }
-  // Installment configs
   const installmentConfigs = {
     lower: {
       type: '6',
-      weights: [44, 13, 12, 22, 22, 16], // sum 129
-      labels: ['Jan (2 months)', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul (2 months)', 'Aug', 'Sep', 'Oct'],
-      windows: [ // m,d for from/to
-        {from: [12,1], to: [1,10]},
-        {from: [3,1], to: [3,15]},
-        {from: [4,1], to: [4,15]},
-        {from: [5,1], to: [5,15]},
-        {from: [7,1], to: [7,15]},
-        {from: [9,1], to: [9,15]},
+      weights: [44, 13, 12, 22, 22, 16],
+      labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+      windows: [
+        { from: [12, 1], to: [1, 10] },
+        { from: [3, 1], to: [3, 15] },
+        { from: [4, 1], to: [4, 15] },
+        { from: [5, 1], to: [5, 15] },
+        { from: [7, 1], to: [7, 15] },
+        { from: [9, 1], to: [9, 15] },
       ]
     },
     class4_7: {
       type: '4',
-      weights: [27, 20, 20, 15], // sum 82
+      weights: [27, 20, 20, 15],
       labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4'],
       windows: [
-        {from: [12,1], to: [1,10]},
-        {from: [3,1], to: [3,15]},
-        {from: [4,1], to: [4,15]},
-        {from: [5,1], to: [5,15]},
+        { from: [12, 1], to: [1, 10] },
+        { from: [3, 1], to: [3, 15] },
+        { from: [4, 1], to: [4, 15] },
+        { from: [5, 1], to: [5, 15] },
       ]
     },
     class5: {
       type: '6',
-      weights: [44, 23, 22, 32, 26, 17], // sum 164
+      weights: [44, 23, 22, 32, 26, 17],
       labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
       windows: [
-        {from: [12,1], to: [1,10]},
-        {from: [3,1], to: [3,15]},
-        {from: [4,1], to: [4,15]},
-        {from: [5,1], to: [5,15]},
-        {from: [7,1], to: [7,15]},
-        {from: [9,1], to: [9,15]},
+        { from: [12, 1], to: [1, 10] },
+        { from: [3, 1], to: [3, 15] },
+        { from: [4, 1], to: [4, 15] },
+        { from: [5, 1], to: [5, 15] },
+        { from: [7, 1], to: [7, 15] },
+        { from: [9, 1], to: [9, 15] },
       ]
     },
     class6: {
       type: '6',
-      weights: [236, 115, 110, 160, 160, 100], // sum 881
+      weights: [236, 115, 110, 160, 160, 100],
       labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
       windows: [
-        {from: [12,1], to: [1,10]},
-        {from: [3,1], to: [3,15]},
-        {from: [4,1], to: [4,15]},
-        {from: [5,1], to: [5,15]},
-        {from: [7,1], to: [7,15]},
-        {from: [9,1], to: [9,15]},
+        { from: [12, 1], to: [1, 10] },
+        { from: [3, 1], to: [3, 15] },
+        { from: [4, 1], to: [4, 15] },
+        { from: [5, 1], to: [5, 15] },
+        { from: [7, 1], to: [7, 15] },
+        { from: [9, 1], to: [9, 15] },
       ]
     },
     monthly: {
       type: 'monthly',
-      weights: [2, 1, 1, 1, 1, 1, 2, 1, 1, 1], // sum 12
+      weights: [2, 1, 1, 1, 1, 1, 2, 1, 1, 1],
       labels: ['Jan (2 months)', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul (2 months)', 'Aug', 'Sep', 'Oct'],
       windows: [
-        {from: [1,1], to: [1,31]},
-        {from: [2,1], to: [2,28]},
-        {from: [3,1], to: [3,31]},
-        {from: [4,1], to: [4,30]},
-        {from: [5,1], to: [5,31]},
-        {from: [6,1], to: [6,30]},
-        {from: [7,1], to: [7,31]},
-        {from: [8,1], to: [8,31]},
-        {from: [9,1], to: [9,30]},
-        {from: [10,1], to: [10,31]},
+        { from: [1, 1], to: [1, 31] },
+        { from: [2, 1], to: [2, 28] },
+        { from: [3, 1], to: [3, 31] },
+        { from: [4, 1], to: [4, 30] },
+        { from: [5, 1], to: [5, 31] },
+        { from: [6, 1], to: [6, 30] },
+        { from: [7, 1], to: [7, 31] },
+        { from: [8, 1], to: [8, 31] },
+        { from: [9, 1], to: [9, 30] },
+        { from: [10, 1], to: [10, 31] },
       ]
     },
     '2inst': {
       type: '2',
       discount: 0.96,
-      weights: [1, 1], // sum 2
+      weights: [1, 1],
       labels: ['1st Half (48%)', '2nd Half (48%)'],
       windows: [
-        {from: [1,1], to: [1,10]},
-        {from: [7,1], to: [7,5]},
+        { from: [1, 1], to: [1, 10] },
+        { from: [7, 1], to: [7, 5] },
       ]
     },
     full: {
       type: 'full',
-      discount: 0.95,
+      discount: '0.95',
       weights: [1],
       labels: ['Full Year (5% off)'],
       windows: [
-        {from: [1,1], to: [1,10]},
+        { from: [1, 1], to: [1, 10] },
       ]
     }
   };
-  // Get config for student
   function getConfig(student) {
     const plan = (student.paymentPlan || '').toLowerCase();
     const c = (student.classLevel || '').toLowerCase();
@@ -369,16 +347,13 @@
       if (c === 'class 5') return installmentConfigs.class5;
       if (c === 'class 6') return installmentConfigs.class6;
     }
-    // default
     return installmentConfigs.full;
   }
-  // Build plan schedule for a student (windows + expected amounts)
-  // Returns: { items: [{key,label,fromTS,toTS,amount, paidAllocated, status}], periodLabelNow, expectedToDate }
   function buildSchedule(student) {
     const config = getConfig(student);
     const { y } = todayYMD();
     let feeBase = Number(student.feePerYear) || 0;
-    const discount = config.discount || 1;
+    const discount = Number(config.discount) || 1;
     feeBase = Math.round(feeBase * discount);
     const weights = config.weights;
     const amounts = apportion(feeBase, weights);
@@ -391,9 +366,8 @@
       if (toM === 12) toY = y - 1;
       const fromTS = dateFromYMD(fromY, fromM, fromD);
       const toTS = dateFromYMD(toY, toM, toD);
-      sc.push({ key: `inst${i+1}`, label, fromTS, toTS, amount: amounts[i] });
+      sc.push({ key: `inst${i + 1}`, label, fromTS, toTS, amount: amounts[i] });
     });
-    // Determine current period label for “Debt till …”
     const now = Date.now();
     let lastDueIndex = -1;
     let periodLabel = '—';
@@ -402,28 +376,23 @@
       if (it.toTS < now) { lastDueIndex = idx; expectedToDate += it.amount; }
     });
     if (lastDueIndex >= 0) periodLabel = sc[lastDueIndex].label;
-    // initialize paidAllocated/status
     sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
     return { items: sc, periodLabelNow: periodLabel, expectedToDate };
   }
-  // Allocate payments: previousDebt first, then schedule oldest→newest, then credit
-  // Returns { scheduleItems, prevDebtAfter, credit, totalPaid, debtTillNow }
   function allocatePayments(student, schedule) {
     const payList = [];
     if (student.payments) {
       Object.values(student.payments).forEach(p => {
-        payList.push({ amount: clamp(p.amount), ts: Number(p.timestamp)||0 });
+        payList.push({ amount: clamp(p.amount), ts: Number(p.timestamp) || 0 });
       });
     }
-    payList.sort((a,b)=>a.ts - b.ts);
-    let pot = payList.reduce((s,p)=>s + p.amount, 0);
+    payList.sort((a, b) => a.ts - b.ts);
+    let pot = payList.reduce((s, p) => s + p.amount, 0);
     const totalPaid = pot;
-    // 1) previous debt
     let prevDebt = clamp(student.previousDebt || student.debt);
     let toPrev = Math.min(prevDebt, pot);
     prevDebt -= toPrev;
     pot -= toPrev;
-    // 2) Schedule
     for (const it of schedule.items) {
       const need = Math.max(0, it.amount - it.paidAllocated);
       if (need <= 0) continue;
@@ -432,9 +401,7 @@
       it.paidAllocated += use;
       pot -= use;
     }
-    // 3) Credit
     const credit = Math.max(0, pot);
-    // Status
     const now = Date.now();
     for (const it of schedule.items) {
       const a = it.paidAllocated;
@@ -449,13 +416,11 @@
         }
       }
     }
-    // Debt till now
-    const expectedToDate = schedule.items.filter(it => it.toTS < now).reduce((s,it)=>s + it.amount, 0);
+    const expectedToDate = schedule.items.filter(it => it.toTS < now).reduce((s, it) => s + it.amount, 0);
     const paidConsumed = totalPaid - credit;
     const debtTillNow = Math.max(0, expectedToDate - paidConsumed);
     return { scheduleItems: schedule.items, prevDebtAfter: prevDebt, credit, totalPaid, debtTillNow };
   }
-  // Compute financials for rendering
   function computeStudentFinancials(student) {
     const feePerYear = Number(student.feePerYear) || 0;
     const previousDebt = clamp(student.previousDebt || student.debt);
@@ -474,7 +439,6 @@
       scheduleItems: alloc.scheduleItems
     };
   }
-  // ====================== RENDER TABLE ======================
   function breakdownRowHTML(id, fin) {
     return `
       <tr id="br-${id}" class="hidden bg-slate-50">
@@ -529,7 +493,6 @@
     document.getElementById('totalDue').textContent = fmt(totalDue);
     document.getElementById('totalCollected').textContent = fmt(totalCollected);
     document.getElementById('totalOutstanding').textContent = fmt(totalOutstanding);
-    // attach events
     tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', e => openPaymentModalFor(e.target.dataset.id)));
     tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
     tbody.querySelectorAll('.expander').forEach(btn => btn.addEventListener('click', e => {
@@ -545,7 +508,6 @@
       }
     }));
   }
-  // ====================== LOAD & SELECTORS ======================
   async function loadStudents() {
     if (!db) return;
     try {
@@ -577,7 +539,6 @@
     paymentModal.style.display = 'none';
     paymentForm.reset();
   }
-  // ====================== DETAILS MODAL (ledger) ======================
   function openDetailsModal(id) {
     const s = cachedStudents[id];
     if (!s) return alert('Student not found');
@@ -599,7 +560,7 @@
       html += '<div class="text-sm text-gray-500">No payments recorded yet.</div>';
     } else {
       html += `<div class="overflow-auto"><table class="min-w-full text-xs mt-2"><thead><tr class="table-header"><th class="p-1 border">Date</th><th class="p-1 border">Amount</th><th class="p-1 border">Method</th><th class="p-1 border">Note</th></tr></thead><tbody>`;
-      Object.values(s.payments).sort((a,b)=> (a.timestamp||0) - (b.timestamp||0)).forEach(p => {
+      Object.values(s.payments).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).forEach(p => {
         const d = new Date(p.timestamp || 0).toLocaleString();
         html += `<tr><td class="p-1 border">${d}</td><td class="p-1 border">${fmt(p.amount)}</td><td class="p-1 border">${p.method || ''}</td><td class="p-1 border">${p.note || ''}</td></tr>`;
       });
@@ -609,7 +570,6 @@
     detailsModal.style.display = 'block';
   }
   function closeDetailsModalFn() { detailsModal.style.display = 'none'; detailsContent.innerHTML = ''; }
-  // ====================== PAYMENT SAVE (ledger source-of-truth) ======================
   paymentForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const studentId = studentSelect.value;
@@ -638,23 +598,22 @@
       alert('Error recording payment: ' + err.message);
     }
   });
-  // ====================== EXPORTS (MAIN) ======================
   function downloadCSV_Main() {
-    const rows = [['Admission No','Full Name','Class','Fee (Year)','Plan','Paid','Balance (Year)','Debt till …','Debt Amount']];
+    const rows = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
     let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
     const filterClass = classFilter.value;
     Object.entries(cachedStudents).forEach(([id, s]) => {
       if (filterClass && s.classLevel !== filterClass) return;
       const fin = computeStudentFinancials(s);
       if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
-      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
-      rows.push([s.admissionNumber||'', fullName, s.classLevel||'', fin.feePerYear, s.paymentPlan||'', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      rows.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
       totalFee += fin.feePerYear;
       totalPaid += fin.paidAmount;
       totalBal += fin.balance;
       totalDebt += fin.periodDebtValue;
     });
-    rows.push(['TOTAL','','',totalFee,'',totalPaid,totalBal,'',totalDebt]);
+    rows.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Finance');
@@ -663,7 +622,7 @@
   function downloadPDF_Main() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape' });
-    const headers = [['Admission No','Full Name','Class','Fee (Year)','Plan','Paid','Balance (Year)','Debt till …','Debt Amount']];
+    const headers = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
     const body = [];
     let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
     const filterClass = classFilter.value;
@@ -671,20 +630,19 @@
       if (filterClass && s.classLevel !== filterClass) return;
       const fin = computeStudentFinancials(s);
       if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
-      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
-      body.push([s.admissionNumber||'', fullName, s.classLevel||'', fin.feePerYear, s.paymentPlan||'', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      body.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
       totalFee += fin.feePerYear;
       totalPaid += fin.paidAmount;
       totalBal += fin.balance;
       totalDebt += fin.periodDebtValue;
     });
-    body.push(['TOTAL','','',totalFee,'',totalPaid,totalBal,'',totalDebt]);
+    body.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
     doc.setFontSize(14);
     doc.text('SoMAp Finance Report', 14, 14);
     doc.autoTable({ head: headers, body, startY: 20, styles: { fontSize: 8 } });
     doc.save(`finance_report_${Date.now()}.pdf`);
   }
-  // ====================== EXPORTS (CURRENT PERIOD DEBT LIST) ======================
   function _gatherDebtNow() {
     const rows = [];
     let totalDebt = 0;
@@ -693,17 +651,17 @@
       if (filterClass && s.classLevel !== filterClass) return;
       const fin = computeStudentFinancials(s);
       if (fin.periodDebtValue > 0) {
-        const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
-        rows.push([s.admissionNumber||'', fullName, s.classLevel||'', s.paymentPlan||'', fin.periodDebtLabel, fin.periodDebtValue]);
+        const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+        rows.push([s.admissionNumber || '', fullName, s.classLevel || '', s.paymentPlan || '', fin.periodDebtLabel, fin.periodDebtValue]);
         totalDebt += fin.periodDebtValue;
       }
     });
     return { rows, totalDebt };
   }
   function downloadCSV_DebtNow() {
-    const header = ['Admission No','Full Name','Class','Plan','Debt till …','Debt Amount'];
+    const header = ['Admission No', 'Full Name', 'Class', 'Plan', 'Debt till …', 'Debt Amount'];
     const { rows, totalDebt } = _gatherDebtNow();
-    const data = [header, ...rows, ['TOTAL','','','','', totalDebt]];
+    const data = [header, ...rows, ['TOTAL', '', '', '', '', totalDebt]];
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Debt Now');
@@ -712,23 +670,22 @@
   function downloadPDF_DebtNow() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape' });
-    const header = [['Admission No','Full Name','Class','Plan','Debt till …','Debt Amount']];
+    const header = [['Admission No', 'Full Name', 'Class', 'Plan', 'Debt till …', 'Debt Amount']];
     const { rows, totalDebt } = _gatherDebtNow();
-    const body = [...rows, ['TOTAL','','','','', totalDebt]];
+    const body = [...rows, ['TOTAL', '', '', '', '', totalDebt]];
     doc.setFontSize(14);
     doc.text('Debt List (Current Period)', 14, 14);
-    doc.autoTable({ head: header, body, startY: 20, styles: {fontSize:8} });
+    doc.autoTable({ head: header, body, startY: 20, styles: { fontSize: 8 } });
     doc.save(`debt_now_${Date.now()}.pdf`);
   }
-  // ====================== EXPORTS (BREAKDOWN) ======================
   function _gatherBreakdown() {
     const sheets = [];
     const filterClass = classFilter.value;
     Object.entries(cachedStudents).forEach(([id, s]) => {
       if (filterClass && s.classLevel !== filterClass) return;
       const fin = computeStudentFinancials(s);
-      const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
-      const rows = [['Period','Expected','Allocated Paid','Remaining','Status','Window']];
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      const rows = [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']];
       let totalExp = 0, totalPaid = 0;
       fin.scheduleItems.forEach(it => {
         const need = it.amount;
@@ -740,7 +697,7 @@
       });
       const totalRem = Math.max(0, totalExp - totalPaid);
       rows.push(['TOTAL', totalExp, totalPaid, totalRem, '', '']);
-      sheets.push({ title: `${fullName} (${s.admissionNumber||''})`, rows });
+      sheets.push({ title: `${fullName} (${s.admissionNumber || ''})`, rows });
     });
     return sheets;
   }
@@ -750,7 +707,7 @@
     if (!sheets.length) return alert('No students to export.');
     sheets.forEach(sh => {
       const ws = XLSX.utils.aoa_to_sheet(sh.rows);
-      XLSX.utils.book_append_sheet(wb, ws, sh.title.slice(0,31));
+      XLSX.utils.book_append_sheet(wb, ws, sh.title.slice(0, 31));
     });
     XLSX.writeFile(wb, `breakdowns_${Date.now()}.xlsx`);
   }
@@ -763,11 +720,10 @@
       if (idx > 0) doc.addPage();
       doc.setFontSize(14);
       doc.text(`Installment Breakdown — ${sh.title}`, 14, 14);
-      doc.autoTable({ head: [['Period','Expected','Allocated Paid','Remaining','Status','Window']], body: sh.rows.slice(1), startY: 20, styles: {fontSize:8} });
+      doc.autoTable({ head: [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']], body: sh.rows.slice(1), startY: 20, styles: { fontSize: 8 } });
     });
     doc.save(`breakdowns_${Date.now()}.pdf`);
   }
-  // ====================== EXPENSES (kept) ======================
   const expenseForm = document.getElementById('expenseForm');
   const expenseTableBody = document.querySelector('#expenseTable tbody');
   async function loadExpenses() {
@@ -788,7 +744,7 @@
         expenseTableBody.appendChild(tr);
       });
       document.getElementById('totalExpenses').textContent = fmt(total);
-      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g, '')) || 0;
+      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g, '') || 0);
       document.getElementById('netBalance').textContent = fmt(collected - total);
     } catch (err) {
       console.error('Error loading expenses:', err);
@@ -809,7 +765,6 @@
       alert('Error saving expense');
     }
   });
-  // ====================== EVENTS & INIT ======================
   closePaymentModal.addEventListener('click', closePaymentModalFn);
   cancelPayment.addEventListener('click', closePaymentModalFn);
   closeDetailsModal.addEventListener('click', closeDetailsModalFn);
@@ -831,7 +786,6 @@
   });
   classFilter.addEventListener('change', renderTable);
   document.addEventListener('DOMContentLoaded', () => { loadStudents(); loadExpenses(); });
-  // Expense downloads (kept from your code)
   document.getElementById("downloadExpenseCsv").addEventListener("click", () => {
     const rows = [["Category", "Description", "Amount", "Date"]];
     document.querySelectorAll("#expenseTable tbody tr").forEach(tr => {
@@ -859,7 +813,7 @@
     });
     doc.save("expenses_report.pdf");
   });
-})(); // end IIFE
+})();
 </script>
 </body>
 </html>

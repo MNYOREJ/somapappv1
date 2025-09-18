@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="../firebase.js"></script> <!-- path to root firebase.js -->
+  <title>Installment Breakdown</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+  <style>
+    .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
+    .status-paid { background:#dcfce7; color:#166534; }
+    .status-partial { background:#fef9c3; color:#854d0e; }
+    .status-overdue { background:#fee2e2; color:#991b1b; }
+    .table-header { background: #eef2ff; color: #1f2937; }
+  </style>
+</head>
+<body>
+  <div id="breakdownContent" class="text-sm"></div>
+  <script>
+    const db = window.db;
+    // Utilities (duplicated from finance.html for independence)
+    function fmt(n) {
+      n = Number(n) || 0;
+      return n.toLocaleString();
+    }
+    function clamp(n){ return Math.max(0, Math.round(Number(n)||0)); }
+    function todayYMD() {
+      const d = new Date();
+      return { y: d.getFullYear(), m: d.getMonth()+1, d: d.getDate() };
+    }
+    function dateFromYMD(y,m,d){ return new Date(y, m-1, d).getTime(); }
+    function isPast(ts){ return Date.now() > ts; }
+    function apportion(total, weights) {
+      if (!weights.length) return [];
+      const sumW = weights.reduce((a,b)=>a + b, 0);
+      let amounts = weights.map(w => Math.floor((w * total) / sumW));
+      let sumA = amounts.reduce((a,b)=>a + b, 0);
+      let rem = total - sumA;
+      if (rem > 0) {
+        const sortedIdx = [...weights.keys()].sort((a,b) => weights[b] - weights[a]);
+        for (let i = 0; i < rem; i++) {
+          amounts[sortedIdx[i % sortedIdx.length]]++;
+        }
+      }
+      return amounts;
+    }
+    // Configs (duplicated)
+    const installmentConfigs = {
+      lower: {
+        type: '6',
+        weights: [44, 13, 12, 22, 22, 16],
+        labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+        windows: [
+          {from: [12,1], to: [1,10]},
+          {from: [3,1], to: [3,15]},
+          {from: [4,1], to: [4,15]},
+          {from: [5,1], to: [5,15]},
+          {from: [7,1], to: [7,15]},
+          {from: [9,1], to: [9,15]},
+        ]
+      },
+      class4_7: {
+        type: '4',
+        weights: [27, 20, 20, 15],
+        labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4'],
+        windows: [
+          {from: [12,1], to: [1,10]},
+          {from: [3,1], to: [3,15]},
+          {from: [4,1], to: [4,15]},
+          {from: [5,1], to: [5,15]},
+        ]
+      },
+      class5: {
+        type: '6',
+        weights: [44, 23, 22, 32, 26, 17],
+        labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+        windows: [
+          {from: [12,1], to: [1,10]},
+          {from: [3,1], to: [3,15]},
+          {from: [4,1], to: [4,15]},
+          {from: [5,1], to: [5,15]},
+          {from: [7,1], to: [7,15]},
+          {from: [9,1], to: [9,15]},
+        ]
+      },
+      class6: {
+        type: '6',
+        weights: [236, 115, 110, 160, 160, 100],
+        labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+        windows: [
+          {from: [12,1], to: [1,10]},
+          {from: [3,1], to: [3,15]},
+          {from: [4,1], to: [4,15]},
+          {from: [5,1], to: [5,15]},
+          {from: [7,1], to: [7,15]},
+          {from: [9,1], to: [9,15]},
+        ]
+      },
+      monthly: {
+        type: 'monthly',
+        weights: [2, 1, 1, 1, 1, 1, 2, 1, 1, 1],
+        labels: ['Jan (2 months)', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul (2 months)', 'Aug', 'Sep', 'Oct'],
+        windows: [
+          {from: [1,1], to: [1,31]},
+          {from: [2,1], to: [2,28]},
+          {from: [3,1], to: [3,31]},
+          {from: [4,1], to: [4,30]},
+          {from: [5,1], to: [5,31]},
+          {from: [6,1], to: [6,30]},
+          {from: [7,1], to: [7,31]},
+          {from: [8,1], to: [8,31]},
+          {from: [9,1], to: [9,30]},
+          {from: [10,1], to: [10,31]},
+        ]
+      },
+      '2inst': {
+        type: '2',
+        discount: 0.96,
+        weights: [1, 1],
+        labels: ['1st Half (48%)', '2nd Half (48%)'],
+        windows: [
+          {from: [1,1], to: [1,10]},
+          {from: [7,1], to: [7,5]},
+        ]
+      },
+      full: {
+        type: 'full',
+        discount: 0.95,
+        weights: [1],
+        labels: ['Full Year (5% off)'],
+        windows: [
+          {from: [1,1], to: [1,10]},
+        ]
+      }
+    };
+    // Get config (duplicated)
+    function getConfig(student) {
+      const plan = (student.paymentPlan || '').toLowerCase();
+      const c = (student.classLevel || '').toLowerCase();
+      if (plan.includes('monthly')) return installmentConfigs.monthly;
+      if (plan.includes('2')) return installmentConfigs['2inst'];
+      if (plan.includes('full')) return installmentConfigs.full;
+      if (plan.includes('4') || (plan.includes('inst') && (c === 'class 4' || c === 'class 7'))) return installmentConfigs.class4_7;
+      if (plan.includes('inst')) {
+        if (c === 'class 1' || c === 'class 2' || c === 'class 3') return installmentConfigs.lower;
+        if (c === 'class 5') return installmentConfigs.class5;
+        if (c === 'class 6') return installmentConfigs.class6;
+      }
+      return installmentConfigs.full;
+    }
+    // buildSchedule (duplicated)
+    function buildSchedule(student) {
+      const config = getConfig(student);
+      const { y } = todayYMD();
+      let feeBase = Number(student.feePerYear) || 0;
+      const discount = config.discount || 1;
+      feeBase = Math.round(feeBase * discount);
+      const weights = config.weights;
+      const amounts = apportion(feeBase, weights);
+      const sc = [];
+      config.labels.forEach((label, i) => {
+        let fromY = y, toY = y;
+        const fromM = config.windows[i].from[0], fromD = config.windows[i].from[1];
+        const toM = config.windows[i].to[0], toD = config.windows[i].to[1];
+        if (fromM === 12) fromY = y - 1;
+        if (toM === 12) toY = y - 1;
+        const fromTS = dateFromYMD(fromY, fromM, fromD);
+        const toTS = dateFromYMD(toY, toM, toD);
+        sc.push({ key: `inst${i+1}`, label, fromTS, toTS, amount: amounts[i] });
+      });
+      const now = Date.now();
+      let lastDueIndex = -1;
+      let periodLabel = '—';
+      let expectedToDate = 0;
+      sc.forEach((it, idx) => {
+        if (it.toTS < now) { lastDueIndex = idx; expectedToDate += it.amount; }
+      });
+      if (lastDueIndex >= 0) periodLabel = sc[lastDueIndex].label;
+      sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
+      return { items: sc, periodLabelNow: periodLabel, expectedToDate };
+    }
+    // allocatePayments (duplicated)
+    function allocatePayments(student, schedule) {
+      const payList = [];
+      if (student.payments) {
+        Object.values(student.payments).forEach(p => payList.push({ amount: clamp(p.amount), ts: Number(p.timestamp)||0 }));
+      }
+      payList.sort((a,b)=>a.ts - b.ts);
+      let pot = payList.reduce((s,p)=>s + p.amount, 0);
+      const totalPaid = pot;
+      let prevDebt = clamp(student.previousDebt || student.debt);
+      let toPrev = Math.min(prevDebt, pot);
+      prevDebt -= toPrev;
+      pot -= toPrev;
+      for (const it of schedule.items) {
+        const need = Math.max(0, it.amount - it.paidAllocated);
+        if (need <= 0) continue;
+        if (pot <= 0) break;
+        const use = Math.min(need, pot);
+        it.paidAllocated += use;
+        pot -= use;
+      }
+      const credit = Math.max(0, pot);
+      const now = Date.now();
+      for (const it of schedule.items) {
+        const a = it.paidAllocated;
+        const need = it.amount;
+        if (a >= need) {
+          it.status = 'Cleared';
+        } else {
+          if (isPast(it.toTS)) {
+            it.status = a > 0 ? 'Partially Paid (Overdue)' : 'Overdue';
+          } else {
+            it.status = a > 0 ? 'Partially Paid' : 'Pending';
+          }
+        }
+      }
+      const expectedToDate = schedule.items.filter(it => it.toTS < now).reduce((s,it)=>s + it.amount, 0);
+      const paidConsumed = totalPaid - credit;
+      const debtTillNow = Math.max(0, expectedToDate - paidConsumed);
+      return { scheduleItems: schedule.items, prevDebtAfter: prevDebt, credit, totalPaid, debtTillNow };
+    }
+    // computeStudentFinancials (duplicated)
+    function computeStudentFinancials(student) {
+      const feePerYear = Number(student.feePerYear) || 0;
+      const previousDebt = clamp(student.previousDebt || student.debt);
+      const schedule = buildSchedule(student);
+      const alloc = allocatePayments(student, schedule);
+      const paidAfterPrev = Math.max(0, alloc.totalPaid - (previousDebt - alloc.prevDebtAfter));
+      const yearBalance = Math.max(0, feePerYear - paidAfterPrev);
+      return {
+        feePerYear,
+        previousDebt,
+        paidAmount: alloc.totalPaid,
+        balance: yearBalance,
+        periodDebtLabel: schedule.periodLabelNow || '—',
+        periodDebtValue: alloc.debtTillNow,
+        credit: alloc.credit,
+        scheduleItems: alloc.scheduleItems
+      };
+    }
+    // Render
+    const urlParams = new URLSearchParams(window.location.search);
+    const studentId = urlParams.get('student');
+    if (studentId) {
+      db.ref(`students/${studentId}`).once('value').then(snap => {
+        const student = snap.val();
+        if (student) {
+          const fin = computeStudentFinancials(student);
+          let rows = '';
+          let totalsExp = 0, totalsPaid = 0;
+          fin.scheduleItems.forEach(it => {
+            const need = it.amount;
+            const got = it.paidAllocated;
+            const bal = Math.max(0, need - got);
+            let statusClass = 'status-partial';
+            if (it.status === 'Cleared') statusClass = 'status-paid';
+            if (it.status.includes('Overdue')) statusClass = 'status-overdue';
+            rows += `
+              <tr>
+                <td class="p-1 border">${it.label}</td>
+                <td class="p-1 border text-right">${fmt(need)}</td>
+                <td class="p-1 border text-right">${fmt(got)}</td>
+                <td class="p-1 border text-right">${fmt(bal)}</td>
+                <td class="p-1 border"><span class="status-pill ${statusClass}">${it.status}</span></td>
+                <td class="p-1 border text-xs">${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}</td>
+              </tr>
+            `;
+            totalsExp += need;
+            totalsPaid += got;
+          });
+          const rem = Math.max(0, totalsExp - totalsPaid);
+          const html = `
+            <div class="flex items-center justify-between mb-2">
+              <div class="font-semibold text-indigo-700">Installment Breakdown</div>
+              <div>
+                <span class="mr-3">Expected: <strong>${fmt(totalsExp)}</strong></span>
+                <span class="mr-3">Paid: <strong>${fmt(totalsPaid)}</strong></span>
+                <span>Remaining: <strong>${fmt(rem)}</strong></span>
+              </div>
+            </div>
+            <div class="overflow-auto">
+              <table class="min-w-full text-xs">
+                <thead>
+                  <tr class="table-header">
+                    <th class="p-1 border">Period</th>
+                    <th class="p-1 border">Expected</th>
+                    <th class="p-1 border">Allocated Paid</th>
+                    <th class="p-1 border">Remaining</th>
+                    <th class="p-1 border">Status</th>
+                    <th class="p-1 border">Window</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          `;
+          document.getElementById('breakdownContent').innerHTML = html;
+        } else {
+          document.getElementById('breakdownContent').innerHTML = '<p>Student not found.</p>';
+        }
+      }).catch(err => {
+        console.error(err);
+        document.getElementById('breakdownContent').innerHTML = '<p>Error loading data.</p>';
+      });
+    } else {
+      document.getElementById('breakdownContent').innerHTML = '<p>No student selected.</p>';
+    }
+  </script>
+</body>
+</html>

@@ -270,6 +270,8 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="../firebase.js"></script> <!-- Adjusted path to firebase.js in root -->
+  <!-- Cloudinary Upload Library -->
+  <script src="https://widget.cloudinary.com/v2.0/global/all.js"></script>
 
   <!-- Admissions Logic -->
   <script>
@@ -371,23 +373,35 @@
         return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
       }
 
-      async function uploadIfPresent(inputId, folder, newKey) {
-        if (!storage) return null;
-        const el = document.getElementById(inputId);
-        if (!el || !el.files || el.files.length === 0) return null;
+     async function uploadIfPresent(inputId, folder, newKey) {
+  const el = document.getElementById(inputId);
+  if (!el || !el.files || el.files.length === 0) return null;
 
-        try {
-          const file = el.files[0];
-          const path = `students/${newKey}/${folder}/${Date.now()}_${file.name}`;
-          const sref = storage.ref(path);
-          await sref.put(file);
-          const url = await sref.getDownloadURL();
-          return url;
-        } catch (err) {
-          console.warn(`[Storage] Skipping ${inputId} upload:`, err);
-          return null;
-        }
-      }
+  try {
+    const file = el.files[0];
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", "somap_unsigned"); // your preset
+    formData.append("folder", "studentDocs/" + newKey + "/" + folder);
+
+    const res = await fetch("https://api.cloudinary.com/v1_1/dg7vnrkgd/auto/upload", {
+      method: "POST",
+      body: formData
+    });
+    const data = await res.json();
+
+    if (data.secure_url) {
+      console.log(`Uploaded ${inputId} to Cloudinary:`, data.secure_url);
+      return data.secure_url; // save link to Firebase
+    } else {
+      console.error("Cloudinary upload failed:", data);
+      return null;
+    }
+  } catch (err) {
+    console.error(`Upload error for ${inputId}:`, err);
+    return null;
+  }
+}
 
       // ---- Registration submit ----
       if (form) {
@@ -451,34 +465,30 @@
             }
 
             const newRef = db.ref('students').push();
-            const newKey = newRef.key;
+      const newKey = newRef.key;
 
-            await newRef.set({
-              createdAt: firebase.database.ServerValue.TIMESTAMP,
-              ...studentData
-            });
+      // 🔽🔽 INSERT CLOUDINARY UPLOADS HERE 🔽🔽
+      studentData.passportPhotoUrl   = await uploadIfPresent("passportPhoto", "passport", newKey);
+      studentData.birthCertUrl       = await uploadIfPresent("birthCertUpload", "birthCert", newKey);
+      studentData.reportCardUrl      = await uploadIfPresent("reportCardUpload", "reportCard", newKey);
+      studentData.joiningLetterUrl   = await uploadIfPresent("joiningLetterUpload", "joiningLetter", newKey);
+      studentData.medicalDocsUrl     = await uploadIfPresent("medicalDocsUpload", "medicalDocs", newKey);
+      // 🔼🔼 END OF CLOUDINARY UPLOADS 🔼🔼
 
-            const urls = {};
-            urls.passportPhotoURL = await uploadIfPresent('passportPhoto', 'passport', newKey);
-            urls.birthCertURL = await uploadIfPresent('birthCertUpload', 'birth-cert', newKey);
-            urls.reportCardURL = await uploadIfPresent('reportCardUpload', 'report-card', newKey);
-            urls.joiningLetterURL = await uploadIfPresent('joiningLetterUpload', 'joining-letter', newKey);
-            urls.medicalDocsURL = await uploadIfPresent('medicalDocsUpload', 'medical-docs', newKey);
+      await newRef.set({
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        ...studentData
+      });
 
-            const clean = Object.fromEntries(Object.entries(urls).filter(([,v]) => !!v));
-            if (Object.keys(clean).length) {
-              await newRef.update(clean);
-            }
-            alert('✅ Student registered successfully!');
-            closeRegistrationModal();
-          } catch (err) {
-            console.error('Registration error:', err);
-            alert('❌ Error registering student: ' + (err.message || err));
-            if (registerBtn) registerBtn.disabled = false;
-          }
-        });
-      }
-
+      alert('✅ Student registered successfully!');
+      closeRegistrationModal();
+    } catch (err) {
+      console.error('Registration error:', err);
+      alert('❌ Error registering student: ' + (err.message || err));
+      if (registerBtn) registerBtn.disabled = false;
+    }
+  });
+}
       // ---- Live cache + rendering for search ----
       let cachedStudents = [];
 

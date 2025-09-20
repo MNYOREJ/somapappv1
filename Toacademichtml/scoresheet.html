@@ -1,28 +1,18 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>SoMAp — Scoresheet</title>
-
-  <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- jsPDF + autotable -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
-
-  <!-- FileSaver + SheetJS -->
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-  <!-- Firebase compat (v9 compat libs) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-
-  <!-- Your firebase.js must be alongside this file -->
   <script src="../firebase.js"></script>
-
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
     .scroll-shadow { box-shadow: inset 0 10px 8px -10px rgba(2,6,23,0.12); }
@@ -30,14 +20,12 @@
   </style>
 </head>
 <body class="bg-gray-50 text-slate-800">
-  <!-- Scoresheet -->
   <div class="bg-white rounded-2xl shadow overflow-hidden">
     <div class="px-4 py-3 border-b flex items-center justify-between">
       <div>
         <h2 class="text-base font-semibold">Scoresheet</h2>
         <p class="text-xs text-slate-500">Enter marks per subject • Auto averages • Positions • Grades</p>
       </div>
-
       <div class="flex items-center gap-3">
         <label class="text-xs text-slate-500 flex items-center gap-2">
           Max/100
@@ -52,7 +40,6 @@
         <button id="btnPrint" class="px-3 py-2 bg-white border rounded-lg text-sm">Print</button>
       </div>
     </div>
-
     <div class="overflow-auto scroll-shadow" style="max-height:60vh">
       <table id="scoresTable" class="w-full min-w-table text-sm">
         <thead class="sticky-th">
@@ -63,7 +50,6 @@
             <th class="p-2 border">Fee Due</th>
             <th class="p-2 border">Paid</th>
             <th class="p-2 border">Balance</th>
-            <!-- SUBJECT HEADERS INJECTED HERE -->
             <th class="p-2 border">Total</th>
             <th class="p-2 border">Max</th>
             <th class="p-2 border">% Avg</th>
@@ -77,7 +63,6 @@
         <tbody id="scoresBody"></tbody>
       </table>
     </div>
-
     <div class="px-4 py-3 border-t flex items-center justify-between">
       <div class="text-xs text-slate-500">
         <span id="lblCount">0</span> students • <span id="lblSubjects">0</span> subjects
@@ -88,22 +73,17 @@
       </div>
     </div>
   </div>
-
-  <!-- Templates -->
   <template id="tplSubjectHeader">
     <th class="p-2 border subject-col"></th>
     <th class="p-2 border max-col">Max</th>
     <th class="p-2 border pos-col">Pstn</th>
   </template>
-
   <template id="tplSubjectCell">
     <td class="p-1.5 border"><input type="number" min="0" step="0.01" class="w-20 px-2 py-1 border rounded score-input" /></td>
     <td class="p-1.5 border"><input type="number" min="1" class="w-16 px-2 py-1 border rounded max-input" value="100" /></td>
     <td class="p-1.5 border text-center"><span class="inline-block w-10 text-center pstn-cell">–</span></td>
   </template>
-
   <script>
-  /* ---------- CONFIG ---------- */
   const SUBJECTS_BY_CLASS = {
     'Baby': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
     'Middle': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
@@ -116,11 +96,9 @@
     'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
     'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
   };
-
   const EXAM_KEYS = {
     'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
   };
-
   function letterGrade(pct) {
     const p = Number(pct);
     if (p >= 80.5) return 'A';
@@ -129,18 +107,13 @@
     if (p >= 20.5) return 'D';
     return 'F';
   }
-
-  /* ---------- STATE ---------- */
   const state = {
     students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
     rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:''
   };
-
-  /* ---------- ELEMENTS ---------- */
   const scoresBody = document.getElementById('scoresBody');
   const lblCount = document.getElementById('lblCount');
   const lblSubjects = document.getElementById('lblSubjects');
-
   const btnRecalc = document.getElementById('btnRecalc');
   const btnSaveAll = document.getElementById('btnSaveAll');
   const btnExportCSV = document.getElementById('btnExportCSV');
@@ -151,8 +124,6 @@
   const btnGenerateReports = document.getElementById('btnGenerateReports');
   const btnEmailReports = document.getElementById('btnEmailReports');
   const globalMaxInput = document.getElementById('globalMaxInput');
-
-  // wire controls
   btnRecalc.addEventListener('click', recomputeAll);
   btnSaveAll.addEventListener('click', saveAllScores);
   btnExportCSV.addEventListener('click', exportCSV);
@@ -162,8 +133,6 @@
   btnSetAllMax.addEventListener('click', ()=>{ const v = Number(globalMaxInput.value||100); scoresBody.querySelectorAll('input.max-input').forEach(i=>i.value=v); recomputeAll(); });
   btnGenerateReports.addEventListener('click', bulkGenerateReportCards);
   btnEmailReports.addEventListener('click', ()=>alert('Integrate your SMS/email gateway here.'));
-
-  /* ---------- Firebase DB helper ---------- */
   function getDB(){
     if(window && window.db) return window.db;
     if(!window.firebase) {
@@ -184,8 +153,6 @@
     }
     return firebase.database();
   }
-
-  /* ---------- Robust student loader ---------- */
   async function fetchStudents(className, stream){
     const db = getDB();
     if(!db) return [];
@@ -230,7 +197,6 @@
     }
     return [];
   }
-
   function normalizeStudentRecord(admKey, s){
     const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
     const sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
@@ -243,8 +209,6 @@
     const balance = Number(s.balance || Math.max(0, feeDue - feePaid) || 0);
     return { adm: admKey, name, class: sClass, stream: sStream, feeDue, feePaid, balance, meta: s };
   }
-
-  /* ---------- Attendance + fees + scores fetchers ---------- */
   async function fetchAttendance(year, month, className){
     const db = getDB();
     if(!db) return {};
@@ -262,7 +226,6 @@
       return out;
     }catch(e){ console.warn('fetchAttendance', e.message); return {}; }
   }
-
   async function fetchFees(year, className){
     const db = getDB();
     if(!db) return {};
@@ -282,7 +245,6 @@
       return out;
     }catch(e){ console.warn('fetchFees', e.message); return {}; }
   }
-
   async function fetchScores({year,className,examKey,month}){
     const db = getDB();
     if(!db) return {};
@@ -304,8 +266,6 @@
       return out;
     }catch(e){ console.warn('fetchScores', e.message); return {}; }
   }
-
-  /* ---------- Save ---------- */
   async function saveAllScores(){
     const db = getDB();
     if(!db){ alert('Firebase not initialized'); return; }
@@ -323,11 +283,9 @@
       });
     });
     await baseRef.set(payload);
-    // persist summary
     await persistComputedSummary().catch(()=>{});
     alert('Scores saved.');
   }
-
   async function persistComputedSummary(){
     const db = getDB();
     if(!db) return;
@@ -344,7 +302,7 @@
     });
     const list = Object.values(state.rowsByAdm).map(r=>({ name: r.meta.name, adm: r.meta.adm, avg: r._avgPct || 0 })).sort((a,b)=> b.avg - a.avg);
     summary.top3 = list.slice(0,3); summary.bottom3 = list.slice(-3);
-    let sumP=0,sumA=0,sumD=0, feeReq=0,feePaid=0,feeBal=0;
+    let sumP=0,sumA=0, sumD=0, feeReq=0,feePaid=0,feeBal=0;
     Object.keys(state.rowsByAdm).forEach(adm=>{
       const r = state.rowsByAdm[adm];
       sumP += Number(r.tdPresent.textContent||0); sumA += Number(r.tdAbsent.textContent||0); sumD += (sumP + sumA);
@@ -355,16 +313,12 @@
     summary.fees = { required: feeReq, paid: feePaid, balance: feeBal };
     await db.ref(`/summaries/${state.year}/${state.className}/${state.examKey}/${state.month}`).set(summary);
   }
-
-  /* ---------- Build table ---------- */
   function buildTable(){
     const scoresTable = document.getElementById('scoresTable');
     const theadRow = scoresTable.querySelector('thead tr');
-
     while(theadRow.children.length > 6 && (theadRow.children[6].textContent.trim() !== 'Total')){
       theadRow.removeChild(theadRow.children[6]);
     }
-
     const tplHeader = document.getElementById('tplSubjectHeader');
     let insertIndex = Array.from(theadRow.children).findIndex(th => th.textContent.trim() === 'Total');
     if(insertIndex < 0) insertIndex = theadRow.children.length;
@@ -377,27 +331,21 @@
       theadRow.insertBefore(ths[2], theadRow.children[insertIndex+2]);
       insertIndex += 3;
     });
-
     scoresBody.innerHTML = '';
     state.rowsByAdm = {};
-
     const tplCell = document.getElementById('tplSubjectCell');
-
     state.students.forEach((s, idx)=>{
       const tr = document.createElement('tr');
       tr.className = idx % 2 ? 'bg-white' : 'bg-slate-50';
-
       tr.appendChild(Object.assign(document.createElement('td'), {className:'p-2 border text-center', textContent: idx+1}));
       tr.appendChild(Object.assign(document.createElement('td'), {className:'p-2 border text-center', textContent: s.adm}));
       const tdName = document.createElement('td'); tdName.className='p-2 border';
       tdName.innerHTML = `<div class="font-medium">${escapeHtml(s.name)}</div><div class="text-xs text-slate-500">${escapeHtml(s.class)} ${s.stream? '('+escapeHtml(s.stream)+')':''}</div>`;
       tr.appendChild(tdName);
-
       const feeObj = state.fees[s.adm] || { required: s.feeDue || 0, paid: s.feePaid || 0, balance: s.balance || 0 };
       tr.appendChild(Object.assign(document.createElement('td'), {className:'p-2 border text-center', textContent: money(feeObj.required || 0)}));
       tr.appendChild(Object.assign(document.createElement('td'), {className:'p-2 border text-center', textContent: money(feeObj.paid || 0)}));
       tr.appendChild(Object.assign(document.createElement('td'), {className:'p-2 border text-center', textContent: money(feeObj.balance || 0)}));
-
       const subjectCells = {};
       state.subjectList.forEach(subject=>{
         const frag = tplCell.content.cloneNode(true);
@@ -405,55 +353,42 @@
         const scoreInp = tds[0].querySelector('input.score-input');
         const maxInp = tds[1].querySelector('input.max-input');
         const pstnSpan = tds[2].querySelector('.pstn-cell');
-
         const sc = (state.scores[s.adm]||{})[subject] || {};
         scoreInp.value = sc.score ?? '';
         maxInp.value = sc.max ?? 100;
-
         scoreInp.addEventListener('input', recomputeAll);
         maxInp.addEventListener('input', recomputeAll);
-
         tr.appendChild(tds[0]); tr.appendChild(tds[1]); tr.appendChild(tds[2]);
-
         subjectCells[subject] = { scoreInput: scoreInp, maxInput: maxInp, pstnSpan };
       });
-
       const tdTotal = document.createElement('td'); tdTotal.className='p-2 border text-center font-medium'; tdTotal.textContent='0';
       const tdMax = document.createElement('td'); tdMax.className='p-2 border text-center'; tdMax.textContent='0';
       const tdAvg = document.createElement('td'); tdAvg.className='p-2 border text-center'; tdAvg.textContent='0';
       const tdPstn = document.createElement('td'); tdPstn.className='p-2 border text-center'; tdPstn.textContent='–';
       const tdGrade = document.createElement('td'); tdGrade.className='p-2 border text-center'; tdGrade.textContent='–';
       tr.appendChild(tdTotal); tr.appendChild(tdMax); tr.appendChild(tdAvg); tr.appendChild(tdPstn); tr.appendChild(tdGrade);
-
       const att = state.attendance[s.adm] || { present:0, absent:0 };
       const tdPresent = document.createElement('td'); tdPresent.className='p-2 border text-center'; tdPresent.textContent = att.present;
       const tdAbsent = document.createElement('td'); tdAbsent.className='p-2 border text-center'; tdAbsent.textContent = att.absent;
       tr.appendChild(tdPresent); tr.appendChild(tdAbsent);
-
       const tdComment = document.createElement('td'); tdComment.className='p-2 border';
       tdComment.innerHTML = '<textarea class="w-56 h-10 p-2 border rounded text-xs" placeholder="Teacher comment..."></textarea>';
       tr.appendChild(tdComment);
-
       scoresBody.appendChild(tr);
-
       state.rowsByAdm[s.adm] = {
         tr, subjectCells,
         tdTotal, tdMax, tdAvg, tdPstn, tdGrade,
-        tdPresent, tdAbsent,
         tdFeeDue: tr.children[3], tdPaid: tr.children[4], tdBal: tr.children[5],
+        tdPresent, tdAbsent,
         tdComment,
         meta: s
       };
     });
-
     lblCount.textContent = state.students.length;
     lblSubjects.textContent = state.subjectList.length;
   }
-
   function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
   function money(n){ n = Number(n||0); return new Intl.NumberFormat('en-KE',{style:'currency',currency:'KES',maximumFractionDigits:0}).format(n); }
-
-  /* ---------- Computation ---------- */
   function recomputeAll(){
     const perSubject = {};
     Object.keys(state.rowsByAdm).forEach(adm=>{
@@ -476,7 +411,6 @@
       row._avgPct = avgPct;
       row._sumScore = sumScore;
     });
-
     state.subjectList.forEach(subject=>{
       const list = (perSubject[subject] || []).slice().sort((a,b)=> b.pct - a.pct);
       let pos=0, last=null, idx=0;
@@ -487,7 +421,6 @@
         row.subjectCells[subject].pstnSpan.textContent = pos;
       });
     });
-
     const arr = Object.keys(state.rowsByAdm).map(adm=>{
       const r = state.rowsByAdm[adm];
       return { adm, avg: r._avgPct || 0, total: r._sumScore || 0, attendance: Number(r.tdPresent.textContent || 0) };
@@ -499,8 +432,6 @@
     });
     arr.forEach((r,i)=> state.rowsByAdm[r.adm].tdPstn.textContent = i+1);
   }
-
-  /* ---------- Exports ---------- */
   function gatherRowsForExport(){
     const rows = [];
     const header = ['Adm','Student', 'Fee Due','Paid','Balance', ...state.subjectList.flatMap(s => [`${s} Score`, `${s} Max`, `${s} Pstn`]), 'Total','Max','% Avg','Overall Pos','Grade','Present','Absent','Comment'];
@@ -519,14 +450,12 @@
     });
     return rows;
   }
-
   function exportCSV(){
     const rows = gatherRowsForExport();
     const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     saveAs(blob, `Scoresheet_${state.className}_${state.examKey}_${state.year}-${state.month}.csv`);
   }
-
   function exportXLSX(){
     const rows = gatherRowsForExport();
     const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -534,7 +463,6 @@
     XLSX.utils.book_append_sheet(wb, ws, 'Scoresheet');
     XLSX.writeFile(wb, `Scoresheet_${state.className}_${state.examKey}_${state.year}-${state.month}.xlsx`);
   }
-
   function exportPDF(){
     const rows = gatherRowsForExport();
     const { jsPDF } = window.jspdf;
@@ -544,8 +472,6 @@
     doc.autoTable({ startY:60, head:[rows[0]], body:rows.slice(1), styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[37,99,235]} });
     doc.save(title.replace(/[^A-Za-z0-9_\- ]/g,'_') + '.pdf');
   }
-
-  /* ---------- Report cards ---------- */
   async function bulkGenerateReportCards(){
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4' });
@@ -570,7 +496,6 @@
       doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
       const fee = state.fees[s.adm] || { required: s.feeDue||0, paid: s.feePaid||0, balance: s.balance||0 };
       doc.text(`Fees: Required ${fee.required} | Paid ${fee.paid} | Balance ${fee.balance}`, margin, 170);
-
       const tableHead = ['Subject','Score','Max','%','Pstn','Grade'];
       const tableBody = state.subjectList.map(sub=> {
         const c = r.subjectCells[sub];
@@ -589,8 +514,6 @@
     }
     doc.save(`ReportCards_${state.className}_${state.examKey}_${state.year}.pdf`);
   }
-
-  /* ---------- Load sequence ---------- */
   async function loadAll(){
     const params = new URLSearchParams(window.location.search);
     state.className = params.get('class') || '';
@@ -599,22 +522,16 @@
     state.year = params.get('year') || '';
     state.examKey = params.get('exam') || 'monthly';
     state.schoolBranch = params.get('branch') || '';
-
     if(!state.className || !state.year) { alert('Missing parameters'); return; }
-
     state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
-
     state.students = await fetchStudents(state.className, state.stream);
     state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
     state.fees = await fetchFees(state.year, state.className) || {};
     state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
-
     buildTable();
     recomputeAll();
   }
-
   window.addEventListener('load', loadAll);
-
   </script>
 </body>
 </html>

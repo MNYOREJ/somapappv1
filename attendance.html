@@ -112,7 +112,7 @@
   let monthKey = '';
   let attendanceCache = {};
   let monthAttendance = {};
-  let db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+  let db = null;
 
   // ---------- HELPERS ----------
   const el = id => document.getElementById(id);
@@ -135,159 +135,228 @@
     elm.className = 'status-pill ' + (val==='P' ? 'bg-green-100 text-green-800' : (val||'').includes('A') ? 'bg-red-100 text-red-700' : (val||'').includes('S') ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700');
   }
 
-  // ---------- FIREBASE: load students ----------
-  async function loadStudentsFromDb(){
-    if(!db) return [];
-    const tryPaths = ['students','Students','StudentsList','Students_List'];
-    for(const p of tryPaths){
-      try{
+  // ---------- FIREBASE: initialize and load students ----------
+  async function initializeFirebase() {
+    try {
+      if (!window.firebase || !window.firebase.apps.length) {
+        await new Promise((resolve) => {
+          const script = document.createElement('script');
+          script.src = 'firebase.js';
+          script.onload = resolve;
+          script.onerror = () => {
+            console.error('Failed to load firebase.js');
+            el('rtState').textContent = 'Failed to load firebase.js';
+            alert('Error: firebase.js not found. Please check the file path.');
+          };
+          document.head.appendChild(script);
+        });
+      }
+      db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+      if (!db) {
+        throw new Error('Firebase database not initialized');
+      }
+      el('rtState').textContent = 'Connected to Firebase';
+    } catch (e) {
+      console.error('Firebase initialization error:', e.message);
+      el('rtState').textContent = 'Firebase error: ' + e.message;
+      alert('Firebase initialization failed: ' + e.message + '. Please check firebase.js and database rules.');
+    }
+  }
+
+  async function loadStudentsFromDb() {
+    if (!db) return [];
+    const tryPaths = ['students', 'Students', 'StudentsList', 'Students_List'];
+    for (const p of tryPaths) {
+      try {
         const snap = await db.ref(p).get();
-        if(snap.exists()){
+        if (snap.exists()) {
           const data = snap.val();
-          return Object.keys(data).map(k=>{
+          return Object.keys(data).map(k => {
             const s = data[k] || {};
-            const name = [s.firstName,s.middleName,s.lastName].filter(Boolean).join(' ').trim() || s.name || (s.fullName||'');
+            const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || (s.fullName || '');
             const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || 0);
             const feePaid = Number(s.feesPaid || s.feePaid || s.paidAmount || 0);
             const balance = Number(s.balance || (feeDue - feePaid) || 0);
-            return { id:k, admissionNo: s.admissionNumber || s.admNo || s.admissionNo || '', name, class: s.class || s.classLevel || s.grade || 'Unknown', feeDue, feePaid, balance };
+            return { id: k, admissionNo: s.admissionNumber || s.admNo || s.admissionNo || '', name, class: s.class || s.classLevel || s.grade || 'Unknown', feeDue, feePaid, balance };
           });
         }
-      }catch(e){ console.warn('load path',p,e.message); }
+      } catch (e) {
+        console.warn('Failed to load path', p, ':', e.message);
+      }
     }
+    console.error('No students data found in any path');
     return [];
   }
 
   // ---------- Attendance CRUD ----------
-  async function loadMonthAttendance(cls, yymm){
+  async function loadMonthAttendance(cls, yymm) {
     monthAttendance = {};
-    if(!db || !cls) return;
-    try{
+    if (!db || !cls) return;
+    try {
       const snap = await db.ref(`attendance/${cls}/${yymm}`).get();
       const d = snap.exists() ? snap.val() : {};
-      Object.keys(d).forEach(dateKey=>{
-        const byStu = d[dateKey]||{};
-        Object.keys(byStu).forEach(stuId=>{
+      Object.keys(d).forEach(dateKey => {
+        const byStu = d[dateKey] || {};
+        Object.keys(byStu).forEach(stuId => {
           monthAttendance[stuId] = monthAttendance[stuId] || {};
           monthAttendance[stuId][dateKey] = byStu[stuId];
         });
       });
-    }catch(e){ console.warn(e); }
+    } catch (e) {
+      console.warn('Failed to load month attendance:', e.message);
+    }
   }
 
   // ---------- Analytics compute ----------
-  async function computeAnalytics(){
+  async function computeAnalytics() {
     const workdays = monthWorkingDays(currentDateStr);
     el('classDays').textContent = workdays;
     el('monthLabel').textContent = monthKey;
 
-    let totalPct=0, nWithData=0; let yellow=0;
-    const [y,m] = monthKey.split('-').map(Number);
+    let totalPct = 0, nWithData = 0;
+    let yellow = 0;
+    const [y, m] = monthKey.split('-').map(Number);
     const monthsToCheck = [];
-    for(let k=0;k<3;k++){
-      const dt = new Date(y, m-1-k, 1);
-      monthsToCheck.push(`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`);
+    for (let k = 0; k < 3; k++) {
+      const dt = new Date(y, m - 1 - k, 1);
+      monthsToCheck.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`);
     }
 
     const threeMonthAttendance = {};
-    for(const mon of monthsToCheck){
-      const snap = await db.ref(`attendance/${currentClass}/${mon}`).get();
-      const data = snap.exists() ? snap.val() : {};
-      Object.keys(data).forEach(dateKey=>{
-        const byStu = data[dateKey] || {};
-        Object.keys(byStu).forEach(sid=>{
-          threeMonthAttendance[sid] = threeMonthAttendance[sid] || {};
-          threeMonthAttendance[sid][dateKey] = byStu[sid];
+    for (const mon of monthsToCheck) {
+      try {
+        const snap = await db.ref(`attendance/${currentClass}/${mon}`).get();
+        const data = snap.exists() ? snap.val() : {};
+        Object.keys(data).forEach(dateKey => {
+          const byStu = data[dateKey] || {};
+          Object.keys(byStu).forEach(sid => {
+            threeMonthAttendance[sid] = threeMonthAttendance[sid] || {};
+            threeMonthAttendance[sid][dateKey] = byStu[sid];
+          });
         });
-      });
+      } catch (e) {
+        console.warn(`Failed to load attendance for ${mon}:`, e.message);
+      }
     }
 
-    filtered.forEach(s=>{
+    filtered.forEach(s => {
       const dates = monthAttendance[s.id] || {};
-      let present=0, absent=0;
-      Object.keys(dates).forEach(dk=>{
+      let present = 0, absent = 0;
+      Object.keys(dates).forEach(dk => {
         const rec = dates[dk];
-        if(rec && rec.daily==='P') present++;
-        if(rec && (rec.daily||'').includes('A')) absent++;
+        if (rec && rec.daily === 'P') present++;
+        if (rec && (rec.daily || '').includes('A')) absent++;
       });
-      const pct = workdays ? Math.round((present/workdays)*100) : 0;
-      if(workdays){ totalPct += pct; nWithData++; }
-      if(absent >= 10) yellow++;
+      const pct = workdays ? Math.round((present / workdays) * 100) : 0;
+      if (workdays) { totalPct += pct; nWithData++; }
+      if (absent >= 10) yellow++;
     });
 
-    el('classPctPresent').textContent = nWithData ? Math.round(totalPct/nWithData)+'%' : '—';
+    el('classPctPresent').textContent = nWithData ? Math.round(totalPct / nWithData) + '%' : '—';
     el('yellowCount').textContent = yellow;
   }
 
   // ---------- Archive load range ----------
-  async function loadRangeBetween(from, to, cls){
-    if(!db || !cls) return alert('Pick class and ensure connection');
-    const start = new Date(from + 'T00:00:00'); const end = new Date(to + 'T00:00:00');
+  async function loadRangeBetween(from, to, cls) {
+    if (!db || !cls) return alert('Pick class and ensure connection');
+    const start = new Date(from + 'T00:00:00');
+    const end = new Date(to + 'T00:00:00');
     const days = [];
-    for(let d = new Date(start); d<=end; d.setDate(d.getDate()+1)){
-      if(isWeekend(d) || isHoliday(d)) continue;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (isWeekend(d) || isHoliday(d)) continue;
       days.push(fmtDate(new Date(d)));
     }
     const results = {};
-    for(const day of days){
+    for (const day of days) {
       const mon = toMonthKey(day);
-      const snap = await db.ref(`attendance/${cls}/${mon}/${day}`).get();
-      const d = snap.exists() ? snap.val() : {};
-      let present=0, absent=0;
-      Object.keys(d||{}).forEach(k=>{
-        const rec = d[k];
-        if(rec && rec.daily==='P') present++; if(rec && (rec.daily||'').includes('A')) absent++;
-      });
-      results[day] = { present, absent };
+      try {
+        const snap = await db.ref(`attendance/${cls}/${mon}/${day}`).get();
+        const d = snap.exists() ? snap.val() : {};
+        let present = 0, absent = 0;
+        Object.keys(d || {}).forEach(k => {
+          const rec = d[k];
+          if (rec && rec.daily === 'P') present++;
+          if (rec && (rec.daily || '').includes('A')) absent++;
+        });
+        results[day] = { present, absent };
+      } catch (e) {
+        console.warn(`Failed to load attendance for ${day}:`, e.message);
+      }
     }
     let text = `Attendance summary for ${cls} from ${from} to ${to}:\n`;
-    Object.keys(results).forEach(k=> text += `${k}: P=${results[k].present} A=${results[k].absent}\n`);
+    Object.keys(results).forEach(k => text += `${k}: P=${results[k].present} A=${results[k].absent}\n`);
     alert(text);
   }
 
   // ---------- UI wiring ----------
-  function wireUI(){
-    el('btnRangeLoad').addEventListener('click', ()=> loadRangeBetween(el('fromDate').value, el('toDate').value, currentClass));
-    el('btnFullscreen').addEventListener('click', ()=>{
-      if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
-      else document.exitFullscreen().catch(()=>{});
+  function wireUI() {
+    el('btnRangeLoad').addEventListener('click', () => loadRangeBetween(el('fromDate').value, el('toDate').value, currentClass));
+    el('btnFullscreen').addEventListener('click', () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+      else document.exitFullscreen().catch(() => {});
     });
-    setInterval(check3pmAlert, 60*1000);
+    setInterval(check3pmAlert, 60 * 1000);
   }
 
   // ---------- 3PM alert ----------
-  function check3pmAlert(){
-    const now = new Date(); const cut = new Date(now); cut.setHours(SCHOOL_DAY_CUTOFF_HOUR,0,0,0);
+  function check3pmAlert() {
+    const now = new Date();
+    const cut = new Date(now);
+    cut.setHours(SCHOOL_DAY_CUTOFF_HOUR, 0, 0, 0);
     const box = el('todayAlert');
-    if(now > cut){
-      const need = filtered.some(s=> {
+    if (now > cut) {
+      const need = filtered.some(s => {
         const rec = attendanceCache[s.id] || {};
         return !(rec.am && rec.pm);
       });
-      if(need){ box.textContent = '⚠️ 3:00 PM: Attendance not fully marked for today'; box.classList.remove('hidden'); }
-      else { box.classList.add('hidden'); }
-    } else { box.classList.add('hidden'); }
+      if (need) {
+        box.textContent = '⚠️ 3:00 PM: Attendance not fully marked for today';
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+    } else {
+      box.classList.add('hidden');
+    }
   }
 
   // ---------- Utilities ----------
-  function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','"':'&#39;"}[m])); }
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+  }
 
   // ---------- Start ----------
-  async function init(){
+  async function init() {
     const now = new Date();
     currentDateStr = fmtDate(now);
     monthKey = toMonthKey(currentDateStr);
     el('fromDate').value = currentDateStr;
     el('toDate').value = currentDateStr;
 
-    if(!db){ el('rtState').textContent='firebase.js not loaded'; alert('firebase.js not loaded or window.db not set'); return; }
-    el('rtState').textContent='Loading students...';
-    students = await loadStudentsFromDb();
-    el('rtState').textContent='Ready';
+    await initializeFirebase();
+    if (!db) return;
+
+    el('rtState').textContent = 'Loading students...';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      students = await loadStudentsFromDb();
+      if (students.length) break;
+      console.warn(`Attempt ${attempt} failed to load students. Retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    if (!students.length) {
+      el('rtState').textContent = 'No students found';
+      alert('No students found in database. Please check Firebase data at /students.');
+      return;
+    }
+    el('rtState').textContent = 'Ready';
     wireUI();
-    if(students.length && !currentClass){
-      const classes = Array.from(new Set(students.map(s=>s.class))).sort();
-      if(classes.length===1){ currentClass = classes[0]; computeAnalytics(); }
+    if (students.length && !currentClass) {
+      const classes = Array.from(new Set(students.map(s => s.class))).sort();
+      if (classes.length === 1) {
+        currentClass = classes[0];
+        computeAnalytics();
+      }
     }
   }
 

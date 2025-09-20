@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SoMAp — Attendance</title>
+<title>SoMAp — Per-Student Attendance</title>
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
@@ -30,8 +30,8 @@
 <header class="bg-white border-b sticky top-0 z-30">
   <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
     <div class="flex items-center gap-4">
-      <a href="schoolerp.html" class="text-slate-700 hover:text-blue-600">← Back to ERP</a>
-      <h1 class="text-lg font-semibold">SoMAp — Attendance</h1>
+      <a href="../attendance.html" class="text-slate-700 hover:text-blue-600">← Back to Dashboard</a>
+      <h1 class="text-lg font-semibold">SoMAp — Per-Student Attendance</h1>
     </div>
     <div class="flex items-center gap-3">
       <button id="btnFullscreen" class="px-3 py-1 rounded-md border bg-slate-100">Enter Fullscreen</button>
@@ -42,50 +42,31 @@
 
 <main class="max-w-6xl mx-auto px-4 py-4 space-y-4">
 
-  <!-- Top Analytics -->
-  <section id="analytics" class="bg-white rounded-2xl p-4 shadow-sm border">
-    <div class="flex items-start justify-between gap-4">
+  <!-- Filters -->
+  <section class="bg-white rounded-2xl p-4 shadow-sm border">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
       <div>
-        <div class="text-sm text-slate-500">Analytics — <span id="monthLabel">—</span></div>
-        <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div class="p-3 rounded-xl border bg-[var(--muted,#fbfcfe)]">
-            <div class="text-sm text-slate-500">Class Days (excl. weekends & holidays)</div>
-            <div id="classDays" class="text-2xl font-bold">—</div>
-          </div>
-          <div class="p-3 rounded-xl border bg-[var(--muted,#fbfcfe)]">
-            <div class="text-sm text-slate-500">% Present (Class Avg)</div>
-            <div id="classPctPresent" class="text-2xl font-bold">—</div>
-          </div>
-          <div class="p-3 rounded-xl border bg-[var(--muted,#fbfcfe)]">
-            <div class="text-sm text-slate-500">Yellow Alerts (≥ 10 absent days/month)</div>
-            <div id="yellowCount" class="text-2xl font-bold">—</div>
-          </div>
-        </div>
+        <label class="text-sm font-medium">Class</label>
+        <select id="classSelect" class="w-full border rounded px-3 py-2"></select>
       </div>
-      <div class="w-64">
-        <div class="text-sm text-slate-500 mb-2">Archived query</div>
-        <div class="grid grid-cols-1 gap-2">
-          <input id="fromDate" type="date" class="px-3 py-2 border rounded" />
-          <input id="toDate" type="date" class="px-3 py-2 border rounded" />
-          <button id="btnRangeLoad" class="px-3 py-2 bg-indigo-600 text-white rounded">Load Range</button>
-        </div>
+      <div>
+        <label class="text-sm font-medium">Search / Show</label>
+        <input id="searchInput" type="text" placeholder="Type name or admission" class="w-full border rounded px-3 py-2"/>
       </div>
     </div>
   </section>
 
-  <!-- Navigation Links -->
+  <!-- Per-student analytics list -->
   <section class="bg-white rounded-2xl p-4 shadow-sm border">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <a href="Toattendancehtml/classattendance.html" class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-center">Class Attendance</a>
-      <a href="Toattendancehtml/perstudentattendance.html" class="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-center">Per-Student Attendance</a>
-    </div>
+    <h3 class="font-semibold mb-3">Per-student summary (Month)</h3>
+    <div id="perStudentStats" class="grid gap-3"></div>
   </section>
 
 </main>
 
 <footer class="bg-white border-t py-3 sticky bottom-0">
   <div class="max-w-6xl mx-auto px-4 text-sm text-slate-500 flex items-center gap-3">
-    <div>SoMAp Attendance · Mobile friendly</div>
+    <div>SoMAp Per-Student Attendance · Mobile friendly</div>
     <div id="todayAlert" class="ml-auto text-sm text-yellow-700 hidden"></div>
   </div>
 </footer>
@@ -94,7 +75,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-<script src="firebase.js"></script>
+<script src="../firebase.js"></script>
 
 <script>
 (async function(){
@@ -129,11 +110,6 @@
     }
     return count;
   }
-  function setStatusElem(elm, val){
-    if(!elm) return;
-    elm.textContent = val || '—';
-    elm.className = 'status-pill ' + (val==='P' ? 'bg-green-100 text-green-800' : (val||'').includes('A') ? 'bg-red-100 text-red-700' : (val||'').includes('S') ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700');
-  }
 
   // ---------- FIREBASE: load students ----------
   async function loadStudentsFromDb(){
@@ -166,7 +142,7 @@
       const snap = await db.ref(`attendance/${cls}/${yymm}`).get();
       const d = snap.exists() ? snap.val() : {};
       Object.keys(d).forEach(dateKey=>{
-        const byStu = d[dateKey]||{};
+        const byStu = d[dateKey] || {};
         Object.keys(byStu).forEach(stuId=>{
           monthAttendance[stuId] = monthAttendance[stuId] || {};
           monthAttendance[stuId][dateKey] = byStu[stuId];
@@ -175,33 +151,12 @@
     }catch(e){ console.warn(e); }
   }
 
-  // ---------- Analytics compute ----------
-  async function computeAnalytics(){
+  // ---------- Render UI ----------
+  function renderStudentStats(){
+    const q = (el('searchInput').value || '').toLowerCase();
+    filtered = students.filter(s => s.class === currentClass).filter(s => !q || s.name.toLowerCase().includes(q) || String(s.admissionNo || '').includes(q));
+    el('perStudentStats').innerHTML = '';
     const workdays = monthWorkingDays(currentDateStr);
-    el('classDays').textContent = workdays;
-    el('monthLabel').textContent = monthKey;
-
-    let totalPct=0, nWithData=0; let yellow=0;
-    const [y,m] = monthKey.split('-').map(Number);
-    const monthsToCheck = [];
-    for(let k=0;k<3;k++){
-      const dt = new Date(y, m-1-k, 1);
-      monthsToCheck.push(`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`);
-    }
-
-    const threeMonthAttendance = {};
-    for(const mon of monthsToCheck){
-      const snap = await db.ref(`attendance/${currentClass}/${mon}`).get();
-      const data = snap.exists() ? snap.val() : {};
-      Object.keys(data).forEach(dateKey=>{
-        const byStu = data[dateKey] || {};
-        Object.keys(byStu).forEach(sid=>{
-          threeMonthAttendance[sid] = threeMonthAttendance[sid] || {};
-          threeMonthAttendance[sid][dateKey] = byStu[sid];
-        });
-      });
-    }
-
     filtered.forEach(s=>{
       const dates = monthAttendance[s.id] || {};
       let present=0, absent=0;
@@ -211,43 +166,25 @@
         if(rec && (rec.daily||'').includes('A')) absent++;
       });
       const pct = workdays ? Math.round((present/workdays)*100) : 0;
-      if(workdays){ totalPct += pct; nWithData++; }
-      if(absent >= 10) yellow++;
+      const card = document.createElement('div');
+      card.className = 'p-3 rounded-xl border bg-white';
+      card.innerHTML = `<div class="flex items-center justify-between"><div><b>${escapeHtml(s.name)}</b></div><div class="text-sm text-slate-500">${s.admissionNo}</div></div>
+        <div class="text-sm mt-1">Present: <b>${present}</b> / ${workdays} · Absent: <b>${absent}</b> · ${pct}%</div>`;
+      el('perStudentStats').appendChild(card);
     });
-
-    el('classPctPresent').textContent = nWithData ? Math.round(totalPct/nWithData)+'%' : '—';
-    el('yellowCount').textContent = yellow;
-  }
-
-  // ---------- Archive load range ----------
-  async function loadRangeBetween(from, to, cls){
-    if(!db || !cls) return alert('Pick class and ensure connection');
-    const start = new Date(from + 'T00:00:00'); const end = new Date(to + 'T00:00:00');
-    const days = [];
-    for(let d = new Date(start); d<=end; d.setDate(d.getDate()+1)){
-      if(isWeekend(d) || isHoliday(d)) continue;
-      days.push(fmtDate(new Date(d)));
-    }
-    const results = {};
-    for(const day of days){
-      const mon = toMonthKey(day);
-      const snap = await db.ref(`attendance/${cls}/${mon}/${day}`).get();
-      const d = snap.exists() ? snap.val() : {};
-      let present=0, absent=0;
-      Object.keys(d||{}).forEach(k=>{
-        const rec = d[k];
-        if(rec && rec.daily==='P') present++; if(rec && (rec.daily||'').includes('A')) absent++;
-      });
-      results[day] = { present, absent };
-    }
-    let text = `Attendance summary for ${cls} from ${from} to ${to}:\n`;
-    Object.keys(results).forEach(k=> text += `${k}: P=${results[k].present} A=${results[k].absent}\n`);
-    alert(text);
   }
 
   // ---------- UI wiring ----------
   function wireUI(){
-    el('btnRangeLoad').addEventListener('click', ()=> loadRangeBetween(el('fromDate').value, el('toDate').value, currentClass));
+    el('classSelect').addEventListener('change', async (e)=>{
+      currentClass = e.target.value; if(!currentClass) return;
+      monthKey = toMonthKey(currentDateStr);
+      await loadMonthAttendance(currentClass, monthKey);
+      renderStudentStats();
+    });
+
+    el('searchInput').addEventListener('input', () => renderStudentStats());
+
     el('btnFullscreen').addEventListener('click', ()=>{
       if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
       else document.exitFullscreen().catch(()=>{});
@@ -277,18 +214,23 @@
     const now = new Date();
     currentDateStr = fmtDate(now);
     monthKey = toMonthKey(currentDateStr);
-    el('fromDate').value = currentDateStr;
-    el('toDate').value = currentDateStr;
 
     if(!db){ el('rtState').textContent='firebase.js not loaded'; alert('firebase.js not loaded or window.db not set'); return; }
     el('rtState').textContent='Loading students...';
     students = await loadStudentsFromDb();
+    populateClassSelect();
     el('rtState').textContent='Ready';
     wireUI();
     if(students.length && !currentClass){
       const classes = Array.from(new Set(students.map(s=>s.class))).sort();
-      if(classes.length===1){ currentClass = classes[0]; computeAnalytics(); }
+      if(classes.length===1){ el('classSelect').value = classes[0]; el('classSelect').dispatchEvent(new Event('change')); }
     }
+  }
+
+  function populateClassSelect(){
+    const classes = Array.from(new Set(students.map(s=>s.class))).filter(Boolean).sort();
+    const sel = el('classSelect');
+    sel.innerHTML = `<option value="">-- Select class --</option>` + classes.map(c=>`<option value="${c}">${c}</option>`).join('');
   }
 
   await init();

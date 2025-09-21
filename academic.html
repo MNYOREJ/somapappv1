@@ -66,7 +66,7 @@
 
       <div class="bg-white rounded-2xl p-4 shadow">
         <label class="text-xs text-slate-500">Class</label>
-        <select id="classSelect" class="mt-1 w-full border rounded px-2 py-2 text-sm" disabled></select>
+        <select id="classSelect" class="mt-1 w-full border rounded px-2 py-2 text-sm"></select>
       </div>
 
       <div class="bg-white rounded-2xl p-4 shadow">
@@ -185,7 +185,9 @@
       'Middle Class': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
       'Pre-Unit': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
       'Class 1 AB': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'],
+      'Class 1': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'], // Added for variants
       'Class 2 AB': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'],
+      'Class 2': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'], // Added for variants
       'Class 3': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
       'Class 4': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
       'Class 5': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
@@ -194,7 +196,11 @@
     };
 
     const EXAM_KEYS = {
-      'Monthly': 'monthly', 'Midterm 1': 'midterm1', 'End Term': 'endterm', 'Midterm 2': 'midterm2', 'Annual': 'annual'
+      'Monthly': 'monthly',
+      'Midterm 1': 'midterm1',
+      'End Term': 'endterm',
+      'Midterm 2': 'midterm2',
+      'Annual': 'annual'
     };
 
     function letterGrade(pct) {
@@ -299,7 +305,7 @@
       }
     }
 
-    /* ---------- Robust student loader ---------- */
+    /* ---------- Robust student loader (attendance style) ---------- */
     async function fetchStudents(className, stream) {
       const db = getDB();
       if (!db) return [];
@@ -326,13 +332,13 @@
                 }
               });
             }
+            const normalizedSelect = normalize(className);
+            const normalizedInputStream = normalize(stream);
             const filtered = arr.filter(x => {
-              const normalizedClass = String(x.class || '').toUpperCase().replace(/[\s-]/g, '');
-              const normalizedSelect = className.toUpperCase().replace(/[\s-]/g, '');
-              const classMatches = !className || normalizedClass.includes(normalizedSelect);
-              const normalizedStream = String(x.stream || '').toUpperCase().replace(/[\s-]/g, '');
-              const normalizedInputStream = stream.toUpperCase().replace(/[\s-]/g, '');
-              const streamMatches = !stream || normalizedStream.includes(normalizedInputStream);
+              const normalizedClass = normalize(x.class);
+              const normalizedStream = normalize(x.stream);
+              const classMatches = !className || normalizedClass.includes(normalizedSelect) || normalizedSelect.includes(normalizedClass);
+              const streamMatches = !stream || normalizedStream.includes(normalizedInputStream) || normalizedInputStream.includes(normalizedStream) || normalizedClass.includes(normalizedInputStream) || normalizedInputStream.includes(normalizedClass);
               return classMatches && streamMatches;
             });
             filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
@@ -345,17 +351,8 @@
       return [];
     }
 
-    function normalizeStudentRecord(admKey, s) {
-      const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
-      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
-      const sStream = s.stream || s.streamName || s.section || '';
-      const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
-      let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
-      if (s.payments && typeof s.payments === 'object') {
-        feePaid = Object.values(s.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-      }
-      const balance = Number(s.balance || Math.max(0, feeDue - feePaid) || 0);
-      return { adm: admKey, name, class: sClass, stream: sStream, feeDue, feePaid, balance, meta: s };
+    function normalize(text) {
+      return String(text || '').toUpperCase().replace(/[\s-]/g, '');
     }
 
     /* ---------- Attendance + fees + scores fetchers ---------- */
@@ -421,16 +418,6 @@
 
     /* ---------- Load sequence (main entry) ---------- */
     async function loadAll() {
-      if (!state.assignedClass) {
-        alert('No assigned class detected. Please contact the administrator.');
-        return;
-      }
-      if (classSelect.value !== state.assignedClass) {
-        alert('NOT YOUR CLASS BUDDY! You are restricted to ' + state.assignedClass);
-        classSelect.value = state.assignedClass;
-        return;
-      }
-
       state.className = classSelect.value;
       let inputStream = (streamInput.value || '').trim();
       state.month = monthSelect.value;
@@ -489,94 +476,7 @@
       });
     });
 
-    /* ---------- Computation: totals/averages/positions/grades ---------- */
-    function updateKPIs() {
-      const list = Object.values(state.students).map(s => ({
-        name: s.name,
-        avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, { score, max }) => sum + (score / max) * 100, 0) / state.subjectList.length : 0) || 0
-      }));
-      if (list.length === 0) {
-        ['kpiTopStudent', 'kpiTopScore', 'kpiBottomStudent', 'kpiBottomScore', 'kpiClassMax', 'kpiClassGrade', 'kpiPresent', 'kpiAbsent', 'kpiFeeRequired', 'kpiFeePaid', 'kpiFeeBalance'].forEach(id => document.getElementById(id).textContent = '–');
-        return;
-      }
-      const sorted = list.slice().sort((a, b) => b.avg - a.avg);
-      const top = sorted[0];
-      const bottom = sorted[sorted.length - 1];
-      kpiTopStudent.textContent = top.name || '–';
-      kpiTopScore.textContent = (top.avg || 0).toFixed(2) + '%';
-      kpiBottomStudent.textContent = bottom.name || '–';
-      kpiBottomScore.textContent = (bottom.avg || 0).toFixed(2) + '%';
-      kpiClassMax.textContent = (top.avg || 0).toFixed(2) + '%';
-      const classAvg = sorted.reduce((s, x) => s + (x.avg || 0), 0) / sorted.length;
-      kpiClassGrade.textContent = letterGrade(classAvg);
-
-      let sumPresent = 0, sumAbsent = 0, sumDays = 0;
-      state.students.forEach(s => {
-        const att = state.attendance[s.adm] || { present: 0, absent: 0, days: 0 };
-        sumPresent += att.present;
-        sumAbsent += att.absent;
-        sumDays += att.days || (att.present + att.absent);
-      });
-      const pctPresent = sumDays ? (sumPresent / sumDays) * 100 : 0;
-      const pctAbsent = sumDays ? (sumAbsent / sumDays) * 100 : 0;
-      kpiPresent.textContent = pctPresent.toFixed(1) + '%';
-      kpiAbsent.textContent = pctAbsent.toFixed(1) + '%';
-
-      let totalReq = 0, totalPaid = 0, totalBal = 0;
-      state.students.forEach(s => {
-        const fee = state.fees[s.adm] || { required: s.feeDue || 0, paid: s.feePaid || 0, balance: s.balance || 0 };
-        totalReq += fee.required || 0;
-        totalPaid += fee.paid || 0;
-        totalBal += fee.balance || 0;
-      });
-      kpiFeeRequired.textContent = money(totalReq);
-      kpiFeePaid.textContent = money(totalPaid);
-      kpiFeeBalance.textContent = money(totalBal);
-    }
-
-    /* ---------- Charts (bounded) ---------- */
-    function drawCharts() {
-      const MAX_LABELS = 50;
-      const subjects = state.subjectList || [];
-      const avgPerSubject = subjects.map(sub => {
-        let sum = 0, cnt = 0;
-        state.students.forEach(s => {
-          const sc = (state.scores[s.adm]?.[sub]?.score || 0);
-          const mx = Math.max(1, state.scores[s.adm]?.[sub]?.max || 100);
-          sum += (sc / mx) * 100;
-          cnt++;
-        });
-        return cnt ? sum / cnt : 0;
-      });
-
-      const topList = state.students.map(s => ({
-        name: s.name,
-        avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, { score, max }) => sum + (score / max) * 100, 0) / state.subjectList.length : 0) || 0
-      })).sort((a, b) => b.avg - a.avg).slice(0, 10);
-
-      try { if (subjectsChart) { subjectsChart.destroy(); subjectsChart = null; } } catch (e) {}
-      try { if (top10Chart) { top10Chart.destroy(); top10Chart = null; } } catch (e) {}
-
-      const subjectsToShow = subjects.slice(0, MAX_LABELS);
-      const avgToShow = avgPerSubject.slice(0, MAX_LABELS);
-
-      subjectsChart = new Chart(subjectsChartCtx, {
-        type: 'bar',
-        data: { labels: subjectsToShow, datasets: [{ label: 'Average %', data: avgToShow, backgroundColor: '#4B5EAA' }] },
-        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { ticks: { autoSkip: true, maxTicksLimit: 12 } } } }
-      });
-
-      top10Chart = new Chart(top10ChartCtx, {
-        type: 'bar',
-        data: { labels: topList.map(x => x.name), datasets: [{ label: 'Overall %', data: topList.map(x => x.avg), backgroundColor: '#6B7280' }] },
-        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { ticks: { autoSkip: true } } } }
-      });
-    }
-
-    /* ---------- Small helpers ---------- */
-    function money(n) { n = Number(n || 0); return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n); }
-
-    /* ---------- Load on change ---------- */
+    /* ---------- Event Listeners ---------- */
     classSelect.addEventListener('change', () => {
       if (classSelect.value !== state.assignedClass) {
         alert('NOT YOUR CLASS BUDDY! You are restricted to ' + state.assignedClass);
@@ -616,6 +516,9 @@
         scoresheetModal.style.display = 'none';
       }
     });
+
+    /* ---------- Small helpers ---------- */
+    function money(n) { n = Number(n || 0); return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n); }
   </script>
 </body>
 </html>

@@ -1,293 +1,300 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Staff Dashboard - SoMApV2.1</title>
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-database-compat.js"></script>
-    <!-- Google Sign-In -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- Chart.js for Charts -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Tailwind CSS for Styling (bright, modern dashboard) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Custom Styles for Bright Colors and Animations */
-        .welcome-flash {
-            animation: flash 2s ease-in-out;
-        }
-        @keyframes flash {
-            0% { opacity: 0; transform: scale(1.1); color: #3b82f6; }
-            50% { opacity: 1; transform: scale(1); color: #10b981; }
-            100% { opacity: 0; transform: scale(1.1); color: #f59e0b; }
-        }
-        .sidebar-hidden { transform: translateX(-100%); }
-        .sidebar-visible { transform: translateX(0); }
-        .card-hover { transition: transform 0.2s, box-shadow 0.2s; }
-        .card-hover:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        /* Bright Color Scheme */
-        .bg-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .bg-success { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-        .bg-warning { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-        .bg-danger { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SoMApV2 — Teacher Dashboard (Staff)</title>
+
+  <!-- Firebase compat (project uses compat in repo) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- Use existing firebase config file in repo (firebase.js) -->
+  <script src="firebase.js"></script>
+
+  <!-- Tailwind + FontAwesome + Chart.js -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    html,body { height:100%; }
+    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: linear-gradient(135deg,#fef3c7 0%, #fff7ed 40%, #e0f2fe 100%); }
+    .sidebar { position:fixed; left:0; top:0; height:100vh; width:0; overflow:hidden; transition:width .35s ease; background:linear-gradient(180deg,#0ea5e9,#6366f1); z-index:60; }
+    .sidebar.expanded{ width:260px; }
+    .sidebar .item{ color:white; padding:14px 18px; display:flex; gap:12px; align-items:center; cursor:pointer; }
+    .sidebar .item:hover{ background: rgba(255,255,255,0.06); }
+    #menu-dots{ position:fixed; top:16px; left:16px; z-index:70; background:transparent; border-radius:999px; padding:10px; }
+    /* main area shifting */
+    .main { transition: margin-left .35s ease; margin-left:0; padding:28px; }
+    .main.shifted{ margin-left:260px; }
+    .card { background:white; border-radius:12px; padding:18px; box-shadow:0 8px 20px rgba(16,24,40,0.06); }
+    .welcome-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.35); z-index:80; }
+    .welcome-card{ background:linear-gradient(90deg,#60a5fa,#a78bfa); color:white; padding:22px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.25); text-align:center; }
+    .toast{ position:fixed; right:20px; bottom:20px; background:rgba(0,0,0,0.75); color:white; padding:10px 14px; border-radius:8px; z-index:90; display:none; }
+  </style>
 </head>
-<body class="bg-gray-100 font-sans">
-    <!-- Sidebar (Hidden by default) -->
-    <div id="sidebar" class="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg sidebar-hidden transition-transform duration-300 ease-in-out">
-        <div class="p-4">
-            <h2 class="text-xl font-bold text-gray-800 mb-6">Navigation</h2>
-            <ul class="space-y-2">
-                <li><a href="academic.html" class="flex items-center p-2 text-blue-600 hover:bg-blue-50 rounded"><span class="mr-3">📚</span>Academic</a></li>
-                <li><a href="#" class="flex items-center p-2 text-green-600 hover:bg-green-50 rounded"><span class="mr-3">📊</span>Attendance</a></li>
-                <li><a href="#" class="flex items-center p-2 text-purple-600 hover:bg-purple-50 rounded"><span class="mr-3">👥</span>Student List</a></li>
-                <li><a href="#" class="flex items-center p-2 text-red-600 hover:bg-red-50 rounded"><span class="mr-3">⚠️</span>Discipline</a></li>
-            </ul>
-        </div>
+<body>
+
+  <!-- three dots (hidden icons appear when clicked) -->
+  <button id="menu-dots" aria-label="open menu" title="open menu" class="text-white">
+    <i class="fas fa-ellipsis-vertical fa-2x"></i>
+  </button>
+
+  <!-- sidebar (initially collapsed) -->
+  <nav id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="p-4">
+      <img src="images/somap-logo.png.jpg" alt="SoMAp" class="w-20 h-20 mx-auto rounded-full shadow-lg mb-3"/>
+      <div class="text-white text-center font-semibold mb-4">SoMAp — Teacher</div>
+      <div class="item" onclick="navigateTo('academic')"><i class="fas fa-book"></i><span>Academic</span></div>
+      <div class="item" onclick="navigateTo('attendance')"><i class="fas fa-calendar-check"></i><span>Attendance</span></div>
+      <div class="item" onclick="navigateTo('discipline')"><i class="fas fa-exclamation-triangle"></i><span>Discipline</span></div>
+      <div class="item" onclick="navigateTo('studentlist')"><i class="fas fa-users"></i><span>Student List</span></div>
+      <div class="item mt-6" onclick="logout()"><i class="fas fa-right-from-bracket"></i><span>Logout</span></div>
+    </div>
+  </nav>
+
+  <!-- main content -->
+  <main id="main" class="main">
+
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold">Teacher Dashboard</h1>
+        <p class="text-sm text-gray-700">Live, class-filtered view for the signed-in teacher</p>
+      </div>
+      <div class="flex items-center gap-4">
+        <div id="user-badge" class="text-sm text-gray-700"></div>
+        <button id="speech-toggle" class="px-3 py-1 bg-white rounded-lg shadow text-gray-800 hidden"><i class="fas fa-volume-up"></i></button>
+      </div>
     </div>
 
-    <!-- Overlay for Sidebar -->
-    <div id="overlay" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden"></div>
-
-    <!-- Main Dashboard -->
-    <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <!-- Top Bar -->
-        <nav class="bg-white shadow-md p-4 flex justify-between items-center">
-            <button id="menuBtn" class="text-2xl text-gray-600 focus:outline-none">⋮</button> <!-- Three dots -->
-            <div class="flex items-center space-x-4">
-                <span id="userInfo" class="text-sm text-gray-600"></span>
-                <button id="signOutBtn" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Sign Out</button>
-            </div>
-        </nav>
-
-        <!-- Welcome Flash -->
-        <div id="welcomeDiv" class="text-center py-8 welcome-flash hidden">
-            <h1 id="welcomeText" class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600"></h1>
-        </div>
-
-        <!-- KPI Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 p-6">
-            <div class="bg-primary text-white p-6 rounded-lg card-hover">
-                <h3 class="text-lg font-semibold">Attendance Rate</h3>
-                <p id="attendanceRate" class="text-3xl font-bold mt-2">95%</p>
-            </div>
-            <div class="bg-success text-white p-6 rounded-lg card-hover">
-                <h3 class="text-lg font-semibold">Avg Academic Score</h3>
-                <p id="avgScore" class="text-3xl font-bold mt-2">85</p>
-            </div>
-            <div class="bg-warning text-white p-6 rounded-lg card-hover">
-                <h3 class="text-lg font-semibold">Students</h3>
-                <p id="totalStudents" class="text-3xl font-bold mt-2">30</p>
-            </div>
-            <div class="bg-danger text-white p-6 rounded-lg card-hover">
-                <h3 class="text-lg font-semibold">Discipline Incidents</h3>
-                <p id="incidents" class="text-3xl font-bold mt-2">2</p>
-            </div>
-        </div>
-
-        <!-- Charts Section -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
-            <!-- Attendance Chart -->
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-4">Attendance Trend (Last 7 Days)</h3>
-                <canvas id="attendanceChart" width="400" height="200"></canvas>
-            </div>
-            <!-- Academic Performance Chart -->
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-4">Subject Scores</h3>
-                <canvas id="scoresChart" width="400" height="200"></canvas>
-            </div>
-            <!-- Discipline Chart -->
-            <div class="bg-white p-6 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-4">Discipline Categories</h3>
-                <canvas id="disciplineChart" width="400" height="200"></canvas>
-            </div>
-        </div>
+    <div id="grid" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="card">
+        <h3 class="font-semibold">Academic Summary</h3>
+        <div class="mt-3 text-2xl font-bold" id="class-score">-</div>
+        <div class="text-sm text-gray-500">Class Average</div>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold">Attendance</h3>
+        <div class="mt-3 text-2xl font-bold" id="present-percent">-</div>
+        <div class="text-sm text-gray-500">% Present (monthly)</div>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold">Discipline</h3>
+        <div class="mt-3 text-2xl font-bold" id="incidents-count">-</div>
+        <div class="text-sm text-gray-500">Incidents logged</div>
+      </div>
     </div>
 
-    <script>
-        // Firebase Config (Replace with your actual config from Firebase Console)
-        const firebaseConfig = {
-            apiKey: "your-api-key",
-            authDomain: "somaptestt.firebaseapp.com",
-            databaseURL: "https://somaptestt-default-rtdb.firebaseio.com/",
-            projectId: "somaptestt",
-            storageBucket: "somaptestt.appspot.com",
-            messagingSenderId: "your-sender-id",
-            appId: "your-app-id"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const database = firebase.database();
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="card">
+        <h3 class="font-semibold mb-2">Subject Performance</h3>
+        <canvas id="subjectsChart"></canvas>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-2">Attendance Trend</h3>
+        <canvas id="attendanceChart"></canvas>
+      </div>
+    </div>
 
-        let currentClass = '';
-        let userName = '';
-        let attendanceChart, scoresChart, disciplineChart;
+    <div class="mt-6">
+      <a id="open-academic" href="academic.html" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded shadow">Open Academic (scoresheet)</a>
+    </div>
 
-        // Google Sign-In
-        function initGoogleSignIn() {
-            google.accounts.id.initialize({
-                client_id: 'your-google-client-id', // From Google Cloud Console
-                callback: handleCredentialResponse
+  </main>
+
+  <!-- Welcome modal (appears briefly) -->
+  <div id="welcome" class="welcome-modal" style="display:none">
+    <div class="welcome-card">
+      <h2 id="welcome-msg" class="text-2xl font-bold">WELCOME</h2>
+      <p id="welcome-sub" class="mt-2 opacity-90">...</p>
+      <div class="mt-4"><button id="welcome-close" class="px-4 py-2 bg-white text-indigo-700 rounded">Continue</button></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // Globals
+    const auth = firebase.auth();
+    const dbRef = firebase.database();
+
+    // UI shortcuts
+    const sidebar = document.getElementById('sidebar');
+    const main = document.getElementById('main');
+    const menu = document.getElementById('menu-dots');
+    const userBadge = document.getElementById('user-badge');
+    const speechToggle = document.getElementById('speech-toggle');
+    const toast = document.getElementById('toast');
+
+    // App state
+    let currentUserClass = null;
+    let students = [];
+    let scores = {};
+    let attendance = {};
+    let discipline = {};
+
+    // previous hashes to detect changes
+    let prevScoresHash = null, prevAttendHash = null, prevDisciplineHash = null;
+
+    // Charts
+    let subjectsChart = null, attendanceChart = null;
+
+    function showToast(msg, t=3000){ toast.textContent = msg; toast.style.display = 'block'; setTimeout(()=>{ toast.style.display='none'; }, t); }
+    function speak(msg){ if(!window.speechSynthesis) return; try{ const u=new SpeechSynthesisUtterance(msg); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);}catch(e){console.warn(e)} }
+
+    // Menu behaviour: three dots open sidebar
+    menu.addEventListener('click', ()=>{
+      sidebar.classList.toggle('expanded');
+      main.classList.toggle('shifted');
+      sidebar.setAttribute('aria-hidden', !sidebar.classList.contains('expanded'));
+      // show speech toggle when menu open
+      speechToggle.classList.toggle('hidden', !sidebar.classList.contains('expanded'));
+    });
+
+    // nav mapping
+    function navigateTo(page){
+      const map = { academic: 'academic.html', attendance: 'attendance.html', discipline: 'dashboard.html', studentlist: 'schoolerp.html' };
+      const target = map[page] || page;
+      window.location.href = target;
+    }
+
+    function logout(){ auth.signOut().then(()=> window.location.href='index.html'); }
+
+    // start auth
+    auth.onAuthStateChanged(user=>{
+      if(!user){ window.location.href='index.html'; return; }
+      const safeEmail = user.email.replace('.', '_');
+      dbRef.ref('users/'+safeEmail).once('value').then(snap=>{
+        const ud = snap.val() || {};
+        if(ud.role !== 'teacher'){ alert('Unauthorized: only teachers allowed'); auth.signOut(); window.location.href='index.html'; return; }
+        const display = user.displayName || user.email.split('@')[0];
+        currentUserClass = ud.class || ud['class'] || ud.classLevel || 'Class 7';
+        userBadge.innerHTML = `<strong>${display}</strong> · <span class=\"text-sm text-gray-600\">${currentUserClass}</span>`;
+
+        // brief welcome
+        document.getElementById('welcome-msg').textContent = `WELCOME ${display.toUpperCase()}`;
+        document.getElementById('welcome-sub').textContent = `You are viewing ${currentUserClass}`;
+        document.getElementById('welcome').style.display = 'flex';
+        speak(`Welcome ${display}. You are viewing ${currentUserClass}`);
+        setTimeout(()=>{ document.getElementById('welcome').style.display='none'; }, 2200);
+
+        attachListeners();
+      });
+    });
+
+    document.getElementById('welcome-close').addEventListener('click', ()=> document.getElementById('welcome').style.display='none');
+
+    function attachListeners(){
+      // students: we filter client-side by classLevel property (some projects store classLevel)
+      dbRef.ref('students').on('value', snap=>{
+        const all = snap.val() || {};
+        students = Object.values(all).filter(s => (s.classLevel===currentUserClass) || (s.class===currentUserClass) );
+        updateSummary();
+      });
+
+      // attendance for the class (path often attendance/<class>)
+      dbRef.ref(`attendance/${currentUserClass}`).on('value', snap=>{
+        const newAtt = snap.val() || {};
+        const hash = JSON.stringify(newAtt);
+        if(prevAttendHash && prevAttendHash !== hash){ speak('Attendance updated for ' + currentUserClass); showToast('Attendance updated'); }
+        prevAttendHash = hash; attendance = newAtt; updateSummary();
+      });
+
+      // scores often stored as scores/<year>/<class>
+      const year = new Date().getFullYear();
+      dbRef.ref(`scores/${year}/${currentUserClass}`).on('value', snap=>{
+        const newScores = snap.val() || {};
+        const hash = JSON.stringify(newScores);
+        if(prevScoresHash && prevScoresHash !== hash){ speak('Scores updated for ' + currentUserClass); showToast('Scores updated'); }
+        prevScoresHash = hash; scores = newScores; updateSummary();
+      });
+
+      // discipline
+      dbRef.ref('discipline').orderByChild('class').equalTo(currentUserClass).on('value', snap=>{
+        const newD = snap.val() || {};
+        const hash = JSON.stringify(newD);
+        if(prevDisciplineHash && prevDisciplineHash !== hash){ speak('Discipline incidents updated for ' + currentUserClass); showToast('Discipline updated'); }
+        prevDisciplineHash = hash; discipline = newD; updateSummary();
+      });
+    }
+
+    // compute and render summary + charts
+    function updateSummary(){
+      // Academic average
+      let totalAvg = 0; let count=0; const subjectAggregates = {};
+      students.forEach(s=>{
+        const adm = s.admissionNumber || s.admission || s.id;
+        // iterate scores structure: scores -> examKey -> month -> adm -> {subject: {score,max}}
+        Object.values(scores||{}).forEach(exam => {
+          Object.values(exam||{}).forEach(monthObj => {
+            const studentRow = monthObj[adm] || {};
+            Object.entries(studentRow).forEach(([subject, val])=>{
+              const score = Number(val.score||0); const max = Number(val.max||100);
+              const pct = max? (score/max)*100 : 0;
+              subjectAggregates[subject] = subjectAggregates[subject] || {sum:0, n:0};
+              subjectAggregates[subject].sum += pct; subjectAggregates[subject].n += 1;
+              totalAvg += pct; count++;
             });
-            google.accounts.id.renderButton(document.body, { theme: 'outline', size: 'large' });
-            google.accounts.id.prompt();
-        }
-
-        function handleCredentialResponse(response) {
-            const credential = google.accounts.id.parseTokenForCredential(response.credential);
-            const email = credential.email;
-            userName = credential.given_name || credential.name;
-            signInWithEmail(email);
-        }
-
-        function signInWithEmail(email) {
-            // For simplicity, assume email is used directly; in production, use Firebase Auth
-            const safeEmail = email.replace(/\./g, '_');
-            database.ref(`users/${safeEmail}`).once('value').then(snapshot => {
-                if (snapshot.exists()) {
-                    const userData = snapshot.val();
-                    currentClass = userData.class;
-                    document.getElementById('userInfo').textContent = `${userName} - ${currentClass}`;
-                    showWelcome();
-                    loadDashboardData();
-                } else {
-                    alert('User not found. Please contact admin.');
-                }
-            });
-        }
-
-        function showWelcome() {
-            const welcomeDiv = document.getElementById('welcomeDiv');
-            const welcomeText = document.getElementById('welcomeText');
-            welcomeText.textContent = `WELCOME ${userName} - ${currentClass}`;
-            welcomeDiv.classList.remove('hidden');
-            setTimeout(() => welcomeDiv.classList.add('hidden'), 2000);
-        }
-
-        function loadDashboardData() {
-            // Live listeners for data filtered by class
-            // Attendance Rate (example: average over last 7 days)
-            database.ref(`attendance/${currentClass}`).on('value', snapshot => {
-                let totalDays = 0, presentDays = 0;
-                snapshot.forEach(child => {
-                    const dayData = child.val();
-                    const present = Object.values(dayData || {}).filter(s => s.present).length;
-                    const totalStudents = Object.keys(dayData || {}).length;
-                    if (totalStudents > 0) {
-                        presentDays += present / totalStudents * 100;
-                        totalDays++;
-                    }
-                });
-                const rate = totalDays > 0 ? (presentDays / totalDays).toFixed(0) : 0;
-                document.getElementById('attendanceRate').textContent = `${rate}%`;
-                updateAttendanceChart(snapshot.val());
-            });
-
-            // Avg Score
-            database.ref(`academic/${currentClass}`).on('value', snapshot => {
-                let totalScores = 0, count = 0;
-                snapshot.forEach(subjectSnap => {
-                    subjectSnap.forEach(studentSnap => {
-                        const scores = studentSnap.val();
-                        totalScores += Object.values(scores || {}).reduce((a, b) => a + b, 0);
-                        count += Object.keys(scores || {}).length;
-                    });
-                });
-                const avg = count > 0 ? (totalScores / count).toFixed(0) : 0;
-                document.getElementById('avgScore').textContent = avg;
-                updateScoresChart(snapshot.val());
-            });
-
-            // Total Students
-            database.ref(`students/${currentClass}`).once('value', snapshot => {
-                const total = snapshot.numChildren();
-                document.getElementById('totalStudents').textContent = total;
-            });
-
-            // Incidents
-            database.ref(`discipline/${currentClass}`).on('value', snapshot => {
-                const count = snapshot.numChildren();
-                document.getElementById('incidents').textContent = count;
-                updateDisciplineChart(snapshot.val());
-            });
-        }
-
-        function updateAttendanceChart(data) {
-            const ctx = document.getElementById('attendanceChart').getContext('2d');
-            if (attendanceChart) attendanceChart.destroy();
-            // Assume data structure for last 7 days; adapt as needed
-            const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-            const values = labels.map(() => Math.floor(Math.random() * 20) + 80); // Placeholder; use real data
-            attendanceChart = new Chart(ctx, {
-                type: 'line',
-                data: { labels, datasets: [{ label: 'Attendance %', data: values, borderColor: '#10b981', tension: 0.1 }] },
-                options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
-            });
-        }
-
-        function updateScoresChart(data) {
-            const ctx = document.getElementById('scoresChart').getContext('2d');
-            if (scoresChart) scoresChart.destroy();
-            // Assume subjects; adapt
-            const labels = ['Math', 'English', 'Science', 'History'];
-            const values = labels.map(() => Math.floor(Math.random() * 20) + 70); // Placeholder
-            scoresChart = new Chart(ctx, {
-                type: 'bar',
-                data: { labels, datasets: [{ label: 'Avg Score', data: values, backgroundColor: '#3b82f6' }] },
-                options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
-            });
-        }
-
-        function updateDisciplineChart(data) {
-            const ctx = document.getElementById('disciplineChart').getContext('2d');
-            if (disciplineChart) disciplineChart.destroy();
-            // Assume categories; adapt
-            const labels = ['Tardiness', 'Misbehavior', 'Bullying'];
-            const values = [5, 3, 2]; // Placeholder
-            disciplineChart = new Chart(ctx, {
-                type: 'pie',
-                data: { labels, datasets: [{ data: values, backgroundColor: ['#f59e0b', '#ef4444', '#dc2626'] }] },
-                options: { responsive: true }
-            });
-        }
-
-        // Menu Toggle
-        document.getElementById('menuBtn').addEventListener('click', () => {
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('overlay');
-            sidebar.classList.toggle('sidebar-hidden');
-            sidebar.classList.toggle('sidebar-visible');
-            overlay.classList.toggle('hidden');
+          });
         });
+      });
+      const classAvg = count? (totalAvg/count): 0;
+      document.getElementById('class-score').textContent = classAvg? classAvg.toFixed(1)+'%':'-';
 
-        document.getElementById('overlay').addEventListener('click', () => {
-            document.getElementById('sidebar').classList.add('sidebar-hidden');
-            document.getElementById('overlay').classList.add('hidden');
-        });
+      // Subject chart
+      const subjects = Object.keys(subjectAggregates);
+      const subjData = subjects.map(s => (subjectAggregates[s].sum/subjectAggregates[s].n).toFixed(1));
+      drawBar('subjectsChart', subjects, subjData, 'Avg % by Subject');
 
-        // Sign Out
-        document.getElementById('signOutBtn').addEventListener('click', () => {
-            auth.signOut().then(() => {
-                window.location.href = 'index.html'; // Redirect to login
-            });
-        });
+      // Attendance percent (simple heuristic: present/total)
+      // attendance may contain daily records: { "2025-09": { adm1: {present: 20, total:21}, ... } }
+      let presentSum = 0, totalSum = 0;
+      Object.values(attendance||{}).forEach(month => {
+        Object.values(month||{}).forEach(rec => { if(rec.present!=null && rec.total!=null){ presentSum+=Number(rec.present); totalSum+=Number(rec.total); } });
+      });
+      const presentPct = totalSum? Math.round((presentSum/totalSum)*100): 0;
+      document.getElementById('present-percent').textContent = presentPct? presentPct+'%':'-';
 
-        // Initialize
-        auth.onAuthStateChanged(user => {
-            if (user) {
-                signInWithEmail(user.email);
-            } else {
-                initGoogleSignIn();
-            }
-        });
+      // attendance trend chart (monthly totals)
+      const months = Object.keys(attendance||{}).sort();
+      const monthVals = months.map(m => {
+        const mm = attendance[m]||{}; let p=0,t=0; Object.values(mm).forEach(r=>{ p+= Number(r.present||0); t+=Number(r.total||0); });
+        return t? Math.round((p/t)*100): 0;
+      });
+      drawLine('attendanceChart', months, monthVals, 'Monthly % Present');
 
-        // For navigation links, pass class as query param, e.g., academic.html?class=${encodeURIComponent(currentClass)}
-        // In academic.html, read from URL and filter data similarly.
-        // For scoresheet.html integration: In academic.html, include or iframe scoresheet.html, passing class.
-    </script>
+      // Discipline
+      const incCount = Object.keys(discipline||{}).length;
+      document.getElementById('incidents-count').textContent = incCount || 0;
+
+      // speak short summary when first loaded
+      // speak(`Class average ${Math.round(classAvg)} percent. Attendance ${presentPct} percent. ${incCount} incidents.`);
+    }
+
+    // Chart helpers (destroy previous to avoid memory leaks)
+    function drawBar(el, labels, data, label){
+      const ctx = document.getElementById(el).getContext('2d');
+      if(window[el]) window[el].destroy();
+      window[el] = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label, data }] }, options:{ responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, max:100 } } } });
+    }
+    function drawLine(el, labels, data, label){
+      const ctx = document.getElementById(el).getContext('2d');
+      if(window[el]) window[el].destroy();
+      window[el] = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label, data, tension:0.2, fill:false }] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } } });
+    }
+
+    // expose navigate mapping for top-level link
+    document.getElementById('open-academic').addEventListener('click', ()=>{ navigateTo('academic'); });
+
+    // speech toggle and controlling behaviour
+    let speechEnabled = true;
+    speechToggle.addEventListener('click', ()=>{ speechEnabled = !speechEnabled; speechToggle.innerHTML = speechEnabled? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>'; showToast('Speech ' + (speechEnabled? 'enabled':'disabled')); });
+    // override speak to respect toggle
+    const _speak = speak;
+    speak = function(msg){ if(!speechEnabled) return; _speak(msg); };
+
+  </script>
 </body>
 </html>

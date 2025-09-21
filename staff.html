@@ -1,253 +1,185 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SoMApV2 — Teacher Dashboard (Staff)</title>
-
-  <!-- Firebase compat -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-
-  <!-- Firebase config -->
-  <script src="firebase.js"></script>
-
-  <!-- Tailwind + FontAwesome + Chart.js -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-  <style>
-    html,body { height:100%; }
-    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: linear-gradient(135deg,#fef3c7 0%, #fff7ed 40%, #e0f2fe 100%); }
-    .sidebar { position:fixed; left:0; top:0; height:100vh; width:0; overflow:hidden; transition:width .35s ease; background:linear-gradient(180deg,#0ea5e9,#6366f1); z-index:60; }
-    .sidebar.expanded{ width:260px; }
-    .sidebar .item{ color:white; padding:14px 18px; display:flex; gap:12px; align-items:center; cursor:pointer; }
-    .sidebar .item:hover{ background: rgba(255,255,255,0.06); }
-    #menu-dots{ position:fixed; top:16px; left:16px; z-index:70; background:transparent; border-radius:999px; padding:10px; }
-    .main { transition: margin-left .35s ease; margin-left:0; padding:28px; }
-    .main.shifted{ margin-left:260px; }
-    .card { background:white; border-radius:12px; padding:18px; box-shadow:0 8px 20px rgba(16,24,40,0.06); }
-    .welcome-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.35); z-index:80; }
-    .welcome-card{ background:linear-gradient(90deg,#60a5fa,#a78bfa); color:white; padding:22px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.25); text-align:center; }
-    .toast{ position:fixed; right:20px; bottom:20px; background:rgba(0,0,0,0.75); color:white; padding:10px 14px; border-radius:8px; z-index:90; display:none; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SoMApV2 — Academic Management</title>
+    <!-- Firebase compat (consistent with project) -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <!-- Assume firebase.js is in root -->
+    <script src="firebase.js"></script>
+    <!-- Tailwind + FontAwesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <style>
+        body { 
+            font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+            background: linear-gradient(135deg, #fef3c7 0%, #fff7ed 40%, #e0f2fe 100%);
+        }
+        .card { 
+            background: white; 
+            border-radius: 12px; 
+            padding: 18px; 
+            box-shadow: 0 8px 20px rgba(16,24,40,0.06); 
+        }
+        .table th, .table td { padding: 12px; }
+        .table th { background: #eff6ff; }
+        .toast{ position:fixed; right:20px; bottom:20px; background:rgba(0,0,0,0.75); color:white; padding:10px 14px; border-radius:8px; z-index:90; display:none; }
+    </style>
 </head>
-<body>
+<body class="p-6">
+    <header class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-3xl font-bold">Academic Management</h1>
+            <p class="text-sm text-gray-700" id="class-info">Loading class...</p>
+        </div>
+        <div class="flex gap-4">
+            <button onclick="navigateToScoresheet()" class="px-4 py-2 bg-indigo-600 text-white rounded shadow">Open Scoresheet</button>
+            <button onclick="logout()" class="px-4 py-2 bg-red-500 text-white rounded shadow">Logout</button>
+        </div>
+    </header>
 
-  <!-- three dots (open sidebar) -->
-  <button id="menu-dots" aria-label="open menu" title="open menu" class="text-white">
-    <i class="fas fa-ellipsis-vertical fa-2x"></i>
-  </button>
-
-  <!-- sidebar -->
-  <nav id="sidebar" class="sidebar" aria-hidden="true">
-    <div class="p-4">
-      <img src="images/somap-logo.png.jpg" alt="SoMAp" class="w-20 h-20 mx-auto rounded-full shadow-lg mb-3"/>
-      <div class="text-white text-center font-semibold mb-4">SoMAp — Teacher</div>
-      <div class="item" onclick="navigateTo('academic')"><i class="fas fa-book"></i><span>Academic</span></div>
-      <div class="item" onclick="navigateTo('attendance')"><i class="fas fa-calendar-check"></i><span>Attendance</span></div>
-      <div class="item" onclick="navigateTo('discipline')"><i class="fas fa-exclamation-triangle"></i><span>Discipline</span></div>
-      <div class="item" onclick="navigateTo('studentlist')"><i class="fas fa-users"></i><span>Student List</span></div>
-      <div class="item mt-6" onclick="logout()"><i class="fas fa-right-from-bracket"></i><span>Logout</span></div>
-    </div>
-  </nav>
-
-  <!-- main content -->
-  <main id="main" class="main">
-
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-3xl font-bold">Teacher Dashboard</h1>
-        <p class="text-sm text-gray-700">Live, class-filtered view for the signed-in teacher</p>
-      </div>
-      <div class="flex items-center gap-4">
-        <div id="user-badge" class="text-sm text-gray-700"></div>
-      </div>
+    <!-- Student List Table (filtered by class) -->
+    <div class="card mb-6">
+        <h3 class="font-semibold mb-4">Students in Class</h3>
+        <table class="table w-full border-collapse">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Admission No.</th>
+                    <th>Payments (Balance)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="students-table"></tbody>
+        </table>
     </div>
 
-    <div id="grid" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="card">
-        <h3 class="font-semibold">Academic Summary</h3>
-        <div class="mt-3 text-2xl font-bold" id="class-score">-</div>
-        <div class="text-sm text-gray-500">Class Average</div>
-      </div>
-      <div class="card">
-        <h3 class="font-semibold">Attendance</h3>
-        <div class="mt-3 text-2xl font-bold" id="present-percent">-</div>
-        <div class="text-sm text-gray-500">% Present (monthly)</div>
-      </div>
-      <div class="card">
-        <h3 class="font-semibold">Discipline</h3>
-        <div class="mt-3 text-2xl font-bold" id="incidents-count">-</div>
-        <div class="text-sm text-gray-500">Incidents logged</div>
-      </div>
+    <!-- Scores Summary or other sections -->
+    <div class="card">
+        <h3 class="font-semibold mb-4">Class Scores Overview</h3>
+        <div id="scores-summary" class="grid grid-cols-2 gap-4">
+            <!-- Dynamically populated -->
+        </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="card">
-        <h3 class="font-semibold mb-2">Subject Performance</h3>
-        <canvas id="subjectsChart"></canvas>
-      </div>
-      <div class="card">
-        <h3 class="font-semibold mb-2">Attendance Trend</h3>
-        <canvas id="attendanceChart"></canvas>
-      </div>
-    </div>
+    <div id="toast" class="toast"></div>
 
-    <div class="mt-6">
-      <a id="open-academic" href="academic.html" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded shadow">Open Academic (scoresheet)</a>
-    </div>
+    <script>
+        const auth = firebase.auth();
+        const dbRef = firebase.database();
+        let currentUserClass = null;
+        let students = [];
 
-  </main>
+        function showToast(msg, t=3000){ 
+            const toast = document.getElementById('toast');
+            toast.textContent = msg; 
+            toast.style.display = 'block'; 
+            setTimeout(()=>{ toast.style.display='none'; }, t); 
+        }
 
-  <!-- Welcome modal -->
-  <div id="welcome" class="welcome-modal" style="display:none">
-    <div class="welcome-card">
-      <h2 id="welcome-msg" class="text-2xl font-bold">WELCOME</h2>
-      <p id="welcome-sub" class="mt-2 opacity-90">...</p>
-      <div class="mt-4"><button id="welcome-close" class="px-4 py-2 bg-white text-indigo-700 rounded">Continue</button></div>
-    </div>
-  </div>
+        function logout(){ 
+            auth.signOut().then(()=> window.location.href='index.html'); 
+        }
 
-  <div id="toast" class="toast"></div>
+        function navigateToScoresheet(){ 
+            window.location.href = 'Toacademichtml/scoresheet.html?class=' + encodeURIComponent(currentUserClass); 
+        }
 
-  <script>
-    // Firebase
-    const auth = firebase.auth();
-    const dbRef = firebase.database();
-
-    // UI refs
-    const sidebar = document.getElementById('sidebar');
-    const main = document.getElementById('main');
-    const menu = document.getElementById('menu-dots');
-    const userBadge = document.getElementById('user-badge');
-    const toast = document.getElementById('toast');
-
-    // State
-    let currentUserClass = null;
-    let students = [], scores = {}, attendance = {}, discipline = {};
-    let subjectsChart = null, attendanceChart = null;
-
-    // Sidebar toggle
-    menu.addEventListener('click', ()=>{
-      sidebar.classList.toggle('expanded');
-      main.classList.toggle('shifted');
-    });
-
-    function navigateTo(page){
-      const map = { academic: 'academic.html', attendance: 'attendance.html', discipline: 'dashboard.html', studentlist: 'schoolerp.html' };
-      window.location.href = map[page] || page;
-    }
-    function logout(){ auth.signOut().then(()=> window.location.href='index.html'); }
-
-    // Auth
-    auth.onAuthStateChanged(user=>{
-      if(!user){ window.location.href='index.html'; return; }
-      const safeEmail = user.email.replace('.', '_');
-      dbRef.ref('users/'+safeEmail).once('value').then(snap=>{
-        const ud = snap.val() || {};
-        if(ud.role !== 'teacher'){ alert('Unauthorized'); auth.signOut(); window.location.href='index.html'; return; }
-        const display = user.displayName || user.email.split('@')[0];
-        currentUserClass = ud.class || 'Class 7';
-        userBadge.innerHTML = `<strong>${display}</strong> · <span class="text-sm text-gray-600">${currentUserClass}</span>`;
-        document.getElementById('welcome-msg').textContent = `WELCOME ${display.toUpperCase()}`;
-        document.getElementById('welcome-sub').textContent = `You are viewing ${currentUserClass}`;
-        document.getElementById('welcome').style.display = 'flex';
-        setTimeout(()=>{ document.getElementById('welcome').style.display='none'; }, 2000);
-        attachListeners();
-      });
-    });
-    document.getElementById('welcome-close').addEventListener('click', ()=> document.getElementById('welcome').style.display='none');
-
-    function attachListeners(){
-      // Students (filter)
-      dbRef.ref('students').on('value', snap=>{
-        const all = snap.val() || {};
-        students = Object.values(all).filter(s => (s.classLevel===currentUserClass) || (s.class===currentUserClass));
-        updateSummary();
-      });
-
-      // Attendance (locked to class)
-      dbRef.ref(`attendance/${currentUserClass}`).on('value', snap=>{
-        attendance = snap.val() || {};
-        updateSummary();
-      });
-
-      // Scores (locked to class & year)
-      const year = new Date().getFullYear();
-      dbRef.ref(`scores/${year}/${currentUserClass}`).on('value', snap=>{
-        scores = snap.val() || {};
-        updateSummary();
-      });
-
-      // Discipline (locked to class)
-      dbRef.ref('discipline').orderByChild('class').equalTo(currentUserClass).on('value', snap=>{
-        discipline = snap.val() || {};
-        updateSummary();
-      });
-    }
-
-    // Update dashboard
-    function updateSummary(){
-      // Academic average
-      let totalAvg=0, count=0, subjectAggregates={};
-      students.forEach(s=>{
-        const adm = s.admissionNumber || s.admission || s.id;
-        Object.values(scores||{}).forEach(exam=>{
-          Object.values(exam||{}).forEach(month=>{
-            const row = month[adm] || {};
-            Object.entries(row).forEach(([sub,val])=>{
-              const pct = (Number(val.score||0) / Number(val.max||100))*100;
-              subjectAggregates[sub] = subjectAggregates[sub] || {sum:0,n:0};
-              subjectAggregates[sub].sum += pct; subjectAggregates[sub].n++;
-              totalAvg += pct; count++;
+        auth.onAuthStateChanged(user => {
+            if (!user) { 
+                window.location.href = 'index.html'; 
+                return; 
+            }
+            const safeEmail = user.email.replace('.', '_');
+            dbRef.ref('users/' + safeEmail).once('value').then(snap => {
+                const ud = snap.val() || {};
+                if (ud.role !== 'teacher') { 
+                    alert('Unauthorized: only teachers allowed'); 
+                    auth.signOut(); 
+                    window.location.href = 'index.html'; 
+                    return; 
+                }
+                currentUserClass = ud.class || 'Unknown';
+                document.getElementById('class-info').textContent = `Managing ${currentUserClass} only`;
+                loadFilteredData();
             });
-          });
         });
-      });
-      const classAvg = count? (totalAvg/count): 0;
-      document.getElementById('class-score').textContent = classAvg? classAvg.toFixed(1)+'%':'-';
 
-      // Subject chart
-      const labels = Object.keys(subjectAggregates);
-      const data = labels.map(s=> (subjectAggregates[s].sum/subjectAggregates[s].n).toFixed(1));
-      drawBar('subjectsChart', labels, data, 'Avg % by Subject');
+        function loadFilteredData() {
+            // Filter students by class
+            dbRef.ref('students').once('value').then(snap => {
+                const allStudents = snap.val() || {};
+                students = Object.entries(allStudents).reduce((acc, [key, s]) => {
+                    if ((s.classLevel === currentUserClass) || (s.class === currentUserClass)) {
+                        acc.push({ id: key, ...s });
+                    }
+                    return acc;
+                }, []);
+                renderStudents();
+            });
 
-      // Attendance
-      let present=0,total=0;
-      Object.values(attendance||{}).forEach(month=>{
-        Object.values(month||{}).forEach(r=>{ present+=Number(r.present||0); total+=Number(r.total||0); });
-      });
-      const pct = total? Math.round((present/total)*100): 0;
-      document.getElementById('present-percent').textContent = pct? pct+'%':'-';
-      const months = Object.keys(attendance||{}).sort();
-      const monthVals = months.map(m=>{
-        const mm=attendance[m]||{}; let p=0,t=0;
-        Object.values(mm).forEach(r=>{ p+=Number(r.present||0); t+=Number(r.total||0); });
-        return t? Math.round((p/t)*100):0;
-      });
-      drawLine('attendanceChart', months, monthVals, 'Monthly % Present');
+            // Load scores filtered by class (assuming path scores/year/class)
+            const year = new Date().getFullYear();
+            dbRef.ref(`scores/${year}/${currentUserClass}`).on('value', snap => {
+                const classScores = snap.val() || {};
+                renderScoresSummary(classScores);
+                showToast('Scores updated');
+            });
 
-      // Discipline
-      document.getElementById('incidents-count').textContent = Object.keys(discipline||{}).length || 0;
-    }
+            // If payments are under students or separate, filter accordingly
+            // Assuming payments are per student, already filtered in students
+        }
 
-    // Charts
-    function drawBar(el, labels, data, label){
-      const ctx = document.getElementById(el).getContext('2d');
-      if(window[el]) window[el].destroy();
-      window[el] = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label, data }] }, options:{ scales:{ y:{ beginAtZero:true,max:100 } } } });
-    }
-    function drawLine(el, labels, data, label){
-      const ctx = document.getElementById(el).getContext('2d');
-      if(window[el]) window[el].destroy();
-      window[el] = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label, data, tension:0.2 }] }, options:{ scales:{ y:{ beginAtZero:true,max:100 } } } });
-    }
+        function renderStudents() {
+            const tbody = document.getElementById('students-table');
+            tbody.innerHTML = '';
+            students.forEach(s => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${s.name || 'N/A'}</td>
+                    <td>${s.admissionNumber || s.admission || 'N/A'}</td>
+                    <td>${s.paymentBalance || '0'} (Balance)</td>
+                    <td><button class="text-blue-600" onclick="viewDetails('${s.id}')">View</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
 
-    // open academic link
-    document.getElementById('open-academic').addEventListener('click', ()=> navigateTo('academic'));
-  </script>
+        function renderScoresSummary(scores) {
+            const summary = document.getElementById('scores-summary');
+            summary.innerHTML = '';
+            // Example: average per subject
+            const subjects = new Set();
+            let aggregates = {};
+            // Parse scores structure (adapt based on actual DB)
+            Object.values(scores).forEach(exam => {
+                Object.values(exam).forEach(month => {
+                    Object.entries(month).forEach(([adm, subs]) => {
+                        Object.entries(subs).forEach(([sub, val]) => {
+                            subjects.add(sub);
+                            aggregates[sub] = aggregates[sub] || { sum: 0, count: 0 };
+                            aggregates[sub].sum += Number(val.score || 0);
+                            aggregates[sub].count++;
+                        });
+                    });
+                });
+            });
+            subjects.forEach(sub => {
+                const agg = aggregates[sub] || { sum: 0, count: 0 };
+                const avg = agg.count ? (agg.sum / agg.count).toFixed(1) : 'N/A';
+                const div = document.createElement('div');
+                div.innerHTML = `<strong>${sub}</strong>: Avg ${avg}`;
+                summary.appendChild(div);
+            });
+        }
+
+        function viewDetails(studentId) {
+            // Implement details view, perhaps modal or link
+            showToast(`Viewing details for student ${studentId}`);
+        }
+    </script>
 </body>
 </html>

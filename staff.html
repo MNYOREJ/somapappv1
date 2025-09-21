@@ -1,611 +1,300 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SoMAp - Teacher Dashboard</title>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <style>
-        body { 
-            font-family: 'Roboto', sans-serif; 
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); 
-            min-height: 100vh; 
-            overflow-x: hidden;
-        }
-        .sidebar {
-            width: 0;
-            background: linear-gradient(to bottom, #007bff, #6610f2);
-            height: 100vh;
-            position: fixed;
-            top: 0;
-            left: 0;
-            padding: 1rem 0;
-            transition: width 0.3s ease;
-            overflow: hidden;
-            z-index: 1000;
-        }
-        .sidebar.expanded { 
-            width: 250px; 
-            overflow-y: auto;
-        }
-        .sidebar-icon {
-            display: flex;
-            align-items: center;
-            padding: 0.5rem 1rem;
-            color: white;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .sidebar-icon:hover { background: rgba(255,255,255,0.2); }
-        .sidebar-icon i { margin-right: 1rem; }
-        .main-content {
-            margin-left: 0;
-            padding: 2rem;
-            transition: margin-left 0.3s ease;
-        }
-        .main-content.shifted { margin-left: 250px; }
-        .card { 
-            background: white; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-            padding: 1.5rem; 
-            margin-bottom: 1.5rem; 
-            border-left: 4px solid #007bff; 
-            transition: transform 0.3s, opacity 0.5s; 
-            opacity: 0;
-            animation: fadeInUp 0.5s forwards;
-        }
-        .card:nth-child(odd) { animation-delay: 0.2s; }
-        .card:nth-child(even) { animation-delay: 0.4s; }
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .card:hover { transform: scale(1.02); box-shadow: 0 8px 16px rgba(0,0,0,0.15); }
-        .card.academic { border-left-color: #28a745; background: linear-gradient(to right, #f6ffed, white); }
-        .card.attendance { border-left-color: #ffc107; background: linear-gradient(to right, #fffbeb, white); }
-        .card.finance { border-left-color: #17a2b8; background: linear-gradient(to right, #ecfeff, white); }
-        .card.discipline { border-left-color: #dc3545; background: linear-gradient(to right, #fff1f2, white); }
-        .btn { 
-            background: linear-gradient(45deg, #007bff, #0056b3); 
-            color: white; 
-            padding: 0.75rem 1.5rem; 
-            border-radius: 6px; 
-            border: none; 
-            cursor: pointer; 
-            transition: all 0.3s; 
-        }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,123,255,0.3); }
-        .stats-grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
-            gap: 1rem; 
-        }
-        .stat-card { 
-            background: linear-gradient(135deg, #ff758c, #ff7eb3); 
-            color: white; 
-            padding: 1.5rem; 
-            border-radius: 10px; 
-            text-align: center; 
-            transition: transform 0.3s; 
-            cursor: pointer;
-        }
-        .stat-card:hover { transform: scale(1.05); }
-        .stat-card.academic { background: linear-gradient(135deg, #11998e, #38ef7d); }
-        .stat-card.attendance { background: linear-gradient(135deg, #f7971e, #ffd200); }
-        .stat-card.finance { background: linear-gradient(135deg, #2193b0, #6dd5ed); }
-        .stat-card.discipline { background: linear-gradient(135deg, #ed213a, #93291e); }
-        .chart-container { 
-            background: white; 
-            border-radius: 12px; 
-            padding: 1rem; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-            margin-bottom: 1.5rem;
-        }
-        #welcome-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-            opacity: 0;
-            animation: fadeIn 1s forwards;
-        }
-        #welcome-text {
-            color: white;
-            font-size: 3rem;
-            text-align: center;
-            animation: zoomIn 1s, pulse 1s infinite alternate 1s;
-        }
-        @keyframes zoomIn {
-            from { transform: scale(0); }
-            to { transform: scale(1); }
-        }
-        @keyframes pulse {
-            from { transform: scale(1); }
-            to { transform: scale(1.05); }
-        }
-        .tooltip {
-            position: relative;
-        }
-        .tooltip::after {
-            content: attr(data-tooltip);
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #333;
-            color: white;
-            padding: 0.5rem;
-            border-radius: 4px;
-            white-space: nowrap;
-            opacity: 0;
-            transition: opacity 0.3s;
-            pointer-events: none;
-        }
-        .tooltip:hover::after { opacity: 1; }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SoMApV2 — Teacher Dashboard (Staff)</title>
+
+  <!-- Firebase compat (project uses compat in repo) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- Use existing firebase config file in repo (firebase.js) -->
+  <script src="firebase.js"></script>
+
+  <!-- Tailwind + FontAwesome + Chart.js -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    html,body { height:100%; }
+    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: linear-gradient(135deg,#fef3c7 0%, #fff7ed 40%, #e0f2fe 100%); }
+    .sidebar { position:fixed; left:0; top:0; height:100vh; width:0; overflow:hidden; transition:width .35s ease; background:linear-gradient(180deg,#0ea5e9,#6366f1); z-index:60; }
+    .sidebar.expanded{ width:260px; }
+    .sidebar .item{ color:white; padding:14px 18px; display:flex; gap:12px; align-items:center; cursor:pointer; }
+    .sidebar .item:hover{ background: rgba(255,255,255,0.06); }
+    #menu-dots{ position:fixed; top:16px; left:16px; z-index:70; background:transparent; border-radius:999px; padding:10px; }
+    /* main area shifting */
+    .main { transition: margin-left .35s ease; margin-left:0; padding:28px; }
+    .main.shifted{ margin-left:260px; }
+    .card { background:white; border-radius:12px; padding:18px; box-shadow:0 8px 20px rgba(16,24,40,0.06); }
+    .welcome-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.35); z-index:80; }
+    .welcome-card{ background:linear-gradient(90deg,#60a5fa,#a78bfa); color:white; padding:22px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.25); text-align:center; }
+    .toast{ position:fixed; right:20px; bottom:20px; background:rgba(0,0,0,0.75); color:white; padding:10px 14px; border-radius:8px; z-index:90; display:none; }
+  </style>
 </head>
 <body>
-    <button id="sidebar-toggle" class="fixed top-4 left-4 bg-blue-600 text-white p-2 rounded-full z-10 hover:bg-blue-700 transition">
-        <i class="fas fa-bars"></i>
-    </button>
 
-    <div id="sidebar" class="sidebar">
-        <img src="images/somap-logo.png.jpg" alt="SoMAp Logo" class="h-12 mx-auto mb-6 rounded-full shadow-lg">
-        <div class="sidebar-icon" onclick="navigateTo('teacherscoresheet')">
-            <i class="fas fa-book text-xl"></i> Academic Management
-        </div>
-        <div class="sidebar-icon" onclick="navigateTo('teacherclassattendance')">
-            <i class="fas fa-calendar-check text-xl"></i> Attendance
-        </div>
-        <div class="sidebar-icon" onclick="navigateTo('teacherclassdiscipline')">
-            <i class="fas fa-exclamation-triangle text-xl"></i> Discipline
-        </div>
-        <div class="sidebar-icon" onclick="navigateTo('teacherstudentlist')">
-            <i class="fas fa-users text-xl"></i> Student List
-        </div>
-        <div class="sidebar-icon mt-auto" onclick="logout()">
-            <i class="fas fa-sign-out-alt text-xl"></i> Logout
-        </div>
+  <!-- three dots (hidden icons appear when clicked) -->
+  <button id="menu-dots" aria-label="open menu" title="open menu" class="text-white">
+    <i class="fas fa-ellipsis-vertical fa-2x"></i>
+  </button>
+
+  <!-- sidebar (initially collapsed) -->
+  <nav id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="p-4">
+      <img src="images/somap-logo.png.jpg" alt="SoMAp" class="w-20 h-20 mx-auto rounded-full shadow-lg mb-3"/>
+      <div class="text-white text-center font-semibold mb-4">SoMAp — Teacher</div>
+      <div class="item" onclick="navigateTo('academic')"><i class="fas fa-book"></i><span>Academic</span></div>
+      <div class="item" onclick="navigateTo('attendance')"><i class="fas fa-calendar-check"></i><span>Attendance</span></div>
+      <div class="item" onclick="navigateTo('discipline')"><i class="fas fa-exclamation-triangle"></i><span>Discipline</span></div>
+      <div class="item" onclick="navigateTo('studentlist')"><i class="fas fa-users"></i><span>Student List</span></div>
+      <div class="item mt-6" onclick="logout()"><i class="fas fa-right-from-bracket"></i><span>Logout</span></div>
+    </div>
+  </nav>
+
+  <!-- main content -->
+  <main id="main" class="main">
+
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold">Teacher Dashboard</h1>
+        <p class="text-sm text-gray-700">Live, class-filtered view for the signed-in teacher</p>
+      </div>
+      <div class="flex items-center gap-4">
+        <div id="user-badge" class="text-sm text-gray-700"></div>
+        <button id="speech-toggle" class="px-3 py-1 bg-white rounded-lg shadow text-gray-800 hidden"><i class="fas fa-volume-up"></i></button>
+      </div>
     </div>
 
-    <div id="main-content" class="main-content">
-        <header class="flex justify-between items-center mb-6">
-            <h1 class="text-4xl font-bold text-gray-800">Teacher Dashboard</h1>
-            <div class="text-lg text-gray-700">
-                Welcome, <span id="user-name" class="font-semibold"></span> | Class: <span id="user-class" class="font-semibold"></span>
-            </div>
-        </header>
-
-        <!-- Stream Select -->
-        <div class="card mb-4">
-            <h2 class="text-2xl font-semibold mb-3 flex items-center">
-                <i class="fas fa-stream mr-2 text-blue-500"></i> Select Stream
-            </h2>
-            <select id="stream-select" class="w-full p-3 border border-gray-300 rounded-lg focus:border-blue-500 transition">
-                <option value="A">Stream A</option>
-                <option value="B">Stream B</option>
-                <option value="Red">Red Stream</option>
-            </select>
-        </div>
-
-        <!-- Academic Section with Chart -->
-        <div class="card academic">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-graduation-cap mr-2 text-green-500"></i> Academic Overview
-            </h2>
-            <div class="stats-grid mb-4">
-                <div class="stat-card academic tooltip" data-tooltip="Average score across all students">
-                    <h3 id="class-scores-count">-</h3>
-                    <p>Average Score</p>
-                </div>
-                <div class="stat-card academic tooltip" data-tooltip="Top performing student">
-                    <h3 id="top-student">-</h3>
-                    <p>Top Student (%)</p>
-                </div>
-                <div class="stat-card academic tooltip" data-tooltip="Bottom performing student">
-                    <h3 id="bottom-student">-</h3>
-                    <p>Bottom Student (%)</p>
-                </div>
-                <div class="stat-card academic tooltip" data-tooltip="Overall class grade">
-                    <h3 id="class-grade">-</h3>
-                    <p>Class Average Grade</p>
-                </div>
-            </div>
-            <div class="chart-container grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <h3 class="text-lg font-medium mb-2">Subject Performance</h3>
-                    <canvas id="subjectsChart"></canvas>
-                </div>
-                <div>
-                    <h3 class="text-lg font-medium mb-2">Top 10 Students</h3>
-                    <canvas id="topStudentsChart"></canvas>
-                </div>
-            </div>
-            <a href="Tostaffhtml/teacherscoresheet.html" class="btn mt-4 inline-block">View & Edit Scores</a>
-        </div>
-
-        <!-- Attendance Section with Chart -->
-        <div class="card attendance">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-calendar mr-2 text-yellow-500"></i> Attendance Overview
-            </h2>
-            <div class="stats-grid mb-4">
-                <div class="stat-card attendance tooltip" data-tooltip="Average presence percentage">
-                    <h3 id="percent-present">-</h3>
-                    <p>% Present</p>
-                </div>
-                <div class="stat-card attendance tooltip" data-tooltip="Average absence percentage">
-                    <h3 id="percent-absent">-</h3>
-                    <p>% Absent</p>
-                </div>
-                <div class="stat-card attendance tooltip" data-tooltip="Students with ≥10 absent days">
-                    <h3 id="yellow-alerts">-</h3>
-                    <p>Yellow Alerts</p>
-                </div>
-                <div class="stat-card attendance tooltip" data-tooltip="Total class days excluding weekends/holidays">
-                    <h3 id="class-days">-</h3>
-                    <p>Class Days</p>
-                </div>
-            </div>
-            <div class="chart-container">
-                <h3 class="text-lg font-medium mb-2">Monthly Attendance Trend</h3>
-                <canvas id="attendanceChart"></canvas>
-            </div>
-            <a href="Tostaffhtml/teacherclassattendance.html" class="btn mt-4 inline-block">View & Mark Attendance</a>
-        </div>
-
-        <!-- Fee Section with Chart -->
-        <div class="card finance">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-money-bill mr-2 text-cyan-500"></i> Fee Status
-            </h2>
-            <div class="stats-grid mb-4">
-                <div class="stat-card finance tooltip" data-tooltip="Total required fees for class/year">
-                    <h3 id="fee-required">-</h3>
-                    <p>Required</p>
-                </div>
-                <div class="stat-card finance tooltip" data-tooltip="Total aggregated payments">
-                    <h3 id="fee-paid">-</h3>
-                    <p>Paid</p>
-                </div>
-                <div class="stat-card finance tooltip" data-tooltip="Outstanding balance">
-                    <h3 id="fee-balance">-</h3>
-                    <p>Balance</p>
-                </div>
-            </div>
-            <div class="chart-container w-1/2 mx-auto">
-                <h3 class="text-lg font-medium mb-2">Fee Distribution</h3>
-                <canvas id="feesChart"></canvas>
-            </div>
-        </div>
-
-        <!-- Discipline Section with Chart -->
-        <div class="card discipline">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-exclamation-triangle mr-2 text-red-500"></i> Discipline Overview
-            </h2>
-            <div class="stats-grid mb-4">
-                <div class="stat-card discipline tooltip" data-tooltip="Total incidents logged">
-                    <h3 id="total-incidents">-</h3>
-                    <p>Total Incidents</p>
-                </div>
-                <div class="stat-card discipline tooltip" data-tooltip="Students with multiple incidents">
-                    <h3 id="repeat-offenders">-</h3>
-                    <p>Repeat Offenders</p>
-                </div>
-            </div>
-            <div class="chart-container">
-                <h3 class="text-lg font-medium mb-2">Incidents by Type</h3>
-                <canvas id="disciplineChart"></canvas>
-            </div>
-            <a href="Tostaffhtml/teacherclassdiscipline.html" class="btn mt-4 inline-block">View & Log Discipline</a>
-        </div>
-
-        <!-- Student List Quick View -->
-        <div class="card">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center">
-                <i class="fas fa-users mr-2 text-indigo-500"></i> Student Overview
-            </h2>
-            <p class="text-gray-600 mb-4">Quick stats: <span id="total-students">-</span> students in class</p>
-            <a href="Tostaffhtml/teacherstudentlist.html" class="btn inline-block">View Full List</a>
-        </div>
+    <div id="grid" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="card">
+        <h3 class="font-semibold">Academic Summary</h3>
+        <div class="mt-3 text-2xl font-bold" id="class-score">-</div>
+        <div class="text-sm text-gray-500">Class Average</div>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold">Attendance</h3>
+        <div class="mt-3 text-2xl font-bold" id="present-percent">-</div>
+        <div class="text-sm text-gray-500">% Present (monthly)</div>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold">Discipline</h3>
+        <div class="mt-3 text-2xl font-bold" id="incidents-count">-</div>
+        <div class="text-sm text-gray-500">Incidents logged</div>
+      </div>
     </div>
 
-    <!-- Welcome Flash -->
-    <div id="welcome-modal">
-        <div id="welcome-text">Welcome, <span id="welcome-name"></span>!</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="card">
+        <h3 class="font-semibold mb-2">Subject Performance</h3>
+        <canvas id="subjectsChart"></canvas>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-2">Attendance Trend</h3>
+        <canvas id="attendanceChart"></canvas>
+      </div>
     </div>
 
-    <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-            authDomain: "somaptestt.firebaseapp.com",
-            databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-            projectId: "somaptestt",
-            storageBucket: "somaptestt.appspot.com",
-            messagingSenderId: "105526245138",
-            appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.database();
+    <div class="mt-6">
+      <a id="open-academic" href="academic.html" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded shadow">Open Academic (scoresheet)</a>
+    </div>
 
-        let currentUserClass = '';
-        let currentStream = 'A';
-        let students = [];
-        let attendance = {};
-        let fees = {};
-        let scores = {};
-        let discipline = {};
-        let subjectsChart, topStudentsChart, attendanceChart, feesChart, disciplineChart;
+  </main>
 
-        auth.onAuthStateChanged(user => {
-            if (!user) { window.location.href = 'index.html'; return; }
-            const userRef = db.ref('users/' + user.email.replace('.', '_'));
-            userRef.once('value').then(snapshot => {
-                const userData = snapshot.val();
-                if (!userData || userData.role !== 'teacher') { 
-                    alert('Unauthorized'); 
-                    auth.signOut(); 
-                    window.location.href = 'index.html'; 
-                    return; 
-                }
-                const name = user.email.split('@')[0];
-                document.getElementById('user-name').textContent = name;
-                document.getElementById('welcome-name').textContent = name;
-                currentUserClass = userData.class || 'Class 7';
-                document.getElementById('user-class').textContent = currentUserClass;
-                document.getElementById('stream-select').value = currentStream;
-                showWelcome();
-                loadAllData();
+  <!-- Welcome modal (appears briefly) -->
+  <div id="welcome" class="welcome-modal" style="display:none">
+    <div class="welcome-card">
+      <h2 id="welcome-msg" class="text-2xl font-bold">WELCOME</h2>
+      <p id="welcome-sub" class="mt-2 opacity-90">...</p>
+      <div class="mt-4"><button id="welcome-close" class="px-4 py-2 bg-white text-indigo-700 rounded">Continue</button></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // Globals
+    const auth = firebase.auth();
+    const dbRef = firebase.database();
+
+    // UI shortcuts
+    const sidebar = document.getElementById('sidebar');
+    const main = document.getElementById('main');
+    const menu = document.getElementById('menu-dots');
+    const userBadge = document.getElementById('user-badge');
+    const speechToggle = document.getElementById('speech-toggle');
+    const toast = document.getElementById('toast');
+
+    // App state
+    let currentUserClass = null;
+    let students = [];
+    let scores = {};
+    let attendance = {};
+    let discipline = {};
+
+    // previous hashes to detect changes
+    let prevScoresHash = null, prevAttendHash = null, prevDisciplineHash = null;
+
+    // Charts
+    let subjectsChart = null, attendanceChart = null;
+
+    function showToast(msg, t=3000){ toast.textContent = msg; toast.style.display = 'block'; setTimeout(()=>{ toast.style.display='none'; }, t); }
+    function speak(msg){ if(!window.speechSynthesis) return; try{ const u=new SpeechSynthesisUtterance(msg); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);}catch(e){console.warn(e)} }
+
+    // Menu behaviour: three dots open sidebar
+    menu.addEventListener('click', ()=>{
+      sidebar.classList.toggle('expanded');
+      main.classList.toggle('shifted');
+      sidebar.setAttribute('aria-hidden', !sidebar.classList.contains('expanded'));
+      // show speech toggle when menu open
+      speechToggle.classList.toggle('hidden', !sidebar.classList.contains('expanded'));
+    });
+
+    // nav mapping
+    function navigateTo(page){
+      const map = { academic: 'academic.html', attendance: 'attendance.html', discipline: 'dashboard.html', studentlist: 'schoolerp.html' };
+      const target = map[page] || page;
+      window.location.href = target;
+    }
+
+    function logout(){ auth.signOut().then(()=> window.location.href='index.html'); }
+
+    // start auth
+    auth.onAuthStateChanged(user=>{
+      if(!user){ window.location.href='index.html'; return; }
+      const safeEmail = user.email.replace('.', '_');
+      dbRef.ref('users/'+safeEmail).once('value').then(snap=>{
+        const ud = snap.val() || {};
+        if(ud.role !== 'teacher'){ alert('Unauthorized: only teachers allowed'); auth.signOut(); window.location.href='index.html'; return; }
+        const display = user.displayName || user.email.split('@')[0];
+        currentUserClass = ud.class || ud['class'] || ud.classLevel || 'Class 7';
+        userBadge.innerHTML = `<strong>${display}</strong> · <span class=\"text-sm text-gray-600\">${currentUserClass}</span>`;
+
+        // brief welcome
+        document.getElementById('welcome-msg').textContent = `WELCOME ${display.toUpperCase()}`;
+        document.getElementById('welcome-sub').textContent = `You are viewing ${currentUserClass}`;
+        document.getElementById('welcome').style.display = 'flex';
+        speak(`Welcome ${display}. You are viewing ${currentUserClass}`);
+        setTimeout(()=>{ document.getElementById('welcome').style.display='none'; }, 2200);
+
+        attachListeners();
+      });
+    });
+
+    document.getElementById('welcome-close').addEventListener('click', ()=> document.getElementById('welcome').style.display='none');
+
+    function attachListeners(){
+      // students: we filter client-side by classLevel property (some projects store classLevel)
+      dbRef.ref('students').on('value', snap=>{
+        const all = snap.val() || {};
+        students = Object.values(all).filter(s => (s.classLevel===currentUserClass) || (s.class===currentUserClass) );
+        updateSummary();
+      });
+
+      // attendance for the class (path often attendance/<class>)
+      dbRef.ref(`attendance/${currentUserClass}`).on('value', snap=>{
+        const newAtt = snap.val() || {};
+        const hash = JSON.stringify(newAtt);
+        if(prevAttendHash && prevAttendHash !== hash){ speak('Attendance updated for ' + currentUserClass); showToast('Attendance updated'); }
+        prevAttendHash = hash; attendance = newAtt; updateSummary();
+      });
+
+      // scores often stored as scores/<year>/<class>
+      const year = new Date().getFullYear();
+      dbRef.ref(`scores/${year}/${currentUserClass}`).on('value', snap=>{
+        const newScores = snap.val() || {};
+        const hash = JSON.stringify(newScores);
+        if(prevScoresHash && prevScoresHash !== hash){ speak('Scores updated for ' + currentUserClass); showToast('Scores updated'); }
+        prevScoresHash = hash; scores = newScores; updateSummary();
+      });
+
+      // discipline
+      dbRef.ref('discipline').orderByChild('class').equalTo(currentUserClass).on('value', snap=>{
+        const newD = snap.val() || {};
+        const hash = JSON.stringify(newD);
+        if(prevDisciplineHash && prevDisciplineHash !== hash){ speak('Discipline incidents updated for ' + currentUserClass); showToast('Discipline updated'); }
+        prevDisciplineHash = hash; discipline = newD; updateSummary();
+      });
+    }
+
+    // compute and render summary + charts
+    function updateSummary(){
+      // Academic average
+      let totalAvg = 0; let count=0; const subjectAggregates = {};
+      students.forEach(s=>{
+        const adm = s.admissionNumber || s.admission || s.id;
+        // iterate scores structure: scores -> examKey -> month -> adm -> {subject: {score,max}}
+        Object.values(scores||{}).forEach(exam => {
+          Object.values(exam||{}).forEach(monthObj => {
+            const studentRow = monthObj[adm] || {};
+            Object.entries(studentRow).forEach(([subject, val])=>{
+              const score = Number(val.score||0); const max = Number(val.max||100);
+              const pct = max? (score/max)*100 : 0;
+              subjectAggregates[subject] = subjectAggregates[subject] || {sum:0, n:0};
+              subjectAggregates[subject].sum += pct; subjectAggregates[subject].n += 1;
+              totalAvg += pct; count++;
             });
+          });
         });
+      });
+      const classAvg = count? (totalAvg/count): 0;
+      document.getElementById('class-score').textContent = classAvg? classAvg.toFixed(1)+'%':'-';
 
-        function showWelcome() {
-            const modal = document.getElementById('welcome-modal');
-            modal.style.display = 'flex';
-            setTimeout(() => {
-                modal.style.opacity = '0';
-                setTimeout(() => modal.style.display = 'none', 500);
-            }, 3000);
-        }
+      // Subject chart
+      const subjects = Object.keys(subjectAggregates);
+      const subjData = subjects.map(s => (subjectAggregates[s].sum/subjectAggregates[s].n).toFixed(1));
+      drawBar('subjectsChart', subjects, subjData, 'Avg % by Subject');
 
-        function loadAllData() {
-            db.ref('students').on('value', snapshot => {
-                const allStudents = snapshot.val() ? Object.values(snapshot.val()) : [];
-                students = allStudents.filter(s => s.classLevel === currentUserClass);
-                document.getElementById('total-students').textContent = students.length;
-                updateDashboard();
-            });
+      // Attendance percent (simple heuristic: present/total)
+      // attendance may contain daily records: { "2025-09": { adm1: {present: 20, total:21}, ... } }
+      let presentSum = 0, totalSum = 0;
+      Object.values(attendance||{}).forEach(month => {
+        Object.values(month||{}).forEach(rec => { if(rec.present!=null && rec.total!=null){ presentSum+=Number(rec.present); totalSum+=Number(rec.total); } });
+      });
+      const presentPct = totalSum? Math.round((presentSum/totalSum)*100): 0;
+      document.getElementById('present-percent').textContent = presentPct? presentPct+'%':'-';
 
-            db.ref(`attendance/${currentUserClass}`).on('value', snapshot => {
-                attendance = snapshot.val() || {};
-                updateDashboard();
-            });
+      // attendance trend chart (monthly totals)
+      const months = Object.keys(attendance||{}).sort();
+      const monthVals = months.map(m => {
+        const mm = attendance[m]||{}; let p=0,t=0; Object.values(mm).forEach(r=>{ p+= Number(r.present||0); t+=Number(r.total||0); });
+        return t? Math.round((p/t)*100): 0;
+      });
+      drawLine('attendanceChart', months, monthVals, 'Monthly % Present');
 
-            const year = new Date().getFullYear();
-            db.ref(`payments/${year}/${currentUserClass}`).on('value', snapshot => {
-                const payments = snapshot.val() || {};
-                fees = {};
-                students.forEach(s => {
-                    const adm = s.admissionNumber;
-                    const paid = Object.values(payments[adm] || {}).reduce((sum, p) => sum + (p.amount || 0), 0);
-                    const due = s.feePerYear || 600000;
-                    fees[adm] = { required: due, paid, balance: Math.max(0, due - paid) };
-                });
-                updateDashboard();
-            });
+      // Discipline
+      const incCount = Object.keys(discipline||{}).length;
+      document.getElementById('incidents-count').textContent = incCount || 0;
 
-            db.ref(`scores/${year}/${currentUserClass}`).on('value', snapshot => {
-                scores = snapshot.val() || {};
-                updateDashboard();
-            });
+      // speak short summary when first loaded
+      // speak(`Class average ${Math.round(classAvg)} percent. Attendance ${presentPct} percent. ${incCount} incidents.`);
+    }
 
-            db.ref('discipline').orderByChild('class').equalTo(currentUserClass).on('value', snapshot => {
-                discipline = snapshot.val() || {};
-                updateDashboard();
-            });
-        }
+    // Chart helpers (destroy previous to avoid memory leaks)
+    function drawBar(el, labels, data, label){
+      const ctx = document.getElementById(el).getContext('2d');
+      if(window[el]) window[el].destroy();
+      window[el] = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label, data }] }, options:{ responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, max:100 } } } });
+    }
+    function drawLine(el, labels, data, label){
+      const ctx = document.getElementById(el).getContext('2d');
+      if(window[el]) window[el].destroy();
+      window[el] = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label, data, tension:0.2, fill:false }] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } } });
+    }
 
-        function updateDashboard() {
-            const streamStudents = students.filter(s => s.stream === currentStream);
-            if (streamStudents.length === 0) return;
+    // expose navigate mapping for top-level link
+    document.getElementById('open-academic').addEventListener('click', ()=>{ navigateTo('academic'); });
 
-            // Academic
-            let avgScore = 0;
-            const subjectPcts = {};
-            const defaultAvg = 0; // Changed from 70 to 0 for accuracy if no scores
-            streamStudents.forEach(s => {
-                let totalPct = 0, count = 0;
-                Object.entries(scores || {}).forEach(([examKey, examData] => {
-                    Object.entries(examData || {}).forEach(([month, monthData] => {
-                        const studentData = monthData[s.admissionNumber] || {};
-                        Object.entries(studentData).forEach(([sub, {score, max}]) => {
-                            const pct = (score / (max || 100)) * 100;
-                            totalPct += pct;
-                            count++;
-                            subjectPcts[sub] = [...(subjectPcts[sub] || []), pct];
-                        });
-                    });
-                });
-                s.avgScore = count ? totalPct / count : defaultAvg;
-                avgScore += s.avgScore;
-            });
-            avgScore /= streamStudents.length || 1;
-            const top = streamStudents.reduce((prev, curr) => (curr.avgScore > prev.avgScore ? curr : prev), {avgScore: -Infinity, firstName: '', lastName: ''});
-            const bottom = streamStudents.reduce((prev, curr) => (curr.avgScore < prev.avgScore ? curr : prev), {avgScore: Infinity, firstName: '', lastName: ''});
-            document.getElementById('class-scores-count').textContent = avgScore.toFixed(1) + '%';
-            document.getElementById('top-student').innerHTML = top.avgScore > -Infinity ? `${top.firstName} ${top.lastName}<br><small>${top.avgScore.toFixed(1)}%</small>` : 'N/A';
-            document.getElementById('bottom-student').innerHTML = bottom.avgScore < Infinity ? `${bottom.firstName} ${bottom.lastName}<br><small>${bottom.avgScore.toFixed(1)}%</small>` : 'N/A';
-            document.getElementById('class-grade').textContent = letterGrade(avgScore);
+    // speech toggle and controlling behaviour
+    let speechEnabled = true;
+    speechToggle.addEventListener('click', ()=>{ speechEnabled = !speechEnabled; speechToggle.innerHTML = speechEnabled? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>'; showToast('Speech ' + (speechEnabled? 'enabled':'disabled')); });
+    // override speak to respect toggle
+    const _speak = speak;
+    speak = function(msg){ if(!speechEnabled) return; _speak(msg); };
 
-            // Subjects Chart
-            const subjects = Object.keys(subjectPcts);
-            const subData = subjects.map(sub => (subjectPcts[sub].reduce((sum, v) => sum + v, 0) / (subjectPcts[sub].length || 1)).toFixed(1));
-            drawBarChart('subjectsChart', subjects, subData, 'Subject Averages (%)', '#28a745');
-
-            // Top Students Chart
-            const top10 = streamStudents.sort((a,b) => b.avgScore - a.avgScore).slice(0,10);
-            const topLabels = top10.map(s => `${s.firstName} ${s.lastName}`);
-            const topData = top10.map(s => s.avgScore.toFixed(1));
-            drawBarChart('topStudentsChart', topLabels, topData, 'Top Students (%)', '#007bff');
-
-            // Attendance
-            let classDays = 0;
-            let yellowAlerts = 0;
-            const monthlyPresence = {};
-            let globalPresent = 0, globalTotal = 0;
-            Object.entries(attendance || {}).forEach(([month, monthData] => {
-                const admStats = {};
-                Object.entries(monthData || {}).forEach(([date, dayData] => {
-                    Object.entries(dayData || {}).forEach(([adm, rec] => {
-                        if (streamStudents.some(s => s.admissionNumber === adm)) {
-                            admStats[adm] = admStats[adm] || {present: 0, absent: 0, days: 0};
-                            admStats[adm].days++;
-                            if (rec.daily === 'P') admStats[adm].present++;
-                            else admStats[adm].absent++;
-                        }
-                    });
-                });
-                let monthPresent = 0, monthTotal = 0;
-                Object.values(admStats).forEach(stat => {
-                    monthPresent += stat.present;
-                    monthTotal += stat.days;
-                    if (stat.absent >= 10) yellowAlerts++;
-                    classDays = Math.max(classDays, stat.days);
-                });
-                monthlyPresence[month] = (monthTotal ? (monthPresent / monthTotal * 100) : 0).toFixed(1);
-                globalPresent += monthPresent;
-                globalTotal += monthTotal;
-            });
-            const percentPresent = (globalTotal ? (globalPresent / globalTotal * 100) : 0).toFixed(1);
-            document.getElementById('percent-present').textContent = percentPresent + '%';
-            document.getElementById('percent-absent').textContent = (100 - parseFloat(percentPresent)).toFixed(1) + '%';
-            document.getElementById('yellow-alerts').textContent = yellowAlerts;
-            document.getElementById('class-days').textContent = classDays;
-
-            // Attendance Chart
-            const attLabels = Object.keys(monthlyPresence).sort();
-            const attData = attLabels.map(m => monthlyPresence[m]);
-            drawLineChart('attendanceChart', attLabels, attData, 'Monthly % Present', '#ffc107');
-
-            // Fees
-            let totalDue = 0, totalPaid = 0, totalBalance = 0;
-            streamStudents.forEach(s => {
-                const fee = fees[s.admissionNumber] || { required: 600000, paid: 0, balance: 600000 };
-                totalDue += fee.required;
-                totalPaid += fee.paid;
-                totalBalance += fee.balance;
-            });
-            document.getElementById('fee-required').textContent = money(totalDue);
-            document.getElementById('fee-paid').textContent = money(totalPaid);
-            document.getElementById('fee-balance').textContent = money(totalBalance);
-
-            // Fees Chart
-            drawPieChart('feesChart', ['Paid', 'Balance'], [totalPaid, totalBalance], ['#17a2b8', '#dc3545']);
-
-            // Discipline
-            const incidentTypes = {};
-            let totalIncidents = 0, repeatOffenders = 0;
-            const studentIncidents = {};
-            Object.values(discipline || {}).forEach(inc => {
-                if (inc.class === currentUserClass) {
-                    totalIncidents++;
-                    incidentTypes[inc.type] = (incidentTypes[inc.type] || 0) + 1;
-                    studentIncidents[inc.student] = (studentIncidents[inc.student] || 0) + 1;
-                }
-            });
-            repeatOffenders = Object.values(studentIncidents).filter(count => count > 1).length;
-            document.getElementById('total-incidents').textContent = totalIncidents;
-            document.getElementById('repeat-offenders').textContent = repeatOffenders;
-
-            // Discipline Chart
-            const discLabels = Object.keys(incidentTypes);
-            const discData = discLabels.map(t => incidentTypes[t]);
-            drawBarChart('disciplineChart', discLabels, discData, 'Incidents by Type', '#dc3545');
-        }
-
-        function drawBarChart(id, labels, data, title, color) {
-            const ctx = document.getElementById(id);
-            if (!ctx) return;
-            const chart = window[`${id}Chart`];
-            if (chart) chart.destroy();
-            window[`${id}Chart`] = new Chart(ctx, {
-                type: 'bar',
-                data: { labels, datasets: [{ label: title, data, backgroundColor: color }] },
-                options: { scales: { y: { beginAtZero: true } }, animation: { duration: 1000 } }
-            });
-        }
-
-        function drawLineChart(id, labels, data, title, color) {
-            const ctx = document.getElementById(id);
-            if (!ctx) return;
-            const chart = window[`${id}Chart`];
-            if (chart) chart.destroy();
-            window[`${id}Chart`] = new Chart(ctx, {
-                type: 'line',
-                data: { labels, datasets: [{ label: title, data, borderColor: color, fill: false }] },
-                options: { scales: { y: { beginAtZero: true, max: 100 } }, animation: { duration: 1000 } }
-            });
-        }
-
-        function drawPieChart(id, labels, data, colors) {
-            const ctx = document.getElementById(id);
-            if (!ctx) return;
-            const chart = window[`${id}Chart`];
-            if (chart) chart.destroy();
-            window[`${id}Chart`] = new Chart(ctx, {
-                type: 'pie',
-                data: { labels, datasets: [{ data, backgroundColor: colors }] },
-                options: { animation: { duration: 1000 } }
-            });
-        }
-
-        function letterGrade(pct) { 
-            const p = Number(pct);
-            if (p >= 80.5) return 'A';
-            if (p >= 60.5) return 'B';
-            if (p >= 40.5) return 'C';
-            if (p >= 20.5) return 'D';
-            return 'F';
-        }
-
-        function money(n) { 
-            n = Number(n || 0); 
-            return 'TSh ' + n.toLocaleString(); 
-        }
-
-        function navigateTo(page) {
-            window.location.href = `Tostaffhtml/${page}.html`;
-        }
-
-        function logout() {
-            auth.signOut().then(() => window.location.href = 'index.html');
-        }
-
-        document.getElementById('sidebar-toggle').addEventListener('click', () => {
-            const sidebar = document.getElementById('sidebar');
-            const main = document.getElementById('main-content');
-            sidebar.classList.toggle('expanded');
-            main.classList.toggle('shifted');
-        });
-
-        document.getElementById('stream-select').addEventListener('change', (e) => {
-            currentStream = e.target.value;
-            updateDashboard();
-        });
-    </script>
+  </script>
 </body>
 </html>

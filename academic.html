@@ -14,12 +14,13 @@
 
   <!-- Firebase compat (v9 compat libs) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
 
   <!-- Your Firebase config wrapper (exports window.db, window.storage) -->
-  <script src="../firebase.js"></script>
+  <script src="firebase.js"></script>
 
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
@@ -38,7 +39,7 @@
   <header class="bg-white border-b sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <a href="schoolerp.html" class="px-3 py-2 rounded-lg bg-white border text-sm flex items-center gap-2">
+        <a href="staff.html" class="px-3 py-2 rounded-lg bg-white border text-sm flex items-center gap-2">
           <span style="font-size:18px;">←</span> Back
         </a>
         <div>
@@ -65,7 +66,7 @@
 
       <div class="bg-white rounded-2xl p-4 shadow">
         <label class="text-xs text-slate-500">Class</label>
-        <select id="classSelect" class="mt-1 w-full border rounded px-2 py-2 text-sm"></select>
+        <select id="classSelect" class="mt-1 w-full border rounded px-2 py-2 text-sm" disabled></select>
       </div>
 
       <div class="bg-white rounded-2xl p-4 shadow">
@@ -180,20 +181,20 @@
   <script>
     /* ---------- CONFIG ---------- */
     const SUBJECTS_BY_CLASS = {
-      'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Pre-Unit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
-      'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
+      'Baby Class': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
+      'Middle Class': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
+      'Pre-Unit': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
+      'Class 1 AB': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'],
+      'Class 2 AB': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'],
+      'Class 3': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
+      'Class 4': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
+      'Class 5': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
+      'Class 6': ['Math', 'English', 'Kiswahili', 'Science', 'Social Studies', 'Civics & Morals'],
+      'Class 7': ['Math', 'English', 'Kiswahili', 'Science', 'Social Studies', 'Civics & Morals']
     };
 
     const EXAM_KEYS = {
-      'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
+      'Monthly': 'monthly', 'Midterm 1': 'midterm1', 'End Term': 'endterm', 'Midterm 2': 'midterm2', 'Annual': 'annual'
     };
 
     function letterGrade(pct) {
@@ -208,7 +209,8 @@
     /* ---------- STATE ---------- */
     const state = {
       students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
-      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:''
+      rowsByAdm: {}, className: '', stream: '', month: '', year: '', examKey: '', schoolBranch: '',
+      assignedClass: ''
     };
 
     /* ---------- ELEMENTS ---------- */
@@ -240,13 +242,13 @@
     const closeModal = document.getElementById('closeModal');
 
     /* ---------- Firebase DB helper ---------- */
-    function getDB(){
-      if(window && window.db) return window.db;
-      if(!window.firebase) {
+    function getDB() {
+      if (window && window.db) return window.db;
+      if (!window.firebase) {
         console.error('Firebase not loaded; ensure firebase.js is present and provides window.db');
         return null;
       }
-      if (!firebase.apps.length){
+      if (!firebase.apps.length) {
         const cfg = {
           apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
           authDomain: "somaptestt.firebaseapp.com",
@@ -261,34 +263,70 @@
       return firebase.database();
     }
 
-    /* ---------- Robust student loader (attendance style) ---------- */
-    async function fetchStudents(className, stream){
+    /* ---------- Parse class from Gmail ---------- */
+    function parseClassFromEmail(email) {
+      const emailPrefix = email.split('@')[0].toLowerCase();
+      const classMap = {
+        'ssbabyclass': 'Baby Class',
+        'ssmiddleclass': 'Middle Class',
+        'sspreunit': 'Pre-Unit',
+        'ssclass1ab': 'Class 1 AB',
+        'ssclass2ab': 'Class 2 AB',
+        'ssclass3': 'Class 3',
+        'ssclass4': 'Class 4',
+        'ssclass5': 'Class 5',
+        'ssclass6': 'Class 6',
+        'ssclass7': 'Class 7'
+      };
+      for (const [key, className] of Object.entries(classMap)) {
+        if (emailPrefix.includes(key)) {
+          return className;
+        }
+      }
+      return null;
+    }
+
+    /* ---------- Populate class dropdown (locked to assigned class) ---------- */
+    function populateClasses(assignedClass) {
+      const opts = Object.keys(SUBJECTS_BY_CLASS);
+      if (assignedClass && opts.includes(assignedClass)) {
+        classSelect.innerHTML = `<option value="${assignedClass}">${assignedClass}</option>`;
+        classSelect.value = assignedClass;
+        classSelect.disabled = true;
+      } else {
+        classSelect.innerHTML = '<option value="">Select Class…</option>' + opts.map(c => `<option>${c}</option>`).join('');
+        classSelect.disabled = false;
+      }
+    }
+
+    /* ---------- Robust student loader ---------- */
+    async function fetchStudents(className, stream) {
       const db = getDB();
-      if(!db) return [];
-      const tryPaths = ['students','Students','StudentsList','Students_List','studentList','studentlist','attendance','school','schoolerp'];
-      for(const p of tryPaths){
-        try{
+      if (!db) return [];
+      const tryPaths = ['students', 'Students', 'StudentsList', 'Students_List', 'studentList', 'studentlist', 'attendance', 'school', 'schoolerp'];
+      for (const p of tryPaths) {
+        try {
           const snap = await db.ref(p).get();
-          if(snap && snap.exists && snap.exists()){
+          if (snap && snap.exists && snap.exists()) {
             const data = snap.val();
             const arr = [];
-            if(Array.isArray(data)){
-              data.forEach((item, idx)=> {
-                if(item) {
-                  const adm = item.adm || item.admissionNumber || item.admNo || ('A'+idx);
+            if (Array.isArray(data)) {
+              data.forEach((item, idx) => {
+                if (item) {
+                  const adm = item.adm || item.admissionNumber || item.admNo || ('A' + idx);
                   arr.push(normalizeStudentRecord(adm, item));
                 }
               });
             } else {
-              Object.keys(data).forEach(k=>{
+              Object.keys(data).forEach(k => {
                 const s = data[k] || {};
-                if(typeof s === 'object' && (s.name || s.fullName || s.firstName || s.adm || s.admissionNumber || s.admissionNo || s.feeDue || s.feePaid)){
+                if (typeof s === 'object' && (s.name || s.fullName || s.firstName || s.adm || s.admissionNumber || s.admissionNo || s.feeDue || s.feePaid)) {
                   const adm = s.adm || s.admissionNumber || s.admNo || s.admission || k;
                   arr.push(normalizeStudentRecord(adm, s));
                 }
               });
             }
-            const filtered = arr.filter(x=>{
+            const filtered = arr.filter(x => {
               const normalizedClass = String(x.class || '').toUpperCase().replace(/[\s-]/g, '');
               const normalizedSelect = className.toUpperCase().replace(/[\s-]/g, '');
               const classMatches = !className || normalizedClass.includes(normalizedSelect);
@@ -297,17 +335,17 @@
               const streamMatches = !stream || normalizedStream.includes(normalizedInputStream);
               return classMatches && streamMatches;
             });
-            filtered.sort((a,b)=> (a.name || '').localeCompare(b.name || ''));
-            if(filtered.length) return filtered;
+            filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            if (filtered.length) return filtered;
           }
-        }catch(err){
+        } catch (err) {
           console.warn('fetchStudents trying', p, err && err.message);
         }
       }
       return [];
     }
 
-    function normalizeStudentRecord(admKey, s){
+    function normalizeStudentRecord(admKey, s) {
       const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
       const sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
       const sStream = s.stream || s.streamName || s.section || '';
@@ -321,34 +359,34 @@
     }
 
     /* ---------- Attendance + fees + scores fetchers ---------- */
-    async function fetchAttendance(year, month, className){
+    async function fetchAttendance(year, month, className) {
       const db = getDB();
-      if(!db) return {};
+      if (!db) return {};
       const refPath = `/attendance/${year}/${month}/${className}`;
-      try{
+      try {
         const snap = await db.ref(refPath).get();
         const out = {};
-        if(snap && snap.exists && snap.exists()){
+        if (snap && snap.exists && snap.exists()) {
           const val = snap.val();
-          Object.keys(val).forEach(adm=>{
+          Object.keys(val).forEach(adm => {
             const a = val[adm] || {};
-            out[adm] = { present: Number(a.present || a.daysPresent || 0), absent: Number(a.absent || a.daysAbsent || 0), days: Number(a.days || (Number(a.present||0)+Number(a.absent||0))) };
+            out[adm] = { present: Number(a.present || a.daysPresent || 0), absent: Number(a.absent || a.daysAbsent || 0), days: Number(a.days || (Number(a.present || 0) + Number(a.absent || 0))) };
           });
         }
         return out;
-      }catch(e){ console.warn('fetchAttendance', e && e.message); return {}; }
+      } catch (e) { console.warn('fetchAttendance', e && e.message); return {}; }
     }
 
-    async function fetchFees(year, className){
+    async function fetchFees(year, className) {
       const db = getDB();
-      if(!db) return {};
+      if (!db) return {};
       const refPath = `/fees/${year}/${className}`;
-      try{
+      try {
         const snap = await db.ref(refPath).get();
         const out = {};
-        if(snap && snap.exists && snap.exists()){
+        if (snap && snap.exists && snap.exists()) {
           const val = snap.val();
-          Object.keys(val).forEach(adm=>{
+          Object.keys(val).forEach(adm => {
             const f = val[adm] || {};
             const required = Number(f.required || f.expected || f.total || 0);
             const paid = Number(f.paid || f.paidAmount || 0);
@@ -356,42 +394,52 @@
           });
         }
         return out;
-      }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
+      } catch (e) { console.warn('fetchFees', e && e.message); return {}; }
     }
 
-    async function fetchScores({year,className,examKey,month}){
+    async function fetchScores({ year, className, examKey, month }) {
       const db = getDB();
-      if(!db) return {};
+      if (!db) return {};
       const refPath = `/scores/${year}/${className}/${examKey}/${month}`;
-      try{
+      try {
         const snap = await db.ref(refPath).get();
         const out = {};
-        if(snap && snap.exists && snap.exists()){
+        if (snap && snap.exists && snap.exists()) {
           const val = snap.val();
-          Object.keys(val).forEach(adm=>{
+          Object.keys(val).forEach(adm => {
             out[adm] = {};
             const subjObj = val[adm] || {};
-            Object.keys(subjObj).forEach(sub=>{
+            Object.keys(subjObj).forEach(sub => {
               const o = subjObj[sub] || {};
-              out[adm][sub] = { score: Number(o.score||0), max: Number(o.max||100) };
+              out[adm][sub] = { score: Number(o.score || 0), max: Number(o.max || 100) };
             });
           });
         }
         return out;
-      }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
+      } catch (e) { console.warn('fetchScores', e && e.message); return {}; }
     }
 
     /* ---------- Load sequence (main entry) ---------- */
-    async function loadAll(){
+    async function loadAll() {
+      if (!state.assignedClass) {
+        alert('No assigned class detected. Please contact the administrator.');
+        return;
+      }
+      if (classSelect.value !== state.assignedClass) {
+        alert('NOT YOUR CLASS BUDDY! You are restricted to ' + state.assignedClass);
+        classSelect.value = state.assignedClass;
+        return;
+      }
+
       state.className = classSelect.value;
-      let inputStream = (streamInput.value||'').trim();
+      let inputStream = (streamInput.value || '').trim();
       state.month = monthSelect.value;
-      state.year = (yearInput.value||'').trim();
+      state.year = (yearInput.value || '').trim();
       state.examKey = EXAM_KEYS[examType.value] || 'monthly';
       state.schoolBranch = (schoolBranch.value || '').trim();
 
-      if(!state.className){ alert('Select a class'); return; }
-      if(!state.year){ alert('Enter academic year'); return; }
+      if (!state.className) { alert('Select a class'); return; }
+      if (!state.year) { alert('Enter academic year'); return; }
 
       const classNumMatch = state.className.match(/\d+/);
       const classNum = classNumMatch ? classNumMatch[0] : '';
@@ -409,41 +457,77 @@
       drawCharts();
     }
 
-    /* ---------- Populate class dropdown ---------- */
-    (function populateClasses(){
-      const opts = Object.keys(SUBJECTS_BY_CLASS);
-      classSelect.innerHTML = '<option value="">Select Class…</option>' + opts.map(c=>`<option>${c}</option>`).join('');
-    })();
-
-    /* ---------- Computation: totals/averages/positions/grades ---------- */
-    function updateKPIs(){
-      const list = Object.values(state.students).map(s => ({ name: s.name, avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, {score, max}) => sum + (score/max)*100, 0) / state.subjectList.length : 0) || 0 }));
-      if(list.length === 0){
-        ['kpiTopStudent','kpiTopScore','kpiBottomStudent','kpiBottomScore','kpiClassMax','kpiClassGrade','kpiPresent','kpiAbsent','kpiFeeRequired','kpiFeePaid','kpiFeeBalance'].forEach(id=>document.getElementById(id).textContent='–');
+    /* ---------- Authentication and class lock ---------- */
+    firebase.auth().onAuthStateChanged(user => {
+      if (!user) {
+        window.location.href = 'index.html';
         return;
       }
-      const sorted = list.slice().sort((a,b)=> b.avg - a.avg);
-      const top = sorted[0]; const bottom = sorted[sorted.length-1];
-      kpiTopStudent.textContent = top.name || '–'; kpiTopScore.textContent = (top.avg||0).toFixed(2)+'%';
-      kpiBottomStudent.textContent = bottom.name || '–'; kpiBottomScore.textContent = (bottom.avg||0).toFixed(2)+'%';
-      kpiClassMax.textContent = (top.avg||0).toFixed(2)+'%';
-      const classAvg = sorted.reduce((s,x)=> s+(x.avg||0),0) / sorted.length;
+      const safeEmail = user.email.replace('.', '_');
+      const db = getDB();
+      db.ref('users/' + safeEmail).once('value').then(snap => {
+        const ud = snap.val() || {};
+        if (ud.role !== 'teacher') {
+          alert('Unauthorized: only teachers allowed');
+          firebase.auth().signOut();
+          window.location.href = 'index.html';
+          return;
+        }
+        // Parse class from email or use Firebase user data
+        state.assignedClass = parseClassFromEmail(user.email) || ud.class || ud.classLevel || '';
+        if (!state.assignedClass || !Object.keys(SUBJECTS_BY_CLASS).includes(state.assignedClass)) {
+          alert('Invalid or no class assigned. Contact administrator.');
+          firebase.auth().signOut();
+          window.location.href = 'index.html';
+          return;
+        }
+        // Lock dropdown to assigned class
+        populateClasses(state.assignedClass);
+        classSelect.value = state.assignedClass;
+        yearInput.value = new Date().getFullYear().toString(); // Default to current year
+        loadAll();
+      });
+    });
+
+    /* ---------- Computation: totals/averages/positions/grades ---------- */
+    function updateKPIs() {
+      const list = Object.values(state.students).map(s => ({
+        name: s.name,
+        avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, { score, max }) => sum + (score / max) * 100, 0) / state.subjectList.length : 0) || 0
+      }));
+      if (list.length === 0) {
+        ['kpiTopStudent', 'kpiTopScore', 'kpiBottomStudent', 'kpiBottomScore', 'kpiClassMax', 'kpiClassGrade', 'kpiPresent', 'kpiAbsent', 'kpiFeeRequired', 'kpiFeePaid', 'kpiFeeBalance'].forEach(id => document.getElementById(id).textContent = '–');
+        return;
+      }
+      const sorted = list.slice().sort((a, b) => b.avg - a.avg);
+      const top = sorted[0];
+      const bottom = sorted[sorted.length - 1];
+      kpiTopStudent.textContent = top.name || '–';
+      kpiTopScore.textContent = (top.avg || 0).toFixed(2) + '%';
+      kpiBottomStudent.textContent = bottom.name || '–';
+      kpiBottomScore.textContent = (bottom.avg || 0).toFixed(2) + '%';
+      kpiClassMax.textContent = (top.avg || 0).toFixed(2) + '%';
+      const classAvg = sorted.reduce((s, x) => s + (x.avg || 0), 0) / sorted.length;
       kpiClassGrade.textContent = letterGrade(classAvg);
 
-      let sumPresent=0, sumAbsent=0, sumDays=0;
+      let sumPresent = 0, sumAbsent = 0, sumDays = 0;
       state.students.forEach(s => {
-        const att = state.attendance[s.adm] || { present:0, absent:0, days:0 };
-        sumPresent += att.present; sumAbsent += att.absent; sumDays += att.days || (att.present + att.absent);
+        const att = state.attendance[s.adm] || { present: 0, absent: 0, days: 0 };
+        sumPresent += att.present;
+        sumAbsent += att.absent;
+        sumDays += att.days || (att.present + att.absent);
       });
-      const pctPresent = sumDays ? (sumPresent/sumDays)*100 : 0;
-      const pctAbsent = sumDays ? (sumAbsent/sumDays)*100 : 0;
+      const pctPresent = sumDays ? (sumPresent / sumDays) * 100 : 0;
+      const pctAbsent = sumDays ? (sumAbsent / sumDays) * 100 : 0;
       kpiPresent.textContent = pctPresent.toFixed(1) + '%';
       kpiAbsent.textContent = pctAbsent.toFixed(1) + '%';
 
-      let totalReq=0, totalPaid=0, totalBal=0;
+      let totalReq = 0, totalPaid = 0, totalBal = 0;
       state.students.forEach(s => {
         const fee = state.fees[s.adm] || { required: s.feeDue || 0, paid: s.feePaid || 0, balance: s.balance || 0 };
-        totalReq += fee.required || 0; totalPaid += fee.paid || 0; totalBal += fee.balance || 0;
+        totalReq += fee.required || 0;
+        totalPaid += fee.paid || 0;
+        totalBal += fee.balance || 0;
       });
       kpiFeeRequired.textContent = money(totalReq);
       kpiFeePaid.textContent = money(totalPaid);
@@ -451,45 +535,56 @@
     }
 
     /* ---------- Charts (bounded) ---------- */
-    function drawCharts(){
+    function drawCharts() {
       const MAX_LABELS = 50;
       const subjects = state.subjectList || [];
       const avgPerSubject = subjects.map(sub => {
-        let sum=0, cnt=0;
+        let sum = 0, cnt = 0;
         state.students.forEach(s => {
           const sc = (state.scores[s.adm]?.[sub]?.score || 0);
           const mx = Math.max(1, state.scores[s.adm]?.[sub]?.max || 100);
-          sum += (sc/mx)*100; cnt++;
+          sum += (sc / mx) * 100;
+          cnt++;
         });
-        return cnt ? sum/cnt : 0;
+        return cnt ? sum / cnt : 0;
       });
 
-      const topList = state.students.map(s => ({ name: s.name, avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, {score, max}) => sum + (score/max)*100, 0) / state.subjectList.length : 0) || 0 })).sort((a,b)=> b.avg - a.avg).slice(0,10);
+      const topList = state.students.map(s => ({
+        name: s.name,
+        avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, { score, max }) => sum + (score / max) * 100, 0) / state.subjectList.length : 0) || 0
+      })).sort((a, b) => b.avg - a.avg).slice(0, 10);
 
-      try{ if(subjectsChart){ subjectsChart.destroy(); subjectsChart = null; } }catch(e){}
-      try{ if(top10Chart){ top10Chart.destroy(); top10Chart = null; } }catch(e){}
+      try { if (subjectsChart) { subjectsChart.destroy(); subjectsChart = null; } } catch (e) {}
+      try { if (top10Chart) { top10Chart.destroy(); top10Chart = null; } } catch (e) {}
 
       const subjectsToShow = subjects.slice(0, MAX_LABELS);
       const avgToShow = avgPerSubject.slice(0, MAX_LABELS);
 
       subjectsChart = new Chart(subjectsChartCtx, {
-        type:'bar',
-        data: { labels: subjectsToShow, datasets: [{ label:'Average %', data: avgToShow, backgroundColor: '#4B5EAA' }] },
-        options: { responsive:true, maintainAspectRatio:true, plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, max:100}, x:{ ticks:{ autoSkip:true, maxTicksLimit:12 } } } }
+        type: 'bar',
+        data: { labels: subjectsToShow, datasets: [{ label: 'Average %', data: avgToShow, backgroundColor: '#4B5EAA' }] },
+        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { ticks: { autoSkip: true, maxTicksLimit: 12 } } } }
       });
 
       top10Chart = new Chart(top10ChartCtx, {
-        type:'bar',
-        data: { labels: topList.map(x=> x.name), datasets: [{ label:'Overall %', data: topList.map(x=> x.avg), backgroundColor: '#6B7280' }] },
-        options: { responsive:true, maintainAspectRatio:true, plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, max:100}, x:{ ticks:{ autoSkip:true } } } }
+        type: 'bar',
+        data: { labels: topList.map(x => x.name), datasets: [{ label: 'Overall %', data: topList.map(x => x.avg), backgroundColor: '#6B7280' }] },
+        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { ticks: { autoSkip: true } } } }
       });
     }
 
     /* ---------- Small helpers ---------- */
-    function money(n){ n = Number(n||0); return new Intl.NumberFormat('en-KE',{style:'currency',currency:'KES',maximumFractionDigits:0}).format(n); }
+    function money(n) { n = Number(n || 0); return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n); }
 
     /* ---------- Load on change ---------- */
-    classSelect.addEventListener('change', loadAll);
+    classSelect.addEventListener('change', () => {
+      if (classSelect.value !== state.assignedClass) {
+        alert('NOT YOUR CLASS BUDDY! You are restricted to ' + state.assignedClass);
+        classSelect.value = state.assignedClass;
+        return;
+      }
+      loadAll();
+    });
     streamInput.addEventListener('change', loadAll);
     monthSelect.addEventListener('change', loadAll);
     yearInput.addEventListener('change', loadAll);
@@ -521,12 +616,6 @@
         scoresheetModal.style.display = 'none';
       }
     });
-
-    window.addEventListener('load', () => {
-      if (classSelect.value && yearInput.value) {
-        loadAll();
-      }
-    });
   </script>
 </body>
-</html> 
+</html>

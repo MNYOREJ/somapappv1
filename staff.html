@@ -329,7 +329,15 @@
     </div>
 
     <script>
-        const firebaseConfig = { /* Same as original */ };
+        const firebaseConfig = {
+            apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+            authDomain: "somaptestt.firebaseapp.com",
+            databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+            projectId: "somaptestt",
+            storageBucket: "somaptestt.appspot.com",
+            messagingSenderId: "105526245138",
+            appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+        };
         firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.database();
@@ -416,35 +424,36 @@
             if (streamStudents.length === 0) return;
 
             // Academic
-            let avgScore = 0, top = {avgScore: 0}, bottom = {avgScore: 100};
-            const subjectAverages = {};
+            let avgScore = 0;
+            const subjectPcts = {};
+            const defaultAvg = 0; // Changed from 70 to 0 for accuracy if no scores
             streamStudents.forEach(s => {
-                const studentScores = scores[s.admissionNumber] || {};
-                let total = 0, count = 0;
-                Object.values(studentScores).forEach(exam => {
-                    Object.values(exam).forEach(month => {
-                        Object.entries(month).forEach(([sub, {score, max}]) => {
-                            const pct = (score / max) * 100;
-                            total += pct;
+                let totalPct = 0, count = 0;
+                Object.entries(scores || {}).forEach(([examKey, examData] => {
+                    Object.entries(examData || {}).forEach(([month, monthData] => {
+                        const studentData = monthData[s.admissionNumber] || {};
+                        Object.entries(studentData).forEach(([sub, {score, max}]) => {
+                            const pct = (score / (max || 100)) * 100;
+                            totalPct += pct;
                             count++;
-                            subjectAverages[sub] = (subjectAverages[sub] || 0) + pct;
+                            subjectPcts[sub] = [...(subjectPcts[sub] || []), pct];
                         });
                     });
                 });
-                s.avgScore = count ? total / count : 70;
+                s.avgScore = count ? totalPct / count : defaultAvg;
                 avgScore += s.avgScore;
-                if (s.avgScore > top.avgScore) top = s;
-                if (s.avgScore < bottom.avgScore) bottom = s;
             });
-            avgScore /= streamStudents.length;
+            avgScore /= streamStudents.length || 1;
+            const top = streamStudents.reduce((prev, curr) => (curr.avgScore > prev.avgScore ? curr : prev), {avgScore: -Infinity, firstName: '', lastName: ''});
+            const bottom = streamStudents.reduce((prev, curr) => (curr.avgScore < prev.avgScore ? curr : prev), {avgScore: Infinity, firstName: '', lastName: ''});
             document.getElementById('class-scores-count').textContent = avgScore.toFixed(1) + '%';
-            document.getElementById('top-student').innerHTML = top ? `${top.firstName} ${top.lastName}<br><small>${top.avgScore.toFixed(1)}%</small>` : 'N/A';
-            document.getElementById('bottom-student').innerHTML = bottom ? `${bottom.firstName} ${bottom.lastName}<br><small>${bottom.avgScore.toFixed(1)}%</small>` : 'N/A';
+            document.getElementById('top-student').innerHTML = top.avgScore > -Infinity ? `${top.firstName} ${top.lastName}<br><small>${top.avgScore.toFixed(1)}%</small>` : 'N/A';
+            document.getElementById('bottom-student').innerHTML = bottom.avgScore < Infinity ? `${bottom.firstName} ${bottom.lastName}<br><small>${bottom.avgScore.toFixed(1)}%</small>` : 'N/A';
             document.getElementById('class-grade').textContent = letterGrade(avgScore);
 
             // Subjects Chart
-            const subjects = Object.keys(subjectAverages);
-            const subData = subjects.map(sub => (subjectAverages[sub] / streamStudents.length).toFixed(1));
+            const subjects = Object.keys(subjectPcts);
+            const subData = subjects.map(sub => (subjectPcts[sub].reduce((sum, v) => sum + v, 0) / (subjectPcts[sub].length || 1)).toFixed(1));
             drawBarChart('subjectsChart', subjects, subData, 'Subject Averages (%)', '#28a745');
 
             // Top Students Chart
@@ -454,26 +463,36 @@
             drawBarChart('topStudentsChart', topLabels, topData, 'Top Students (%)', '#007bff');
 
             // Attendance
-            let totalDays = 0, presentDays = 0, yellowAlerts = 0, classDays = 0;
+            let classDays = 0;
+            let yellowAlerts = 0;
             const monthlyPresence = {};
-            Object.entries(attendance).forEach(([month, monthData]) => {
-                let monthPresent = 0, monthTotal = 0;
-                Object.values(monthData || {}).forEach(dayData => {
-                    Object.values(dayData || {}).forEach(rec => {
-                        const days = (rec.present || 0) + (rec.absent || 0);
-                        classDays = Math.max(classDays, days);
-                        presentDays += rec.present || 0;
-                        totalDays += days;
-                        monthPresent += rec.present || 0;
-                        monthTotal += days;
-                        if (rec.absent >= 10) yellowAlerts++;
+            let globalPresent = 0, globalTotal = 0;
+            Object.entries(attendance || {}).forEach(([month, monthData] => {
+                const admStats = {};
+                Object.entries(monthData || {}).forEach(([date, dayData] => {
+                    Object.entries(dayData || {}).forEach(([adm, rec] => {
+                        if (streamStudents.some(s => s.admissionNumber === adm)) {
+                            admStats[adm] = admStats[adm] || {present: 0, absent: 0, days: 0};
+                            admStats[adm].days++;
+                            if (rec.daily === 'P') admStats[adm].present++;
+                            else admStats[adm].absent++;
+                        }
                     });
                 });
-                monthlyPresence[month] = (monthPresent / monthTotal * 100).toFixed(1) || 0;
+                let monthPresent = 0, monthTotal = 0;
+                Object.values(admStats).forEach(stat => {
+                    monthPresent += stat.present;
+                    monthTotal += stat.days;
+                    if (stat.absent >= 10) yellowAlerts++;
+                    classDays = Math.max(classDays, stat.days);
+                });
+                monthlyPresence[month] = (monthTotal ? (monthPresent / monthTotal * 100) : 0).toFixed(1);
+                globalPresent += monthPresent;
+                globalTotal += monthTotal;
             });
-            const percentPresent = totalDays ? (presentDays / totalDays * 100).toFixed(1) : 0;
+            const percentPresent = (globalTotal ? (globalPresent / globalTotal * 100) : 0).toFixed(1);
             document.getElementById('percent-present').textContent = percentPresent + '%';
-            document.getElementById('percent-absent').textContent = (100 - parseFloat(percentPresent)) + '%';
+            document.getElementById('percent-absent').textContent = (100 - parseFloat(percentPresent)).toFixed(1) + '%';
             document.getElementById('yellow-alerts').textContent = yellowAlerts;
             document.getElementById('class-days').textContent = classDays;
 
@@ -501,7 +520,7 @@
             const incidentTypes = {};
             let totalIncidents = 0, repeatOffenders = 0;
             const studentIncidents = {};
-            Object.values(discipline).forEach(inc => {
+            Object.values(discipline || {}).forEach(inc => {
                 if (inc.class === currentUserClass) {
                     totalIncidents++;
                     incidentTypes[inc.type] = (incidentTypes[inc.type] || 0) + 1;
@@ -519,8 +538,10 @@
         }
 
         function drawBarChart(id, labels, data, title, color) {
-            const ctx = document.getElementById(id).getContext('2d');
-            if (window[`${id}Chart`]) window[`${id}Chart`].destroy();
+            const ctx = document.getElementById(id);
+            if (!ctx) return;
+            const chart = window[`${id}Chart`];
+            if (chart) chart.destroy();
             window[`${id}Chart`] = new Chart(ctx, {
                 type: 'bar',
                 data: { labels, datasets: [{ label: title, data, backgroundColor: color }] },
@@ -529,8 +550,10 @@
         }
 
         function drawLineChart(id, labels, data, title, color) {
-            const ctx = document.getElementById(id).getContext('2d');
-            if (window[`${id}Chart`]) window[`${id}Chart`].destroy();
+            const ctx = document.getElementById(id);
+            if (!ctx) return;
+            const chart = window[`${id}Chart`];
+            if (chart) chart.destroy();
             window[`${id}Chart`] = new Chart(ctx, {
                 type: 'line',
                 data: { labels, datasets: [{ label: title, data, borderColor: color, fill: false }] },
@@ -539,8 +562,10 @@
         }
 
         function drawPieChart(id, labels, data, colors) {
-            const ctx = document.getElementById(id).getContext('2d');
-            if (window[`${id}Chart`]) window[`${id}Chart`].destroy();
+            const ctx = document.getElementById(id);
+            if (!ctx) return;
+            const chart = window[`${id}Chart`];
+            if (chart) chart.destroy();
             window[`${id}Chart`] = new Chart(ctx, {
                 type: 'pie',
                 data: { labels, datasets: [{ data, backgroundColor: colors }] },

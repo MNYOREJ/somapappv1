@@ -1,262 +1,286 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SoMAp — Student ID / Details</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>SoMAp — Student Details & ID</title>
 
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"/>
+  <!-- Tailwind for layout + font + color -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome for icons -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <!-- Path to your firebase initializer -->
+  <script src="../firebase.js"></script>
 
   <style>
-    body { font-family: Inter, system-ui, Arial; background:#f8fafc; color:#0f172a; padding:18px; }
-    .card { background:#fff; border:1px solid #e6e9ef; border-radius:8px; padding:18px; max-width:980px; margin:0 auto; }
-    .grid-2 { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }
-    .left { flex: 0 0 260px; }
-    .right { flex: 1 1 auto; min-width: 260px; }
-    .id-preview { width:260px; border-radius:8px; padding:12px; background:linear-gradient(135deg,#eef2ff,#fff); box-shadow:0 6px 20px rgba(2,6,23,0.06); }
-    .id-photo { width:84px; height:100px; object-fit:cover; border-radius:6px; border:1px solid #ddd; }
-    .btn { display:inline-flex; align-items:center; gap:8px; padding:.5rem .85rem; border-radius:.5rem; }
-    .muted { color:#6b7280; font-size:13px;}
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background-color: #edf2f7;
+      color: #1a202c;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: auto;
+    }
+    .header {
+      flex: 1;
+    }
+    .header h1 {
+      font-size: 1.8rem;
+      color: #2d3748;
+      font-weight: 700;
+    }
+    .button {
+      @apply inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700;
+    }
+    .button-secondary {
+      @apply inline-flex items-center px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400;
+    }
+    .id-card {
+      width: 320px;
+      height: 200px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      overflow: hidden;
+      position: relative;
+      background-color: white;
+    }
+    .id-front, .id-back {
+      margin: 0 auto;
+    }
+    .id-photo {
+      width: 80px;
+      height: 100px;
+      object-fit: cover;
+      border: 2px solid #e2e8f0;
+      border-radius: 6px;
+    }
+    .info-line {
+      font-size: 0.85rem;
+      margin: 2px 0;
+    }
+    .label {
+      font-weight: 600;
+      color: #4a5568;
+    }
+    .value {
+      color: #2d3748;
+    }
+    .qr {
+      width: 60px;
+      height: 60px;
+    }
+    .id-logo {
+      width: 40px;
+      height: 40px;
+    }
+    .side-by-side {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .card-background {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+    }
+    .back-background {
+      background: linear-gradient(135deg, #4a5568, #2d3748);
+      color: #e2e8f0;
+    }
+    .id-front .top-bar, .id-back .top-bar {
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+    .text-small {
+      font-size: 0.75rem;
+    }
+    .mt-4 {
+      margin-top: 1rem;
+    }
+    .mb-4 {
+      margin-bottom: 1rem;
+    }
+    .border-decor {
+      border: 1px solid #cbd5e0;
+    }
   </style>
+
 </head>
 <body>
-  <div class="card">
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-semibold text-gray-800">Student Details & ID</h2>
-      <div class="flex gap-2">
-        <a href="../studentlist.html" class="py-2 px-3 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"><i class="fas fa-arrow-left"></i> Back</a>
-        <button id="downloadPdf" class="py-2 px-3 bg-indigo-600 text-white rounded hover:bg-indigo-700"><i class="fa-solid fa-file-pdf"></i> Generate ID (PDF)</button>
+  <div class="container space-y-6">
+    <!-- Header -->
+    <div class="flex justify-between items-center">
+      <div class="header">
+        <h1>Student Details & ID</h1>
+      </div>
+      <div class="flex gap-4">
+        <button id="downloadPdfBtn" class="button"><i class="fas fa-file-pdf mr-2"></i>Generate ID (PDF)</button>
+        <a href="studentlist.html" class="button-secondary"><i class="fas fa-arrow-left mr-2"></i> Back to List</a>
       </div>
     </div>
 
-    <div id="status" class="muted mb-3">Loading student…</div>
+    <div id="status" class="text-gray-600">Loading student data…</div>
 
-    <div class="grid-2">
-      <!-- left: ID preview -->
-      <div class="left">
-        <div class="id-preview" id="idPreview">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-            <div style="flex:0 0 auto">
-              <img id="idPhotoSmall" class="id-photo" src="https://via.placeholder.com/84x100" alt="photo">
-            </div>
-            <div style="flex:1 1 auto">
-              <div style="font-weight:700;color:#0b3d91">STUDENT ID CARD</div>
-              <div class="muted" style="font-size:12px;margin-top:6px">Socrates School</div>
-            </div>
+    <!-- ID card preview (front & back) -->
+    <div class="side-by-side">
+      <!-- Front side -->
+      <div class="id-card id-front border-decor">
+        <div class="top-bar card-background">Socrates School</div>
+        <div class="p-4 flex gap-4">
+          <img id="idPhotoFront" src="https://via.placeholder.com/80x100" alt="Passport Photo" class="id-photo">
+          <div class="leading-relaxed">
+            <div class="info-line"><span class="label">Name:</span> <span class="value" id="frontFullName">—</span></div>
+            <div class="info-line"><span class="label">Class:</span> <span class="value" id="frontClass">—</span></div>
+            <div class="info-line"><span class="label">Adm No:</span> <span class="value" id="frontAdm">—</span></div>
+            <div class="info-line"><span class="label">Year:</span> <span class="value" id="frontYear">—</span></div>
           </div>
-
-          <div id="idFullName" style="font-weight:700;margin-bottom:6px">Full Name: —</div>
-          <div id="idClass" class="muted" style="margin-bottom:4px">Class: —</div>
-          <div id="idAdmission" class="muted" style="margin-bottom:4px">Admission No: —</div>
-          <div id="idParent" class="muted" style="margin-bottom:4px">Parent Contact: —</div>
-          <div id="idSchoolContact" class="muted" style="margin-top:8px;font-size:12px">School Contact: +255686828732</div>
-          <div id="idYear" class="muted" style="margin-top:4px;font-size:12px">Year: <span id="idYearVal"></span></div>
-          <div style="margin-top:10px;font-size:12px;color:#0b3d91;font-weight:600">Issued by Socrates School</div>
+        </div>
+        <div class="absolute bottom-0 left-0 w-full text-center p-2 text-xs bg-gray-100 text-gray-600">
+          Socratesschool2020@gmail.com · Issued by Socrates School
         </div>
       </div>
 
-      <!-- right: details -->
-      <div class="right">
-        <div id="detailsBlock">
-          <!-- filled by JS -->
+      <!-- Back side -->
+      <div class="id-card id-back border-decor">
+        <div class="top-bar back-background">Student ID – Back</div>
+        <div class="p-4 text-small space-y-1">
+          <div class="info-line"><span class="label">Parent Contact:</span> <span class="value" id="backParent">—</span></div>
+          <div class="info-line"><span class="label">Address:</span> <span class="value" id="backAddress">—</span></div>
+          <div class="info-line"><span class="label">Email:</span> <span class="value">Socratesschool2020@gmail.com</span></div>
+          <div class="info-line"><span class="label">School Contact:</span> <span class="value">+255 686 828 732</span></div>
         </div>
+        <div class="absolute bottom-0 right-0 p-2">
+          <i class="fas fa-shield-alt text-xl text-gray-400"></i>
+        </div>
+      </div>
+    </div>
 
-        <div style="margin-top:12px">
-          <button id="editStudent" class="py-2 px-3 bg-yellow-400 text-black rounded hover:opacity-90"><i class="fas fa-edit"></i> Edit (if allowed)</button>
-          <button id="refreshBtn" class="py-2 px-3 bg-gray-200 text-gray-800 rounded ml-2">Refresh</button>
+    <!-- Full Student Details -->
+    <div class="bg-white rounded-lg shadow-lg border-decor p-6">
+      <h2 class="text-lg font-semibold mb-4">Full Student Details</h2>
+      <div class="space-y-2 text-sm">
+        <div><span class="label">Full Name:</span> <span id="detailFullName">—</span></div>
+        <div><span class="label">Class:</span> <span id="detailClass">—</span></div>
+        <div><span class="label">Date of Registration:</span> <span id="detailDate">—</span></div>
+        <div><span class="label">Passport Photo:</span><br>
+          <img id="detailPhoto" src="https://via.placeholder.com/160x200" alt="Passport Photo" class="rounded border p-1" style="object-fit:cover; width:160px; height:200px;">
         </div>
+        <div><span class="label">Parent Contact:</span> <span id="detailParent">—</span></div>
+        <div><span class="label">Fee Total:</span> <span id="detailFeeTotal">—</span></div>
+        <div><span class="label">Paid Amount:</span> <span id="detailPaid">—</span></div>
+        <div><span class="label">Debt:</span> <span id="detailDebt">—</span></div>
+        <div><span class="label">Payment Plan:</span> <span id="detailPlan">—</span></div>
+        <div><span class="label">Residential Address:</span> <span id="detailAddress">—</span></div>
+        <div><span class="label">Admission Number:</span> <span id="detailAdm">—</span></div>
       </div>
     </div>
   </div>
 
-  <!-- libs -->
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-  <!-- your firebase initialiser (adjust path if needed) -->
-  <script src="../firebase.js"></script>
-
   <script>
-    (function() {
-      // safety: require db
-      const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-      if (!db) {
-        document.getElementById('status').textContent = 'Firebase not available. Check ../firebase.js path.';
-        return;
-      }
+  (async function(){
+    // Setup firebase & DB
+    const db = window.firebase && firebase.database ? firebase.database() : null;
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get("key");
 
-      // read url params
-      const params = new URLSearchParams(window.location.search);
-      const key = params.get('key');      // primary choice (firebase push key)
-      const adm = params.get('adm');      // alternative (admission number)
+    if (!db || !key) {
+      document.getElementById("status").innerText = "Student data cannot load (missing DB or key).";
+      return;
+    }
 
-      const statusEl = document.getElementById('status');
-      const detailsBlock = document.getElementById('detailsBlock');
-      const downloadPdfBtn = document.getElementById('downloadPdf');
-      const refreshBtn = document.getElementById('refreshBtn');
-      const editBtn = document.getElementById('editStudent');
+    const snap = await db.ref("students/" + key).once("value");
+    const s = snap.val();
+    if (!s) {
+      document.getElementById("status").innerText = "Student not found.";
+      return;
+    }
+    // set status off
+    document.getElementById("status").remove();
 
-      async function fetchStudent() {
-        statusEl.textContent = 'Loading student…';
+    // Helper to get photo URL
+    const photoUrl = s.passportPhotoURL || s.passportPhotoUrl || s.passportPhoto || s.photoURL || '';
+
+    // Fill front
+    document.getElementById("idPhotoFront").src = photoUrl || "https://via.placeholder.com/80x100";
+    document.getElementById("frontFullName").innerText = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+    document.getElementById("frontClass").innerText = s.classLevel || "N/A";
+    document.getElementById("frontAdm").innerText = s.admissionNumber || "N/A";
+    document.getElementById("frontYear").innerText = new Date().getFullYear();
+
+    // Fill back
+    document.getElementById("backParent").innerText = s.primaryParentContact || "N/A";
+    document.getElementById("backAddress").innerText = s.residentialAddress || "N/A";
+
+    // Fill detail section
+    document.getElementById("detailFullName").innerText = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+    document.getElementById("detailClass").innerText = s.classLevel || "N/A";
+    document.getElementById("detailDate").innerText = s.timestamp ? new Date(s.timestamp).toLocaleDateString() : (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : "N/A");
+    document.getElementById("detailPhoto").src = photoUrl || "https://via.placeholder.com/160x200";
+    document.getElementById("detailParent").innerText = s.primaryParentContact || "N/A";
+    document.getElementById("detailFeeTotal").innerText = s.feePerYear || "0";
+    let paid = 0;
+    if (s.payments) {
+      paid = Object.values(s.payments).reduce((acc, p) => acc + (Number(p.amount || 0)), 0);
+    }
+    document.getElementById("detailPaid").innerText = paid;
+    document.getElementById("detailDebt").innerText = (Number(s.feePerYear || 0) - paid) >= 0 ? (Number(s.feePerYear || 0) - paid) : 0;
+    document.getElementById("detailPlan").innerText = s.paymentPlan || "N/A";
+    document.getElementById("detailAddress").innerText = s.residentialAddress || "N/A";
+    document.getElementById("detailAdm").innerText = s.admissionNumber || "N/A";
+
+    // PDF generation
+    document.getElementById("downloadPdfBtn").addEventListener("click", () => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: [100, 60] }); 
+      // You might adjust size [100,60] or whatever to match front card size
+
+      // Draw background
+      doc.setFillColor(230, 230, 250);
+      doc.rect(0,0,100,60,"F");
+
+      // School logo top-left
+      // Attempt to insert logo image if you have it hosted
+      // doc.addImage("logo_url_or_base64", "PNG", 2,2, 15,15);
+
+      // Student photo
+      if (photoUrl) {
         try {
-          let s = null;
-          let studentKey = null;
-
-          if (key) {
-            const snap = await db.ref('students/' + key).once('value');
-            s = snap.val() || null;
-            studentKey = key;
-          } else if (adm) {
-            const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
-            const obj = snap.val() || {};
-            const firstKey = Object.keys(obj)[0];
-            studentKey = firstKey || null;
-            s = firstKey ? obj[firstKey] : null;
-          } else {
-            statusEl.textContent = 'No key or admission number provided in URL. Use ?key=FIREBASE_KEY.';
-            return;
-          }
-
-          if (!s) {
-            statusEl.textContent = 'Student not found.';
-            detailsBlock.innerHTML = '';
-            return;
-          }
-
-          statusEl.textContent = '';
-          renderStudent(s, studentKey);
-        } catch (err) {
-          statusEl.textContent = 'Error loading student: ' + err.message;
-          console.error(err);
+          doc.addImage(photoUrl, "JPEG", 75, 5, 20, 25);
+        } catch(e) {
+          // do nothing
         }
       }
 
-      function safePhoto(s) {
-        // support different naming variants used across codebases
-        return s.passportPhotoURL || s.passportPhotoUrl || s.passportPhoto || s.photoUrl || '';
-      }
+      // Set font, etc.
+      doc.setFontSize(12);
+      doc.setTextColor("#0b3d91");
+      doc.text("Socrates School", 10, 10);
 
-      function renderStudent(s, studentKey) {
-        const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-        const photo = safePhoto(s) || 'https://via.placeholder.com/120';
-        const paidAmount = (s.payments) ? Object.values(s.payments).reduce((a,b)=>(a+Number(b.amount||0)),0) : 0;
-        const feePerYear = Number(s.feePerYear || 0);
-        const debt = Math.max(0, feePerYear - paidAmount);
-        const dateReg = s.timestamp ? new Date(s.timestamp).toLocaleDateString() : (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A');
+      doc.setFontSize(10);
+      doc.text(`Name: ${s.firstName} ${s.middleName || ''} ${s.lastName}`, 10, 18);
+      doc.text(`Class: ${s.classLevel || ''}`, 10, 26);
+      doc.text(`Adm No: ${s.admissionNumber}`, 10, 34);
+      doc.text(`Year: ${new Date().getFullYear()}`, 10, 42);
 
-        // details
-        detailsBlock.innerHTML = `
-          <p><strong>Full Name:</strong> ${escapeHtml(fullName)}</p>
-          <p><strong>Class:</strong> ${escapeHtml(s.classLevel||'N/A')}</p>
-          <p><strong>Date of Registration:</strong> ${escapeHtml(dateReg)}</p>
-          <p><strong>Passport Photo:</strong><br/><img src="${escapeHtml(photo)}" alt="photo" style="width:160px;height:160px;object-fit:cover;border-radius:8px;border:1px solid #eee;"/></p>
-          <p><strong>Parent Contact:</strong> ${escapeHtml(s.primaryParentContact||'N/A')}</p>
-          <p><strong>Fee Total:</strong> ${escapeHtml(String(feePerYear))}</p>
-          <p><strong>Paid Amount:</strong> ${escapeHtml(String(paidAmount))}</p>
-          <p><strong>Debt:</strong> ${escapeHtml(String(debt))}</p>
-          <p><strong>Payment Plan:</strong> ${escapeHtml(s.paymentPlan||'N/A')}</p>
-          <p><strong>Residential Address:</strong> ${escapeHtml(s.residentialAddress||'N/A')}</p>
-          <p><strong>Admission Number:</strong> ${escapeHtml(s.admissionNumber||'N/A')}</p>
-        `;
+      // Parent contact on back or bottom
+      doc.setFontSize(8);
+      doc.text(`Parent: ${s.primaryParentContact}`, 10, 50);
+      doc.text(`Email: Socratesschool2020@gmail.com`, 50, 50);
 
-        // fill ID preview
-        document.getElementById('idPhotoSmall').src = photo;
-        document.getElementById('idFullName').textContent = `Full Name: ${fullName}`;
-        document.getElementById('idClass').textContent = `Class: ${s.classLevel || 'N/A'}`;
-        document.getElementById('idAdmission').textContent = `Admission No: ${s.admissionNumber || 'N/A'}`;
-        document.getElementById('idParent').textContent = `Parent Contact: ${s.primaryParentContact || 'N/A'}`;
-        document.getElementById('idYearVal').textContent = new Date().getFullYear();
+      doc.save(`${(s.firstName || '')}_${(s.lastName || '')}_ID.pdf`);
+    });
 
-        // hook Generate PDF
-        downloadPdfBtn.onclick = () => generatePdfID(s, fullName, photo);
-        refreshBtn.onclick = fetchStudent;
-        editBtn.onclick = () => {
-          // open student edit page if you have one; for now jump back to list
-          window.location.href = '../studentlist.html';
-        };
-      }
-
-      function escapeHtml(text) {
-        if (text === undefined || text === null) return '';
-        return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
-      }
-
-      // PDF generation (matches previous style)
-      function generatePdfID(student, fullName, photoUrl) {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF("landscape", "mm", "credit-card"); // same used earlier
-
-        const primaryColor = "#0b3d91";
-        const textColor = "#000000";
-
-        // Background
-        doc.setFillColor("#f5f5f5");
-        doc.rect(0, 0, 85.6, 54, "F");
-
-        // Top Bar
-        doc.setFillColor(primaryColor);
-        doc.rect(0, 0, 85.6, 10, "F");
-        doc.setTextColor("#FFFFFF");
-        doc.setFontSize(10);
-        doc.text("STUDENT ID CARD", 42.8, 7, { align: "center" });
-
-        // Add school logo (optional)
-        try {
-          // adjust path if your image is PNG/JPG
-          doc.addImage("../images/somap-logo.png.jpg", "PNG", 2, 2, 8, 8);
-        } catch (e) {
-          // ignore if missing
-        }
-
-        // Student Photo: attempt to add remote image; if fails fallback to a box
-        if (photoUrl) {
-          try {
-            // jsPDF may throw on CORS blocked images - cloudinary usually works with direct URLs
-            doc.addImage(photoUrl, "JPEG", 2, 12, 20, 25);
-          } catch (e) {
-            doc.setDrawColor(0);
-            doc.rect(2, 12, 20, 25);
-            doc.text("Photo", 12, 25, { align: "center" });
-          }
-        } else {
-          doc.setDrawColor(0);
-          doc.rect(2, 12, 20, 25);
-          doc.text("Photo", 12, 25, { align: "center" });
-        }
-
-        // Student Details
-        const admissionNo = student.admissionNumber || "N/A";
-        const classLevel = student.classLevel || "N/A";
-        const parentContact = student.primaryParentContact || "N/A";
-
-        doc.setTextColor(textColor);
-        doc.setFontSize(8);
-
-        let startX = 25, startY = 15;
-        doc.text(`Full Name: ${fullName}`, startX, startY);
-        doc.text(`Class: ${classLevel}`, startX, startY + 6);
-        doc.text(`Admission No: ${admissionNo}`, startX, startY + 12);
-        doc.text(`Parent Contact: ${parentContact}`, startX, startY + 18);
-        doc.text(`School Contact: +255686828732`, startX, startY + 24);
-        doc.text(`Year: ${new Date().getFullYear()}`, startX, startY + 30);
-
-        // Bottom Bar
-        doc.setFillColor(primaryColor);
-        doc.rect(0, 46, 85.6, 8, "F");
-        doc.setTextColor("#FFFFFF");
-        doc.setFontSize(7);
-        doc.text("Issued by Socrates School", 42.8, 51, { align: "center" });
-
-        // Save
-        const safeName = (fullName || "student").replace(/\s+/g, "_");
-        doc.save(`${safeName}_ID.pdf`);
-      }
-
-      // start
-      fetchStudent();
-    })();
+  })();
   </script>
 </body>
 </html>

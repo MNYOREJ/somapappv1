@@ -166,21 +166,7 @@
     </div>
   </div>
 
-  <!-- Student Details Modal -->
-  <div id="detailsModal" class="modal" aria-hidden="true">
-    <div class="modal-content">
-      <span id="closeDetailsModal" class="close" title="Close">&times;</span>
-      <h2 class="text-2xl font-semibold text-indigo-600 mb-4">Student Details</h2>
-      <div id="studentDetails" class="space-y-2"></div>
-      <div class="mt-4">
-        <button id="generateIDCard" class="py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-          Generate ID Card (PDF)
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Third-party libraries (CSV + PDF) -->
+   <!-- Third-party libraries (CSV + PDF) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
@@ -257,32 +243,28 @@
                           s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A';
           const photoURL = s.passportPhotoURL || 'https://via.placeholder.com/50';
           tr.innerHTML = `
-            <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
-            <td>${escapeHtml(fullName)}</td>
-            <td>${escapeHtml(s.classLevel || 'N/A')}</td>
-            <td>${escapeHtml(dateReg)}</td>
-            <td><img src="${escapeHtml(photoURL)}" alt="photo" style="width:50px;height:50px;object-fit:cover;border-radius:4px"/></td>
-            <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
-            <td>${escapeHtml(String(s.feePerYear || 0))}</td>
-            <td>${escapeHtml(String(paidAmount))}</td>
-            <td>${escapeHtml(String(debt))}</td>
-            <td>${escapeHtml(s.paymentPlan || 'N/A')}</td>
-            <td><button class="py-1 px-2 border rounded text-indigo-600" data-view="${s.key}">
-                  <i class="fas fa-eye"></i>
-                </button></td>
-          `;
+  <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
+  <td>${escapeHtml(fullName)}</td>
+  <td>${escapeHtml(s.classLevel || 'N/A')}</td>
+  <td>${escapeHtml(dateReg)}</td>
+  <td><img src="${escapeHtml(photoURL)}" alt="photo" style="width:50px;height:50px;object-fit:cover;border-radius:4px"/></td>
+  <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
+  <td>${escapeHtml(String(s.feePerYear || 0))}</td>
+  <td>${escapeHtml(String(paidAmount))}</td>
+  <td>${escapeHtml(String(debt))}</td>
+  <td>${escapeHtml(s.paymentPlan || 'N/A')}</td>
+  <td>
+    <a href="generateid.html?key=${encodeURIComponent(s.key)}" target="_blank"
+       class="py-1 px-2 border rounded text-indigo-600 inline-block" title="Open details & generate ID">
+      <i class="fas fa-eye"></i>
+    </a>
+  </td>
+`;
+listBody.appendChild(tr);
           listBody.appendChild(tr);
         });
 
-        // Attach one delegated listener for view buttons
-        listBody.onclick = (e) => {
-          const btn = e.target.closest('button[data-view]');
-          if (!btn) return;
-          const key = btn.getAttribute('data-view');
-          openDetails(key);
-        };
-
-        // School Reports + Report Forms (same structure, with calculated payments)
+               // School Reports + Report Forms (same structure, with calculated payments)
         schoolReportBody.innerHTML = '';
         reportFormBody.innerHTML = '';
         cachedStudents.forEach(s => {
@@ -315,113 +297,7 @@
       // Initial render
       renderAllTables();
 
-      // ---- Details Modal ----
-      async function openDetails(key) {
-        if (!db) return alert('DB not ready');
-        try {
-          const snap = await db.ref('students/' + key).once('value');
-          const s = snap.val() || {};
-          const details = document.getElementById('studentDetails');
-          const fullName = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
-          const photoURL = s.passportPhotoURL || 'https://via.placeholder.com/120';
-          const paidAmount = calculatePaidAmount(s);
-          const debt = calculateDebt(s);
-          details.innerHTML = `
-            <p><strong>Full Name:</strong> ${escapeHtml(fullName)}</p>
-            <p><strong>Class:</strong> ${escapeHtml(s.classLevel || 'N/A')}</p>
-            <p><strong>Date of Registration:</strong> ${s.timestamp ? new Date(s.timestamp).toLocaleDateString() : (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A')}</p>
-            <p><strong>Passport Photo:</strong><br/><img src="${escapeHtml(photoURL)}" alt="photo" style="width:120px;height:120px;object-fit:cover;border-radius:6px"/></p>
-            <p><strong>Parent Contact:</strong> ${escapeHtml(s.primaryParentContact || 'N/A')}</p>
-            <p><strong>Fee Total:</strong> ${escapeHtml(String(s.feePerYear || 0))}</p>
-            <p><strong>Paid Amount:</strong> ${escapeHtml(String(paidAmount))}</p>
-            <p><strong>Debt:</strong> ${escapeHtml(String(debt))}</p>
-            <p><strong>Payment Plan:</strong> ${escapeHtml(s.paymentPlan || 'N/A')}</p>
-            <p><strong>Residential Address:</strong> ${escapeHtml(s.residentialAddress || 'N/A')}</p>
-            <p><strong>Admission Number:</strong> ${escapeHtml(s.admissionNumber || 'N/A')}</p>
-          `;
-          document.getElementById('generateIDCard').onclick = () => generateIDCard(s);
-          document.getElementById('detailsModal').style.display = 'block';
-        } catch (err) {
-          console.error('Error fetching details:', err);
-        }
-      }
-      document.getElementById('closeDetailsModal').addEventListener('click', () => {
-        document.getElementById('detailsModal').style.display = 'none';
-      });
-
-      // ---- ID Card PDF ----
-      function generateIDCard(student) {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF("landscape", "mm", "credit-card");
-
-        // Colors
-        const primaryColor = "#0b3d91"; // dark blue
-        const textColor = "#000000";
-
-        // Background
-        doc.setFillColor("#f5f5f5");
-        doc.rect(0, 0, 85.6, 54, "F");
-
-        // Top Bar
-        doc.setFillColor(primaryColor);
-        doc.rect(0, 0, 85.6, 10, "F");
-        doc.setTextColor("#FFFFFF");
-        doc.setFontSize(10);
-        doc.text("STUDENT ID CARD", 42.8, 7, { align: "center" });
-
-        // School Logo (already in your folder, e.g. "assets/logo.png")
-        try {
-          doc.addImage("../images/somap-logo.png.jpg", "PNG", 2, 2, 8, 8);
-        } catch (e) {
-          console.warn("⚠️ Logo not found, ensure '../images/somap-logo.png.jpg' exists.");
-        }
-
-        // Student Photo
-        if (student.passportPhotoURL) {
-          try {
-            doc.addImage(student.passportPhotoURL, "JPEG", 2, 12, 20, 25);
-          } catch (e) {
-            doc.setDrawColor(0);
-            doc.rect(2, 12, 20, 25);
-            doc.text("Photo", 12, 25, { align: "center" });
-          }
-        } else {
-          doc.setDrawColor(0);
-          doc.rect(2, 12, 20, 25);
-          doc.text("Photo", 12, 25, { align: "center" });
-        }
-
-        // Student Details (correct mapping to your DB fields)
-        const fullName = `${student.firstName || ""} ${student.middleName || ""} ${student.lastName || ""}`.trim();
-        const admissionNo = student.admissionNumber || "N/A";
-        const classLevel = student.classLevel || "N/A";
-        const parentContact = student.primaryParentContact || "N/A";
-
-        doc.setTextColor(textColor);
-        doc.setFontSize(8);
-
-        let startX = 25, startY = 15;
-        doc.text(`Full Name: ${fullName}`, startX, startY);
-        doc.text(`Class: ${classLevel}`, startX, startY + 6);
-        doc.text(`Admission No: ${admissionNo}`, startX, startY + 12);
-        doc.text(`Parent Contact: ${parentContact}`, startX, startY + 18);
-        doc.text(`School Contact: +255686828732`, startX, startY + 24);
-        doc.text(`Year: ${new Date().getFullYear()}`, startX, startY + 30);
-
-        // Bottom Bar
-        doc.setFillColor(primaryColor);
-        doc.rect(0, 46, 85.6, 8, "F");
-        doc.setTextColor("#FFFFFF");
-        doc.setFontSize(7);
-        doc.text("Issued by Socrates School", 42.8, 51, { align: "center" });
-
-        // Save PDF
-        const safeName = (fullName || "student").replace(/\s+/g, "_");
-        doc.save(`${safeName}_ID.pdf`);
-        console.log('ID card generated and saved'); // Debug log
-      }
-
-      // ---- CSV & PDF downloads for tables ----
+        // ---- CSV & PDF downloads for tables ----
       async function downloadCSVforTab(filenameBase) {
         console.log('Download CSV clicked for:', filenameBase); // Debug log
         if (!cachedStudents.length) {

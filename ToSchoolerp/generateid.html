@@ -535,26 +535,12 @@
       }
 
     <!-- Replace the entire generatePdfID function in your <script> with this corrected version -->
-
 function generatePdfID(student) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF("landscape", "mm", [86, 54]); // Credit card size
   const primaryColor = "#0b3d91";
   const textColor = "#000000";
   const schoolEmail = "socratesschool2020@gmail.com";
-
-  // Helper to truncate long text
-  function truncateText(text, maxWidth, fontSize) {
-    let width = doc.getTextWidth(text);
-    if (width <= maxWidth) return text;
-    let truncated = text;
-    while (width > maxWidth && truncated.length > 0) {
-      truncated = truncated.slice(0, -1);
-      doc.setFontSize(fontSize);
-      width = doc.getTextWidth(truncated + '...');
-    }
-    return truncated + '...';
-  }
 
   // Background (subtle gradient sim)
   doc.setFillColor(245, 245, 245);
@@ -568,14 +554,20 @@ function generatePdfID(student) {
   doc.setFont("helvetica", "bold");
   doc.text("SOCRATES SCHOOL STUDENT ID", 43, 8, { align: "center" });
 
-  // School Logo
+  // School Logo (attempt load) - Changed path to "images/somap-logo.png" (remove .. if your HTML is in the same folder as images)
+  // If still not loading, follow instructions below to use base64 instead.
   try {
-    doc.addImage("images/somap-logo.png", "PNG", 3, 2, 10, 10);
+    doc.addImage("images/somap-logo.png", "PNG", 3, 2, 10, 10); // Adjusted path - make sure it's correct relative to your HTML file
   } catch (e) {
+    // Removed the "LOGO" text to prevent any mixing or overlap issues
+    // If you see errors in console about loading image, use base64 method below
     console.error('Failed to load logo:', e);
   }
 
-  // Photo (Cloudinary URL)
+  // Removed the diagonal line (security hologram sim) as you don't want it
+  // Previously: doc.setDrawColor(255, 255, 0, 0.5); doc.setLineWidth(0.5); doc.line(0, 0, 86, 54);
+
+  // Photo (Cloudinary URL - CORS friendly)
   const photoUrl = safeUrl(student.passportPhotoUrl);
   const xPhoto = 4, yPhoto = 14, wPhoto = 22, hPhoto = 28;
   try {
@@ -588,31 +580,28 @@ function generatePdfID(student) {
     doc.text("PHOTO", xPhoto + 11, yPhoto + 14, { align: "center" });
   }
 
-  // Details (Right side, adjusted for fit)
+  // Details (Right side, structured like UoN: Name bold, Reg/ID, Program/Class)
   doc.setTextColor(textColor);
-  doc.setFontSize(8); // Reduced for name
+  doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
-  let y = 15; // Tightened starting point
-  const fullName = escapeHtml(student.firstName + ' ' + (student.middleName || '') + ' ' + student.lastName).trim();
-  const maxWidth = 50; // Max width for text (86mm - 30mm - some padding)
-  doc.text(`Name: ${truncateText(fullName, maxWidth, 8)}`, 28, y); // Adjusted x to 28
-  y += 5; // Tighter spacing
-  doc.setFontSize(7); // Smaller for other details
+  let y = 16;
+  doc.text(`Full Name: ${escapeHtml(student.firstName + ' ' + (student.middleName || '') + ' ' + student.lastName).trim()}`, 30, y);
+  y += 6;
   doc.setFont("helvetica", "normal");
-  doc.text(`Class: ${truncateText(student.classLevel || 'N/A', maxWidth, 7)}`, 28, y);
+  doc.text(`Class: ${student.classLevel || 'N/A'}`, 30, y);
+  y += 6;
+  doc.text(`Admission No: ${student.admissionNumber || 'N/A'}`, 30, y);
+  y += 6;
+  doc.text(`DOB: ${formatDate(student.dateOfBirth)}`, 30, y);
+  y += 6;
+  doc.text(`Guardian: ${student.primaryParentContact || 'N/A'}`, 30, y);
+  y += 6;
+  doc.setFontSize(8);
+  doc.text(`School: +255 686 828 732 | ${schoolEmail}`, 30, y);
   y += 5;
-  doc.text(`Adm No: ${truncateText(student.admissionNumber || 'N/A', maxWidth, 7)}`, 28, y);
-  y += 5;
-  doc.text(`DOB: ${truncateText(formatDate(student.dateOfBirth), maxWidth, 7)}`, 28, y);
-  y += 5;
-  doc.text(`Guardian: ${truncateText(student.primaryParentContact || 'N/A', maxWidth, 7)}`, 28, y);
-  y += 5;
-  doc.setFontSize(6);
-  doc.text(`School: +255 686 828 732 | ${schoolEmail}`, 28, y);
-  y += 4;
-  doc.text(`Valid: ${new Date().getFullYear()} - ${new Date().getFullYear() + 1}`, 28, y);
+  doc.text(`Valid: ${new Date().getFullYear()} - ${new Date().getFullYear() + 1}`, 30, y);
 
-  // Footer Bar
+  // Footer Bar (UDSM style: Issued by)
   doc.setFillColor(primaryColor);
   doc.rect(0, 44, 86, 10, "F");
   doc.setTextColor("#FFFFFF");

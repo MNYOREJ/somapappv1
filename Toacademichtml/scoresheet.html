@@ -698,89 +698,13 @@
       }
     });
 
-    // Single report card generation (example, add selection if needed)
-    async function generateSingleReportCard(adm) {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
-      const margin = 36;
-      const headerColor = { r:37, g:99, b:235 };
-      const s = state.rowsByAdm[adm].meta;
-      const r = state.rowsByAdm[adm];
-      doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
-      doc.rect(0,0,595,80,'F');
-      doc.setTextColor(255,255,255); doc.setFontSize(16);
-      const school = s.schoolName || state.schoolBranch || 'School';
-      doc.text(`${school} — Academic Report`, margin, 40);
-      doc.setTextColor(0,0,0); doc.setFontSize(12);
-      doc.text(`Name: ${s.name}`, margin, 110);
-      doc.text(`Admission: ${s.adm}`, margin, 130);
-      const att = state.attendance[s.adm] || { present:0, absent:0, days:0 };
-      const days = att.days || (att.present + att.absent) || 0;
-      const pct = days ? ((att.present/days)*100).toFixed(1) : '0.0';
-      doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
-      const fee = state.fees[s.adm] || { required: s.feeDue||0, paid: s.feePaid||0, balance: s.balance||0 };
-      doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
-
-      const tableHead = ['Subject','Score','Max','%','Pstn','Grade'];
-      const tableBody = state.subjectList.map(sub=> {
-        const c = r.subjectCells[sub];
-        const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value||100));
-        const pctS = (sc/mx)*100; const g = letterGrade(pctS); const pstn = c.pstnSpan.textContent||'';
-        return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
-      });
-      doc.autoTable({ head:[tableHead], body:tableBody, startY:200, styles:{fontSize:9}, headStyles:{fillColor:[headerColor.r,headerColor.g,headerColor.b]} });
-      const after = doc.lastAutoTable.finalY + 20;
-      doc.text(`Overall Average: ${Number(r.tdAvg.textContent||0).toFixed(2)}%`, margin, after);
-      doc.text(`Overall Position: ${r.tdPstn.textContent}`, margin, after+18);
-      doc.text(`Overall Grade: ${r.tdGrade.textContent}`, margin, after+36);
-      const comment = r.tdComment.querySelector('textarea').value || '—';
-      doc.text('Teacher Comment:', margin, after+64);
-      doc.text(comment, margin, after+82, { maxWidth: 595 - margin*2 });
-      doc.save(`ReportCard_${s.name.replace(/\s+/g, '_')}_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}.pdf`);
-    }
-
-    // To enable single generation, add buttons in rows or a selection mechanism
-    // For example, add in buildTable per row:
-    // <td><button class="btn-single-report" data-adm="${s.adm}">Generate Single Report</button></td>
-    // Then:
-    // scoresBody.addEventListener('click', (e) => {
-    //   if (e.target.classList.contains('btn-single-report')) {
-    //     generateSingleReportCard(e.target.dataset.adm);
-    //   }
-    // });
-
-    /* ---------- Load on page load ---------- */
+        /* ---------- Load on page load ---------- */
     window.addEventListener('load', () => {
       loadAll();
     });
 
     /* ---------- Small helpers ---------- */
     function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }
-    /* ---------- Modal Control ---------- */
-    btnOpenScoresheet.addEventListener('click', () => {
-      if (!state.className || !state.year) {
-        alert('Please select a class and academic year first.');
-        return;
-      }
-      sessionStorage.setItem('className', state.className);
-      sessionStorage.setItem('stream', state.stream);
-      sessionStorage.setItem('month', state.month);
-      sessionStorage.setItem('year', state.year);
-      sessionStorage.setItem('examKey', state.examKey);
-      sessionStorage.setItem('schoolBranch', state.schoolBranch);
-      scoresheetModal.style.display = 'block';
-      document.getElementById('scoresheetFrame').contentWindow.location.reload();
-    });
-
-    closeModal.addEventListener('click', () => {
-      scoresheetModal.style.display = 'none';
-    });
-
-    window.addEventListener('click', (event) => {
-      if (event.target == scoresheetModal) {
-        scoresheetModal.style.display = 'none';
-      }
-    });
   </script>
 </body>
 </html>

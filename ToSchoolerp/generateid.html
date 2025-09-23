@@ -173,9 +173,9 @@
         <p class="muted">View & manage student details, generate secure ID cards</p>
       </div>
       <div class="flex gap-3">
-        <a href="../studentlist.html" class="btn btn-secondary">
-          <i class="fas fa-arrow-left"></i> Back to List
-        </a>
+       <a href="#" id="backButton" class="btn btn-secondary">
+  <i class="fas fa-arrow-left"></i> <span id="backButtonText">Back</span>
+</a>
         <button id="downloadPdf" class="btn btn-primary">
           <i class="fas fa-file-pdf"></i> Generate Secure ID (PDF)
         </button>
@@ -281,6 +281,7 @@
   <!-- Libraries -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <!-- Firebase Config - Adjust as per your project: somaptestt -->
@@ -288,253 +289,263 @@
   <!-- GitHub Repo for Customizations: https://github.com/MNYORE -->
   <script>
     (function() {
-      // Enhanced Safety & Init
-      const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-      const statusEl = document.getElementById('status');
-      const personalDetails = document.getElementById('personalDetails');
-      const academicDetails = document.getElementById('academicDetails');
-      const paymentSummary = document.getElementById('paymentSummary');
-      const docList = document.getElementById('docList');
-      const downloadPdfBtn = document.getElementById('downloadPdf');
-      const refreshBtn = document.getElementById('refreshBtn');
-      const editBtn = document.getElementById('editStudent');
-      const printIdBtn = document.getElementById('printId');
-      const viewAttendanceBtn = document.getElementById('viewAttendance');
+  // Enhanced Safety & Init
+  const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+  const statusEl = document.getElementById('status');
+  const personalDetails = document.getElementById('personalDetails');
+  const academicDetails = document.getElementById('academicDetails');
+  const paymentSummary = document.getElementById('paymentSummary');
+  const docList = document.getElementById('docList');
+  const downloadPdfBtn = document.getElementById('downloadPdf');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const editBtn = document.getElementById('editStudent');
+  const printIdBtn = document.getElementById('printId');
+  const viewAttendanceBtn = document.getElementById('viewAttendance');
+  const backButton = document.getElementById('backButton');
+  const backButtonText = document.getElementById('backButtonText');
 
-      if (!db) {
-        statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-red-500"></i> Firebase unavailable. Check ../firebase.js or console: https://console.firebase.google.com/u/0/project/somaptestt/database';
-        statusEl.className = 'mb-4 text-center py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg';
-        return;
-      }
+  if (!db) {
+    statusEl.innerHTML = '<i class="fas fa-exclamation-triangle text-red-500"></i> Firebase unavailable. Check ../firebase.js or console: https://console.firebase.google.com/u/0/project/somaptestt/database';
+    statusEl.className = 'mb-4 text-center py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg';
+    return;
+  }
 
-      // URL Params
-      const params = new URLSearchParams(window.location.search);
-      const key = params.get('key') || params.get('id'); // Flexible: key or id
-      const adm = params.get('adm');
+  // URL Params
+  const params = new URLSearchParams(window.location.search);
+  const key = params.get('key') || params.get('id'); // Flexible: key or id
+  const adm = params.get('adm');
+  const phone = params.get('phone');
+  const firstName = params.get('firstName');
+  const lastName = params.get('lastName');
 
-      if (!key && !adm) {
-        statusEl.textContent = 'Required: ?key=FIREBASE_KEY or ?adm=ADMISSION_NO';
-        return;
-      }
+  // Utility Functions
+  function showLoading(el) {
+    el.innerHTML = '<div class="loading"></div> Loading...';
+  }
 
-      // Utility Functions
-      function showLoading(el) {
-        el.innerHTML = '<div class="loading"></div> Loading...';
-      }
+  function escapeHtml(text) {
+    if (text == null) return '';
+    return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":"&#39;"}[m]));
+  }
 
-      function escapeHtml(text) {
-        if (text == null) return '';
-        return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":"&#39;"}[m]));
-      }
+  function safeUrl(url) {
+    return url && url.startsWith('http') ? url : 'https://via.placeholder.com/160x200?text=No+Image';
+  }
 
-      function safeUrl(url) {
-        return url && url.startsWith('http') ? url : 'https://via.placeholder.com/160x200?text=No+Image';
-      }
+  function formatDate(timestamp) {
+    return timestamp ? new Date(timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
+  }
 
-      function formatDate(timestamp) {
-        return timestamp ? new Date(timestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'N/A';
-      }
+  function calculatePayments(student) {
+    const payments = student.payments || {};
+    const paid = Object.values(payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const fee = Number(student.feePerYear || 0);
+    const debt = Math.max(0, fee - paid);
+    return { paid, debt, fee };
+  }
 
-      function calculatePayments(student) {
-        const payments = student.payments || {};
-        const paid = Object.values(payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-        const fee = Number(student.feePerYear || 0);
-        const debt = Math.max(0, fee - paid);
-        return { paid, debt, fee };
-      }
+  // Enhanced Fetch with Error Handling
+  async function fetchStudent() {
+    statusEl.innerHTML = '<div class="loading inline-block mr-2"></div> Fetching student data...';
+    statusEl.className = 'mb-4 text-center py-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg';
+    try {
+      let student = null;
+      let studentKey = null;
 
-      // Enhanced Fetch with Error Handling
-      async function fetchStudent() {
-        statusEl.innerHTML = '<div class="loading inline-block mr-2"></div> Fetching student data...';
-        statusEl.className = 'mb-4 text-center py-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg';
-        try {
-          let student = null;
-          let studentKey = null;
-
-          if (key) {
-            const snap = await db.ref('students/' + key).once('value');
-            student = snap.val();
-            studentKey = key;
-          } else if (adm) {
-            const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
-            const data = snap.val() || {};
-            const firstKey = Object.keys(data)[0];
-            if (firstKey) {
-              student = data[firstKey];
-              studentKey = firstKey;
-            }
+      if (key) {
+        const snap = await db.ref('students/' + key).once('value');
+        student = snap.val();
+        studentKey = key;
+      } else if (adm) {
+        const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
+        const data = snap.val() || {};
+        const firstKey = Object.keys(data)[0];
+        if (firstKey) {
+          student = data[firstKey];
+          studentKey = firstKey;
+        }
+      } else if (phone && firstName && lastName) {
+        const snap = await db.ref('students').once('value');
+        const data = snap.val() || {};
+        for (const [sKey, s] in Object.entries(data)) {
+          if (s.primaryParentContact === phone && s.firstName.toLowerCase().replace(/\s+/g, '') === firstName.toLowerCase().replace(/\s+/g, '') && s.lastName.toLowerCase().replace(/\s+/g, '') === lastName.toLowerCase().replace(/\s+/g, '')) {
+            student = s;
+            studentKey = sKey;
+            break;
           }
-
-          if (!student) {
-            throw new Error('Student record not found.');
-          }
-
-          // Enhance with Cloudinary URLs (from admission flow)
-          student.passportPhotoUrl = student.passportPhotoUrl || student.passportPhotoURL || '';
-          student.birthCertUrl = student.birthCertUrl || '';
-          student.reportCardUrl = student.reportCardUrl || '';
-          student.joiningLetterUrl = student.joiningLetterUrl || '';
-          student.medicalDocsUrl = student.medicalDocsUrl || '';
-
-          renderStudent(student, studentKey);
-          statusEl.textContent = `Loaded: ${escapeHtml(student.firstName || '')} ${escapeHtml(student.lastName || '')}`;
-          statusEl.className = 'mb-4 text-center py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg';
-
-        } catch (err) {
-          console.error('Fetch Error:', err);
-          statusEl.innerHTML = `<i class="fas fa-error text-red-500 mr-2"></i> Error: ${escapeHtml(err.message)}`;
-          statusEl.className = 'mb-4 text-center py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg';
         }
       }
 
-      // Render Functions
-      function renderPersonalDetails(student) {
-        const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-        const photoUrl = safeUrl(student.passportPhotoUrl);
-        const dob = formatDate(student.dateOfBirth);
-        const address = student.residentialAddress || 'N/A';
-
-        personalDetails.innerHTML = `
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Full Name</strong>
-            <span>${escapeHtml(fullName)}</span>
-          </div>
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Date of Birth</strong>
-            <span>${escapeHtml(dob)}</span>
-          </div>
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Passport Photo</strong>
-            <img src="${photoUrl}" alt="Passport Photo" style="width:120px; height:150px; object-fit:cover; border-radius:8px; border:1px solid #e2e8f0;">
-          </div>
-          <div class="info-item col-span-2">
-            <strong class="block text-primary mb-1">Residential Address</strong>
-            <span>${escapeHtml(address)}</span>
-          </div>
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Primary Guardian</strong>
-            <span>${escapeHtml(student.primaryParentContact || 'N/A')}</span>
-          </div>
-        `;
+      if (!student) {
+        throw new Error('Student record not found.');
       }
 
-      function renderAcademicDetails(student) {
-        const regDate = formatDate(student.createdAt || student.timestamp);
-        const admNo = student.admissionNumber || student.pupilId || 'N/A';
-        const classLevel = student.classLevel || 'N/A';
+      // Enhance with Cloudinary URLs (from admission flow)
+      student.passportPhotoUrl = student.passportPhotoUrl || student.passportPhotoURL || '';
+      student.birthCertUrl = student.birthCertUrl || '';
+      student.reportCardUrl = student.reportCardUrl || '';
+      student.joiningLetterUrl = student.joiningLetterUrl || '';
+      student.medicalDocsUrl = student.medicalDocsUrl || '';
 
-        academicDetails.innerHTML = `
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Admission Number</strong>
-            <span class="font-mono">${escapeHtml(admNo)}</span>
-          </div>
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Class/Grade</strong>
-            <span>${escapeHtml(classLevel)}</span>
-          </div>
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Registration Date</strong>
-            <span>${escapeHtml(regDate)}</span>
-          </div>
-          <div class="info-item">
-            <strong class="block text-primary mb-1">Payment Plan</strong>
-            <span>${escapeHtml(student.paymentPlan || 'Standard')}</span>
-          </div>
-        `;
-      }
+      renderStudent(student, studentKey);
+      statusEl.textContent = `Loaded: ${escapeHtml(student.firstName || '')} ${escapeHtml(student.lastName || '')}`;
+      statusEl.className = 'mb-4 text-center py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg';
 
-      function renderPayments(student) {
-        const { paid, debt, fee } = calculatePayments(student);
-        const payments = student.payments || {};
-        const paymentHistory = Object.entries(payments).map(([date, p]) => ({ date: formatDate(date), ...p }));
+    } catch (err) {
+      console.error('Fetch Error:', err);
+      statusEl.innerHTML = `<i class="fas fa-error text-red-500 mr-2"></i> Error: ${escapeHtml(err.message)}`;
+      statusEl.className = 'mb-4 text-center py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg';
+    }
+  }
 
-        paymentSummary.innerHTML = `
-          <div class="info-grid mb-4">
-            <div class="info-item">
-              <strong>Total Fee/Year</strong>
-              <span class="text-2xl font-bold text-primary">TZS ${fee.toLocaleString()}</span>
-            </div>
-            <div class="info-item">
-              <strong>Paid Amount</strong>
-              <span class="text-2xl font-bold text-green-600">TZS ${paid.toLocaleString()}</span>
-            </div>
-            <div class="info-item">
-              <strong>Outstanding Debt</strong>
-              <span class="text-2xl font-bold ${debt > 0 ? 'text-red-600' : 'text-green-600'}">TZS ${debt.toLocaleString()}</span>
-            </div>
-          </div>
-          <table class="payment-table">
-            <thead>
-              <tr><th>Date</th><th>Amount</th><th>Method</th><th>Notes</th></tr>
-            </thead>
-            <tbody>
-              ${paymentHistory.map(p => `
-                <tr>
-                  <td>${escapeHtml(p.date)}</td>
-                  <td>TZS ${Number(p.amount || 0).toLocaleString()}</td>
-                  <td>${escapeHtml(p.method || 'Cash')}</td>
-                  <td>${escapeHtml(p.notes || '')}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-        document.getElementById('paymentsSection').style.display = 'block';
-      }
+  // Render Functions
+  function renderPersonalDetails(student) {
+    const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+    const photoUrl = safeUrl(student.passportPhotoUrl);
+    const dob = formatDate(student.dateOfBirth);
+    const address = student.residentialAddress || 'N/A';
 
-      function renderDocuments(student) {
-        const docs = [
-          { label: 'Birth Certificate', url: student.birthCertUrl },
-          { label: 'Report Card', url: student.reportCardUrl },
-          { label: 'Joining Letter', url: student.joiningLetterUrl },
-          { label: 'Medical Docs', url: student.medicalDocsUrl }
-        ].filter(d => d.url);
+    personalDetails.innerHTML = `
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Full Name</strong>
+        <span>${escapeHtml(fullName)}</span>
+      </div>
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Date of Birth</strong>
+        <span>${escapeHtml(dob)}</span>
+      </div>
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Passport Photo</strong>
+        <img src="${photoUrl}" alt="Passport Photo" style="width:120px; height:150px; object-fit:cover; border-radius:8px; border:1px solid #e2e8f0;">
+      </div>
+      <div class="info-item col-span-2">
+        <strong class="block text-primary mb-1">Residential Address</strong>
+        <span>${escapeHtml(address)}</span>
+      </div>
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Primary Guardian</strong>
+        <span>${escapeHtml(student.primaryParentContact || 'N/A')}</span>
+      </div>
+    `;
+  }
 
-        docList.innerHTML = docs.map(d => `
-          <li>
-            <span>${escapeHtml(d.label)}</span>
-            <a href="${safeUrl(d.url)}" target="_blank" class="doc-link">
-              <i class="fas fa-external-link-alt"></i> View
-            </a>
-          </li>
-        `).join('') || '<li class="text-gray-500 italic">No documents uploaded yet.</li>';
-        document.getElementById('documentsSection').style.display = 'block';
-      }
+  function renderAcademicDetails(student) {
+    const regDate = formatDate(student.createdAt || student.timestamp);
+    const admNo = student.admissionNumber || student.pupilId || 'N/A';
+    const classLevel = student.classLevel || 'N/A';
 
-      function renderStudent(student, studentKey) {
-        // Personal
-        renderPersonalDetails(student);
-        // Academic
-        renderAcademicDetails(student);
-        // Payments
-        renderPayments(student);
-        // Documents
-        renderDocuments(student);
+    academicDetails.innerHTML = `
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Admission Number</strong>
+        <span class="font-mono">${escapeHtml(admNo)}</span>
+      </div>
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Class/Grade</strong>
+        <span>${escapeHtml(classLevel)}</span>
+      </div>
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Registration Date</strong>
+        <span>${escapeHtml(regDate)}</span>
+      </div>
+      <div class="info-item">
+        <strong class="block text-primary mb-1">Payment Plan</strong>
+        <span>${escapeHtml(student.paymentPlan || 'Standard')}</span>
+      </div>
+    `;
+  }
 
-        // ID Preview
-        const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-        const photoUrl = safeUrl(student.passportPhotoUrl);
-        const admNo = student.admissionNumber || 'N/A';
-        const classLevel = student.classLevel || 'N/A';
-        const dob = formatDate(student.dateOfBirth);
-        const parentContact = student.primaryParentContact || 'N/A';
-        const currentYear = new Date().getFullYear();
+  function renderPayments(student) {
+    const { paid, debt, fee } = calculatePayments(student);
+    const payments = student.payments || {};
+    const paymentHistory = Object.entries(payments).map(([date, p]) => ({ date: formatDate(date), ...p }));
 
-        document.getElementById('idPhotoSmall').src = photoUrl;
-        document.getElementById('idFullName').textContent = `Full Name: ${fullName}`;
-        document.getElementById('idClass').textContent = `Class: ${classLevel}`;
-        document.getElementById('idAdmission').textContent = `Admission No: ${admNo}`;
-        document.getElementById('idDOB').textContent = `Date of Birth: ${dob}`;
-        document.getElementById('idParent').textContent = `Guardian Contact: ${parentContact}`;
-        document.getElementById('idYearVal').textContent = `${currentYear} - ${currentYear + 1}`;
+    paymentSummary.innerHTML = `
+      <div class="info-grid mb-4">
+        <div class="info-item">
+          <strong>Total Fee/Year</strong>
+          <span class="text-2xl font-bold text-primary">TZS ${fee.toLocaleString()}</span>
+        </div>
+        <div class="info-item">
+          <strong>Paid Amount</strong>
+          <span class="text-2xl font-bold text-green-600">TZS ${paid.toLocaleString()}</span>
+        </div>
+        <div class="info-item">
+          <strong>Outstanding Debt</strong>
+          <span class="text-2xl font-bold ${debt > 0 ? 'text-red-600' : 'text-green-600'}">TZS ${debt.toLocaleString()}</span>
+        </div>
+      </div>
+      <table class="payment-table">
+        <thead>
+          <tr><th>Date</th><th>Amount</th><th>Method</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          ${paymentHistory.map(p => `
+            <tr>
+              <td>${escapeHtml(p.date)}</td>
+              <td>TZS ${Number(p.amount || 0).toLocaleString()}</td>
+              <td>${escapeHtml(p.method || 'Cash')}</td>
+              <td>${escapeHtml(p.notes || '')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    document.getElementById('paymentsSection').style.display = 'block';
+  }
 
-        // Show attendance button if data exists (placeholder)
-        if (student.attendance) {
-          viewAttendanceBtn.style.display = 'inline-flex';
-        }
-      }
+  function renderDocuments(student) {
+    const docs = [
+      { label: 'Birth Certificate', url: student.birthCertUrl },
+      { label: 'Report Card', url: student.reportCardUrl },
+      { label: 'Joining Letter', url: student.joiningLetterUrl },
+      { label: 'Medical Docs', url: student.medicalDocsUrl }
+    ].filter(d => d.url);
 
-    <!-- Replace the entire generatePdfID function in your <script> with this corrected version -->
+    docList.innerHTML = docs.map(d => `
+      <li>
+        <span>${escapeHtml(d.label)}</span>
+        <a href="${safeUrl(d.url)}" target="_blank" class="doc-link">
+          <i class="fas fa-external-link-alt"></i> View
+        </a>
+      </li>
+    `).join('') || '<li class="text-gray-500 italic">No documents uploaded yet.</li>';
+    document.getElementById('documentsSection').style.display = 'block';
+  }
+
+  function renderStudent(student, studentKey) {
+    // Personal
+    renderPersonalDetails(student);
+    // Academic
+    renderAcademicDetails(student);
+    // Payments
+    renderPayments(student);
+    // Documents
+    renderDocuments(student);
+
+    // ID Preview
+    const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+    const photoUrl = safeUrl(student.passportPhotoUrl);
+    const admNo = student.admissionNumber || 'N/A';
+    const classLevel = student.classLevel || 'N/A';
+    const dob = formatDate(student.dateOfBirth);
+    const parentContact = student.primaryParentContact || 'N/A';
+    const currentYear = new Date().getFullYear();
+
+    document.getElementById('idPhotoSmall').src = photoUrl;
+    document.getElementById('idFullName').textContent = `Full Name: ${fullName}`;
+    document.getElementById('idClass').textContent = `Class: ${classLevel}`;
+    document.getElementById('idAdmission').textContent = `Admission No: ${admNo}`;
+    document.getElementById('idDOB').textContent = `Date of Birth: ${dob}`;
+    document.getElementById('idParent').textContent = `Guardian Contact: ${parentContact}`;
+    document.getElementById('idYearVal').textContent = `${currentYear} - ${currentYear + 1}`;
+
+    // Show attendance button if data exists (placeholder)
+    if (student.attendance) {
+      viewAttendanceBtn.style.display = 'inline-flex';
+    }
+  }
+
+// Replace the entire generatePdfID function in your <script> with this corrected version
 function generatePdfID(student) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF("landscape", "mm", [86, 54]); // Credit card size
@@ -623,47 +634,47 @@ function generatePdfID(student) {
   doc.save(`${safeName}_SecureID_${new Date().getFullYear()}.pdf`);
 }
 
-      // Print ID Preview (using html2canvas)
-      async function printIdPreview() {
-        const idPreview = document.getElementById('idPreview');
-        const canvas = await html2canvas(idPreview, { scale: 2 });
-        const imgData = canvas.toDataURL('image/png');
-        const link = document.createElement('a');
-        link.download = 'student_id_preview.png';
-        link.href = imgData;
-        link.click();
-      }
+  // Print ID Preview (using html2canvas)
+  async function printIdPreview() {
+    const idPreview = document.getElementById('idPreview');
+    const canvas = await html2canvas(idPreview, { scale: 2 });
+    const imgData = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = 'student_id_preview.png';
+    link.href = imgData;
+    link.click();
+  }
 
-      // Event Listeners
-      downloadPdfBtn.onclick = () => {
-        // Placeholder: In real, fetch current student
-        const params = new URLSearchParams(window.location.search);
-        const key = params.get('key');
-        if (key) {
-          db.ref('students/' + key).once('value').then(snap => {
-            const student = snap.val();
-            if (student) generatePdfID(student);
-          });
-        } else {
-          alert('Please provide ?key=... in URL to generate PDF.');
-        }
-      };
+  // Event Listeners
+  downloadPdfBtn.onclick = () => {
+    // Placeholder: In real, fetch current student
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get('key');
+    if (key) {
+      db.ref('students/' + key).once('value').then(snap => {
+        const student = snap.val();
+        if (student) generatePdfID(student);
+      });
+    } else {
+      alert('Please provide ?key=... in URL to generate PDF.');
+    }
+  };
 
-      refreshBtn.onclick = fetchStudent;
-      editBtn.onclick = () => window.location.href = `../edit-student.html?key=${key}`;
-      printIdBtn.onclick = printIdPreview;
-      viewAttendanceBtn.onclick = () => alert('Attendance view: Implement modal or redirect.');
+  refreshBtn.onclick = fetchStudent;
+  editBtn.onclick = () => window.location.href = `../edit-student.html?key=${key}`;
+  printIdBtn.onclick = printIdPreview;
+  viewAttendanceBtn.onclick = () => alert('Attendance view: Implement modal or redirect.');
 
-      // Auto-fetch on load
-      fetchStudent();
+  // Auto-fetch on load
+  fetchStudent();
 
-      // Connectivity Test (as in admission)
-      db.ref('z_test_write').set({ ok: true, ts: Date.now() })
-        .then(() => console.log('DB Connectivity: OK'))
-        .catch(err => console.warn('DB Test: ', err.message));
+  // Connectivity Test (as in admission)
+  db.ref('z_test_write').set({ ok: true, ts: Date.now() })
+    .then(() => console.log('DB Connectivity: OK'))
+    .catch(err => console.warn('DB Test: ', err.message));
 
-      console.log('Dashboard Loaded | GitHub: https://github.com/MNYORE | Designs inspired by UoN & UDSM IDs');
-    })();
+  console.log('Dashboard Loaded | GitHub: https://github.com/MNYORE | Designs inspired by UoN & UDSM IDs');
+})();
   </script>
 </body>
 </html>

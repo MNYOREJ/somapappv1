@@ -131,8 +131,7 @@
     <div title="Market" class="icon" data-action="market" id="icon-market"><i class="fas fa-store"></i></div>
     <div title="Academics" class="icon" data-action="academics" id="icon-acad"><i class="fas fa-user-graduate"></i></div>
     <div title="Fees" class="icon" data-action="fees" id="icon-fees"><i class="fas fa-money-bill-wave"></i></div>
-    <div title="Report Card" class="icon" data-action="reportcard" id="icon-report"><i class="fas fa-file-export"></i></div>
-    <div style="flex:1"></div>
+     <div style="flex:1"></div>
     <div id="icon-logout" class="icon" title="Logout"><i class="fas fa-sign-out-alt"></i></div>
   </aside>
 
@@ -264,7 +263,7 @@
           <h4 style="margin:0;font-weight:700">Quick Actions</h4>
           <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
             <button class="btn" id="quickGenerateId">Generate ID</button>
-            <button class="btn-ghost" id="quickReportCard">Report Card PDF</button>
+           <button class="btn-ghost" id="quickReportCard">Open Current Report Card</button>
             <button class="btn-ghost" id="quickFees">View Fees Info</button>
           </div>
         </div>
@@ -692,43 +691,9 @@
     doc.save(filename);
   });
 
-  // Generate full Report Card PDF
-  genReportBtn.addEventListener('click', async () => {
-    if (!currentStudent) { Swal.fire('No student','Please sign in first','warning'); return; }
-    try {
-      const exam = q('#reportExamSelect').value || 'monthly';
-      const month = q('#reportMonth').value || '08';
-      Swal.fire({ title:'Generating report...', willOpen: ()=> Swal.showLoading() });
-      // collect score rows
-      const rows = [];
-      document.querySelectorAll('#scoresTbody tr').forEach(tr=>{
-        const cols = Array.from(tr.querySelectorAll('td')).map(td=>td.textContent.trim());
-        if (cols.length) rows.push(cols);
-      });
-      if (rows.length === 0){ Swal.close(); Swal.fire('No scores','Cannot build report — no scores available','info'); return; }
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({unit:'pt', format:'A4'});
-      doc.setFontSize(18);
-      doc.text('SoMAp Report Card', 40, 50);
-      doc.setFontSize(12);
-      doc.text(`Student: ${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`, 40, 80);
-      doc.text(`Admission: ${safe(currentStudent.admissionNumber)}`, 40, 96);
-      doc.text(`Class: ${safe(currentStudent.classLevel)} • Stream: ${safe(currentStudent.stream)}`, 40, 112);
-      doc.text(`Exam: ${exam} • Month: ${month}`, 40, 128);
-      doc.autoTable({ startY: 150, head: [['Subject','Score','Max','%']], body: rows, styles:{fontSize:10} });
-      const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 16 : 260;
-      doc.setFontSize(11);
-      doc.text(`Attendance (this month): ${statAttendancePct.textContent}`, 40, finalY);
-      doc.text(`Fee Due: ${statFeeDue.textContent} • Paid: ${statPaid.textContent} • Balance: ${statBalance.textContent}`, 40, finalY + 14);
-      const filename = `${currentStudent.admissionNumber || 'report'}_reportcard.pdf`;
-      doc.save(filename);
-      Swal.close();
-    } catch (err) {
-      console.error('genReport error', err);
-      Swal.fire('Error','Failed to generate report.','error');
-    }
-  });
-
+  genReportBtn.addEventListener('click', () => {
+  Swal.fire('Coming Soon', 'Select an exam and month to view archived report cards (in development).', 'info');
+});
   quickGenerateId.addEventListener('click', () => {
     if (!currentStudent) {
       Swal.fire('No student', 'Please sign in first', 'warning');
@@ -741,7 +706,17 @@
     window.open(url, '_blank');
   });
   // Quick actions wiring
-  quickReportCard.addEventListener('click', ()=> genReportBtn.click());
+  quickReportCard.addEventListener('click', () => {
+  if (!currentStudent) {
+    Swal.fire('No student', 'Please sign in first', 'warning');
+    return;
+  }
+  const phone = encodeURIComponent(currentStudent.primaryParentContact || '');
+  const firstName = encodeURIComponent((currentStudent.firstName || '').toLowerCase().replace(/\s+/g, ''));
+  const lastName = encodeURIComponent((currentStudent.lastName || '').toLowerCase().replace(/\s+/g, ''));
+  const url = `Toacademichtml/singlereportcard.html?phone=${phone}&firstName=${firstName}&lastName=${lastName}`;
+  window.open(url, '_blank');
+});
   quickFees.addEventListener('click', ()=> {
     Swal.fire({ title: 'Fees', html: `<div style="text-align:left">${statFeeDue.textContent}<br>${statPaid.textContent}<br>${statBalance.textContent}</div>` });
   });
@@ -768,8 +743,7 @@
         // open finance page but read-only - or show inline list:
         Swal.fire({ title: 'Payments', html: paymentsList.innerHTML, width:800 });
         break;
-      case 'reportcard': genReportBtn.click(); break;
-      default: console.log('unknown action', action);
+        default: console.log('unknown action', action);
     }
   }
 

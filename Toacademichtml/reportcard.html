@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Report Card</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js for graphs and pie charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- jsPDF + autotable for PDF generation -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Firebase compat (v9 compat libs) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+
+  <!-- Your Firebase config wrapper (exports window.db, window.storage) -->
+  <script src="../firebase.js"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; background: linear-gradient(to bottom right, #f3f4f6, #e5e7eb); color: #1f2937; min-height: 100vh; padding: 1.5rem; }
+    .card { background: white; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); padding: 1.5rem; }
+    .photo-oval { clip-path: ellipse(50% 50% at 50% 50%); width: 120px; height: 160px; object-fit: cover; border: 2px solid #e5e7eb; }
+    .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+    .chart-container { background: white; border-radius: 0.75rem; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .archive-item { background: #f9fafb; border-radius: 0.5rem; padding: 1rem; cursor: pointer; transition: all 0.2s; }
+    .archive-item:hover { background: #f3f4f6; }
+    .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; transition: all 0.2s; }
+    .btn-primary { background: #1d4ed8; color: white; }
+    .btn-primary:hover { background: #1e40af; }
+    .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card max-w-6xl mx-auto">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-gray-900">SoMAp Report Card Dashboard</h1>
+      <div class="flex gap-3">
+        <button id="downloadSinglePdf" class="btn btn-primary">
+          <i class="fas fa-file-pdf"></i> Download My Report
+        </button>
+        <button id="downloadBulkPdf" class="btn btn-secondary hidden">
+          <i class="fas fa-download"></i> Download All Reports
+        </button>
+        <a href="#" id="backButton" class="btn btn-secondary">
+          <i class="fas fa-arrow-left"></i> Back
+        </a>
+      </div>
+    </header>
+
+    <div id="status" class="mb-4 p-3 bg-blue-50 text-blue-700 rounded-lg text-center">Initializing...</div>
+
+    <div class="dashboard-grid">
+      <!-- Report Card Preview -->
+      <div class="card p-6">
+        <h2 class="text-xl font-semibold mb-4">Report Card Preview</h2>
+        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-xl shadow-inner">
+          <img id="studentPhoto" class="photo-oval mx-auto mb-4" src="https://via.placeholder.com/120x160" alt="Student Photo">
+          <div id="studentName" class="text-center font-bold text-lg mb-2">Loading...</div>
+          <div id="classInfo" class="text-center text-sm text-gray-600 mb-2">Class: —</div>
+          <div id="admNo" class="text-center text-sm text-gray-600 mb-2">Adm No: —</div>
+          <div id="overallAvg" class="text-center text-sm text-gray-600 mb-2">Average: —%</div>
+          <div id="overallGrade" class="text-center text-sm text-gray-600 mb-4">Grade: —</div>
+          <div class="border-t pt-4">
+            <p class="text-sm font-medium mb-2">Teacher Comment:</p>
+            <p id="teacherComment" class="text-sm italic text-gray-700">—</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Performance Dashboard -->
+      <div class="card p-6">
+        <h2 class="text-xl font-semibold mb-4">Performance Dashboard</h2>
+        <div class="chart-container mb-4">
+          <canvas id="performanceChart"></canvas>
+        </div>
+        <div class="chart-container">
+          <canvas id="subjectPieChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Archive Selector -->
+      <div class="card p-6">
+        <h2 class="text-xl font-semibold mb-4">Report Archive</h2>
+        <select id="archiveSelect" class="w-full p-2 border rounded mb-4">
+          <option value="">Select period...</option>
+        </select>
+        <div id="archivePreview" class="bg-gray-50 p-4 rounded-lg min-h-[200px]">
+          <p class="text-center text-gray-500">Select a period to view</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      // Firebase Initialization (from firebase.js)
+      const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+      if (!db) {
+        document.getElementById('status').innerHTML = 'Database unavailable. Check console.';
+        document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
+        return;
+      }
+
+      // URL Params for access mode
+      const params = new URLSearchParams(window.location.search);
+      const key = params.get('key');
+      const adm = params.get('adm');
+      const phone = params.get('phone');
+      const firstName = params.get('firstName');
+      const lastName = params.get('lastName');
+      const isTeacher = params.get('role') === 'teacher'; // Assume passed from staff/academic
+
+      // Hide bulk download for parents
+      if (!isTeacher) {
+        document.getElementById('downloadBulkPdf').classList.add('hidden');
+        document.getElementById('backButton').href = '../parent.html'; // Parent dashboard
+      } else {
+        document.getElementById('downloadBulkPdf').classList.remove('hidden');
+        document.getElementById('backButton').href = '../scoresheet.html'; // Teacher back to scoresheet
+      }
+
+      // Fetch student(s)
+      async function fetchStudentData() {
+        document.getElementById('status').innerHTML = 'Loading report card...';
+        try {
+          let student = null;
+          let studentKey = null;
+
+          if (key) {
+            const snap = await db.ref('students/' + key).once('value');
+            student = snap.val();
+            studentKey = key;
+          } else if (adm) {
+            const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
+            const data = snap.val() || {};
+            const firstKey = Object.keys(data)[0];
+            if (firstKey) {
+              student = data[firstKey];
+              studentKey = firstKey;
+            }
+          } else if (phone && firstName && lastName) {
+            const snap = await db.ref('students').once('value');
+            const data = snap.val() || {};
+            for (const [sKey, s] of Object.entries(data)) {
+              if (s.primaryParentContact === phone && s.firstName.toLowerCase().replace(/\s+/g, '') === firstName.toLowerCase().replace(/\s+/g, '') && s.lastName.toLowerCase().replace(/\s+/g, '') === lastName.toLowerCase().replace(/\s+/g, '')) {
+                student = s;
+                studentKey = sKey;
+                break;
+              }
+            }
+          }
+
+          if (!student) {
+            throw new Error('Student not found.');
+          }
+
+          // Fetch scores, attendance, etc. (adjust paths as per your Firebase)
+          const year = new Date().getFullYear().toString();
+          const month = new Date().toLocaleString('default', { month: 'long' }).toLowerCase();
+          const examKey = 'monthly'; // Default, or from params
+          const scoresSnap = await db.ref(`scores/${year}/${student.classLevel}/${examKey}/${month}/${student.adm}`).once('value');
+          student.scores = scoresSnap.val() || {};
+          const attSnap = await db.ref(`attendance/${year}/${month}/${student.classLevel}/${student.adm}`).once('value');
+          student.attendance = attSnap.val() || { present: 0, absent: 0 };
+          const paymentsSnap = await db.ref(`students/${studentKey}/payments`).once('value');
+          student.payments = paymentsSnap.val() || {};
+          const { paid, debt } = calculatePayments(student);
+
+          renderReportCard(student, paid, debt);
+          renderPerformanceDashboard(student);
+          renderArchive(studentKey);
+          document.getElementById('status').innerHTML = 'Report card loaded successfully.';
+          document.getElementById('status').className = 'mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-center';
+        } catch (err) {
+          console.error('Fetch Error:', err);
+          document.getElementById('status').innerHTML = 'Error: ' + err.message;
+          document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
+        }
+      }
+
+      // Render Report Card Preview
+      function renderReportCard(student, paid, debt) {
+        const photoUrl = student.passportPhotoUrl || 'https://via.placeholder.com/120x160';
+        const fullName = `${student.firstName} ${student.middleName || ''} ${student.lastName}`.trim();
+        const classLevel = student.classLevel || 'N/A';
+        const admNo = student.admissionNumber || 'N/A';
+        const avg = calculateAverage(student.scores);
+        const grade = letterGrade(avg);
+        const comment = getTeacherComment(grade, fullName.split(' ')[0]);
+
+        document.getElementById('studentPhoto').src = photoUrl;
+        document.getElementById('studentName').textContent = fullName;
+        document.getElementById('classInfo').textContent = classLevel;
+        document.getElementById('admNo').textContent = admNo;
+        document.getElementById('overallAvg').textContent = avg.toFixed(2) + '%';
+        document.getElementById('overallGrade').textContent = grade;
+        document.getElementById('teacherComment').textContent = comment;
+      }
+
+      // Performance Dashboard (Graph and Pie Chart)
+      function renderPerformanceDashboard(student) {
+        const scores = student.scores || {};
+        const subjects = Object.keys(scores);
+        const percentages = subjects.map(sub => (scores[sub].score / scores[sub].max) * 100);
+        const avg = calculateAverage(scores);
+
+        // Line Graph for Trends (assuming multiple periods; mock data for now)
+        const ctxGraph = document.getElementById('performanceChart').getContext('2d');
+        new Chart(ctxGraph, {
+          type: 'line',
+          data: {
+            labels: ['Prev Term', 'Midterm', 'Current'],
+            datasets: [{
+              label: 'Performance Trend',
+              data: [avg - 10, avg - 5, avg], // Mock trend data
+              borderColor: '#1d4ed8',
+              fill: false
+            }]
+          },
+          options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+        });
+
+        // Pie Chart for Subject Breakdown
+        const ctxPie = document.getElementById('subjectPieChart').getContext('2d');
+        new Chart(ctxPie, {
+          type: 'pie',
+          data: {
+            labels: subjects,
+            datasets: [{
+              data: percentages,
+              backgroundColor: ['#ef4444', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#f97316', '#6d28d9']
+            }]
+          },
+          options: { responsive: true }
+        });
+      }
+
+      // Report Archive (Fetch from summaries)
+      async function renderArchive(studentKey) {
+        const archiveSnap = await db.ref('summaries').once('value');
+        const archives = archiveSnap.val() || {};
+        const select = document.getElementById('archiveSelect');
+        select.innerHTML = '<option value="">Select period...</option>';
+        Object.entries(archives).forEach(([year, yearData]) => {
+          Object.entries(yearData).forEach(([classLevel, classData]) => {
+            Object.entries(classData).forEach(([examKey, examData]) => {
+              Object.entries(examData).forEach(([month, data]) => {
+                const option = document.createElement('option');
+                option.value = `${year}-${classLevel}-${examKey}-${month}`;
+                option.textContent = `${month} ${examKey} ${year} (${classLevel})`;
+                select.appendChild(option);
+              });
+            });
+          });
+        });
+
+        select.addEventListener('change', async (e) => {
+          const [year, classLevel, examKey, month] = e.target.value.split('-');
+          const preview = document.getElementById('archivePreview');
+          showLoading(preview);
+          const snap = await db.ref(`summaries/${year}/${classLevel}/${examKey}/${month}`).get();
+          const data = snap.val() || {};
+          preview.innerHTML = `
+            <p><strong>Average:</strong> ${data.subjectAverages ? Object.values(data.subjectAverages).reduce((sum, v) => sum + v, 0) / Object.keys(data.subjectAverages).length : 0}.toFixed(2)%</p>
+            <p><strong>Top 3:</strong> ${data.top3 ? data.top3.map(t => t.name).join(', ') : 'N/A'}</p>
+            <p><strong>Bottom 3:</strong> ${data.bottom3 ? data.bottom3.map(b => b.name).join(', ') : 'N/A'}</p>
+            <p><strong>Attendance:</strong> ${data.attendance ? data.attendance.present : 0} present</p>
+          `;
+        });
+      }
+
+      // Calculate average from scores
+      function calculateAverage(scores) {
+        const subjects = Object.keys(scores);
+        if (subjects.length === 0) return 0;
+        const total = subjects.reduce((sum, sub) => sum + (scores[sub].score / scores[sub].max * 100), 0);
+        return total / subjects.length;
+      }
+
+      // Loading Helper
+      function showLoading(el) {
+        el.innerHTML = '<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>';
+      }
+
+      // Event Listeners for Downloads
+      downloadSinglePdf.onclick = () => {
+        alert('Generating single report...');
+        // Implement single PDF generation here (similar to bulk, but for one student)
+      };
+      downloadBulkPdf.onclick = () => {
+        alert('Generating bulk reports...');
+        // Implement bulk PDF generation here (loop through all students)
+      };
+
+      // Initial Load
+      fetchStudentData();
+    })();
+  </script>
+</body>
+</html>

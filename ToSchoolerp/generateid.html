@@ -390,7 +390,21 @@
       renderStudent(student, studentKey);
       statusEl.textContent = `Loaded: ${escapeHtml(student.firstName || '')} ${escapeHtml(student.lastName || '')}`;
       statusEl.className = 'mb-4 text-center py-3 bg-green-50 border border-green-200 text-green-700 rounded-lg';
-
+if (phone && firstName && lastName) {
+  document.getElementById('paymentsSection').style.display = 'none';
+  document.getElementById('documentsSection').style.display = 'none';
+  editBtn.style.display = 'none';
+  viewAttendanceBtn.style.display = 'none';
+  backButton.href = '../parent.html';
+  backButtonText.textContent = 'Back to Dashboard';
+} else {
+  document.getElementById('paymentsSection').style.display = 'block';
+  document.getElementById('documentsSection').style.display = 'block';
+  editBtn.style.display = 'inline-flex';
+  viewAttendanceBtn.style.display = student.attendance ? 'inline-flex' : 'none';
+  backButton.href = '../studentlist.html';
+  backButtonText.textContent = 'Back to List';
+}
     } catch (err) {
       console.error('Fetch Error:', err);
       statusEl.innerHTML = `<i class="fas fa-error text-red-500 mr-2"></i> Error: ${escapeHtml(err.message)}`;
@@ -646,19 +660,47 @@ function generatePdfID(student) {
   }
 
   // Event Listeners
-  downloadPdfBtn.onclick = () => {
-    // Placeholder: In real, fetch current student
-    const params = new URLSearchParams(window.location.search);
-    const key = params.get('key');
+ downloadPdfBtn.onclick = async () => {
+  const params = new URLSearchParams(window.location.search);
+  const key = params.get('key') || params.get('id');
+  const phone = params.get('phone');
+  const firstName = params.get('firstName');
+  const lastName = params.get('lastName');
+  let student = null;
+  let studentKey = null;
+  try {
     if (key) {
-      db.ref('students/' + key).once('value').then(snap => {
-        const student = snap.val();
-        if (student) generatePdfID(student);
-      });
-    } else {
-      alert('Please provide ?key=... in URL to generate PDF.');
+      const snap = await db.ref('students/' + key).once('value');
+      student = snap.val();
+      studentKey = key;
+    } else if (phone && firstName && lastName) {
+      console.log('PDF Parent lookup:', { phone, firstName, lastName });
+      const snap = await db.ref('students').once('value');
+      const data = snap.val() || {};
+      for (const [sKey, s] of Object.entries(data)) {
+        if (
+          s.primaryParentContact === phone &&
+          s.firstName.toLowerCase().replace(/\s+/g, '') === firstName.toLowerCase().replace(/\s+/g, '') &&
+          s.lastName.toLowerCase().replace(/\s+/g, '') === lastName.toLowerCase().replace(/\s+/g, '')
+        ) {
+          student = s;
+          studentKey = sKey;
+          console.log('PDF Match found:', studentKey, student);
+          break;
+        }
+      }
     }
-  };
+    if (student) {
+      student.passportPhotoUrl = student.passportPhotoUrl || student.passportPhotoURL || '';
+      generatePdfID(student);
+    } else {
+      alert('Student not found. Please check the URL parameters (key or phone/firstName/lastName).');
+    }
+  } catch (err) {
+    console.error('PDF Error:', err);
+    alert('Error generating PDF: ' + err.message);
+  }
+};
 
   refreshBtn.onclick = fetchStudent;
   editBtn.onclick = () => window.location.href = `../edit-student.html?key=${key}`;

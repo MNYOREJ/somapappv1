@@ -141,14 +141,14 @@
           if (key) {
             const snap = await db.ref('students/' + key).once('value');
             student = snap.val();
-            studentKey = key;
+            studentkey = key;
           } else if (adm) {
             const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
             const data = snap.val() || {};
             const firstKey = Object.keys(data)[0];
             if (firstKey) {
               student = data[firstKey];
-              studentKey = firstKey;
+              studentkey = firstKey;
             }
           } else if (phone && firstName && lastName) {
             const snap = await db.ref('students').once('value');
@@ -156,7 +156,7 @@
             for (const [sKey, s] of Object.entries(data)) {
               if (s.primaryParentContact === phone && s.firstName.toLowerCase().replace(/\s+/g, '') === firstName.toLowerCase().replace(/\s+/g, '') && s.lastName.toLowerCase().replace(/\s+/g, '') === lastName.toLowerCase().replace(/\s+/g, '')) {
                 student = s;
-                studentKey = sKey;
+                studentkey = sKey;
                 break;
               }
             }
@@ -164,18 +164,6 @@
 
           if (!student) {
             throw new Error('Student not found.');
-          }
-
-          // Fetch photo URL from Storage (like in generateid.html)
-          if (student.passportPhotoUrl) {
-            try {
-              student.photoDownloadUrl = await storage.ref(student.passportPhotoUrl).getDownloadURL();
-            } catch (e) {
-              console.error('Photo fetch error:', e);
-              student.photoDownloadUrl = 'https://via.placeholder.com/120x160';
-            }
-          } else {
-            student.photoDownloadUrl = 'https://via.placeholder.com/120x160';
           }
 
           // Fetch scores, attendance, etc. (adjust paths as per your Firebase)
@@ -186,7 +174,7 @@
           student.scores = scoresSnap.val() || {};
           const attSnap = await db.ref(`attendance/${year}/${month}/${student.classLevel}/${student.adm}`).once('value');
           student.attendance = attSnap.val() || { present: 0, absent: 0, days: 0 };
-          const paymentsSnap = await db.ref(`students/${studentKey}/payments`).once('value');
+          const paymentsSnap = await db.ref(`students/${studentkey}/payments`).once('value');
           student.payments = paymentsSnap.val() || {};
           const { paid, debt } = calculatePayments(student);
 
@@ -200,7 +188,7 @@
 
           renderReportCard(student, paid, debt);
           renderPerformanceDashboard(student);
-          renderArchive(studentKey);
+          renderArchive(studentkey);
           document.getElementById('status').innerHTML = 'Report card loaded successfully.';
           document.getElementById('status').className = 'mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-center';
         } catch (err) {
@@ -212,7 +200,7 @@
 
       // Render Report Card Preview
       function renderReportCard(student, paid, debt) {
-        const photoUrl = student.photoDownloadUrl || 'https://via.placeholder.com/120x160';
+        const photoUrl = student.passportPhotoUrl || 'https://via.placeholder.com/120x160';
         const fullName = `${student.firstName} ${student.middleName || ''} ${student.lastName}`.trim();
         const classLevel = student.classLevel || 'N/A';
         const admNo = student.admissionNumber || student.adm || 'N/A';
@@ -233,7 +221,7 @@
       function renderPerformanceDashboard(student) {
         const scores = student.scores || {};
         const subjects = Object.keys(scores);
-        const percentages = subjects.map(sub => (scores[sub].score / scores[sub].max) * 100);
+        const percentages = subjects.map(sub => ((scores[sub].score || 0) / (scores[sub].max || 100) * 100));
         const avg = calculateAverage(scores);
 
         // Line Graph for Trends (assuming multiple periods; mock data for now)

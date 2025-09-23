@@ -131,7 +131,6 @@
     <div title="Market" class="icon" data-action="market" id="icon-market"><i class="fas fa-store"></i></div>
     <div title="Academics" class="icon" data-action="academics" id="icon-acad"><i class="fas fa-user-graduate"></i></div>
     <div title="Fees" class="icon" data-action="fees" id="icon-fees"><i class="fas fa-money-bill-wave"></i></div>
-    <div title="Generate ID" class="icon" data-action="generate-id" id="icon-id"><i class="fas fa-id-card"></i></div>
     <div title="Report Card" class="icon" data-action="reportcard" id="icon-report"><i class="fas fa-file-export"></i></div>
     <div style="flex:1"></div>
     <div id="icon-logout" class="icon" title="Logout"><i class="fas fa-sign-out-alt"></i></div>
@@ -297,21 +296,6 @@
 
     <div class="footer-note">SoMAp — All monetary values are shown in Tanzanian shillings (TSh).</div>
   </main>
-
-  <!-- Hidden ID print area -->
-  <div id="idCardTemplate" style="display:none;">
-    <div style="width:360px;padding:14px;border:1px solid #222;font-family:Arial;">
-      <div style="display:flex;gap:12px;align-items:center;">
-        <img src="images/somap-logo.png.jpg" style="width:70px;height:70px;object-fit:cover;border-radius:8px;">
-        <div>
-          <div style="font-size:18px;font-weight:700;">SoMAp Student ID</div>
-          <div id="idPrintName" style="font-size:16px;margin-top:6px;"></div>
-          <div id="idPrintClass" style="font-size:13px;margin-top:4px;"></div>
-          <div id="idPrintAdm" style="font-size:12px;margin-top:4px;"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <script>
   /*************************************************************************
@@ -745,27 +729,17 @@
     }
   });
 
-  // Generate ID card (print)
-  quickGenerateId.addEventListener('click', () => generateIdCard());
-  function generateIdCard(){
-    if (!currentStudent){ Swal.fire('No student','Please sign in first','warning'); return; }
-    const el = q('#idCardTemplate').innerHTML;
-    // fill placeholders
-    const tmp = document.createElement('div');
-    tmp.innerHTML = el;
-    tmp.querySelector('#idPrintName').textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`;
-    tmp.querySelector('#idPrintClass').textContent = `Class: ${safe(currentStudent.classLevel)} • Stream: ${safe(currentStudent.stream)}`;
-    tmp.querySelector('#idPrintAdm').textContent = `ADM: ${safe(currentStudent.admissionNumber)}`;
-    // open print window
-    const w = window.open('', '_blank', 'width=420,height=320');
-    w.document.write('<html><head><title>ID</title></head><body>');
-    w.document.write(tmp.innerHTML);
-    w.document.write('</body></html>');
-    w.document.close();
-    w.focus();
-    setTimeout(()=> w.print(), 600);
-  }
-
+  quickGenerateId.addEventListener('click', () => {
+    if (!currentStudent) {
+      Swal.fire('No student', 'Please sign in first', 'warning');
+      return;
+    }
+    const phone = encodeURIComponent(currentStudent.primaryParentContact || '');
+    const firstName = encodeURIComponent((currentStudent.firstName || '').toLowerCase().replace(/\s+/g, ''));
+    const lastName = encodeURIComponent((currentStudent.lastName || '').toLowerCase().replace(/\s+/g, ''));
+    const url = `generateid.html?phone=${phone}&firstName=${firstName}&lastName=${lastName}`;
+    window.open(url, '_blank');
+  });
   // Quick actions wiring
   quickReportCard.addEventListener('click', ()=> genReportBtn.click());
   quickFees.addEventListener('click', ()=> {
@@ -794,7 +768,6 @@
         // open finance page but read-only - or show inline list:
         Swal.fire({ title: 'Payments', html: paymentsList.innerHTML, width:800 });
         break;
-      case 'generate-id': generateIdCard(); break;
       case 'reportcard': genReportBtn.click(); break;
       default: console.log('unknown action', action);
     }
@@ -803,13 +776,6 @@
   // Bind UI events (some already bound)
   function bindUI(){
     // Export PDF button already wired
-    // Additional keyboard shortcuts (optional)
-    document.addEventListener('keydown', (ev)=>{
-      if (ev.ctrlKey && ev.key === 'p') {
-        ev.preventDefault();
-        generateIdCard();
-      }
-    });
   }
 
   // Safety: If student record changes in db we listen for updates and refresh UI

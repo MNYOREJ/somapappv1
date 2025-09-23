@@ -166,6 +166,19 @@
             throw new Error('Student not found.');
           }
 
+          // Fetch photo URL from Storage (like in generateid.html)
+          const storage = firebase.storage();
+          if (student.passportPhotoUrl) {
+            try {
+              student.photoDownloadUrl = await storage.ref(student.passportPhotoUrl).getDownloadURL();
+            } catch (e) {
+              console.error('Photo fetch error:', e);
+              student.photoDownloadUrl = 'https://via.placeholder.com/120x160';
+            }
+          } else {
+            student.photoDownloadUrl = 'https://via.placeholder.com/120x160';
+          }
+
           // Fetch scores, attendance, etc. (adjust paths as per your Firebase)
           const year = new Date().getFullYear().toString();
           const month = new Date().toLocaleString('default', { month: 'long' }).toLowerCase();
@@ -200,7 +213,7 @@
 
       // Render Report Card Preview
       function renderReportCard(student, paid, debt) {
-        const photoUrl = student.passportPhotoUrl || 'https://via.placeholder.com/120x160';
+        const photoUrl = student.photoDownloadUrl || 'https://via.placeholder.com/120x160';
         const fullName = `${student.firstName} ${student.middleName || ''} ${student.lastName}`.trim();
         const classLevel = student.classLevel || 'N/A';
         const admNo = student.admissionNumber || student.adm || 'N/A';
@@ -221,7 +234,7 @@
       function renderPerformanceDashboard(student) {
         const scores = student.scores || {};
         const subjects = Object.keys(scores);
-        const percentages = subjects.map(sub => (scores[sub].score / scores[sub].max) * 100);
+        const percentages = subjects.map(sub => ((scores[sub].score || 0) / (scores[sub].max || 100) * 100));
         const avg = calculateAverage(scores);
 
         // Line Graph for Trends (assuming multiple periods; mock data for now)
@@ -334,7 +347,9 @@
         const comment = getTeacherComment(letterGrade(calculateAverage(student.scores)), (student.firstName + ' ' + (student.middleName || '') + ' ' + student.lastName).trim().split(' ')[0] || '');
         doc.text('Teacher Comment:', margin, after + 64);
         doc.text(comment, margin, after + 82, { maxWidth: 595 - margin * 2 });
-        doc.save(`ReportCard_${student.firstName}_${student.lastName}_${new Date().getFullYear()}.pdf`);
+        const pdfBlob = doc.output('blob');
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+        window.open(pdfUrl, '_blank');
       };
 
       downloadBulkPdf.onclick = () => {

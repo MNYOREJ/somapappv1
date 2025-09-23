@@ -106,8 +106,9 @@
     (function() {
       // Firebase Initialization (from firebase.js)
       const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-      if (!db) {
-        document.getElementById('status').innerHTML = 'Database unavailable. Check console.';
+      const storage = window.storage || (window.firebase && firebase.storage ? firebase.storage() : null);
+      if (!db || !storage) {
+        document.getElementById('status').innerHTML = 'Database or Storage unavailable. Check console.';
         document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
         return;
       }
@@ -167,7 +168,6 @@
           }
 
           // Fetch photo URL from Storage (like in generateid.html)
-          const storage = firebase.storage();
           if (student.passportPhotoUrl) {
             try {
               student.photoDownloadUrl = await storage.ref(student.passportPhotoUrl).getDownloadURL();
@@ -179,7 +179,7 @@
             student.photoDownloadUrl = 'https://via.placeholder.com/120x160';
           }
 
-          // Fetch scores, attendance, etc. (adjust paths as per your Firebase)
+          // Fetch scores, attendance, etc.
           const year = new Date().getFullYear().toString();
           const month = new Date().toLocaleString('default', { month: 'long' }).toLowerCase();
           const examKey = 'monthly'; // Default, or from params
@@ -191,13 +191,14 @@
           student.payments = paymentsSnap.val() || {};
           const { paid, debt } = calculatePayments(student);
 
-          // Fetch summary for position if available
+          // Fetch summary for position and subject rankings
           const summarySnap = await db.ref(`summaries/${year}/${student.classLevel}/${examKey}/${month}`).once('value');
           const summary = summarySnap.val() || {};
-          const list = (summary.top3 || []).concat(summary.bottom3 || []).map(item => ({ adm: item.adm, avg: item.avg })); // Approximate list
+          const list = (summary.top3 || []).concat(summary.bottom3 || []).map(item => ({ adm: item.adm, avg: item.avg }));
           list.sort((a, b) => b.avg - a.avg);
           const posIndex = list.findIndex(item => item.adm === student.adm);
           student.overallPos = posIndex >= 0 ? posIndex + 1 : '—';
+          student.subjectPositions = summary.subjectPositions || {};
 
           renderReportCard(student, paid, debt);
           renderPerformanceDashboard(student);
@@ -237,7 +238,7 @@
         const percentages = subjects.map(sub => ((scores[sub].score || 0) / (scores[sub].max || 100) * 100));
         const avg = calculateAverage(scores);
 
-        // Line Graph for Trends (assuming multiple periods; mock data for now)
+        // Line Graph for Trends (mock data for now)
         const ctxGraph = document.getElementById('performanceChart').getContext('2d');
         new Chart(ctxGraph, {
           type: 'line',
@@ -303,60 +304,108 @@
       }
 
       // Event Listeners for Downloads
-      downloadSinglePdf.onclick = () => {
+      downloadSinglePdf.onclick = async () => {
         if (!student) {
           alert('No student data loaded. Please check credentials.');
           return;
         }
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
-        const margin = 36;
-        const headerColor = { r: 37, g: 99, b: 235 };
+        const margin = 40;
+        const headerColor = { r: 29, g: 78, b: 216 }; // Match bulk report style
+
+        // Header
         doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
-        doc.rect(0, 0, 595, 80, 'F');
+        doc.rect(0, 0, 595, 100, 'F');
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(16);
-        const school = student.schoolName || 'School';
-        doc.text(`${school} — Academic Report`, margin, 40);
+        doc.setFontSize(18);
+        const school = student.schoolName || 'School of Mastery';
+        doc.text(`${school} - Academic Report Card`, margin, 50);
         doc.setTextColor(0, 0, 0);
         doc.setFontSize(12);
-        doc.text(`Name: ${student.firstName} ${student.middleName || ''} ${student.lastName}`, margin, 110);
-        doc.text(`Admission: ${student.admissionNumber || student.adm || 'N/A'}`, margin, 130);
+
+        // Student Details
+        const fullName = `${student.firstName} ${student.middleName || ''} ${student.lastName}`.trim();
+        doc.text(`Name: ${fullName}`, margin, 120);
+        doc.text(`Admission No: ${student.admissionNumber || student.adm || 'N/A'}`, margin, 140);
+        doc.text(`Class: ${student.classLevel || 'N/A'}`, margin, 160);
         const att = student.attendance || { present: 0, absent: 0, days: 0 };
         const days = att.days || (att.present + att.absent) || 0;
-        const pct = days ? ((att.present / days) * 100).toFixed(1) : '0.0';
-        doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
+        const attPct = days ? ((att.present / days) * 100).toFixed(1) : '0.0';
+        doc.text(`Attendance: ${att.present}/${days} days (${attPct}%)`, margin, 180);
         const fee = { required: student.feeDue || student.feePerYear || 0, paid: paid || 0, balance: debt || 0 };
-        doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
+        doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 200);
 
-        const tableHead = ['Subject', 'Score', 'Max', '%', 'Pstn', 'Grade'];
+        // Add Student Photo (like in generateid.html)
+        if (student.photoDownloadUrl && student.photoDownloadUrl !== 'https://via.placeholder.com/120x160') {
+          try {
+            const imgData = await fetch(student.photoDownloadUrl).then(res => res.blob()).then(blob => {
+              return new Promise(resolve => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+              });
+            });
+            doc.addImage(imgData, 'JPEG', 400, 120, 120, 160, undefined, 'FAST');
+          } catch (e) {
+            console.error('Error adding photo to PDF:', e);
+          }
+        }
+
+        // Performance Table
+        const tableHead = ['Subject', 'Score', 'Max', '%', 'Position', 'Grade'];
         const tableBody = Object.keys(student.scores || {}).map(sub => {
           const scObj = student.scores[sub] || {};
           const sc = Number(scObj.score || 0);
           const mx = Math.max(1, Number(scObj.max || 100));
           const pctS = (sc / mx) * 100;
           const g = letterGrade(pctS);
-          const pstn = ''; // Position not available in single; use overallPos for class position if needed
-          return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
+          const subjectPos = student.subjectPositions[sub] || '—';
+          return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), subjectPos, g];
         });
-        doc.autoTable({ head: [tableHead], body: tableBody, startY: 200, styles: { fontSize: 9 }, headStyles: { fillColor: [headerColor.r, headerColor.g, headerColor.b] } });
+        doc.autoTable({
+          head: [tableHead],
+          body: tableBody,
+          startY: 220,
+          styles: { fontSize: 10, cellPadding: 4 },
+          headStyles: { fillColor: [headerColor.r, headerColor.g, headerColor.b], textColor: [255, 255, 255] },
+          columnStyles: {
+            0: { cellWidth: 150 },
+            1: { cellWidth: 80 },
+            2: { cellWidth: 80 },
+            3: { cellWidth: 80 },
+            4: { cellWidth: 80 },
+            5: { cellWidth: 80 }
+          }
+        });
+
+        // Summary Section
         const after = doc.lastAutoTable.finalY + 20;
-        doc.text(`Overall Average: ${calculateAverage(student.scores).toFixed(2)}%`, margin, after);
-        doc.text(`Overall Position: ${student.overallPos || '—'}`, margin, after + 18);
-        doc.text(`Overall Grade: ${letterGrade(calculateAverage(student.scores))}`, margin, after + 36);
-        const comment = getTeacherComment(letterGrade(calculateAverage(student.scores)), (student.firstName + ' ' + (student.middleName || '') + ' ' + student.lastName).trim().split(' ')[0] || '');
-        doc.text('Teacher Comment:', margin, after + 64);
-        doc.text(comment, margin, after + 82, { maxWidth: 595 - margin * 2 });
+        const avg = calculateAverage(student.scores);
+        doc.text(`Overall Average: ${avg.toFixed(2)}%`, margin, after);
+        doc.text(`Overall Position: ${student.overallPos || '—'}`, margin, after + 20);
+        doc.text(`Overall Grade: ${letterGrade(avg)}`, margin, after + 40);
+        const comment = getTeacherComment(letterGrade(avg), fullName.split(' ')[0] || '');
+        doc.text('Teacher Comment:', margin, after + 60);
+        doc.text(comment, margin, after + 80, { maxWidth: 595 - margin * 2 });
+
+        // Generate and open PDF
         const pdfBlob = doc.output('blob');
         const pdfUrl = URL.createObjectURL(pdfBlob);
-        window.open(pdfUrl, '_blank');
+        const link = document.createElement('a');
+        link.href = pdfUrl;
+        link.download = `ReportCard_${student.firstName}_${student.lastName}_${new Date().getFullYear()}.pdf`;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
       };
 
       downloadBulkPdf.onclick = () => {
         alert('Bulk reports are generated from scoresheet.html for teachers.');
       };
 
-      // Helper functions from scoresheet.html
+      // Helper functions
       function calculatePayments(student) {
         let paid = Number(student.paid || student.feePaid || student.totalPaid || student.paidAmount || 0);
         if (student.payments && typeof student.payments === 'object') {

@@ -563,7 +563,52 @@
       doc.save(title.replace(/[^A-Za-z0-9_\- ]/g,'_') + '.pdf');
     }
 
-        /* ---------- Persist summary ---------- */
+    /* ---------- Report cards ---------- */
+    async function bulkGenerateReportCards(){
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4' });
+      const margin = 36;
+      const headerColor = { r:37, g:99, b:235 };
+      const students = state.students || [];
+      for(let i=0; i<students.length; i++){
+        if(i>0) doc.addPage();
+        const s = students[i];
+        const r = state.rowsByAdm[s.adm];
+        doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
+        doc.rect(0,0,595,80,'F');
+        doc.setTextColor(255,255,255); doc.setFontSize(16);
+        const school = s.schoolName || state.schoolBranch || 'School';
+        doc.text(`${school} — Academic Report`, margin, 40);
+        doc.setTextColor(0,0,0); doc.setFontSize(12);
+        doc.text(`Name: ${s.name}`, margin, 110);
+        doc.text(`Admission: ${s.adm}`, margin, 130);
+        const att = state.attendance[s.adm] || { present:0, absent:0, days:0 };
+        const days = att.days || (att.present + att.absent) || 0;
+        const pct = days ? ((att.present/days)*100).toFixed(1) : '0.0';
+        doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
+        const fee = state.fees[s.adm] || { required: s.feeDue||0, paid: s.feePaid||0, balance: s.balance||0 };
+        doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
+
+        const tableHead = ['Subject','Score','Max','%','Pstn','Grade'];
+        const tableBody = state.subjectList.map(sub=> {
+          const c = r.subjectCells[sub];
+          const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value||100));
+          const pctS = (sc/mx)*100; const g = letterGrade(pctS); const pstn = c.pstnSpan.textContent||'';
+          return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
+        });
+        doc.autoTable({ head:[tableHead], body:tableBody, startY:200, styles:{fontSize:9}, headStyles:{fillColor:[headerColor.r,headerColor.g,headerColor.b]} });
+        const after = doc.lastAutoTable.finalY + 20;
+        doc.text(`Overall Average: ${Number(r.tdAvg.textContent||0).toFixed(2)}%`, margin, after);
+        doc.text(`Overall Position: ${r.tdPstn.textContent}`, margin, after+18);
+        doc.text(`Overall Grade: ${r.tdGrade.textContent}`, margin, after+36);
+        const comment = r.tdComment.querySelector('textarea').value || '—';
+        doc.text('Teacher Comment:', margin, after+64);
+        doc.text(comment, margin, after+82, { maxWidth: 595 - margin*2 });
+      }
+      doc.save(`ReportCards_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}.pdf`);
+    }
+
+    /* ---------- Persist summary ---------- */
     async function persistComputedSummary(){
       const db = getDB();
       if(!db) return;
@@ -628,7 +673,7 @@
     btnExportPDF.addEventListener('click', exportPDF);
     btnPrint.addEventListener('click', ()=>window.print());
     btnSetAllMax.addEventListener('click', ()=>{ const v = Number(globalMaxInput.value||100); scoresBody.querySelectorAll('input.max-input').forEach(i=>i.value=v); recomputeAll(); });
-    btnbtnGenerateReports.addEventListener('click', () => alert('Bulk report generation coming soon!'));
+    btnGenerateReports.addEventListener('click', bulkGenerateReportCards);
     btnEmailReports.addEventListener('click', ()=>alert('Integrate your SMS/email gateway here.'));
 
     /* ---------- Load on page load ---------- */

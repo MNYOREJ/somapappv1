@@ -99,289 +99,348 @@
     </div>
   </div>
 
-  <script>
-    (function() {
-      // Firebase Initialization (from firebase.js)
-      const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-      if (!db) {
-        document.getElementById('status').innerHTML = 'Database unavailable. Check console.';
-        document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
-        return;
-      }
+ <script>
+(function() {
+  // Firebase Initialization (from firebase.js)
+  const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+  if (!db) {
+    document.getElementById('status').innerHTML = 'Database unavailable. Check console.';
+    document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
+    return;
+  }
 
-      // URL Params for access mode
-      const params = new URLSearchParams(window.location.search);
-      const key = params.get('key');
-      const adm = params.get('adm');
-      const phone = params.get('phone');
-      const firstName = params.get('firstName');
-      const lastName = params.get('lastName');
-      const isTeacher = params.get('role') === 'teacher'; // Assume passed from staff/academic
+  // URL Params for access mode
+  const params = new URLSearchParams(window.location.search);
+  const key = params.get('key');
+  const adm = params.get('adm');
+  const phone = params.get('phone');
+  const firstName = params.get('firstName');
+  const lastName = params.get('lastName');
+  const isTeacher = params.get('role') === 'teacher';
 
-      // Hide bulk download for parents
-      if (!isTeacher) {
-        document.getElementById('backButton').href = '../parent.html'; // Parent dashboard
-      } else {
-        document.getElementById('backButton').href = '../scoresheet.html'; // Teacher back to scoresheet
-      }
+  if (!isTeacher) {
+    document.getElementById('backButton').href = '../parent.html';
+  } else {
+    document.getElementById('backButton').href = '../scoresheet.html';
+  }
 
-      let student = null; // Global for PDF access
+  let student = null;
+  let subjectList = [];
 
-      // Fetch student(s)
-      async function fetchStudentData() {
-        document.getElementById('status').innerHTML = 'Loading report card...';
-        try {
-          let studentkey = null;
+  // Fetch student data with subject positions
+  async function fetchStudentData() {
+    document.getElementById('status').innerHTML = 'Loading report card...';
+    try {
+      let studentkey = null;
 
-          if (key) {
-            const snap = await db.ref('students/' + key).once('value');
-            student = snap.val();
-            studentkey = key;
-          } else if (adm) {
-            const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
-            const data = snap.val() || {};
-            const firstKey = Object.keys(data)[0];
-            if (firstKey) {
-              student = data[firstKey];
-              studentkey = firstKey;
-            }
-          } else if (phone && firstName && lastName) {
-            const snap = await db.ref('students').once('value');
-            const data = snap.val() || {};
-            for (const [sKey, s] of Object.entries(data)) {
-              if (s.primaryParentContact === phone && s.firstName.toLowerCase().replace(/\s+/g, '') === firstName.toLowerCase().replace(/\s+/g, '') && s.lastName.toLowerCase().replace(/\s+/g, '') === lastName.toLowerCase().replace(/\s+/g, '')) {
-                student = s;
-                studentkey = sKey;
-                break;
-              }
-            }
+      if (key) {
+        const snap = await db.ref('students/' + key).once('value');
+        student = snap.val();
+        studentkey = key;
+      } else if (adm) {
+        const snap = await db.ref('students').orderByChild('admissionNumber').equalTo(adm).once('value');
+        const data = snap.val() || {};
+        const firstKey = Object.keys(data)[0];
+        if (firstKey) {
+          student = data[firstKey];
+          studentkey = firstKey;
+        }
+      } else if (phone && firstName && lastName) {
+        const snap = await db.ref('students').once('value');
+        const data = snap.val() || {};
+        for (const [sKey, s] of Object.entries(data)) {
+          if (
+            s.primaryParentContact === phone &&
+            s.firstName.toLowerCase().replace(/\s+/g, '') === firstName.toLowerCase().replace(/\s+/g, '') &&
+            s.lastName.toLowerCase().replace(/\s+/g, '') === lastName.toLowerCase().replace(/\s+/g, '')
+          ) {
+            student = s;
+            studentkey = sKey;
+            break;
           }
-
-          if (!student) {
-            throw new Error('Student not found.');
-          }
-
-          // Fetch scores, attendance, etc. (adjust paths as per your Firebase)
-          const year = new Date().getFullYear().toString();
-          const month = new Date().toLocaleString('default', { month: 'long' }).toLowerCase();
-          const examKey = 'monthly'; // Default, or from params
-          const scoresSnap = await db.ref(`scores/${year}/${student.classLevel}/${examKey}/${month}/${student.adm}`).once('value');
-          student.scores = scoresSnap.val() || {};
-          const attSnap = await db.ref(`attendance/${year}/${month}/${student.classLevel}/${student.adm}`).once('value');
-          student.attendance = attSnap.val() || { present: 0, absent: 0, days: 0 };
-          const paymentsSnap = await db.ref(`students/${studentkey}/payments`).once('value');
-          student.payments = paymentsSnap.val() || {};
-          const { paid, debt } = calculatePayments(student);
-
-          // Fetch summary for position if available
-          const summarySnap = await db.ref(`summaries/${year}/${student.classLevel}/${examKey}/${month}`).once('value');
-          const summary = summarySnap.val() || {};
-          const list = (summary.top3 || []).concat(summary.bottom3 || []).map(item => ({ adm: item.adm, avg: item.avg })); // Approximate list
-          list.sort((a, b) => b.avg - a.avg);
-          const posIndex = list.findIndex(item => item.adm === student.adm);
-          student.overallPos = posIndex >= 0 ? posIndex + 1 : '—';
-
-          renderReportCard(student, paid, debt);
-          renderPerformanceDashboard(student);
-          renderArchive(studentkey);
-          document.getElementById('status').innerHTML = 'Report card loaded successfully.';
-          document.getElementById('status').className = 'mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-center';
-        } catch (err) {
-          console.error('Fetch Error:', err);
-          document.getElementById('status').innerHTML = 'Error: ' + err.message;
-          document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
         }
       }
 
-      // Render Report Card Preview
-      function renderReportCard(student, paid, debt) {
-        const photoUrl = student.passportPhotoUrl || 'https://via.placeholder.com/120x160';
-        const fullName = `${student.firstName} ${student.middleName || ''} ${student.lastName}`.trim();
-        const classLevel = student.classLevel || 'N/A';
-        const admNo = student.admissionNumber || student.adm || 'N/A';
-        const avg = calculateAverage(student.scores);
-        const grade = letterGrade(avg);
-        const comment = getTeacherComment(grade, fullName.split(' ')[0] || '');
-
-        document.getElementById('studentPhoto').src = photoUrl;
-        document.getElementById('studentName').textContent = fullName || 'N/A';
-        document.getElementById('classInfo').textContent = `Class: ${classLevel}`;
-        document.getElementById('admNo').textContent = `Adm No: ${admNo}`;
-        document.getElementById('overallAvg').textContent = `Average: ${avg.toFixed(2)}%`;
-        document.getElementById('overallGrade').textContent = `Grade: ${grade}`;
-        document.getElementById('teacherComment').textContent = comment;
+      if (!student) {
+        throw new Error('Student not found.');
       }
 
-      // Performance Dashboard (Graph and Pie Chart)
-      function renderPerformanceDashboard(student) {
-        const scores = student.scores || {};
-        const subjects = Object.keys(scores);
-        const percentages = subjects.map(sub => ((scores[sub].score || 0) / (scores[sub].max || 100) * 100));
-        const avg = calculateAverage(scores);
+      const year = new Date().getFullYear().toString();
+      const month = new Date().toLocaleString('default', { month: 'long' }).toLowerCase();
+      const examKey = 'monthly';
 
-        // Line Graph for Trends (assuming multiple periods; mock data for now)
-        const ctxGraph = document.getElementById('performanceChart').getContext('2d');
-        new Chart(ctxGraph, {
-          type: 'line',
-          data: {
-            labels: ['Prev Term', 'Midterm', 'Current'],
-            datasets: [{
-              label: 'Performance Trend',
-              data: [avg - 10, avg - 5, avg], // Mock trend data
-              borderColor: '#1d4ed8',
-              fill: false
-            }]
-          },
-          options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+      // Fetch scores
+      const scoresSnap = await db.ref(`scores/${year}/${student.classLevel}/${examKey}/${month}/${student.adm}`).once('value');
+      student.scores = scoresSnap.val() || {};
+
+      // Fetch attendance
+      const attSnap = await db.ref(`attendance/${year}/${month}/${student.classLevel}/${student.adm}`).once('value');
+      student.attendance = attSnap.val() || { present: 0, absent: 0, days: 0 };
+
+      // Fetch payments
+      const paymentsSnap = await db.ref(`students/${studentkey}/payments`).once('value');
+      student.payments = paymentsSnap.val() || {};
+      const { paid, debt } = calculatePayments(student);
+
+      // Fetch class summary for positions and subject list
+      const summarySnap = await db.ref(`summaries/${year}/${student.classLevel}/${examKey}/${month}`).once('value');
+      const summary = summarySnap.val() || {};
+      subjectList = summary.subjectList || [];
+
+      // Compute per-subject positions
+      const scoresSnapAll = await db.ref(`scores/${year}/${student.classLevel}/${examKey}/${month}`).once('value');
+      const allScores = scoresSnapAll.val() || {};
+      const perSubject = {};
+      subjectList.forEach(subject => {
+        perSubject[subject] = [];
+        Object.keys(allScores).forEach(adm => {
+          const subjObj = allScores[adm][subject] || {};
+          const score = Number(subjObj.score || 0);
+          const max = Math.max(1, Number(subjObj.max || 100));
+          const pct = (score / max) * 100;
+          perSubject[subject].push({ adm, pct });
         });
+        perSubject[subject].sort((a, b) => b.pct - a.pct);
+      });
 
-        // Pie Chart for Subject Breakdown
-        const ctxPie = document.getElementById('subjectPieChart').getContext('2d');
-        new Chart(ctxPie, {
-          type: 'pie',
-          data: {
-            labels: subjects,
-            datasets: [{
-              data: percentages,
-              backgroundColor: ['#ef4444', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#f97316', '#6d28d9']
-            }]
-          },
-          options: { responsive: true }
+      // Assign positions to student's scores
+      student.subjectPositions = {};
+      subjectList.forEach(subject => {
+        const list = perSubject[subject];
+        let pos = 0;
+        let last = null;
+        let idx = 0;
+        list.forEach(item => {
+          idx++;
+          if (last === null || item.pct < last) {
+            pos = idx;
+            last = item.pct;
+          }
+          if (item.adm === student.adm) {
+            student.subjectPositions[subject] = pos;
+          }
         });
-      }
+      });
 
-      // Report Archive (Fetch from summaries)
-      async function renderArchive(studentkey) {
-        const archiveSnap = await db.ref('summaries').once('value');
-        const archives = archiveSnap.val() || {};
-        const select = document.getElementById('archiveSelect');
-        select.innerHTML = '<option value="">Select period...</option>';
-        Object.entries(archives).forEach(([year, yearData]) => {
-          Object.entries(yearData).forEach(([classLevel, classData]) => {
-            Object.entries(classData).forEach(([examKey, examData]) => {
-              Object.entries(examData).forEach(([month, data]) => {
-                const option = document.createElement('option');
-                option.value = `${year}-${classLevel}-${examKey}-${month}`;
-                option.textContent = `${month} ${examKey} ${year} (${classLevel})`;
-                select.appendChild(option);
-              });
-            });
+      // Fetch overall position
+      const list = (summary.top3 || []).concat(summary.bottom3 || []).map(item => ({ adm: item.adm, avg: item.avg }));
+      list.sort((a, b) => b.avg - a.avg);
+      const posIndex = list.findIndex(item => item.adm === student.adm);
+      student.overallPos = posIndex >= 0 ? posIndex + 1 : '—';
+
+      renderReportCard(student, paid, debt);
+      renderPerformanceDashboard(student);
+      renderArchive(studentkey);
+      document.getElementById('status').innerHTML = 'Report card loaded successfully.';
+      document.getElementById('status').className = 'mb-4 p-3 bg-green-50 text-green-700 rounded-lg text-center';
+    } catch (err) {
+      console.error('Fetch Error:', err);
+      document.getElementById('status').innerHTML = 'Error: ' + err.message;
+      document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
+    }
+  }
+
+  // Render Report Card Preview (unchanged)
+  function renderReportCard(student, paid, debt) {
+    const photoUrl = student.passportPhotoUrl || 'https://via.placeholder.com/120x160';
+    const fullName = `${student.firstName} ${student.middleName || ''} ${student.lastName}`.trim();
+    const classLevel = student.classLevel || 'N/A';
+    const admNo = student.admissionNumber || student.adm || 'N/A';
+    const avg = calculateAverage(student.scores);
+    const grade = letterGrade(avg);
+    const comment = getTeacherComment(grade, fullName.split(' ')[0] || '');
+
+    document.getElementById('studentPhoto').src = photoUrl;
+    document.getElementById('studentName').textContent = fullName || 'N/A';
+    document.getElementById('classInfo').textContent = `Class: ${classLevel}`;
+    document.getElementById('admNo').textContent = `Adm No: ${admNo}`;
+    document.getElementById('overallAvg').textContent = `Average: ${avg.toFixed(2)}%`;
+    document.getElementById('overallGrade').textContent = `Grade: ${grade}`;
+    document.getElementById('teacherComment').textContent = comment;
+  }
+
+  // Performance Dashboard (unchanged)
+  function renderPerformanceDashboard(student) {
+    const scores = student.scores || {};
+    const subjects = Object.keys(scores);
+    const percentages = subjects.map(sub => ((scores[sub].score || 0) / (scores[sub].max || 100) * 100));
+    const avg = calculateAverage(scores);
+
+    const ctxGraph = document.getElementById('performanceChart').getContext('2d');
+    new Chart(ctxGraph, {
+      type: 'line',
+      data: {
+        labels: ['Prev Term', 'Midterm', 'Current'],
+        datasets: [{
+          label: 'Performance Trend',
+          data: [avg - 10, avg - 5, avg], // Mock trend data
+          borderColor: '#1d4ed8',
+          fill: false
+        }]
+      },
+      options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+
+    const ctxPie = document.getElementById('subjectPieChart').getContext('2d');
+    new Chart(ctxPie, {
+      type: 'pie',
+      data: {
+        labels: subjects,
+        datasets: [{
+          data: percentages,
+          backgroundColor: ['#ef4444', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#f97316', '#6d28d9']
+        }]
+      },
+      options: { responsive: true }
+    });
+  }
+
+  // Report Archive (unchanged)
+  async function renderArchive(studentkey) {
+    const archiveSnap = await db.ref('summaries').once('value');
+    const archives = archiveSnap.val() || {};
+    const select = document.getElementById('archiveSelect');
+    select.innerHTML = '<option value="">Select period...</option>';
+    Object.entries(archives).forEach(([year, yearData]) => {
+      Object.entries(yearData).forEach(([classLevel, classData]) => {
+        Object.entries(classData).forEach(([examKey, examData]) => {
+          Object.entries(examData).forEach(([month, data]) => {
+            const option = document.createElement('option');
+            option.value = `${year}-${classLevel}-${examKey}-${month}`;
+            option.textContent = `${month} ${examKey} ${year} (${classLevel})`;
+            select.appendChild(option);
           });
         });
+      });
+    });
 
-        select.addEventListener('change', async (e) => {
-          const [year, classLevel, examKey, month] = e.target.value.split('-');
-          const preview = document.getElementById('archivePreview');
-          showLoading(preview);
-          const snap = await db.ref(`summaries/${year}/${classLevel}/${examKey}/${month}`).get();
-          const data = snap.val() || {};
-          preview.innerHTML = `
-            <p><strong>Average:</strong> ${data.subjectAverages ? (Object.values(data.subjectAverages).reduce((sum, v) => sum + v, 0) / Object.keys(data.subjectAverages).length).toFixed(2) : '0'}%</p>
-            <p><strong>Top 3:</strong> ${data.top3 ? data.top3.map(t => t.name).join(', ') : 'N/A'}</p>
-            <p><strong>Bottom 3:</strong> ${data.bottom3 ? data.bottom3.map(b => b.name).join(', ') : 'N/A'}</p>
-            <p><strong>Attendance:</strong> ${data.attendance ? data.attendance.present : 0} present</p>
-          `;
-        });
-      }
+    select.addEventListener('change', async (e) => {
+      const [year, classLevel, examKey, month] = e.target.value.split('-');
+      const preview = document.getElementById('archivePreview');
+      showLoading(preview);
+      const snap = await db.ref(`summaries/${year}/${classLevel}/${examKey}/${month}`).get();
+      const data = snap.val() || {};
+      preview.innerHTML = `
+        <p><strong>Average:</strong> ${data.subjectAverages ? (Object.values(data.subjectAverages).reduce((sum, v) => sum + v, 0) / Object.keys(data.subjectAverages).length).toFixed(2) : '0'}%</p>
+        <p><strong>Top 3:</strong> ${data.top3 ? data.top3.map(t => t.name).join(', ') : 'N/A'}</p>
+        <p><strong>Bottom 3:</strong> ${data.bottom3 ? data.bottom3.map(b => b.name).join(', ') : 'N/A'}</p>
+        <p><strong>Attendance:</strong> ${data.attendance ? data.attendance.present : 0} present</p>
+      `;
+    });
+  }
 
-      // Event Listeners for Downloads
-      downloadSinglePdf.onclick = () => {
-        if (!student) {
-          alert('No student data loaded. Please check credentials.');
-          return;
-        }
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
-        const margin = 36;
-        const headerColor = { r: 37, g: 99, b: 235 };
-        doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
-        doc.rect(0, 0, 595, 80, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(16);
-        const school = student.schoolName || 'School';
-        doc.text(`${school} — Academic Report`, margin, 40);
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(12);
-        doc.text(`Name: ${student.firstName} ${student.middleName || ''} ${student.lastName}`, margin, 110);
-        doc.text(`Admission: ${student.admissionNumber || student.adm || 'N/A'}`, margin, 130);
-        const att = student.attendance || { present: 0, absent: 0, days: 0 };
-        const days = att.days || (att.present + att.absent) || 0;
-        const pct = days ? ((att.present / days) * 100).toFixed(1) : '0.0';
-        doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
-        const fee = { required: student.feeDue || student.feePerYear || 0, paid: paid || 0, balance: debt || 0 };
-        doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
+  // Download Single PDF (adapted from scoresheet.html)
+  document.getElementById('downloadSinglePdf').onclick = () => {
+    if (!student) {
+      alert('No student data loaded. Please check credentials.');
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+    const margin = 36;
+    const headerColor = { r: 37, g: 99, b: 235 };
 
-        const tableHead = ['Subject', 'Score', 'Max', '%', 'Pstn', 'Grade'];
-        const tableBody = Object.keys(student.scores || {}).map(sub => {
-          const scObj = student.scores[sub] || {};
-          const sc = Number(scObj.score || 0);
-          const mx = Math.max(1, Number(scObj.max || 100));
-          const pctS = (sc / mx) * 100;
-          const g = letterGrade(pctS);
-          const pstn = ''; // Position not available in single; use overallPos for class position if needed
-          return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
-        });
-        doc.autoTable({ head: [tableHead], body: tableBody, startY: 200, styles: { fontSize: 9 }, headStyles: { fillColor: [headerColor.r, headerColor.g, headerColor.b] } });
-        const after = doc.lastAutoTable.finalY + 20;
-        doc.text(`Overall Average: ${calculateAverage(student.scores).toFixed(2)}%`, margin, after);
-        doc.text(`Overall Position: ${student.overallPos || '—'}`, margin, after + 18);
-        doc.text(`Overall Grade: ${letterGrade(calculateAverage(student.scores))}`, margin, after + 36);
-        const comment = getTeacherComment(letterGrade(calculateAverage(student.scores)), (student.firstName + ' ' + (student.middleName || '') + ' ' + student.lastName).trim().split(' ')[0] || '');
-        doc.text('Teacher Comment:', margin, after + 64);
-        doc.text(comment, margin, after + 82, { maxWidth: 595 - margin * 2 });
-        doc.save(`ReportCard_${student.firstName}_${student.lastName}_${new Date().getFullYear()}.pdf`);
-      };
+    // Header
+    doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
+    doc.rect(0, 0, 595, 80, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    const school = student.schoolName || 'School';
+    doc.text(`${school} — Academic Report`, margin, 40);
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(12);
 
-      // Helper functions from scoresheet.html
-      function calculatePayments(student) {
-        let paid = Number(student.paid || student.feePaid || student.totalPaid || student.paidAmount || 0);
-        if (student.payments && typeof student.payments === 'object') {
-          paid = Object.values(student.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-        }
-        const debt = Number(student.balance || Math.max(0, (student.totalFee || student.feePerYear || student.feeDue || student.required || student.debt || 0) - paid) || 0);
-        return { paid, debt };
-      }
+    // Student Details
+    doc.text(`Name: ${student.firstName} ${student.middleName || ''} ${student.lastName}`, margin, 110);
+    doc.text(`Admission: ${student.admissionNumber || student.adm || 'N/A'}`, margin, 130);
+    const att = student.attendance || { present: 0, absent: 0, days: 0 };
+    const days = att.days || (att.present + att.absent) || 0;
+    const pct = days ? ((att.present / days) * 100).toFixed(1) : '0.0';
+    doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
+    const fee = { required: student.feeDue || student.feePerYear || 0, paid: student.paid || 0, balance: student.debt || 0 };
+    doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
 
-      function letterGrade(pct) {
-        const p = Number(pct);
-        if (p >= 80.5) return 'A';
-        if (p >= 60.5) return 'B';
-        if (p >= 40.5) return 'C';
-        if (p >= 20.5) return 'D';
-        return 'F';
-      }
+    // Scores Table
+    const tableHead = ['Subject', 'Score', 'Max', '%', 'Pstn', 'Grade'];
+    const tableBody = subjectList.map(sub => {
+      const scObj = student.scores[sub] || {};
+      const sc = Number(scObj.score || 0);
+      const mx = Math.max(1, Number(scObj.max || 100));
+      const pctS = (sc / mx) * 100;
+      const g = letterGrade(pctS);
+      const pstn = student.subjectPositions[sub] || '—';
+      return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
+    });
+    doc.autoTable({
+      head: [tableHead],
+      body: tableBody,
+      startY: 200,
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [headerColor.r, headerColor.g, headerColor.b] }
+    });
 
-      function getTeacherComment(grade, name) {
-        switch (grade) {
-          case 'A': return `Wonderful ${name}, keep this spirit!`;
-          case 'B': return `Good trial ${name}, aim higher!`;
-          case 'C': return `Now, ${name}, this is completely not what we signed up for at our school. Work harder!`;
-          case 'D': return `Dear ${name}, your performance needs significant improvement. Seek help and try harder!`;
-          case 'F': return `Oh ${name}, this is a serious concern. Immediate effort is required!`;
-          default: return `Feedback for ${name} pending.`;
-        }
-      }
+    // Summary
+    const after = doc.lastAutoTable.finalY + 20;
+    const avg = calculateAverage(student.scores);
+    doc.text(`Overall Average: ${avg.toFixed(2)}%`, margin, after);
+    doc.text(`Overall Position: ${student.overallPos || '—'}`, margin, after + 18);
+    doc.text(`Overall Grade: ${letterGrade(avg)}`, margin, after + 36);
+    const comment = getTeacherComment(letterGrade(avg), (student.firstName + ' ' + (student.middleName || '') + ' ' + student.lastName).trim().split(' ')[0] || '');
+    doc.text('Teacher Comment:', margin, after + 64);
+    doc.text(comment, margin, after + 82, { maxWidth: 595 - margin * 2 });
 
-      function money(n) {
-        n = Number(n || 0);
-        return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n);
-      }
+    doc.save(`ReportCard_${student.firstName}_${student.lastName}_${new Date().getFullYear()}.pdf`);
+  };
 
-      function calculateAverage(scores) {
-        const subjects = Object.keys(scores);
-        if (subjects.length === 0) return 0;
-        const total = subjects.reduce((sum, sub) => sum + ((scores[sub].score || 0) / (scores[sub].max || 100) * 100), 0);
-        return total / subjects.length;
-      }
+  // Helper functions (unchanged)
+  function calculatePayments(student) {
+    let paid = Number(student.paid || student.feePaid || student.totalPaid || student.paidAmount || 0);
+    if (student.payments && typeof student.payments === 'object') {
+      paid = Object.values(student.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    }
+    const debt = Number(student.balance || Math.max(0, (student.totalFee || student.feePerYear || student.feeDue || student.required || student.debt || 0) - paid) || 0);
+    return { paid, debt };
+  }
 
-      // Loading Helper
-      function showLoading(el) {
-        el.innerHTML = '<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>';
-      }
+  function letterGrade(pct) {
+    const p = Number(pct);
+    if (p >= 80.5) return 'A';
+    if (p >= 60.5) return 'B';
+    if (p >= 40.5) return 'C';
+    if (p >= 20.5) return 'D';
+    return 'F';
+  }
 
-      // Initial Load
-      fetchStudentData();
-    })();
-  </script>
+  function getTeacherComment(grade, name) {
+    switch (grade) {
+      case 'A': return `Wonderful ${name}, keep this spirit!`;
+      case 'B': return `Good trial ${name}, aim higher!`;
+      case 'C': return `Now, ${name}, this is completely not what we signed up for at our school. Work harder!`;
+      case 'D': return `Dear ${name}, your performance needs significant improvement. Seek help and try harder!`;
+      case 'F': return `Oh ${name}, this is a serious concern. Immediate effort is required!`;
+      default: return `Feedback for ${name} pending.`;
+    }
+  }
+
+  function money(n) {
+    n = Number(n || 0);
+    return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(n);
+  }
+
+  function calculateAverage(scores) {
+    const subjects = Object.keys(scores);
+    if (subjects.length === 0) return 0;
+    const total = subjects.reduce((sum, sub) => sum + ((scores[sub].score || 0) / (scores[sub].max || 100) * 100), 0);
+    return total / subjects.length;
+  }
+
+  function showLoading(el) {
+    el.innerHTML = '<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>';
+  }
+
+  // Initial Load
+  fetchStudentData();
+})();
+</script>
 </body>
 </html>

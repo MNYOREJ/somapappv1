@@ -22,7 +22,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
 
-  <!-- Your Firebase config wrapper -->
+  <!-- Firebase config wrapper -->
   <script src="../firebase.js"></script>
 
   <!-- Font Awesome for icons -->
@@ -43,6 +43,10 @@
     .btn-secondary:hover { background: #e5e7eb; transform: translateY(-1px); }
     .hidden { display: none; }
     .preview-bg { background: linear-gradient(to bottom right, #eff6ff, #dbeafe); border-radius: 1rem; box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); }
+    .table-container { max-height: 300px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+    th { background: #f3f4f6; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -73,10 +77,29 @@
           <div id="classInfo" class="text-center text-sm text-gray-600 mb-2">Class: —</div>
           <div id="admNo" class="text-center text-sm text-gray-600 mb-2">Adm No: —</div>
           <div id="overallAvg" class="text-center text-sm text-gray-600 mb-2">Average: —%</div>
-          <div id="overallGrade" class="text-center text-sm text-gray-600 mb-4">Grade: —</div>
+          <div id="overallGrade" class="text-center text-sm text-gray-600 mb-2">Grade: —</div>
+          <div id="attendance" class="text-center text-sm text-gray-600 mb-4">Attendance: —</div>
           <div class="border-t pt-4">
             <p class="text-sm font-medium mb-2">Teacher Comment:</p>
             <p id="teacherComment" class="text-sm italic text-gray-700">—</p>
+          </div>
+          <div class="border-t pt-4 mt-4">
+            <p class="text-sm font-medium mb-2">Subject Scores:</p>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subject</th>
+                    <th>Score</th>
+                    <th>Max</th>
+                    <th>%</th>
+                    <th>Position</th>
+                    <th>Grade</th>
+                  </tr>
+                </thead>
+                <tbody id="subjectScoresTable"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -113,14 +136,15 @@
     (function() {
       // Firebase Initialization
       const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-      if (!db) {
-        document.getElementById('status').innerHTML = 'Database unavailable. Check console.';
+      const storage = window.storage || (window.firebase && firebase.storage ? firebase.storage() : null);
+      if (!db || !storage) {
+        document.getElementById('status').innerHTML = 'Database or Storage unavailable. Check console.';
         document.getElementById('status').className = 'mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-center';
-        console.error('Firebase database not initialized. Ensure firebase.js is correctly loaded.');
+        console.error('Firebase database or storage not initialized. Ensure firebase.js is correctly loaded.');
         return;
       }
 
-      // SUBJECTS_BY_CLASS fallback (in case summary.subjectList is unavailable)
+      // SUBJECTS_BY_CLASS fallback
       const SUBJECTS_BY_CLASS = {
         'Baby': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
         'Middle': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
@@ -134,7 +158,7 @@
         'Class 7': ['Math', 'English', 'Kiswahili', 'Science', 'Social Studies', 'Civics & Morals']
       };
 
-      // URL Parameters for access
+      // URL Parameters
       const params = new URLSearchParams(window.location.search);
       const key = params.get('key');
       const adm = params.get('adm');
@@ -199,7 +223,7 @@
           student.firstName = student.firstName || '';
           student.lastName = student.lastName || '';
           student.middleName = student.middleName || '';
-          student.passportPhotoUrl = student.passportPhotoUrl || 'https://via.placeholder.com/120x160';
+          student.passportPhotoUrl = student.passportPhotoUrl || null;
 
           // Get period parameters
           const year = window.sessionStorage.getItem('year') || new Date().getFullYear().toString();
@@ -207,9 +231,26 @@
           const examKey = window.sessionStorage.getItem('examKey') || 'monthly';
           const className = student.classLevel;
 
-          // Fetch scores for this student (aligned with scoresheet.html)
-          const scoresSnap = await db.ref(`scores/${year}/${className}/${examKey}/${month}/${student.adm}`).once('value');
-          student.scores = scoresSnap.val() || {};
+          // Fetch student photo from Firebase Storage
+          if (student.passportPhotoUrl) {
+            try {
+              const photoUrl = await storage.ref(student.passportPhotoUrl).getDownloadURL();
+              student.passportPhotoUrl = photoUrl;
+            } catch (err) {
+              console.warn('Failed to fetch photo:', err.message);
+              student.passportPhotoUrl = 'https://via.placeholder.com/120x160';
+            }
+          } else {
+            student.passportPhotoUrl = 'https://via.placeholder.com/120x160';
+          }
+
+          // Fetch scores with real-time listener
+          const scoresRef = db.ref(`scores/${year}/${className}/${examKey}/${month}/${student.adm}`);
+          scoresRef.on('value', (snap) => {
+            student.scores = snap.val() || {};
+            updateReportCard(student);
+            renderPerformanceDashboard(student);
+          });
 
           // Fetch attendance
           const attSnap = await db.ref(`attendance/${year}/${month}/${className}/${student.adm}`).once('value');
@@ -218,9 +259,8 @@
           // Fetch payments
           const paymentsSnap = await db.ref(`students/${studentkey}/payments`).once('value');
           student.payments = paymentsSnap.val() || {};
-          const { paid, debt } = calculatePayments(student);
 
-          // Fetch class summary for subject list and positions
+          // Fetch class summary for subject list
           const summarySnap = await db.ref(`summaries/${year}/${className}/${examKey}/${month}`).once('value');
           const summary = summarySnap.val() || {};
           subjectList = summary.subjectList || SUBJECTS_BY_CLASS[className] || [];
@@ -229,57 +269,11 @@
           const scoresSnapAll = await db.ref(`scores/${year}/${className}/${examKey}/${month}`).once('value');
           allScores = scoresSnapAll.val() || {};
 
-          // Calculate per-subject positions
-          const perSubject = {};
-          subjectList.forEach(subject => {
-            perSubject[subject] = [];
-            Object.keys(allScores).forEach(adm => {
-              const subjObj = allScores[adm][subject] || {};
-              const score = Number(subjObj.score || 0);
-              const max = Math.max(1, Number(subjObj.max || 100));
-              const pct = (score / max) * 100;
-              perSubject[subject].push({ adm, pct });
-            });
-            perSubject[subject].sort((a, b) => b.pct - a.pct);
-          });
+          // Calculate positions
+          updatePositions(student);
 
-          student.subjectPositions = {};
-          subjectList.forEach(subject => {
-            const list = perSubject[subject];
-            let pos = 0, last = null, idx = 0;
-            list.forEach(item => {
-              idx++;
-              if (last === null || item.pct < last) { pos = idx; last = item.pct; }
-              if (item.adm === student.adm) {
-                student.subjectPositions[subject] = pos;
-              }
-            });
-          });
-
-          // Calculate overall position
-          if (summary.top3 && summary.bottom3) {
-            const list = [...(summary.top3 || []), ...(summary.bottom3 || [])].map(item => ({ adm: item.adm, avg: item.avg }));
-            list.sort((a, b) => b.avg - a.avg);
-            const posIndex = list.findIndex(item => item.adm === student.adm);
-            student.overallPos = posIndex >= 0 ? posIndex + 1 : '—';
-          } else {
-            const arr = Object.keys(allScores).map(adm => {
-              const scores = allScores[adm] || {};
-              let sumScore = 0, sumMax = 0;
-              subjectList.forEach(sub => {
-                sumScore += Number(scores[sub]?.score || 0);
-                sumMax += Number(scores[sub]?.max || 100);
-              });
-              const avg = sumMax ? (sumScore / sumMax) * 100 : 0;
-              return { adm, avg };
-            });
-            arr.sort((a, b) => b.avg - a.avg);
-            const posIndex = arr.findIndex(item => item.adm === student.adm);
-            student.overallPos = posIndex >= 0 ? posIndex + 1 : '—';
-          }
-
-          // Render components
-          renderReportCard(student, paid, debt);
+          // Initial render
+          updateReportCard(student);
           renderPerformanceDashboard(student);
           renderArchive(studentkey);
           document.getElementById('status').innerHTML = 'Report card loaded successfully.';
@@ -291,8 +285,52 @@
         }
       }
 
+      // Update positions
+      function updatePositions(student) {
+        const perSubject = {};
+        subjectList.forEach(subject => {
+          perSubject[subject] = [];
+          Object.keys(allScores).forEach(adm => {
+            const subjObj = allScores[adm][subject] || {};
+            const score = Number(subjObj.score || 0);
+            const max = Math.max(1, Number(subjObj.max || 100));
+            const pct = (score / max) * 100;
+            perSubject[subject].push({ adm, pct });
+          });
+          perSubject[subject].sort((a, b) => b.pct - a.pct);
+        });
+
+        student.subjectPositions = {};
+        subjectList.forEach(subject => {
+          const list = perSubject[subject];
+          let pos = 0, last = null, idx = 0;
+          list.forEach(item => {
+            idx++;
+            if (last === null || item.pct < last) { pos = idx; last = item.pct; }
+            if (item.adm === student.adm) {
+              student.subjectPositions[subject] = pos;
+            }
+          });
+        });
+
+        const arr = Object.keys(allScores).map(adm => {
+          const scores = allScores[adm] || {};
+          let sumScore = 0, sumMax = 0;
+          subjectList.forEach(sub => {
+            sumScore += Number(scores[sub]?.score || 0);
+            sumMax += Number(scores[sub]?.max || 100);
+          });
+          const avg = sumMax ? (sumScore / sumMax) * 100 : 0;
+          return { adm, avg };
+        });
+        arr.sort((a, b) => b.avg - a.avg);
+        const posIndex = arr.findIndex(item => item.adm === student.adm);
+        student.overallPos = posIndex >= 0 ? posIndex + 1 : '—';
+      }
+
       // Render Report Card Preview
-      function renderReportCard(student, paid, debt) {
+      function updateReportCard(student) {
+        const { paid, debt } = calculatePayments(student);
         const photoUrl = student.passportPhotoUrl;
         const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ').trim() || 'N/A';
         const classLevel = student.classLevel || 'N/A';
@@ -300,6 +338,9 @@
         const avg = calculateAverage(student.scores);
         const grade = letterGrade(avg);
         const comment = getTeacherComment(grade, student.firstName || '');
+        const att = student.attendance || { present: 0, absent: 0, days: 0 };
+        const days = att.days || (att.present + att.absent) || 0;
+        const attPct = days ? ((att.present / days) * 100).toFixed(1) : '0.0';
 
         document.getElementById('studentPhoto').src = photoUrl;
         document.getElementById('studentName').textContent = fullName;
@@ -307,29 +348,71 @@
         document.getElementById('admNo').textContent = `Adm No: ${admNo}`;
         document.getElementById('overallAvg').textContent = `Average: ${avg.toFixed(2)}%`;
         document.getElementById('overallGrade').textContent = `Grade: ${grade}`;
+        document.getElementById('attendance').textContent = `Attendance: ${att.present}/${days} days (${attPct}%)`;
         document.getElementById('teacherComment').textContent = comment;
+
+        // Render subject scores table
+        const tbody = document.getElementById('subjectScoresTable');
+        tbody.innerHTML = '';
+        subjectList.forEach(sub => {
+          const scObj = student.scores[sub] || {};
+          const score = Number(scObj.score || 0);
+          const max = Math.max(1, Number(scObj.max || 100));
+          const pct = (score / max) * 100;
+          const grade = letterGrade(pct);
+          const pos = student.subjectPositions[sub] || '—';
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${sub}</td>
+            <td>${score.toFixed(2)}</td>
+            <td>${max.toFixed(0)}</td>
+            <td>${pct.toFixed(2)}%</td>
+            <td>${pos}</td>
+            <td>${grade}</td>
+          `;
+          tbody.appendChild(tr);
+        });
       }
 
       // Performance Dashboard
-      function renderPerformanceDashboard(student) {
+      async function renderPerformanceDashboard(student) {
         const scores = student.scores || {};
         const subjects = subjectList;
         const percentages = subjects.map(sub => ((scores[sub]?.score || 0) / (scores[sub]?.max || 100) * 100));
         const avg = calculateAverage(scores);
 
+        // Fetch historical data for trend chart
+        const year = window.sessionStorage.getItem('year') || new Date().getFullYear().toString();
+        const className = student.classLevel;
+        const historicalData = [];
+        const periods = ['monthly', 'midterm1', 'endterm', 'midterm2', 'annual'];
+        for (const examKey of periods) {
+          const snap = await db.ref(`scores/${year}/${className}/${examKey}/${student.adm}`).once('value');
+          const periodScores = snap.val() || {};
+          const periodAvg = calculateAverage(periodScores);
+          historicalData.push(periodAvg);
+        }
+
         const ctxGraph = document.getElementById('performanceChart').getContext('2d');
         new Chart(ctxGraph, {
           type: 'line',
           data: {
-            labels: ['Prev Term', 'Midterm', 'Current'],
+            labels: periods.map(p => p.charAt(0).toUpperCase() + p.slice(1)),
             datasets: [{
               label: 'Performance Trend',
-              data: [avg - 10, avg - 5, avg],
+              data: historicalData,
               borderColor: '#1d4ed8',
-              fill: false
+              fill: false,
+              tension: 0.4
             }]
           },
-          options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+          options: {
+            responsive: true,
+            scales: {
+              y: { beginAtZero: true, max: 100, title: { display: true, text: 'Average (%)' } },
+              x: { title: { display: true, text: 'Exam Period' } }
+            }
+          }
         });
 
         const ctxPie = document.getElementById('subjectPieChart').getContext('2d');
@@ -342,7 +425,7 @@
               backgroundColor: ['#ef4444', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#f97316', '#6d28d9']
             }]
           },
-          options: { responsive: true }
+          options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
         });
       }
 
@@ -371,8 +454,9 @@
           preview.innerHTML = '<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>';
           const snap = await db.ref(`summaries/${year}/${classLevel}/${examKey}/${month}`).get();
           const data = snap.val() || {};
+          const avg = data.subjectAverages ? (Object.values(data.subjectAverages).reduce((sum, v) => sum + v, 0) / Object.keys(data.subjectAverages).length).toFixed(2) : '0';
           preview.innerHTML = `
-            <p class="text-sm"><strong>Average:</strong> ${data.subjectAverages ? (Object.values(data.subjectAverages).reduce((sum, v) => sum + v, 0) / Object.keys(data.subjectAverages).length).toFixed(2) : '0'}%</p>
+            <p class="text-sm"><strong>Class Average:</strong> ${avg}%</p>
             <p class="text-sm"><strong>Top 3:</strong> ${data.top3 ? data.top3.map(t => t.name).join(', ') : 'N/A'}</p>
             <p class="text-sm"><strong>Bottom 3:</strong> ${data.bottom3 ? data.bottom3.map(b => b.name).join(', ') : 'N/A'}</p>
             <p class="text-sm"><strong>Attendance:</strong> ${data.attendance ? data.attendance.present : 0} present</p>
@@ -402,7 +486,8 @@
         doc.setFontSize(12);
 
         // Student Details
-        doc.text(`Name: ${[student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ').toUpperCase()}`, margin, 110);
+        const fullName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ').toUpperCase();
+        doc.text(`Name: ${fullName}`, margin, 110);
         doc.text(`Admission: ${student.adm || 'N/A'}`, margin, 130);
         const att = student.attendance || { present: 0, absent: 0, days: 0 };
         const days = att.days || (att.present + att.absent) || 0;
@@ -437,7 +522,7 @@
         doc.save(`ReportCard_${student.firstName}_${student.lastName}_${new Date().getFullYear()}.pdf`);
       };
 
-      // Helper functions
+      // Helper Functions
       function calculatePayments(student) {
         let paid = 0;
         if (student.payments && typeof student.payments === 'object') {

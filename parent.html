@@ -121,13 +121,6 @@
       .sidebar { position:relative; width:100%; height:auto; flex-direction:row; padding:10px 8px; gap:8px; }
       .main { margin-left:0; padding:12px; }
     }
-    .table-header { background: #bfdbfe; color: #1e3a8a; font-weight: bold; }
-.status-pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-.status-paid { background: #dcfce7; color: #166534; }
-.status-overdue { background: #fee2e2; color: #991b1b; }
-.alert { color: #991b1b; font-weight: 500; }
-.dropdown-menu { display: none; position: absolute; background: white; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 8px; padding: 1rem; width: 400px; z-index: 10; }
-.dropdown-menu.show { display: block; }
   </style>
 </head>
 <body>
@@ -182,28 +175,6 @@
         <div class="small-muted">Present / Total days</div>
       </div>
     </div>
-    <!-- Friday Money Section with Three-Dot Icon -->
-<div class="card relative">
-  <div style="display:flex;justify-content:space-between;align-items:center;">
-    <h3 style="margin:0;font-weight:700">Friday Money</h3>
-    <button id="threeDotBtn" class="text-blue-800"><i class="fas fa-ellipsis-v text-xl"></i></button>
-  </div>
-  <div id="dropdownMenu" class="dropdown-menu">
-    <table id="fridayHistoryTable" class="min-w-full text-sm border">
-      <thead>
-        <tr class="table-header">
-          <th class="p-2 border">Friday Date</th>
-          <th class="p-2 border">Attendance</th>
-          <th class="p-2 border">Paid 1000 TSH</th>
-          <th class="p-2 border">Status</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-    <div id="fridayAlert" class="alert mt-4"></div>
-  </div>
-  <p class="small-muted">Click the three dots for payment history.</p>
-</div>
 
     <!-- GRID: left - main details, right - small cards -->
     <div style="display:grid;grid-template-columns: 1fr 360px; gap:16px;">
@@ -817,56 +788,7 @@ function handleAction(action){
     // reload parts
     loadPayments(currentStudentKey);
   });
-    // Friday Money History Function
-    function generateFridayIds(startYear = 2024, yearsAhead = 10) {
-      const fridays = [];
-      for (let y = startYear; y < startYear + yearsAhead; y++) {
-        for (let m = 1; m <= 12; m++) {
-          const daysInMonth = new Date(y, m, 0).getDate();
-          for (let d = 1; d <= daysInMonth; d++) {
-            const date = new Date(y, m - 1, d);
-            if (date.getDay() === 5) {
-              const weekNum = Math.ceil(d / 7);
-              const id = `${y}-${String(m).padStart(2, '0')}-week${weekNum}`;
-              const label = `Friday ${weekNum} of ${date.toLocaleString('default', { month: 'long' })} ${y} (${date.toDateString()})`;
-              fridays.push({ id, label, date: date.getTime() });
-            }
-          }
-        }
-      }
-      return fridays;
-    }
 
-    async function loadFridayHistory(studentId) {
-      const tbody = document.querySelector('#fridayHistoryTable tbody');
-      tbody.innerHTML = '';
-      let unpaidCount = 0;
-      const allFridays = generateFridayIds();
-      for (const f of allFridays) {
-        const snap = await db.ref(`fridayMoney/${f.id}/${studentId}`).once('value');
-        const rec = snap.val();
-        if (rec) {
-          const status = rec.payment === 'added_to_debt' ? 'Added to Debt' : rec.payment;
-          if (status === 'added_to_debt') unpaidCount++;
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td class="p-2 border">${f.label}</td><td class="p-2 border"><span class="status-pill status-${rec.attendance === 'present' ? 'paid' : 'overdue'}">${rec.attendance}</span></td><td class="p-2 border">${rec.payment === 'paid' ? 'Yes' : 'No'}</td><td class="p-2 border">${status}</td>`;
-          tbody.appendChild(tr);
-        }
-      }
-      document.getElementById('fridayAlert').textContent = unpaidCount > 0 ? `Alert: ${unpaidCount} unpaid Fridays added to your debt till date.` : '';
-    }
-
-    // Three-dot menu toggle
-    document.getElementById('threeDotBtn').addEventListener('click', () => {
-      document.getElementById('dropdownMenu').classList.toggle('show');
-    });
-
-    // Call loadFridayHistory after loading studentId
-    (async function() {
-      if (currentStudentKey) {
-        await loadFridayHistory(currentStudentKey);
-      }
-    })();
   </script>
 </body>
 </html>

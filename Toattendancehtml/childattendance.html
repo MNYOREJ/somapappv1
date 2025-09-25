@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Child Attendance Dashboard</title>
+
+  <!-- Tailwind CSS CDN for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <!-- Firebase compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+
+  <!-- jsPDF + autoTable for PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- SheetJS for CSV/Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- SweetAlert2 for nicer alerts -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <!-- Chart.js for charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* Custom visual polish - consistent with parent.html */
+    :root{
+      --bg1: #0ea5e9;
+      --bg2: #7c3aed;
+      --card-bg: rgba(255,255,255,0.98);
+      --accent: #4f46e5;
+      --muted: #6b7280;
+    }
+    html,body { height:100%; }
+    body {
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(135deg, var(--bg1), var(--bg2));
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius:12px;
+      box-shadow: 0 6px 18px rgba(2,6,23,0.12);
+      padding:18px;
+      overflow:hidden;
+    }
+    .stat-value { font-weight:700; font-size:1.25rem; }
+    .small-muted { color:var(--muted); font-size:0.9rem; }
+    .ts { color: #065f46; font-weight:700; }
+    .btn {
+      background:var(--accent);
+      color:white;
+      padding:10px 14px;
+      border-radius:8px;
+      font-weight:600;
+      border:none;
+    }
+    .btn-ghost {
+      background:transparent;
+      border:1px solid rgba(0,0,0,0.06);
+      padding:8px 12px;
+      border-radius:8px;
+    }
+    table { width:100%; border-collapse:collapse; }
+    table thead th { text-align:left; padding:8px; font-weight:700; color: #374151; }
+    table tbody td { padding:8px; border-top:1px solid #e6e7eb; color:#0f172a; }
+    .chart-wrap { height:220px; }
+  </style>
+</head>
+<body>
+
+  <!-- Login Form (if no params from parent.html) -->
+  <div id="loginSection" class="min-h-screen flex items-center justify-center" style="display: none;">
+    <div class="bg-white p-8 rounded-lg shadow-lg w-96">
+      <h2 class="text-2xl font-bold mb-6 text-center">Parent Login for Attendance</h2>
+      <form id="loginForm">
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Phone Number (as in database)</label>
+          <input type="tel" id="phoneInput" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Child's First Name</label>
+          <input type="text" id="firstNameInput" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Child's Last Name (or Middle Name)</label>
+          <input type="text" id="lastNameInput" class="w-full border rounded px-3 py-2" required>
+        </div>
+        <button type="submit" class="btn w-full">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main Dashboard (hidden until logged in) -->
+  <main id="dashboardSection" class="p-6" style="display: none;">
+    <div class="flex items-center justify-between mb-6">
+      <h1 id="childName" class="text-3xl font-bold text-white">Child Attendance Dashboard</h1>
+      <button id="logoutBtn" class="btn-ghost text-white">Logout</button>
+      <button class="btn text-white" onclick="document.documentElement.requestFullscreen()">Go Fullscreen</button>
+      <button class="btn-ghost text-white" onclick="window.location.href='../parent.html'">Back to Dashboard</button>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="card">
+        <h3 class="font-semibold mb-2">This Month Attendance</h3>
+        <p class="text-2xl font-bold" id="monthPct">0%</p>
+        <p class="small-muted">Present days / Total school days</p>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-2">Year-to-Date Attendance</h3>
+        <p class="text-2xl font-bold" id="ytdPct">0%</p>
+        <p class="small-muted">Overall % present</p>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-2">Recent Absences</h3>
+        <p class="text-2xl font-bold" id="absentCount">0</p>
+        <p class="small-muted">In last 30 days</p>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="card">
+        <h3 class="font-semibold mb-2">Monthly Attendance Trend</h3>
+        <canvas id="monthlyChart" class="chart-wrap"></canvas>
+      </div>
+      <div class="card">
+        <h3 class="font-semibold mb-2">Weekly Breakdown (Current Month)</h3>
+        <canvas id="weeklyChart" class="chart-wrap"></canvas>
+      </div>
+    </div>
+
+    <!-- Daily Attendance Table -->
+    <div class="card">
+      <div class="flex justify-between mb-4">
+        <h3 class="font-semibold">Daily Attendance History</h3>
+        <div>
+          <button id="exportCsvDaily" class="btn-ghost mr-2"><i class="fas fa-file-csv"></i> CSV</button>
+          <button id="exportPdfDaily" class="btn"><i class="fas fa-file-pdf"></i> PDF</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>AM</th>
+              <th>PM</th>
+              <th>Daily Status</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="dailyTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  /*************************************************************************
+   * Child Attendance Dashboard - for parents, individual child view
+   * - Login via phone + two names (case insensitive match)
+   * - Or use URL params from parent.html (?class= &adm=)
+   * - Live updates from Firebase /attendance/{class}/{month}/{date}/{studentId}
+   * - Charts: Monthly trend (line), weekly breakdown (bar)
+   * - Table: Daily history
+   * - Stats: Month %, YTD %, recent absences
+   * - Exports: CSV/PDF
+   *************************************************************************/
+  const firebaseConfig = {
+    apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+    authDomain: "somaptestt.firebaseapp.com",
+    databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+    projectId: "somaptestt",
+    storageBucket: "somaptestt.appspot.com",
+    messagingSenderId: "105526245138",
+    appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+    measurementId: "G-4HKX7KN6Q3"
+  };
+
+  // Initialize Firebase
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
+  const db = firebase.database();
+
+  // Utilities
+  function fmtDate(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function getMonthKey(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  }
+  function calculatePct(present, total) {
+    return total ? Math.round((present / total) * 100) : 0;
+  }
+
+  // Global state
+  let currentStudent = null;
+  let attendanceData = {}; // {monthKey: {date: {am, pm, daily}}}
+  let monthlyChart = null;
+  let weeklyChart = null;
+
+  // Check URL params from parent.html
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramClass = urlParams.get('class');
+  const paramAdm = urlParams.get('adm');
+
+  // Init
+  (async function init() {
+    if (paramAdm && paramClass) {
+      // From parent.html - fetch student by adm and class
+      const snap = await db.ref('students').once('value');
+      const allStudents = snap.val() || {};
+      const studentKey = Object.keys(allStudents).find(key => {
+        const s = allStudents[key];
+        return s.admissionNumber === paramAdm && (s.class === paramClass || s.classLevel === paramClass);
+      });
+      if (studentKey) {
+        currentStudent = { id: studentKey, ...allStudents[studentKey] };
+        showDashboard();
+        return;
+      }
+    }
+    // No params - show login
+    document.getElementById('loginSection').style.display = 'flex';
+  })();
+
+  // Login Form Submit
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const phone = document.getElementById('phoneInput').value.trim();
+    const firstName = document.getElementById('firstNameInput').value.trim().toLowerCase();
+    const lastName = document.getElementById('lastNameInput').value.trim().toLowerCase();
+
+    if (!phone || !firstName || !lastName) {
+      Swal.fire('Error', 'All fields required', 'error');
+      return;
+    }
+
+    try {
+      const snap = await db.ref('students').once('value');
+      const allStudents = snap.val() || {};
+      const studentKey = Object.keys(allStudents).find(key => {
+        const s = allStudents[key];
+        const sPhone = (s.primaryParentContact || '').trim();
+        const sFirst = (s.firstName || '').toLowerCase();
+        const sMiddle = (s.middleName || '').toLowerCase();
+        const sLast = (s.lastName || '').toLowerCase();
+        return sPhone === phone && 
+          ((firstName === sFirst && lastName === sLast) ||
+           (firstName === sFirst && lastName === sMiddle) ||
+           (firstName === sMiddle && lastName === sLast));
+      });
+
+      if (!studentKey) {
+        Swal.fire('Error', 'No matching student found. Check details.', 'error');
+        return;
+      }
+
+      currentStudent = { id: studentKey, ...allStudents[studentKey] };
+      localStorage.setItem('childStudentKey', studentKey); // Persist for refresh
+      showDashboard();
+    } catch (err) {
+      Swal.fire('Error', 'Login failed: ' + err.message, 'error');
+    }
+  });
+
+  // Show Dashboard
+  async function showDashboard() {
+    if (!currentStudent) {
+      const storedKey = localStorage.getItem('childStudentKey');
+      if (storedKey) {
+        const snap = await db.ref('students/' + storedKey).once('value');
+        if (snap.exists()) currentStudent = { id: storedKey, ...snap.val() };
+      }
+      if (!currentStudent) return;
+    }
+
+    document.getElementById('loginSection').style.display = 'none';
+    document.getElementById('dashboardSection').style.display = 'block';
+    document.getElementById('childName').textContent = `${currentStudent.firstName || ''} ${currentStudent.lastName || ''} Attendance`;
+
+    loadAttendanceData();
+  }
+
+  // Load Attendance Data (live listener)
+  function loadAttendanceData() {
+    const admNo = currentStudent.admissionNumber;
+    const classLevel = currentStudent.class || currentStudent.classLevel;
+
+    if (!admNo || !classLevel) {
+      Swal.fire('Error', 'Student data incomplete', 'error');
+      return;
+    }
+
+    // Listen to all attendance for this class, filter client-side by admNo
+    db.ref(`attendance/${classLevel}`).on('value', (snap) => {
+      attendanceData = {};
+      const allData = snap.val() || {};
+      Object.keys(allData).forEach(monthKey => {
+        const monthData = allData[monthKey] || {};
+        attendanceData[monthKey] = {};
+        Object.keys(monthData).forEach(dateKey => {
+          const dateData = monthData[dateKey] || {};
+          Object.keys(dateData).forEach(stuKey => {
+            const rec = dateData[stuKey];
+            if (rec.snap && rec.snap.admissionNo === admNo) {
+              attendanceData[monthKey][dateKey] = rec;
+            }
+          });
+        });
+      });
+      updateStats();
+      updateCharts();
+      updateDailyTable();
+      Swal.fire('Updated', 'Attendance data refreshed live', 'success');
+    });
+  }
+
+  // Update Stats
+  function updateStats() {
+    let ytdPresent = 0, ytdTotal = 0;
+    let monthPresent = 0, monthTotal = 0;
+    let absent30Days = 0;
+
+    const now = new Date();
+    const currentMonth = getMonthKey(now);
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(now.getDate() - 30);
+
+    Object.keys(attendanceData).forEach(monthKey => {
+      const monthDates = attendanceData[monthKey] || {};
+      Object.keys(monthDates).forEach(dateKey => {
+        const rec = monthDates[dateKey];
+        const dateTs = new Date(dateKey).getTime();
+        if (rec.daily) {
+          ytdTotal++;
+          if (rec.daily === 'P') ytdPresent++;
+
+          if (monthKey === currentMonth) {
+            monthTotal++;
+            if (rec.daily === 'P') monthPresent++;
+          }
+
+          if (dateTs >= thirtyDaysAgo.getTime() && rec.daily.includes('A')) absent30Days++;
+        }
+      });
+    });
+
+    document.getElementById('monthPct').textContent = `${calculatePct(monthPresent, monthTotal)}%`;
+    document.getElementById('ytdPct').textContent = `${calculatePct(ytdPresent, ytdTotal)}%`;
+    document.getElementById('absentCount').textContent = absent30Days;
+  }
+
+  // Update Charts
+  function updateCharts() {
+    // Monthly Trend (line chart, last 12 months)
+    const ctxMonthly = document.getElementById('monthlyChart').getContext('2d');
+    if (monthlyChart) monthlyChart.destroy();
+    const months = Object.keys(attendanceData).sort();
+    const monthlyData = months.map(m => {
+      const dates = attendanceData[m] || {};
+      let p = 0, t = 0;
+      Object.values(dates).forEach(rec => {
+        if (rec.daily) {
+          t++;
+          if (rec.daily === 'P') p++;
+        }
+      });
+      return calculatePct(p, t);
+    });
+    monthlyChart = new Chart(ctxMonthly, {
+      type: 'line',
+      data: {
+        labels: months,
+        datasets: [{ label: 'Monthly % Present', data: monthlyData, borderColor: '#10b981', fill: true }]
+      },
+      options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+
+    // Weekly Breakdown (bar chart, current month)
+    const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
+    if (weeklyChart) weeklyChart.destroy();
+    const currentMonthData = attendanceData[getMonthKey(new Date())] || {};
+    const weeks = {1: {p:0,t:0}, 2: {p:0,t:0}, 3: {p:0,t:0}, 4: {p:0,t:0}, 5: {p:0,t:0}};
+    Object.keys(currentMonthData).forEach(dateKey => {
+      const d = new Date(dateKey);
+      const weekNum = Math.ceil(d.getDate() / 7);
+      const rec = currentMonthData[dateKey];
+      if (rec.daily) {
+        weeks[weekNum].t++;
+        if (rec.daily === 'P') weeks[weekNum].p++;
+      }
+    });
+    const weeklyLabels = ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'];
+    const weeklyValues = weeklyLabels.map((_, i) => calculatePct(weeks[i+1].p, weeks[i+1].t));
+    weeklyChart = new Chart(ctxWeekly, {
+      type: 'bar',
+      data: {
+        labels: weeklyLabels,
+        datasets: [{ label: '% Present', data: weeklyValues, backgroundColor: '#3b82f6' }]
+      },
+      options: { responsive: true, scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+  }
+
+  // Update Daily Table
+  function updateDailyTable() {
+    const tbody = document.getElementById('dailyTable');
+    tbody.innerHTML = '';
+    let allDates = [];
+    Object.values(attendanceData).forEach(month => {
+      allDates = [...allDates, ...Object.keys(month).map(date => ({date, rec: month[date]}))];
+    });
+    allDates.sort((a,b) => new Date(b.date) - new Date(a.date)); // Recent first
+
+    allDates.forEach(item => {
+      const {date, rec} = item;
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${date}</td>
+        <td>${rec.am || '—'}</td>
+        <td>${rec.pm || '—'}</td>
+        <td>${rec.daily || '—'}</td>
+        <td>${rec.note || '—'}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  // Exports
+  document.getElementById('exportCsvDaily').addEventListener('click', () => {
+    let csvData = [['Date', 'AM', 'PM', 'Daily', 'Note']];
+    Object.values(attendanceData).forEach(month => {
+      Object.entries(month).forEach(([date, rec]) => {
+        csvData.push([date, rec.am || '', rec.pm || '', rec.daily || '', rec.note || '']);
+      });
+    });
+    const ws = XLSX.utils.aoa_to_sheet(csvData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `${currentStudent.admissionNumber || 'child'}_attendance.csv`);
+  });
+
+  document.getElementById('exportPdfDaily').addEventListener('click', () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.text(`${currentStudent.firstName} ${currentStudent.lastName} Attendance History`, 14, 20);
+    const rows = [];
+    Object.values(attendanceData).forEach(month => {
+      Object.entries(month).forEach(([date, rec]) => {
+        rows.push([date, rec.am || '—', rec.pm || '—', rec.daily || '—', rec.note || '—']);
+      });
+    });
+    doc.autoTable({ startY: 30, head: [['Date', 'AM', 'PM', 'Daily', 'Note']], body: rows });
+    doc.save(`${currentStudent.admissionNumber || 'child'}_attendance.pdf`);
+  });
+
+  // Logout
+  document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('childStudentKey');
+    location.reload();
+  });
+  </script>
+</body>
+</html>

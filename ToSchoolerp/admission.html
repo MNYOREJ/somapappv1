@@ -304,8 +304,8 @@
     if (!form) console.error('registrationForm not found');
     if (!registerBtn) console.error('registerBtn not found');
 
-    let editingKey = null;      // when set -> form is in EDIT mode
-    let editingStudent = null;  // currently loaded student object (for keeping old URLs)
+    let editingKey = null;      // When set -> form is in EDIT mode
+    let editingStudent = null;  // Currently loaded student object (for keeping old URLs)
 
     if (openModalBtn && modal) {
       openModalBtn.addEventListener('click', function() {
@@ -336,8 +336,8 @@
       modalTitle.textContent = 'Student Registration';
       registerBtn.textContent = 'Register Student';
       cancelEditBtn.classList.add('hidden');
-      // clear previews
-      ['passportPreview','birthCertPreview','reportCardPreview','joiningLetterPreview','medicalDocsPreview'].forEach(id => {
+      // Clear previews
+      ['passportPreview', 'birthCertPreview', 'reportCardPreview', 'joiningLetterPreview', 'medicalDocsPreview'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerHTML = '';
       });
@@ -398,19 +398,22 @@
     // ---- Utils ----
     function escapeHtml(text) {
       if (text === undefined || text === null) return '';
-      return String(text).replace(/[&<>\"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]));
+      return String(text).replace(/[&<>\"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
     }
 
-    // Upload: if editing and no new file selected, KEEP existingUrl
+    // Upload: If editing and no new file selected, KEEP existingUrl
     async function uploadMaybe(inputId, folder, newKey, existingUrl) {
       const el = document.getElementById(inputId);
-      if (!el || !el.files || el.files.length === 0) return existingUrl || null;
+      if (!el || !el.files || el.files.length === 0) {
+        console.log(`No new file for ${inputId}, keeping:`, existingUrl); // Debug log
+        return existingUrl || null;
+      }
 
       try {
         const file = el.files[0];
         const formData = new FormData();
         formData.append("file", file);
-        formData.append("upload_preset", "somap_unsigned"); // update if your preset differs
+        formData.append("upload_preset", "somap_unsigned"); // Update if your preset differs
         formData.append("folder", "studentDocs/" + newKey + "/" + folder);
 
         const res = await fetch("https://api.cloudinary.com/v1_1/dg7vnrkgd/auto/upload", {
@@ -420,7 +423,7 @@
         const data = await res.json();
 
         if (data.secure_url) {
-          console.log(`Uploaded ${inputId} to Cloudinary:`, data.secure_url);
+          console.log(`Uploaded ${inputId} to Cloudinary:`, data.secure_url); // Debug log
           return data.secure_url;
         } else {
           console.error("Cloudinary upload failed:", data);
@@ -441,52 +444,61 @@
 
         const fd = new FormData(form);
         const studentData = {
-  firstName: fd.get('firstName'),
-  middleName: fd.get('middleName') || '',
-  lastName: fd.get('lastName'),
-  gender: fd.get('gender'),
-  dob: fd.get('dob'),
-  pupilId: fd.get('pupilId') || '',
-  birthCertNumber: fd.get('birthCertNumber') || '',
-  religion: fd.get('religion') || '',
-  tribe: fd.get('tribe') || '',
-  schoolName: fd.get('schoolName'),
-  classLevel: fd.get('classLevel'),
-  stream: fd.get('stream') || '',
-  academicYear: fd.get('academicYear'),
-  academicTrack: fd.get('academicTrack') || '',
-  boardingStatus: fd.get('boardingStatus'),
-  shiftedFrom: fd.get('shiftedFrom') || '',
-  primaryParentName: fd.get('primaryParentName'),
-  primaryParentContact: fd.get('primaryParentContact'),
-  secondaryGuardian: fd.get('secondaryGuardian') || '',
-  relationshipToStudent: fd.get('relationshipToStudent') || '',
-  residentialAddress: fd.get('residentialAddress'),
-  employmentStatus: fd.get('employmentStatus') || '',
-  feePerYear: Number(fd.get('feePerYear') || 0),
-  paymentPlan: fd.get('paymentPlan'),
-};
+          firstName: fd.get('firstName'),
+          middleName: fd.get('middleName') || '',
+          lastName: fd.get('lastName'),
+          gender: fd.get('gender'),
+          dob: fd.get('dob'),
+          admissionNumber: fd.get('admissionNumber') || `AUTO-${Date.now()}`,
+          pupilId: fd.get('pupilId') || '',
+          birthCertNumber: fd.get('birthCertNumber') || '',
+          religion: fd.get('religion') || '',
+          tribe: fd.get('tribe') || '',
+          schoolName: fd.get('schoolName'),
+          classLevel: fd.get('classLevel'),
+          stream: fd.get('stream') || '',
+          academicYear: fd.get('academicYear'),
+          academicTrack: fd.get('academicTrack') || '',
+          boardingStatus: fd.get('boardingStatus'),
+          shiftedFrom: fd.get('shiftedFrom') || '',
+          primaryParentName: fd.get('primaryParentName'),
+          primaryParentContact: fd.get('primaryParentContact'),
+          secondaryGuardian: fd.get('secondaryGuardian') || '',
+          relationshipToStudent: fd.get('relationshipToStudent') || '',
+          residentialAddress: fd.get('residentialAddress'),
+          employmentStatus: fd.get('employmentStatus') || '',
+          feePerYear: Number(fd.get('feePerYear') || 0),
+          paymentPlan: fd.get('paymentPlan'),
+        };
+
         try {
           if (!db) throw new Error('Database not available');
 
-          // Duplicate check: look for existing student with same parent contact + name + dob + class
+          // Duplicate check: Look for existing student with same parent contact + name + dob + class + admission number
           let duplicate = false;
           const dupQuery = db.ref('students').orderByChild('primaryParentContact').equalTo(studentData.primaryParentContact);
           const dupSnap = await dupQuery.once('value');
+          console.log('Duplicate check: Matches=', dupSnap.numChildren(), 'Ignored self=', editingKey ? `Yes (${editingKey})` : 'N/A'); // Debug log
           dupSnap.forEach(child => {
             const s = child.val();
             const key = child.key;
             if (s) {
-              const sameIdentity = ((s.firstName||'') === studentData.firstName && (s.lastName||'') === studentData.lastName && (s.dob||'') === studentData.dob && (s.classLevel||'') === studentData.classLevel);
+              const sameIdentity = (
+                (s.firstName || '') === studentData.firstName &&
+                (s.lastName || '') === studentData.lastName &&
+                (s.dob || '') === studentData.dob &&
+                (s.classLevel || '') === studentData.classLevel &&
+                (s.admissionNumber || '') === studentData.admissionNumber
+              );
               if (sameIdentity) {
-                // if creating new -> any match is duplicate. If editing -> ignore self
+                // If creating new -> any match is duplicate. If editing -> ignore self
                 if (!editingKey || (editingKey && editingKey !== key)) duplicate = true;
               }
             }
           });
 
           if (duplicate) {
-            alert("Duplicate student detected (same name, DOB, class & parent contact). Update aborted.");
+            alert("Duplicate student detected (same name, DOB, class, parent contact, or admission number). Update aborted.");
             if (registerBtn) registerBtn.disabled = false;
             return;
           }
@@ -495,38 +507,39 @@
             // CREATE NEW
             const newRef = db.ref('students').push();
             const newKey = newRef.key;
-
             // Upload files (all required for new registration)
-            studentData.passportPhotoUrl   = await uploadMaybe("passportPhoto", "passport", newKey, null);
-            studentData.birthCertUrl       = await uploadMaybe("birthCertUpload", "birthCert", newKey, null);
-            studentData.reportCardUrl      = await uploadMaybe("reportCardUpload", "reportCard", newKey, null);
-            studentData.joiningLetterUrl   = await uploadMaybe("joiningLetterUpload", "joiningLetter", newKey, null);
-            studentData.medicalDocsUrl     = await uploadMaybe("medicalDocsUpload", "medicalDocs", newKey, null);
-
+            console.log('Creating new student, uploading files for key:', newKey); // Debug log
+            studentData.passportPhotoUrl = await uploadMaybe("passportPhoto", "passport", newKey, null);
+            studentData.birthCertUrl = await uploadMaybe("birthCertUpload", "birthCert", newKey, null);
+            studentData.reportCardUrl = await uploadMaybe("reportCardUpload", "reportCard", newKey, null);
+            studentData.joiningLetterUrl = await uploadMaybe("joiningLetterUpload", "joiningLetter", newKey, null);
+            studentData.medicalDocsUrl = await uploadMaybe("medicalDocsUpload", "medicalDocs", newKey, null);
             await newRef.set({ createdAt: firebase.database.ServerValue.TIMESTAMP, ...studentData });
-
             alert('✅ Student registered successfully!');
             closeRegistrationModal();
-
           } else {
             // UPDATE existing
             const keyToUpdate = editingKey;
             // Use existing student data URLs as defaults
             const existing = editingStudent || {};
-
-            studentData.passportPhotoUrl   = await uploadMaybe("passportPhoto", "passport", keyToUpdate, existing.passportPhotoUrl || null);
-            studentData.birthCertUrl       = await uploadMaybe("birthCertUpload", "birthCert", keyToUpdate, existing.birthCertUrl || null);
-            studentData.reportCardUrl      = await uploadMaybe("reportCardUpload", "reportCard", keyToUpdate, existing.reportCardUrl || null);
-            studentData.joiningLetterUrl   = await uploadMaybe("joiningLetterUpload", "joiningLetter", keyToUpdate, existing.joiningLetterUrl || null);
-            studentData.medicalDocsUrl     = await uploadMaybe("medicalDocsUpload", "medicalDocs", keyToUpdate, existing.medicalDocsUrl || null);
-
+            console.log('Updating student, checking files for key:', keyToUpdate); // Debug log
+            studentData.passportPhotoUrl = await uploadMaybe("passportPhoto", "passport", keyToUpdate, existing.passportPhotoUrl || null);
+            studentData.birthCertUrl = await uploadMaybe("birthCertUpload", "birthCert", keyToUpdate, existing.birthCertUrl || null);
+            studentData.reportCardUrl = await uploadMaybe("reportCardUpload", "reportCard", keyToUpdate, existing.reportCardUrl || null);
+            studentData.joiningLetterUrl = await uploadMaybe("joiningLetterUpload", "joiningLetter", keyToUpdate, existing.joiningLetterUrl || null);
+            studentData.medicalDocsUrl = await uploadMaybe("medicalDocsUpload", "medicalDocs", keyToUpdate, existing.medicalDocsUrl || null);
             // Do an update (preserves existing createdAt if present)
             await db.ref('students/' + keyToUpdate).update({ ...studentData, updatedAt: firebase.database.ServerValue.TIMESTAMP });
-
-            alert('✅ Student record updated successfully!');
-            closeRegistrationModal();
+            // Fetch fresh data from Firebase to ensure latest state
+            const updatedSnap = await db.ref('students/' + keyToUpdate).once('value');
+            const updatedStudent = { key: keyToUpdate, ...updatedSnap.val() };
+            if (confirm('✅ Changes saved! Stay in edit mode?')) {
+              populateFormWithStudent(updatedStudent); // Reload form with fresh data
+              console.log('Reloaded with:', updatedStudent); // Debug log
+            } else {
+              closeRegistrationModal();
+            }
           }
-
         } catch (err) {
           console.error('Registration/Update error:', err);
           alert('❌ Error saving student: ' + (err.message || err));
@@ -537,7 +550,6 @@
 
     // ---- Live cache + rendering for search (and edit buttons) ----
     let cachedStudents = [];
-
     if (db) {
       db.ref('students').on('value', (snapshot) => {
         const raw = snapshot.val() || {};
@@ -552,36 +564,36 @@
       if (!searchList) return;
       const term = (searchBox ? searchBox.value || '' : '').toLowerCase();
       const filtered = !term ? students : students.filter(s =>
-        ((s.firstName||'').toLowerCase().includes(term)) ||
-        ((s.lastName||'').toLowerCase().includes(term)) ||
-        ((s.pupilId||'').toLowerCase().includes(term)) ||
-        ((s.admissionNumber||'').toLowerCase().includes(term))
+        ((s.firstName || '').toLowerCase().includes(term)) ||
+        ((s.lastName || '').toLowerCase().includes(term)) ||
+        ((s.pupilId || '').toLowerCase().includes(term)) ||
+        ((s.admissionNumber || '').toLowerCase().includes(term))
       );
       searchList.innerHTML = '';
       filtered.forEach(stu => {
         const div = document.createElement('div');
         div.className = 'student-card';
         div.innerHTML = `
-  <div class="flex justify-between items-start">
-    <div>
-      <strong>${escapeHtml((stu.firstName||'') + ' ' + (stu.lastName||''))}</strong><br>
-      ID: ${escapeHtml(stu.pupilId || stu.admissionNumber || 'N/A')}<br>
-      Class: ${escapeHtml(stu.classLevel || 'N/A')}<br>
-      Fee: ${escapeHtml(String(stu.feePerYear || 0))}<br>
-    </div>
-    <div class="flex gap-2">
-      <button class="btn edit-btn bg-yellow-100 text-yellow-800 px-3 py-1 rounded" data-key="${stu.key}">Edit</button>
-      <button class="btn delete-btn bg-red-100 text-red-800 px-3 py-1 rounded" data-key="${stu.key}">Delete</button>
-    </div>
-  </div>
-  ${stu.passportPhotoUrl ? `<img src="${stu.passportPhotoUrl}" alt="Passport" style="width:80px; height:80px; margin-top:8px; border-radius:6px;" />` : ''}
-  <div style="margin-top:6px;">
-    ${stu.birthCertUrl ? `<a href="${stu.birthCertUrl}" target="_blank">Birth Cert</a> | ` : ''}
-    ${stu.reportCardUrl ? `<a href="${stu.reportCardUrl}" target="_blank">Report Card</a> | ` : ''}
-    ${stu.joiningLetterUrl ? `<a href="${stu.joiningLetterUrl}" target="_blank">Joining Letter</a> | ` : ''}
-    ${stu.medicalDocsUrl ? `<a href="${stu.medicalDocsUrl}" target="_blank">Medical Docs</a>` : ''}
-  </div>
-`;
+          <div class="flex justify-between items-start">
+            <div>
+              <strong>${escapeHtml((stu.firstName || '') + ' ' + (stu.lastName || ''))}</strong><br>
+              ID: ${escapeHtml(stu.pupilId || stu.admissionNumber || 'N/A')}<br>
+              Class: ${escapeHtml(stu.classLevel || 'N/A')}<br>
+              Fee: ${escapeHtml(String(stu.feePerYear || 0))}<br>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn edit-btn bg-yellow-100 text-yellow-800 px-3 py-1 rounded" data-key="${stu.key}">Edit</button>
+              <button class="btn delete-btn bg-red-100 text-red-800 px-3 py-1 rounded" data-key="${stu.key}">Delete</button>
+            </div>
+          </div>
+          ${stu.passportPhotoUrl ? `<img src="${stu.passportPhotoUrl}" alt="Passport" style="width:80px; height:80px; margin-top:8px; border-radius:6px;" />` : ''}
+          <div style="margin-top:6px;">
+            ${stu.birthCertUrl ? `<a href="${stu.birthCertUrl}" download target="_blank" class="text-indigo-600 hover:underline">Birth Cert</a> | ` : ''}
+            ${stu.reportCardUrl ? `<a href="${stu.reportCardUrl}" download target="_blank" class="text-indigo-600 hover:underline">Report Card</a> | ` : ''}
+            ${stu.joiningLetterUrl ? `<a href="${stu.joiningLetterUrl}" download target="_blank" class="text-indigo-600 hover:underline">Joining Letter</a> | ` : ''}
+            ${stu.medicalDocsUrl ? `<a href="${stu.medicalDocsUrl}" download target="_blank" class="text-indigo-600 hover:underline">Medical Docs</a>` : ''}
+          </div>
+        `;
         searchList.appendChild(div);
       });
 
@@ -603,61 +615,65 @@
     // ---- Edit flow ----
     function startEditForKey(key) {
       const student = cachedStudents.find(s => s.key === key);
-if (!student) return alert('Student not found locally. Please refresh.');
-editingKey = key;
-editingStudent = student;
-document.getElementById('recordKey').value = key;
-modalTitle.textContent = 'Edit Student — ' + (student.firstName || '') + ' ' + (student.lastName || '');
-registerBtn.textContent = 'Save Changes';
-cancelEditBtn.classList.remove('hidden');
-// populate fields
-populateFormWithStudent(student);
-openModal();
+      if (!student) return alert('Student not found locally. Please refresh.');
+      editingKey = key;
+      editingStudent = student;
+      document.getElementById('recordKey').value = key;
+      modalTitle.textContent = 'Edit Student — ' + (student.firstName || '') + ' ' + (student.lastName || '');
+      registerBtn.textContent = 'Save Changes';
+      cancelEditBtn.classList.remove('hidden');
+      // Populate fields
+      populateFormWithStudent(student);
+      openModal();
     }
 
-    document.getElementById('cancelEditBtn').addEventListener('click', () => {
-      clearForm();
-      modal.style.display = 'none';
-    });
-// helper: set innerHTML to link only if url exists
-function setIf(id, url, label) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  if (url) {
-    el.innerHTML = `<a href="${url}" target="_blank">${label}</a>`;
-  } else {
-    el.innerHTML = '';
-  }
-}
-function populateFormWithStudent(s) {
-  try {
-    // Map all form fields by their IDs
-    const map = [
-      'firstName','middleName','lastName','gender','dob',
-      'admissionNumber','pupilId','classLevel','feePerYear',
-      'primaryParentName','primaryParentContact','secondaryGuardian',
-      'relationshipToStudent','residentialAddress','employmentStatus',
-      'schoolName','academicYear','academicTrack','boardingStatus',
-      'shiftedFrom','birthCertNumber','religion','tribe','stream'
-    ];
+    if (cancelEditBtn) {
+      cancelEditBtn.addEventListener('click', () => {
+        clearForm();
+        modal.style.display = 'none';
+      });
+    }
 
-    map.forEach(k => {
-      const el = document.getElementById(k);
-      if (el) el.value = s[k] || '';
-    });
+    // Helper: Set innerHTML to link only if URL exists
+    function setIf(id, url, label) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (url) {
+        el.innerHTML = `<a href="${url}" download target="_blank" class="text-indigo-600 hover:underline">${label}</a>`;
+      } else {
+        el.innerHTML = '';
+      }
+    }
 
-    // File previews
-    setIf('passportPreview', s.passportPhotoUrl, 'Current Passport Photo');
-    setIf('birthCertPreview', s.birthCertUrl, 'Current Birth Certificate');
-    setIf('reportCardPreview', s.reportCardUrl, 'Current Report Card');
-    setIf('joiningLetterPreview', s.joiningLetterUrl, 'Current Joining Letter');
-    setIf('medicalDocsPreview', s.medicalDocsUrl, 'Current Medical Docs');
+    function populateFormWithStudent(s) {
+      try {
+        // Map all form fields by their IDs
+        const map = [
+          'firstName', 'middleName', 'lastName', 'gender', 'dob',
+          'admissionNumber', 'pupilId', 'classLevel', 'feePerYear',
+          'primaryParentName', 'primaryParentContact', 'secondaryGuardian',
+          'relationshipToStudent', 'residentialAddress', 'employmentStatus',
+          'schoolName', 'academicYear', 'academicTrack', 'boardingStatus',
+          'shiftedFrom', 'birthCertNumber', 'religion', 'tribe', 'stream'
+        ];
 
-    checkFormValidity();
-  } catch (err) {
-    console.error('populateForm error', err);
-  }
-}
+        map.forEach(k => {
+          const el = document.getElementById(k);
+          if (el) el.value = s[k] || '';
+        });
+
+        // File previews
+        setIf('passportPreview', s.passportPhotoUrl, 'Current Passport Photo');
+        setIf('birthCertPreview', s.birthCertUrl, 'Current Birth Certificate');
+        setIf('reportCardPreview', s.reportCardUrl, 'Current Report Card');
+        setIf('joiningLetterPreview', s.joiningLetterUrl, 'Current Joining Letter');
+        setIf('medicalDocsPreview', s.medicalDocsUrl, 'Current Medical Docs');
+
+        checkFormValidity();
+      } catch (err) {
+        console.error('populateForm error', err);
+      }
+    }
 
     // ---- Delete flow (simple) ----
     async function doDeleteKey(key) {
@@ -677,7 +693,6 @@ function populateFormWithStudent(s) {
         .then(() => console.log('DB test write OK'))
         .catch(err => console.warn('DB test write failed (ignore if rules block):', err.message));
     }
-
   });
 </script>
 </body>

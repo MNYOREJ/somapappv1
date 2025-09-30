@@ -1,7 +1,7 @@
 // --- Firebase Config ---
 const firebaseConfig = {
   apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-  authDomain: "somaptestt.firebaseapp.com",
+  authDomain: "somapv2i.com",
   databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
   projectId: "somaptestt",
   storageBucket: "somaptestt.appspot.com",

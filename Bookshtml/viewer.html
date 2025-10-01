@@ -48,7 +48,7 @@
 
     // Get URL and type from query string
     const params = new URLSearchParams(window.location.search);
-    const pdfUrl = decodeURIComponent(params.get('url') || '');
+    let pdfUrl = decodeURIComponent(params.get('url') || '');
     const bookType = params.get('type') || 'book';
     const bookTitle = pdfUrl.split('/').pop().split('.')[0].replace(/%20/g, ' ') || 'Book';
     document.getElementById('bookTitle').textContent = bookTitle;
@@ -57,14 +57,20 @@
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('error').classList.remove('hidden');
       document.getElementById('error').textContent = 'Error: No PDF URL provided.';
+      console.error('No PDF URL provided');
       return;
     }
 
-    // Use Cloudinary raw endpoint to bypass CORS
-    const rawPdfUrl = pdfUrl.replace('/image/upload/', '/raw/upload/');
+    // Use Cloudinary raw endpoint
+    let finalUrl = pdfUrl.replace('/image/upload/', '/raw/upload/');
+    console.log('Attempting to load PDF:', finalUrl);
+
+    // Fallback: Test with a public PDF if Cloudinary fails
+    const fallbackUrl = 'https://mozilla.github.io/pdf.js/web/compressed.tracemonkey.pdf';
+
     let pdfDoc = null;
     let pageNum = 1;
-    let scale = 1.5; // Default zoom
+    let scale = 1.5;
     const canvas = document.getElementById('pdfCanvas');
     const ctx = canvas.getContext('2d');
     const loading = document.getElementById('loading');
@@ -87,18 +93,38 @@
       }
     }
 
-    // Load PDF
-    loading.classList.remove('hidden');
-    pdfjsLib.getDocument(rawPdfUrl).promise.then(pdf => {
-      pdfDoc = pdf;
-      renderPage(pageNum);
-    }).catch(err => {
+    // Load PDF with timeout
+    let timeoutId = setTimeout(() => {
       loading.classList.add('hidden');
       error.classList.remove('hidden');
-      error.textContent = 'Error loading PDF: ' + err.message;
-      console.error('Load error:', err);
-      alert('Failed to load PDF: ' + err.message + '\nURL: ' + rawPdfUrl);
-    });
+      error.textContent = 'Error: PDF load timed out after 10 seconds. Trying fallback PDF...';
+      console.warn('PDF load timed out, switching to fallback:', fallbackUrl);
+      loadPdf(fallbackUrl, true);
+    }, 10000);
+
+    function loadPdf(url, isFallback = false) {
+      console.log('Loading PDF:', url);
+      pdfjsLib.getDocument(url).promise.then(pdf => {
+        clearTimeout(timeoutId);
+        pdfDoc = pdf;
+        console.log('PDF loaded successfully, pages:', pdfDoc.numPages);
+        renderPage(pageNum);
+      }).catch(err => {
+        clearTimeout(timeoutId);
+        loading.classList.add('hidden');
+        error.classList.remove('hidden');
+        error.textContent = `Error loading ${isFallback ? 'fallback' : 'PDF'}: ${err.message}${isFallback ? '' : '. Retrying with fallback PDF...'}`;
+        console.error('Load error:', err, 'URL:', url);
+        if (!isFallback) {
+          console.warn('Trying fallback PDF:', fallbackUrl);
+          loadPdf(fallbackUrl, true);
+        } else {
+          alert('Failed to load both PDFs: ' + err.message + '\nURL: ' + url);
+        }
+      });
+    }
+
+    loadPdf(finalUrl);
 
     // Zoom and navigation controls
     document.getElementById('zoomIn').addEventListener('click', () => {

@@ -253,7 +253,7 @@
       <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0"></iframe>
     </div>
   </div>
-  <script>
+<script>
   // Firebase Config
   const firebaseConfig = {
     apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
@@ -270,19 +270,55 @@
   const auth = firebase.auth();
   const db = firebase.database();
 
+  // Set auth persistence to SESSION
+  firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
+    .then(() => {
+      console.log('Auth persistence set to SESSION');
+    })
+    .catch(err => {
+      console.error('Error setting auth persistence:', err);
+    });
+
   // Normalize phone number (remove +, spaces, etc.)
   function normalizePhoneNumber(phone) {
     if (!phone) return '';
     return phone.replace(/[\+\s-]/g, '');
   }
 
+  // Wait for auth state with a timeout
+  Swal.fire({
+    title: 'Loading Your Books...',
+    text: 'Fetching your class adventures, please wait!',
+    icon: 'info',
+    allowOutsideClick: false,
+    showConfirmButton: false,
+    didOpen: () => {
+      Swal.showLoading();
+    }
+  });
+
+  const authTimeout = setTimeout(() => {
+    Swal.fire({
+      icon: 'error',
+      title: 'Authentication Timeout',
+      text: 'Taking too long to verify login. Please try again or contact admin.',
+      confirmButtonColor: '#ff6f61'
+    }).then(() => {
+      window.location.href = '../login.html';
+    });
+  }, 10000); // 10 seconds timeout
+
   auth.onAuthStateChanged(user => {
+    clearTimeout(authTimeout); // Clear timeout on auth state change
+    Swal.close(); // Close loading alert
+
     if (!user) {
       console.log('No user logged in, redirecting to login');
+      console.log('Auth state:', auth.currentUser);
       Swal.fire({
         icon: 'error',
         title: 'Login Required',
-        text: 'Please log in to access books',
+        text: 'Please log in to access books. Check Console for auth details.',
         confirmButtonColor: '#ff6f61'
       }).then(() => {
         window.location.href = '../login.html';
@@ -291,10 +327,17 @@
     }
     const parentPhone = normalizePhoneNumber(user.phoneNumber);
     console.log('Parent phone (normalized):', parentPhone);
+    console.log('Firebase user:', { uid: user.uid, phoneNumber: user.phoneNumber });
+
     // Find child by parent phone
     db.ref('students').once('value').then(snap => {
       const students = snap.val() || {};
       console.log('Students data keys:', Object.keys(students));
+      console.log('All students:', Object.values(students).map(s => ({
+        name: s.firstName + ' ' + s.lastName,
+        phone: normalizePhoneNumber(s.primaryParentContact),
+        classLevel: s.classLevel
+      })));
       const child = Object.values(students).find(s => {
         const dbPhone = normalizePhoneNumber(s.primaryParentContact);
         console.log('Checking student:', s.firstName + ' ' + s.lastName, 'DB phone:', dbPhone, 'Match:', dbPhone === parentPhone);
@@ -302,7 +345,6 @@
       });
       if (!child || !child.classLevel) {
         console.error('No matching child found for parent phone:', parentPhone);
-        console.log('All students phones:', Object.values(students).map(s => normalizePhoneNumber(s.primaryParentContact)));
         Swal.fire({
           icon: 'error',
           title: 'No Child Found',
@@ -314,9 +356,9 @@
         return;
       }
       console.log('Child found:', child.firstName + ' ' + child.lastName, 'Class:', child.classLevel);
-      // Normalize classLevel for path (e.g., "Class 4" -> "Class%204")
+      // Normalize classLevel for path (e.g., "Class 7" -> "Class%207")
       const classLevel = child.classLevel.trim();
-      const classPath = `class_books/Class%20${classLevel.substring(6).trim()}`; // "Class 4" -> "Class%204"
+      const classPath = `class_books/Class%20${classLevel.substring(6).trim()}`; // "Class 7" -> "Class%207"
       console.log('Class path:', classPath);
       document.getElementById('hero-subtitle').textContent = `${child.firstName} ${child.lastName}'s ${classLevel} Adventures!`;
       fetchBooks(classPath);

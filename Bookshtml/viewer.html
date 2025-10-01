@@ -62,11 +62,11 @@
       return;
     }
 
-    // Use Cloudinary raw endpoint
+    // Use Cloudinary raw endpoint with explicit MIME type
     let finalUrl = pdfUrl.replace('/image/upload/', '/raw/upload/');
     console.log('Attempting to load PDF:', finalUrl);
 
-    // Fallback: Test with a public PDF if Cloudinary fails
+    // Fallback: Public PDF for testing
     const fallbackUrl = 'https://mozilla.github.io/pdf.js/web/compressed.tracemonkey.pdf';
 
     let pdfDoc = null;
@@ -87,12 +87,13 @@
         await page.render({ canvasContext: ctx, viewport }).promise;
         document.getElementById('pageInfo').textContent = `Page ${num} of ${pdfDoc.numPages}`;
         loading.classList.add('hidden');
+        console.log('Rendered page', num);
       } catch (err) {
         loading.classList.add('hidden');
         error.classList.remove('hidden');
         error.textContent = 'Error rendering PDF: ' + err.message;
         console.error('Render error:', err);
-        fallbackButton.style.display = 'block'; // Show fallback button on error
+        fallbackButton.style.display = 'block';
       }
     }
 
@@ -100,14 +101,16 @@
     let timeoutId = setTimeout(() => {
       loading.classList.add('hidden');
       error.classList.remove('hidden');
-      error.textContent = 'Error: PDF load timed out after 5 seconds. Try enabling PDF delivery in Cloudinary Settings > Security.';
+      error.textContent = 'Error: PDF load timed out after 5 seconds. Enable PDF delivery in Cloudinary Settings > Security or click Try Fallback PDF.';
       console.warn('PDF load timed out, showing fallback button');
       fallbackButton.style.display = 'block';
-    }, 5000); // Shorter timeout for faster feedback
+    }, 5000);
 
     function loadPdf(url, isFallback = false) {
       console.log('Loading PDF:', url);
-      pdfjsLib.getDocument(url).promise.then(pdf => {
+      // Force application/pdf MIME type
+      const pdfParams = { url, headers: { 'Accept': 'application/pdf' } };
+      pdfjsLib.getDocument(pdfParams).promise.then(pdf => {
         clearTimeout(timeoutId);
         pdfDoc = pdf;
         console.log('PDF loaded successfully, pages:', pdfDoc.numPages);
@@ -118,7 +121,12 @@
         error.classList.remove('hidden');
         error.textContent = `Error loading ${isFallback ? 'fallback' : 'PDF'}: ${err.message}. Check Console for details.`;
         console.error('Load error:', err, 'URL:', url);
-        fallbackButton.style.display = 'block';
+        if (!isFallback) {
+          console.warn('Trying fallback PDF:', fallbackUrl);
+          loadPdf(fallbackUrl, true);
+        } else {
+          alert('Failed to load both PDFs: ' + err.message + '\nURL: ' + url);
+        }
       });
     }
 

@@ -11,7 +11,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <style>
-    /* Your styles unchanged – love the gradients & stars! */
+    /* Merged styles: Combined from childbook and classbook for consistency */
     :root {
       --primary: #ff6f61;
       --secondary: #6b48ff;
@@ -240,6 +240,9 @@
         height: 95vh;
       }
     }
+    /* Added from classbook for notifications */
+    .forecast { background: #f9fafb; border-radius: 12px; padding: 20px; margin: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+    .notification-item { background: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
   </style>
 </head>
 <body>
@@ -255,6 +258,11 @@
     <div id="booksGrid" class="book-grid"></div>
     <div id="loading" class="loading"><div class="spinner"></div><p>Loading your fun books...</p></div>
     <div id="noBooks" class="no-books hidden"><i class="fas fa-book-open text-5xl mb-4 block" style="color: var(--primary);"></i>No books yet—ask your teacher for more adventures! 🌟</div>
+    <!-- Added notifications section from classbook, adapted for child -->
+    <div class="forecast">
+      <h2 class="text-xl font-semibold mb-3">Book Updates & Notifications</h2>
+      <div id="notificationsList" class="text-gray-600"></div>
+    </div>
   </div>
   <!-- Modal unchanged -->
   <div id="pdfModal" class="modal hidden">
@@ -271,7 +279,7 @@
     </div>
   </div>
 
-  <!-- Firebase Compat Scripts (as you pasted – no reCAPTCHA) -->
+  <!-- Firebase Compat Scripts -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
@@ -279,7 +287,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
 
   <script>
-    // Firebase Config (unchanged)
+    // Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
       authDomain: "somaptestt.firebaseapp.com",
@@ -311,50 +319,46 @@
         return;
       }
 
-      // Simplified User Key: Always use UID (standardize DB to users/{uid})
-      const userKey = user.uid; // Fix: Use UID for all (email/phone). Update DB keys if needed.
+      // Use UID for userKey
+      const userKey = user.uid;
       console.log('User UID/Key:', userKey, 'Phone:', user.phoneNumber);
 
-      // Fetch from users/{uid} – prioritize this for simplicity
+      // Fetch user data
       db.ref(`users/${userKey}`).once('value').then(userSnap => {
         const userData = userSnap.val();
         console.log('User data from users/:', userData);
 
         let className = null;
-        let childName = 'Super Student'; // Default
+        let childName = 'Super Student';
 
         if (userData) {
           if (userData.role === 'parent' && userData.childClass && userData.childNames) {
-            className = userData.childClass.trim().toLowerCase().replace(/\s+/g, '').replace(/class/i, ''); // e.g., "class 7" → "7", "Class7" → "7"
+            className = userData.childClass.trim().toLowerCase().replace(/\s+/g, '');
             childName = userData.childNames;
           } else if (userData.role === 'student' && userData.class && userData.names) {
-            className = userData.class.trim().toLowerCase().replace(/\s+/g, '').replace(/class/i, ''); // e.g., "7" or "class 7" → "7"
+            className = userData.class.trim().toLowerCase().replace(/\s+/g, '');
             childName = userData.names;
           }
         }
 
-        // Simple Fallback: Only if no class (e.g., legacy data). Search students by phone.
         if (!className) {
           console.log('No class in users/, fallback to students');
           db.ref('students').once('value').then(studentsSnap => {
             const students = studentsSnap.val() || {};
             let matchingChild = null;
 
-            // Match by student phone first
             if (user.phoneNumber) {
               matchingChild = Object.values(students).find(s => (s.phone || '') === user.phoneNumber);
             }
-            // Then parent phone
             if (!matchingChild && user.phoneNumber) {
               matchingChild = Object.values(students).find(s => (s.parentPhone || '') === user.phoneNumber);
             }
-            // Last: By name (if available)
             if (!matchingChild && userData && userData.names) {
               matchingChild = Object.values(students).find(s => s.names === userData.names);
             }
 
             if (matchingChild && matchingChild.class) {
-              className = matchingChild.class.trim().toLowerCase().replace(/\s+/g, '').replace(/class/i, ''); // Normalize to "7"
+              className = matchingChild.class.trim().toLowerCase().replace(/\s+/g, '');
               childName = matchingChild.names || childName;
               console.log('Matched child via fallback:', matchingChild);
             } else {
@@ -362,15 +366,14 @@
               return;
             }
 
-            setupPage(className, childName);
+            setupPage(className, childName, userKey);
           }).catch(err => {
             console.error('Fallback error:', err);
             showError('Oops! Check connection: ' + err.message);
           });
         } else {
-          // Direct from users/
           console.log('Using class from users/:', className);
-          setupPage(className, childName);
+          setupPage(className, childName, userKey);
         }
       }).catch(err => {
         console.error('users/ fetch error:', err);
@@ -378,10 +381,11 @@
       });
     });
 
-    function setupPage(className, childName) {
+    function setupPage(className, childName, userKey) {
       document.getElementById('hero-subtitle').textContent = `${childName}'s ${className} Adventures!`;
       document.getElementById('hero-title').textContent = `${childName}'s Super Fun Books! 📚✨`;
       fetchBooks(className);
+      fetchNotifications(userKey); // Added for book updates
     }
 
     function fetchBooks(className) {
@@ -391,20 +395,17 @@
       const searchInput = document.getElementById('searchInput');
       let allBooks = [];
 
-      // Fix: No encodeURIComponent – Firebase handles spaces. Use normalized class (e.g., "7")
-      const classPath = `class_books/${className}`; // e.g., "class_books/7"
+      loading.classList.remove('hidden');
+      const classPath = `class_books/${encodeURIComponent(className)}`; // Merged: Added encodeURIComponent for safety
       console.log('Fetching from:', classPath);
 
-      loading.classList.remove('hidden');
-
-      // Real-time listener
       const booksRef = db.ref(classPath);
       booksRef.on('value', snap => {
         loading.classList.add('hidden');
         booksGrid.innerHTML = '';
         const books = snap.val() || {};
         console.log('Raw books data:', books);
-        allBooks = Object.entries(books).filter(([id, b]) => b && b.title && b.url); // Filter junk
+        allBooks = Object.entries(books).filter(([id, b]) => b && b.title && b.url);
         console.log('Filtered books:', allBooks.length);
 
         if (allBooks.length === 0) {
@@ -418,11 +419,10 @@
         loading.classList.add('hidden');
         console.error('Books fetch error:', err);
         showError('Books load failed: ' + err.message + ' (Path: ' + classPath + ')');
-        // Offload listener on error
         booksRef.off();
       });
 
-      // Search (unchanged, but debounced for perf)
+      // Search with debounce
       let searchTimeout;
       searchInput.addEventListener('input', () => {
         clearTimeout(searchTimeout);
@@ -444,7 +444,6 @@
         }, 300);
       });
 
-      // Cleanup on unload
       window.addEventListener('beforeunload', () => booksRef.off());
     }
 
@@ -452,7 +451,6 @@
       const booksGrid = document.getElementById('booksGrid');
       booksGrid.innerHTML = '';
       bookEntries.forEach(([id, b]) => {
-        // Thumbnail: Cloudinary sanitize (unchanged)
         const thumbnailUrl = b.url ? b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/') : 'https://via.placeholder.com/150?text=No+Thumbnail';
         console.log('Book:', b.title, 'Thumb:', thumbnailUrl);
         const card = document.createElement('div');
@@ -461,12 +459,12 @@
           <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail" onerror="this.src='https://via.placeholder.com/150?text=No+Image';">
           <h3 class="text-lg font-bold mt-2" style="color: var(--secondary);">${b.title}</h3>
           <p class="text-sm mb-3" style="color: #1f2937;">${b.subject || 'Fun Read'}</p>
-          <button class="read-btn" data-url="${b.url}" data-id="${id}" data-title="${b.title}">Open Adventure! 🚀</button>
+          <button class="read-btn inline-block px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition" data-url="${b.url}" data-id="${id}" data-title="${b.title}">Open Adventure! 🚀</button>
         `;
         booksGrid.appendChild(card);
       });
 
-      // Event listeners for buttons (use delegation for perf)
+      // Event delegation for read buttons
       booksGrid.addEventListener('click', (e) => {
         if (e.target.classList.contains('read-btn')) {
           const button = e.target;
@@ -481,7 +479,7 @@
       setupModalControls();
     }
 
-    // Modal functions (unchanged, but with zoom reset)
+    // Modal functions
     let globalZoomLevel = 1;
     function openModal(title, url) {
       const modal = document.getElementById('pdfModal');
@@ -530,7 +528,7 @@
       });
     }
 
-    // Security (unchanged)
+    // Security
     document.addEventListener('keydown', e => {
       if (e.ctrlKey && (e.key === 'p' || e.key === 's' || e.key === 'o')) {
         e.preventDefault();
@@ -540,6 +538,33 @@
     });
     window.print = () => alert('Printing disabled – enjoy reading!');
     document.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Fetch notifications (adapted from classbook for child/parent)
+    function fetchNotifications(userKey) {
+      const notificationsList = document.getElementById('notificationsList');
+      db.ref(`notifications/${userKey}`).orderByChild('time').limitToLast(5).on('value', snap => {
+        notificationsList.innerHTML = '';
+        const notifs = snap.val() || {};
+        if (Object.keys(notifs).length === 0) {
+          notificationsList.innerHTML = '<p class="text-gray-600">No recent book updates. Stay tuned for new adventures!</p>';
+          return;
+        }
+        Object.entries(notifs).reverse().forEach(([id, n]) => {
+          if (n.type === 'new-book') {
+            const notif = document.createElement('div');
+            notif.className = 'notification-item';
+            notif.innerHTML = `
+              <p><strong>New Book:</strong> ${n.title} (${n.subject}) for your class</p>
+              <p class="text-sm text-gray-500">Added on ${new Date(n.time).toLocaleDateString()}</p>
+            `;
+            notificationsList.appendChild(notif);
+          }
+        });
+      }, err => {
+        console.error('Notifications error:', err);
+        notificationsList.innerHTML = '<p class="text-gray-600">Error loading notifications.</p>';
+      });
+    }
 
     // Init
     setupModalControls();

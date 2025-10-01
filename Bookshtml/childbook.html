@@ -267,20 +267,6 @@
   const auth = firebase.auth();
   const db = firebase.database();
 
-  // Map classLevel to class Gmail
-  const classGmailMap = {
-    "Baby Class": "ssbabyclass2023@gmail_com",
-    "Class 1": "ssclass1ab2023@gmail_com",
-    "Class 2": "ssclass2ab2023@gmail_com",
-    "Class 3": "ssclass32023@gmail_com",
-    "Class 4": "ssclass42023@gmail_com",
-    "Class 5": "ssclass52023@gmail_com",
-    "Class 6": "ssclass62023@gmail_com",
-    "Class 7": "ssclass72023@gmail_com",
-    "Middle Class": "ssmiddleclass2023@gmail_com",
-    "Pre-Unit": "sspreunit2023@gmail_com"
-  };
-
   // Normalize phone number (remove +, spaces, etc.)
   function normalizePhoneNumber(phone) {
     if (!phone) return '';
@@ -299,31 +285,26 @@
     // Find child by parent phone
     db.ref('students').once('value').then(snap => {
       const students = snap.val() || {};
-      console.log('Students data:', students);
+      console.log('Students data keys:', Object.keys(students));
       const child = Object.values(students).find(s => {
         const dbPhone = normalizePhoneNumber(s.primaryParentContact);
+        console.log('Checking student:', s.firstName + ' ' + s.lastName, 'DB phone:', dbPhone, 'Match:', dbPhone === parentPhone);
         return dbPhone === parentPhone;
       });
       if (!child || !child.classLevel) {
         console.error('No matching child found for parent phone:', parentPhone);
-        alert('No child found for this phone number—contact admin');
+        console.log('All students phones:', Object.values(students).map(s => normalizePhoneNumber(s.primaryParentContact)));
+        alert('No child found for this phone number—contact admin. Check Console for details.');
         window.location.href = '../index.html';
         return;
       }
-      console.log('Child found:', child);
-      // Normalize classLevel
+      console.log('Child found:', child.firstName + ' ' + child.lastName, 'Class:', child.classLevel);
+      // Normalize classLevel for path (e.g., "Class 4" -> "Class%204")
       const classLevel = child.classLevel.trim();
-      // Get class Gmail from classLevel
-      const classGmail = classGmailMap[classLevel];
-      if (!classGmail) {
-        console.error('No Gmail found for class:', classLevel);
-        alert(`Class "${classLevel}" not supported—contact admin`);
-        window.location.href = '../index.html';
-        return;
-      }
-      console.log('Class Gmail:', classGmail);
+      const classPath = `class_books/Class%20${classLevel.substring(6).trim()}`; // "Class 4" -> "Class%204"
+      console.log('Class path:', classPath);
       document.getElementById('hero-subtitle').textContent = `${child.firstName} ${child.lastName}'s ${classLevel} Adventures!`;
-      fetchBooks(classGmail);
+      fetchBooks(classPath);
     }).catch(err => {
       console.error('Students query error:', err);
       alert('Error fetching student data: ' + err.message);
@@ -331,25 +312,24 @@
     });
   });
 
-  function fetchBooks(classGmail) {
+  function fetchBooks(classPath) {
     const booksGrid = document.getElementById('booksGrid');
     const noBooks = document.getElementById('noBooks');
     const loading = document.getElementById('loading');
     const searchInput = document.getElementById('searchInput');
     let allBooks = [];
 
-    const bookPath = `student_books/${encodeURIComponent(classGmail)}`;
-    console.log('Fetching books for path:', bookPath);
+    console.log('Fetching books for path:', classPath);
     loading.classList.remove('hidden');
 
-    db.ref(bookPath).on('value', snap => {
+    db.ref(classPath).on('value', snap => {
       loading.classList.add('hidden');
       booksGrid.innerHTML = '';
       const books = snap.val() || {};
       console.log('Books data:', books);
       allBooks = Object.entries(books);
       if (allBooks.length === 0) {
-        console.log('No books found for:', classGmail);
+        console.log('No books found for:', classPath);
         noBooks.classList.remove('hidden');
         return;
       }
@@ -357,8 +337,8 @@
       renderBooks(allBooks);
     }, err => {
       loading.classList.add('hidden');
-      console.error('Firebase error for path', bookPath, ':', err);
-      alert('Error loading books: ' + err.message + '\nPath: ' + bookPath);
+      console.error('Firebase error for path', classPath, ':', err);
+      alert('Error loading books: ' + err.message + '\nPath: ' + classPath);
     });
 
     searchInput.addEventListener('input', () => {

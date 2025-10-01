@@ -281,35 +281,48 @@
     "Pre-Unit": "sspreunit2023@gmail_com"
   };
 
+  // Normalize phone number (remove +, spaces, etc.)
+  function normalizePhoneNumber(phone) {
+    if (!phone) return '';
+    return phone.replace(/[\+\s-]/g, '');
+  }
+
   auth.onAuthStateChanged(user => {
     if (!user) {
       console.log('No user logged in, redirecting to login');
+      alert('Please log in to access books');
       window.location.href = '../login.html';
       return;
     }
-    console.log('Parent phone:', user.phoneNumber);
+    const parentPhone = normalizePhoneNumber(user.phoneNumber);
+    console.log('Parent phone (normalized):', parentPhone);
     // Find child by parent phone
     db.ref('students').once('value').then(snap => {
       const students = snap.val() || {};
       console.log('Students data:', students);
-      const child = Object.values(students).find(s => s.primaryParentContact === user.phoneNumber);
+      const child = Object.values(students).find(s => {
+        const dbPhone = normalizePhoneNumber(s.primaryParentContact);
+        return dbPhone === parentPhone;
+      });
       if (!child || !child.classLevel) {
-        console.error('No matching child found for parent phone:', user.phoneNumber);
-        alert('No child found—contact admin');
+        console.error('No matching child found for parent phone:', parentPhone);
+        alert('No child found for this phone number—contact admin');
         window.location.href = '../index.html';
         return;
       }
       console.log('Child found:', child);
+      // Normalize classLevel
+      const classLevel = child.classLevel.trim();
       // Get class Gmail from classLevel
-      const classGmail = classGmailMap[child.classLevel];
+      const classGmail = classGmailMap[classLevel];
       if (!classGmail) {
-        console.error('No Gmail found for class:', child.classLevel);
-        alert('Class not supported—contact admin');
+        console.error('No Gmail found for class:', classLevel);
+        alert(`Class "${classLevel}" not supported—contact admin`);
         window.location.href = '../index.html';
         return;
       }
       console.log('Class Gmail:', classGmail);
-      document.getElementById('hero-subtitle').textContent = `${child.firstName} ${child.lastName}'s ${child.classLevel} Adventures!`;
+      document.getElementById('hero-subtitle').textContent = `${child.firstName} ${child.lastName}'s ${classLevel} Adventures!`;
       fetchBooks(classGmail);
     }).catch(err => {
       console.error('Students query error:', err);

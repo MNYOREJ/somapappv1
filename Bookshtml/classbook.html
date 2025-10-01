@@ -6,7 +6,10 @@
   <title>SoMAp — Teacher Class Books</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <script src="../firebase.js"></script>
+  <!-- Firebase CDN SDKs (compat v9.6.10) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <style>
     body { font-family: Inter, sans-serif; background: linear-gradient(135deg, #e0f2fe, #f0f9ff); margin: 0; padding: 0; color: #1f2937; }
     .hero { background: linear-gradient(90deg, #4f46e5, #7c3aed); color: white; padding: 40px 20px; text-align: center; border-radius: 0 0 20px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -20,6 +23,9 @@
     .forecast { background: #f9fafb; border-radius: 12px; padding: 20px; margin: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
     .no-books { text-align: center; color: #6b7280; font-size: 18px; margin: 40px 0; }
     .notification-item { background: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .loading { text-align: center; color: #6b7280; font-size: 16px; margin: 40px 0; }
+    .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 0 auto; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -34,6 +40,7 @@
     </div>
     <div class="max-w-7xl mx-auto px-4">
       <div id="booksGrid" class="book-grid"></div>
+      <div id="loading" class="loading"><div class="spinner"></div><p>Loading your class books...</p></div>
       <div id="noBooks" class="no-books hidden"><i class="fas fa-book-open text-4xl mb-4 block"></i>No books available yet. Check back soon!</div>
     </div>
     <div class="forecast">
@@ -42,50 +49,70 @@
     </div>
   </div>
   <script>
-  firebase.auth().onAuthStateChanged(user => {
+  // Inline Firebase Config (from your index.html - no external firebase.js needed)
+  const firebaseConfig = {
+    apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+    authDomain: "somaptestt.firebaseapp.com",
+    databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+    projectId: "somaptestt",
+    storageBucket: "somaptestt.appspot.com",
+    messagingSenderId: "105526245138",
+    appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+  };
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
+  const auth = firebase.auth();
+  const db = firebase.database();
+
+  auth.onAuthStateChanged(user => {
     if (!user) { window.location.href = '../login.html'; return; }
     const userKey = user.email.replace(/\./g, '_');
-    firebase.database().ref(`users/${userKey}`).once('value').then(snap => {
+    db.ref(`users/${userKey}`).once('value').then(snap => {
       const data = snap.val();
       if (!data || data.role !== 'teacher' || !data.class) {
         alert('Invalid teacher access. Please contact admin.');
         window.location.href = '../index.html';
         return;
       }
-      const className = data.class.trim(); // Normalize class name
+      const className = data.class.trim(); // Normalize
       document.getElementById('hero-title').textContent = `${className} Books`;
-      console.log('Debug: Fetching books for class:', className, 'Encoded:', encodeURIComponent(className)); // Debug in console
+      alert('Debug: Class Name = ' + className); // Alert class name
       fetchBooks(className);
       fetchNotifications(userKey);
     }).catch(err => {
-      console.error('Error fetching user data:', err);
-      alert('Error accessing user data: ' + err.message);
+      console.error('User data error:', err);
+      alert('Error: ' + err.message);
     });
   });
 
   function fetchBooks(className) {
     const booksGrid = document.getElementById('booksGrid');
     const noBooks = document.getElementById('noBooks');
+    const loading = document.getElementById('loading');
     const searchInput = document.getElementById('searchInput');
     let allBooks = [];
 
+    loading.classList.remove('hidden'); // Show spinner
     const classPath = `class_books/${encodeURIComponent(className)}`;
-    console.log('Debug: Querying Firebase path:', classPath); // Debug path
-    firebase.database().ref(classPath).on('value', snap => {
+    console.log('Path:', classPath);
+    db.ref(classPath).on('value', snap => {
+      loading.classList.add('hidden');
       booksGrid.innerHTML = '';
       const books = snap.val() || {};
-      console.log('Debug: Books data:', books); // Debug data received
+      console.log('Raw books data:', books); // Debug raw data
       allBooks = Object.entries(books);
+      alert('Debug: Found ' + allBooks.length + ' books. Data sample: ' + JSON.stringify(allBooks[0])); // Alert count + first book
       if (allBooks.length === 0) {
         noBooks.classList.remove('hidden');
-        console.log('Debug: No books found for', className);
         return;
       }
       noBooks.classList.add('hidden');
       renderBooks(allBooks);
     }, err => {
+      loading.classList.add('hidden');
       console.error('Firebase error:', err);
-      alert('Error fetching books: ' + err.message);
+      alert('Firebase Error: ' + err.message + '\nPath: ' + classPath);
     });
 
     searchInput.addEventListener('input', () => {
@@ -106,7 +133,7 @@
   function renderBooks(bookEntries) {
     const booksGrid = document.getElementById('booksGrid');
     bookEntries.forEach(([id, b]) => {
-      const thumbnailUrl = b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/'); // Cloudinary thumbnail
+      const thumbnailUrl = b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/'); // Thumbnail
       const card = document.createElement('div');
       card.className = 'book-card';
       card.innerHTML = `
@@ -121,7 +148,7 @@
 
   function fetchNotifications(userKey) {
     const notificationsList = document.getElementById('notificationsList');
-    firebase.database().ref(`notifications/${userKey}`).orderByChild('time').limitToLast(5).on('value', snap => {
+    db.ref(`notifications/${userKey}`).orderByChild('time').limitToLast(5).on('value', snap => {
       notificationsList.innerHTML = '';
       const notifs = snap.val() || {};
       if (Object.keys(notifs).length === 0) {
@@ -140,7 +167,7 @@
         }
       });
     }, err => {
-      console.error('Error fetching notifications:', err);
+      console.error('Notifications error:', err);
       notificationsList.innerHTML = '<p class="text-gray-600">Error loading notifications.</p>';
     });
   }

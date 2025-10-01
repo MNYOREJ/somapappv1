@@ -274,35 +274,38 @@
         return;
       }
       const userKey = user.email.replace(/\./g, '_');
-      console.log('User key:', userKey);
+      console.log('Parent user key:', userKey);
       db.ref(`users/${userKey}`).once('value').then(snap => {
         const data = snap.val();
-        console.log('User data:', data);
-        if (!data || data.role !== 'parent' || !data.childClass || !data.childNames) {
-          console.log('Missing parent data, attempting students fallback');
-          db.ref('students').once('value').then(snap => {
-            const students = snap.val() || {};
-            console.log('Students data:', students);
-            const child = Object.values(students).find(s => s.parentPhone === user.phoneNumber && s.names === data?.childNames);
-            if (!child || !child.class) {
-              console.error('No matching child found for phone:', user.phoneNumber, 'and names:', data?.childNames);
-              alert('No child class found—contact admin');
-              window.location.href = '../index.html';
-              return;
-            }
-            console.log('Child found:', child);
-            document.getElementById('hero-subtitle').textContent = `${child.names}'s ${child.class} Adventures!`;
-            fetchBooks(child.class);
-          }).catch(err => {
-            console.error('Students query error:', err);
-            alert('Error fetching student data: ' + err.message);
-            window.location.href = '../index.html';
-          });
-        } else {
-          console.log('Using childClass from users:', data.childClass);
-          document.getElementById('hero-subtitle').textContent = `${data.childNames}'s ${data.childClass} Adventures!`;
-          fetchBooks(data.childClass);
+        console.log('Parent user data:', data);
+        if (!data || data.role !== 'parent') {
+          console.error('Invalid parent data or role:', data);
+          alert('Invalid parent access—contact admin');
+          window.location.href = '../index.html';
+          return;
         }
+        // Find child by parent phone
+        db.ref('students').once('value').then(snap => {
+          const students = snap.val() || {};
+          console.log('Students data:', students);
+          const child = Object.values(students).find(s => s.primaryParentContact === user.phoneNumber);
+          if (!child || !child.classLevel) {
+            console.error('No matching child found for parent phone:', user.phoneNumber);
+            alert('No child found—contact admin');
+            window.location.href = '../index.html';
+            return;
+          }
+          console.log('Child found:', child);
+          // Generate child user key (e.g., ssclass42023@gmail_com)
+          const childUserKey = `ss${child.classLevel.toLowerCase().replace(/\s/g, '')}2023@gmail_com`;
+          console.log('Child user key:', childUserKey);
+          document.getElementById('hero-subtitle').textContent = `${child.firstName} ${child.lastName}'s ${child.classLevel} Adventures!`;
+          fetchBooks(childUserKey);
+        }).catch(err => {
+          console.error('Students query error:', err);
+          alert('Error fetching student data: ' + err.message);
+          window.location.href = '../index.html';
+        });
       }).catch(err => {
         console.error('User data error:', err);
         alert('Error fetching user data: ' + err.message);
@@ -310,27 +313,25 @@
       });
     });
 
-    function fetchBooks(className) {
+    function fetchBooks(childUserKey) {
       const booksGrid = document.getElementById('booksGrid');
       const noBooks = document.getElementById('noBooks');
       const loading = document.getElementById('loading');
       const searchInput = document.getElementById('searchInput');
       let allBooks = [];
 
-      // Normalize className
-      const normalizedClassName = className.trim().toLowerCase();
-      const classPath = `class_books/${encodeURIComponent(normalizedClassName)}`;
-      console.log('Fetching books for path:', classPath);
+      const bookPath = `student_books/${encodeURIComponent(childUserKey)}`;
+      console.log('Fetching books for path:', bookPath);
       loading.classList.remove('hidden');
 
-      db.ref(classPath).on('value', snap => {
+      db.ref(bookPath).on('value', snap => {
         loading.classList.add('hidden');
         booksGrid.innerHTML = '';
         const books = snap.val() || {};
         console.log('Books data:', books);
         allBooks = Object.entries(books);
         if (allBooks.length === 0) {
-          console.log('No books found for class:', normalizedClassName);
+          console.log('No books found for:', childUserKey);
           noBooks.classList.remove('hidden');
           return;
         }
@@ -338,8 +339,8 @@
         renderBooks(allBooks);
       }, err => {
         loading.classList.add('hidden');
-        console.error('Firebase error for path', classPath, ':', err);
-        alert('Error loading books: ' + err.message + '\nPath: ' + classPath);
+        console.error('Firebase error for path', bookPath, ':', err);
+        alert('Error loading books: ' + err.message + '\nPath: ' + bookPath);
       });
 
       searchInput.addEventListener('input', () => {

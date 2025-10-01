@@ -40,6 +40,7 @@
       <div id="loading" class="loading"><div class="spinner"></div><p>Loading PDF...</p></div>
       <div id="error" class="error hidden"></div>
       <canvas id="pdfCanvas"></canvas>
+      <button id="fallbackButton" class="mt-4 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700" style="display: none;"><i class="fas fa-redo mr-1"></i> Try Fallback PDF</button>
     </div>
   </div>
   <script>
@@ -75,6 +76,7 @@
     const ctx = canvas.getContext('2d');
     const loading = document.getElementById('loading');
     const error = document.getElementById('error');
+    const fallbackButton = document.getElementById('fallbackButton');
 
     async function renderPage(num) {
       try {
@@ -90,6 +92,7 @@
         error.classList.remove('hidden');
         error.textContent = 'Error rendering PDF: ' + err.message;
         console.error('Render error:', err);
+        fallbackButton.style.display = 'block'; // Show fallback button on error
       }
     }
 
@@ -97,10 +100,10 @@
     let timeoutId = setTimeout(() => {
       loading.classList.add('hidden');
       error.classList.remove('hidden');
-      error.textContent = 'Error: PDF load timed out after 10 seconds. Trying fallback PDF...';
-      console.warn('PDF load timed out, switching to fallback:', fallbackUrl);
-      loadPdf(fallbackUrl, true);
-    }, 10000);
+      error.textContent = 'Error: PDF load timed out after 5 seconds. Try enabling PDF delivery in Cloudinary Settings > Security.';
+      console.warn('PDF load timed out, showing fallback button');
+      fallbackButton.style.display = 'block';
+    }, 5000); // Shorter timeout for faster feedback
 
     function loadPdf(url, isFallback = false) {
       console.log('Loading PDF:', url);
@@ -113,18 +116,20 @@
         clearTimeout(timeoutId);
         loading.classList.add('hidden');
         error.classList.remove('hidden');
-        error.textContent = `Error loading ${isFallback ? 'fallback' : 'PDF'}: ${err.message}${isFallback ? '' : '. Retrying with fallback PDF...'}`;
+        error.textContent = `Error loading ${isFallback ? 'fallback' : 'PDF'}: ${err.message}. Check Console for details.`;
         console.error('Load error:', err, 'URL:', url);
-        if (!isFallback) {
-          console.warn('Trying fallback PDF:', fallbackUrl);
-          loadPdf(fallbackUrl, true);
-        } else {
-          alert('Failed to load both PDFs: ' + err.message + '\nURL: ' + url);
-        }
+        fallbackButton.style.display = 'block';
       });
     }
 
     loadPdf(finalUrl);
+
+    fallbackButton.addEventListener('click', () => {
+      error.classList.add('hidden');
+      loading.classList.remove('hidden');
+      fallbackButton.style.display = 'none';
+      loadPdf(fallbackUrl, true);
+    });
 
     // Zoom and navigation controls
     document.getElementById('zoomIn').addEventListener('click', () => {

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Teacher Class Books</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="../firebase.js"></script>
+  <style>
+    body { font-family: Inter, sans-serif; background: #f0f9ff; margin: 0; padding: 20px; }
+    .card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+    .book-card { background: #fff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 12px; text-align: center; }
+    .book-card i { font-size: 48px; color: #7c3aed; }
+    .back-btn { position: fixed; top: 20px; left: 20px; background: #0ea5a4; color: white; padding: 8px 16px; border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <a href="../staff.html" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-2xl font-bold mb-4">Your Class Books</h1>
+    <div id="booksGrid" class="book-grid"></div>
+    <div id="noBooks" class="hidden text-center text-gray-500 mt-8">No books available for your class yet.</div>
+  </div>
+  <script>
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) { window.location.href = '../login.html'; return; }
+    const userKey = user.email.replace(/\./g, '_');
+    firebase.database().ref(`users/${userKey}`).once('value').then(snap => {
+      const data = snap.val();
+      if (!data || data.role !== 'teacher' || !data.class) { alert('Invalid teacher access'); return; }
+      fetchBooks(data.class);
+    });
+  });
+
+  function fetchBooks(className) {
+    const booksGrid = document.getElementById('booksGrid');
+    const noBooks = document.getElementById('noBooks');
+    firebase.database().ref(`class_books/${encodeURIComponent(className)}`).on('value', snap => {
+      booksGrid.innerHTML = '';
+      const books = snap.val() || {};
+      if (Object.keys(books).length === 0) { noBooks.classList.remove('hidden'); return; }
+      noBooks.classList.add('hidden');
+      Object.entries(books).forEach(([id, b]) => {
+        const card = document.createElement('div');
+        card.className = 'book-card';
+        card.innerHTML = `
+          <i class="fas fa-book"></i>
+          <h3 class="text-lg font-semibold mt-2">${b.title}</h3>
+          <p class="text-sm text-gray-600">${b.subject}</p>
+          <a href="viewer.html?url=${encodeURIComponent(b.url)}&type=book" class="mt-2 inline-block px-4 py-2 bg-indigo-600 text-white rounded-md">Read</a>
+        `;
+        booksGrid.appendChild(card);
+      });
+    });
+  }
+</script>
+</body>
+</html>

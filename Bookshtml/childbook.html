@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — My Fun Books!</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="../firebase.js"></script>
+  <style>
+    body { font-family: 'Comic Sans MS', cursive; background: linear-gradient(135deg, #ff9, #f9f, #9ff); margin: 0; padding: 20px; color: #333; }
+    .card { background: rgba(255,255,255,0.8); border-radius: 16px; padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+    .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 20px; }
+    .book-card { background: linear-gradient(135deg, #ffd, #dfa); border-radius: 12px; padding: 16px; text-align: center; animation: bounce 1s infinite alternate; }
+    @keyframes bounce { 0% { transform: translateY(0); } 100% { transform: translateY(-5px); } }
+    .book-card i { font-size: 64px; color: #ff69b4; }
+    .back-btn { position: fixed; top: 20px; left: 20px; background: #ff4500; color: white; padding: 10px 20px; border-radius: 999px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <a href="../parent.html" class="back-btn"><i class="fas fa-arrow-left"></i> Back to My Dashboard</a>
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6 text-center" style="color: #ff1493;">My Super Fun Books! 📚✨</h1>
+    <div id="booksGrid" class="book-grid"></div>
+    <div id="noBooks" class="hidden text-center text-2xl mt-8" style="color: #4169e1;">No books yet—ask teacher for more adventures! 🌟</div>
+  </div>
+  <script>
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) { window.location.href = '../login.html'; return; }
+    const userKey = user.email.replace(/\./g, '_');
+    firebase.database().ref(`users/${userKey}`).once('value').then(snap => {
+      const data = snap.val();
+      if (!data || data.role !== 'parent' || !data.childClass) {
+        // Fallback: Query /students by phone/names (adjust based on your DB)
+        firebase.database().ref('students').orderByChild('parentPhone').equalTo(user.phoneNumber || '').once('value').then(snap => {
+          const students = snap.val() || {};
+          const child = Object.values(students).find(s => s.names === data.childNames); // Adjust names check
+          if (!child || !child.class) { alert('No child class found—contact admin'); return; }
+          fetchBooks(child.class);
+        });
+      } else {
+        fetchBooks(data.childClass);
+      }
+    });
+  });
+
+  function fetchBooks(className) {
+    const booksGrid = document.getElementById('booksGrid');
+    const noBooks = document.getElementById('noBooks');
+    firebase.database().ref(`class_books/${encodeURIComponent(className)}`).on('value', snap => {
+      booksGrid.innerHTML = '';
+      const books = snap.val() || {};
+      if (Object.keys(books).length === 0) { noBooks.classList.remove('hidden'); return; }
+      noBooks.classList.add('hidden');
+      Object.entries(books).forEach(([id, b]) => {
+        const card = document.createElement('div');
+        card.className = 'book-card';
+        card.innerHTML = `
+          <i class="fas fa-book-open"></i>
+          <h3 class="text-xl font-bold mt-2" style="color: #4b0082;">${b.title}</h3>
+          <p class="text-md" style="color: #008080;">${b.subject}</p>
+          <a href="viewer.html?url=${encodeURIComponent(b.url)}&type=book" class="mt-3 inline-block px-6 py-3 bg-rainbow text-white rounded-full" style="background: linear-gradient(90deg, red, orange, yellow, green, blue, indigo, violet);">Open Adventure!</a>
+        `;
+        booksGrid.appendChild(card);
+      });
+    });
+  }
+</script>
+</body>
+</html>

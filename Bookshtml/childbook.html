@@ -9,6 +9,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/confetti-js@0.0.18/dist/index.min.js"></script> <!-- For fun confetti -->
   <style>
     :root {
       --primary: #ff6f61;
@@ -34,6 +35,11 @@
       margin-bottom: 20px;
       position: relative;
       overflow: hidden;
+      animation: fadeIn 1s ease-in;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .hero::before {
       content: '✨';
@@ -56,6 +62,15 @@
     .search-bar {
       max-width: 500px;
       margin: 15px auto;
+      position: relative;
+    }
+    .voice-search {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      cursor: pointer;
+      color: var(--secondary);
     }
     .book-grid {
       display: grid;
@@ -72,6 +87,11 @@
       transition: transform 0.3s ease, box-shadow 0.3s ease;
       position: relative;
       overflow: hidden;
+      animation: cardPop 0.5s ease;
+    }
+    @keyframes cardPop {
+      from { transform: scale(0.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
     }
     .book-card:hover {
       transform: scale(1.05);
@@ -96,6 +116,11 @@
       border-radius: 12px;
       margin-bottom: 12px;
       border: 2px solid var(--accent);
+    }
+    .rating {
+      font-size: 14px;
+      color: #fbbf24;
+      margin-bottom: 8px;
     }
     .read-btn {
       background: linear-gradient(90deg, var(--primary), var(--secondary));
@@ -187,6 +212,7 @@
       width: 100%;
       border: none;
       border-radius: 0 0 16px 16px;
+      touch-action: pan-y; /* Better mobile swipe */
     }
     .loading {
       text-align: center;
@@ -207,6 +233,16 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    .load-more {
+      display: block;
+      margin: 20px auto;
+      padding: 12px 24px;
+      background: var(--secondary);
+      color: white;
+      border-radius: 999px;
+      font-weight: bold;
+      cursor: pointer;
+    }
     @media (max-width: 768px) {
       .book-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -221,9 +257,6 @@
         width: 95%;
         height: 95vh;
       }
-      .modal-pdf-frame {
-        transform-origin: top left; /* Better mobile zoom */
-      }
     }
   </style>
 </head>
@@ -234,10 +267,12 @@
       <h1 class="text-4xl font-bold mb-2" style="color: var(--secondary);" id="hero-title">Your Super Fun Books! 📚✨</h1>
       <p class="text-lg mb-4" style="color: #1f2937;" id="hero-subtitle">Loading your class adventures...</p>
       <div class="search-bar">
-        <input id="searchInput" type="text" placeholder="Find your favorite book..." class="w-full px-4 py-3 rounded-lg bg-white/80 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 placeholder-gray-400">
+        <input id="searchInput" type="text" placeholder="Find your favorite book... (or speak! 🎤)" class="w-full px-4 py-3 rounded-lg bg-white/80 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-yellow-400 text-gray-700 placeholder-gray-400" aria-label="Search books">
+        <i id="voiceSearch" class="fas fa-microphone voice-search" aria-label="Voice search"></i>
       </div>
     </div>
     <div id="booksGrid" class="book-grid"></div>
+    <button id="loadMore" class="load-more hidden">Load More Adventures! 🚀</button>
     <div id="loading" class="loading"><div class="spinner"></div><p>Loading your fun books...</p></div>
     <div id="noBooks" class="no-books hidden"><i class="fas fa-book-open text-5xl mb-4 block" style="color: var(--primary);"></i>No books yet—ask your teacher for more adventures! 🌟</div>
   </div>
@@ -251,289 +286,276 @@
       <div class="modal-controls">
         <button id="zoomInModal" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-search-plus mr-1"></i> Zoom In</button>
         <button id="zoomOutModal" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-search-minus mr-1"></i> Zoom Out</button>
-        <p class="text-sm text-gray-500 flex-1 text-center">💡 Swipe to navigate on mobile!</p>
+        <p class="text-sm text-white flex-1 text-center">Swipe to turn pages! 📖</p>
       </div>
-      <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0"></iframe>
+      <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0" aria-label="Book viewer"></iframe>
     </div>
   </div>
+  <canvas id="confettiCanvas" style="position: fixed; top: 0; left: 0; pointer-events: none; z-index: 9999;"></canvas>
   <script>
-  // Firebase Config (DB only—no auth needed here)
-  const firebaseConfig = {
-    apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-    authDomain: "somaptestt.firebaseapp.com",
-    databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-    projectId: "somaptestt",
-    storageBucket: "somaptestt.appspot.com",
-    messagingSenderId: "105526245138",
-    appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
-  };
-  if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-  }
-  const db = firebase.database();
-
-  // Normalize phone number (remove +, spaces, etc.)
-  function normalizePhoneNumber(phone) {
-    if (!phone) return '';
-    return phone.replace(/[\+\s-]/g, '');
-  }
-
-  // Session check (custom, via localStorage—assumes login stores this)
-  function checkSession() {
-    const sessionStr = localStorage.getItem('sessionChild');
-    if (!sessionStr) {
-      console.log('No session found, redirecting to login');
-      Swal.fire({
-        icon: 'error',
-        title: 'Login Required',
-        text: 'Please log in to access books',
-        confirmButtonColor: '#ff6f61'
-      }).then(() => {
-        localStorage.removeItem('sessionChild'); // Clean up
-        window.location.href = '../login.html';
-      });
-      return null;
+    // Firebase Config (DB only - no auth)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
     }
-    try {
-      const session = JSON.parse(sessionStr);
-      console.log('Session loaded:', session);
-      if (!session.phone || !session.firstName || !session.lastName) {
-        throw new Error('Invalid session data');
+    const db = firebase.database();
+
+    // Normalize helpers
+    function normalizePhone(phone) {
+      return phone ? phone.replace(/[\+\s-]/g, '') : '';
+    }
+    function normalizeName(name) {
+      return name ? name.trim().toLowerCase().replace(/\s+/g, ' ') : '';
+    }
+
+    // Session check (custom via localStorage)
+    function getSession() {
+      const sessionStr = localStorage.getItem('somapSession');
+      if (!sessionStr) {
+        Swal.fire({ icon: 'error', title: 'Session Expired', text: 'Please log in again!', confirmButtonColor: '#ff6f61' }).then(() => {
+          window.location.href = '../login.html';
+        });
+        return null;
       }
-      return session;
-    } catch (err) {
-      console.error('Session parse error:', err);
-      localStorage.removeItem('sessionChild');
-      window.location.href = '../login.html';
-      return null;
+      try {
+        const session = JSON.parse(sessionStr);
+        if (!session.phone || !session.childNames) throw new Error('Invalid session');
+        return session;
+      } catch (err) {
+        console.error('Session error:', err);
+        localStorage.removeItem('somapSession');
+        window.location.href = '../login.html';
+        return null;
+      }
     }
-  }
 
-  // Main load logic
-  (function init() {
-    const session = checkSession();
-    if (!session) return;
+    // Main init
+    (async function init() {
+      const session = getSession();
+      if (!session) return;
 
-    const parentPhone = normalizePhoneNumber(session.phone);
-    const fullName = `${session.firstName} ${session.lastName}`.toLowerCase();
-    console.log('Session phone (normalized):', parentPhone, 'Full name:', fullName);
+      const normPhone = normalizePhone(session.phone);
+      const normNames = normalizeName(session.childNames);
+      console.log('Session:', { normPhone, normNames });
 
-    // Find child by parent phone + names (secure match)
-    db.ref('students').once('value').then(snap => {
-      const students = snap.val() || {};
-      console.log('Students data keys:', Object.keys(students));
-      const child = Object.values(students).find(s => {
-        const dbPhone = normalizePhoneNumber(s.primaryParentContact);
-        const dbFullName = `${s.firstName || ''} ${s.lastName || ''}`.toLowerCase();
-        const nameMatch = dbFullName.includes(fullName) || fullName.includes(dbFullName); // Flexible but exact-ish
-        const phoneMatch = dbPhone === parentPhone;
-        console.log('Checking student:', dbFullName, 'DB phone:', dbPhone, 'Name match:', nameMatch, 'Phone match:', phoneMatch);
-        return nameMatch && phoneMatch;
-      });
+      try {
+        const snap = await db.ref('students').once('value');
+        const students = snap.val() || {};
+        console.log('Students keys:', Object.keys(students));
 
-      if (!child || !child.classLevel) {
-        console.error('No matching child found for phone:', parentPhone, 'and name:', fullName);
-        console.log('All students:', Object.values(students).map(s => ({name: `${s.firstName} ${s.lastName}`, phone: normalizePhoneNumber(s.primaryParentContact)})));
-        Swal.fire({
-          icon: 'error',
-          title: 'No Child Found',
-          text: 'No matching child—double-check details or contact admin. (Console has debug info.)',
-          confirmButtonColor: '#ff6f61'
-        }).then(() => {
-          localStorage.removeItem('sessionChild');
+        const child = Object.values(students).find(s => {
+          const dbPhone = normalizePhone(s.primaryParentContact || s.parentPhone);
+          const dbNames = normalizeName(`${s.firstName || ''} ${s.lastName || ''}` || s.names);
+          return dbPhone === normPhone && dbNames === normNames;
+        });
+
+        if (!child || !child.classLevel) {  // Assume field is classLevel or class
+          console.error('No match for:', { normPhone, normNames });
+          console.log('All students:', Object.values(students).map(s => ({ names: `${s.firstName} ${s.lastName}`, phone: normalizePhone(s.primaryParentContact) })));
+          Swal.fire({ icon: 'error', title: 'No Child Found', text: 'Check details or contact admin. (Console for debug)', confirmButtonColor: '#ff6f61' }).then(() => {
+            localStorage.removeItem('somapSession');
+            window.location.href = '../index.html';
+          });
+          return;
+        }
+
+        console.log('Child found:', child);
+        const childClass = child.classLevel || child.class;  // Flexible field
+        document.getElementById('hero-title').textContent = `${child.firstName || child.names.split(' ')[0]}'s Super Fun Books! 📚✨`;
+        document.getElementById('hero-subtitle').textContent = `${child.names || `${child.firstName} ${child.lastName}`}'s ${childClass} Adventures!`;
+
+        // Confetti fun on load
+        const confetti = new ConfettiGenerator({ target: 'confettiCanvas' });
+        confetti.render();
+
+        // Path: Assume DB uses "Class 7"
+        const classNum = childClass.replace(/Class\s*/i, '').trim();
+        const classPath = `class_books/Class%20${classNum}`;
+        console.log('Fetching from:', classPath);
+
+        fetchBooks(classPath, childClass);
+      } catch (err) {
+        console.error('DB error:', err);
+        Swal.fire({ icon: 'error', title: 'Error', text: `Failed to fetch data: ${err.message}`, confirmButtonColor: '#ff6f61' }).then(() => {
           window.location.href = '../index.html';
         });
-        return;
       }
 
-      console.log('Child found:', child.firstName + ' ' + child.lastName, 'Class:', child.classLevel);
-      document.getElementById('hero-title').textContent = `${child.firstName}'s Super Fun Books! 📚✨`;
-      document.getElementById('hero-subtitle').textContent = `${child.firstName} ${child.lastName}'s ${child.classLevel} Adventures!`;
+      // Idle timeout (30min)
+      let idleTimer;
+      function resetIdle() {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          localStorage.removeItem('somapSession');
+          Swal.fire({ icon: 'info', title: 'Idle Timeout', text: 'Session expired - log in again!', confirmButtonColor: '#ff6f61' }).then(() => {
+            window.location.href = '../login.html';
+          });
+        }, 1800000);
+      }
+      ['mousemove', 'keydown', 'scroll', 'touchstart'].forEach(evt => document.addEventListener(evt, resetIdle));
+      resetIdle();
+    })();
 
-      // Normalize classLevel for path (e.g., "Class 7" -> "Class%207")
-      const classLevel = child.classLevel.trim();
-      const classNum = classLevel.replace(/Class\s*/i, '').trim(); // Extract "7"
-      const classPath = `class_books/Class%20${classNum}`;
-      console.log('Class path:', classPath);
-
-      fetchBooks(classPath, child.classLevel); // Pass classLevel for search filter
-    }).catch(err => {
-      console.error('Students query error:', err);
-      Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: 'Error fetching student data: ' + err.message,
-        confirmButtonColor: '#ff6f61'
-      }).then(() => {
-        window.location.href = '../index.html';
-      });
-    });
-
-    // Idle timeout (1hr) for session expiry
-    let idleTimer;
-    function resetIdle() { clearTimeout(idleTimer); idleTimer = setTimeout(() => { localStorage.removeItem('sessionChild'); window.location.href = '../login.html'; }, 3600000); }
-    ['mousemove', 'keydown', 'scroll', 'click'].forEach(evt => document.addEventListener(evt, resetIdle, true));
-    resetIdle();
-  })();
-
-  function fetchBooks(classPath, childClass) {
-    const booksGrid = document.getElementById('booksGrid');
-    const noBooks = document.getElementById('noBooks');
-    const loading = document.getElementById('loading');
-    const searchInput = document.getElementById('searchInput');
     let allBooks = [];
+    let currentPage = 0;
+    const pageSize = 10;
 
-    console.log('Fetching books for path:', classPath, 'Child class:', childClass);
-    loading.classList.remove('hidden');
+    function fetchBooks(classPath, childClass) {
+      const booksGrid = document.getElementById('booksGrid');
+      const noBooks = document.getElementById('noBooks');
+      const loading = document.getElementById('loading');
+      const searchInput = document.getElementById('searchInput');
+      const loadMore = document.getElementById('loadMore');
+      const voiceSearch = document.getElementById('voiceSearch');
 
-    db.ref(classPath).on('value', snap => {
-      loading.classList.add('hidden');
-      booksGrid.innerHTML = '';
-      const books = snap.val() || {};
-      console.log('Books data:', books);
-      allBooks = Object.entries(books).filter(([id, b]) => b.title && b.url); // Filter invalid
-      if (allBooks.length === 0) {
-        console.log('No books found for:', classPath);
-        noBooks.classList.remove('hidden');
-        Swal.fire({
-          icon: 'info',
-          title: 'No Books Yet',
-          text: `No adventures for ${childClass}—tell your teacher to upload some! 🌟`,
-          confirmButtonColor: '#ff6f61'
+      loading.classList.remove('hidden');
+
+      db.ref(classPath).once('value').then(snap => {  // Use once for perf (no live updates needed)
+        loading.classList.add('hidden');
+        const books = snap.val() || {};
+        console.log('Books:', books);
+        allBooks = Object.entries(books).map(([id, b]) => ({ id, ...b }));
+        if (allBooks.length === 0) {
+          noBooks.classList.remove('hidden');
+          Swal.fire({ icon: 'info', title: 'No Books', text: `No adventures for ${childClass} yet! Ask teacher. 🌟`, confirmButtonColor: '#ff6f61' });
+          return;
+        }
+        noBooks.classList.add('hidden');
+        renderPage(0);
+        if (allBooks.length > pageSize) loadMore.classList.remove('hidden');
+      }).catch(err => {
+        loading.classList.add('hidden');
+        console.error('Fetch error:', err);
+        Swal.fire({ icon: 'error', title: 'Error', text: `Loading books failed: ${err.message}`, confirmButtonColor: '#ff6f61' });
+      });
+
+      // Search
+      searchInput.addEventListener('input', () => filterAndRender(searchInput.value.toLowerCase().trim()));
+      
+      // Voice search (Web Speech API - fun for kids!)
+      if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        voiceSearch.addEventListener('click', () => {
+          const recognition = new SpeechRecognition();
+          recognition.lang = 'en-US';
+          recognition.start();
+          recognition.onresult = (e) => {
+            searchInput.value = e.results[0][0].transcript;
+            filterAndRender(searchInput.value.toLowerCase().trim());
+          };
+          recognition.onerror = () => Swal.fire({ icon: 'error', title: 'Voice Error', text: 'Microphone issue - try typing! 🎤', confirmButtonColor: '#ff6f61' });
         });
+      } else {
+        voiceSearch.style.display = 'none';
+      }
+
+      // Load more
+      loadMore.addEventListener('click', () => {
+        currentPage++;
+        renderPage(currentPage, true);
+        if ((currentPage + 1) * pageSize >= allBooks.length) loadMore.classList.add('hidden');
+      });
+    }
+
+    function filterAndRender(query) {
+      const filtered = query ? allBooks.filter(b => 
+        b.title.toLowerCase().includes(query) || b.subject.toLowerCase().includes(query)
+      ) : allBooks;
+      currentPage = 0;
+      document.getElementById('booksGrid').innerHTML = '';
+      renderPage(0, false, filtered);
+      const loadMore = document.getElementById('loadMore');
+      loadMore.classList.toggle('hidden', filtered.length <= pageSize);
+    }
+
+    function renderPage(page, append = false, books = allBooks) {
+      const booksGrid = document.getElementById('booksGrid');
+      const start = page * pageSize;
+      const end = start + pageSize;
+      const pageBooks = books.slice(start, end);
+
+      if (pageBooks.length === 0) {
+        document.getElementById('noBooks').classList.remove('hidden');
         return;
       }
-      noBooks.classList.add('hidden');
-      renderBooks(allBooks, childClass);
-    }, err => {
-      loading.classList.add('hidden');
-      console.error('Firebase error for path', classPath, ':', err);
-      Swal.fire({
-        icon: 'error',
-        title: 'Oops!',
-        text: 'Error loading books: ' + err.message + '\nPath: ' + classPath + '\nRefresh and try again?',
-        confirmButtonColor: '#ff6f61'
+
+      pageBooks.forEach(b => {
+        const thumbnailUrl = b.url ? b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/') : 'https://via.placeholder.com/150?text=No+Thumbnail';
+        const card = document.createElement('div');
+        card.className = 'book-card';
+        card.innerHTML = `
+          <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail" loading="lazy">
+          <h3 class="text-lg font-bold mt-2" style="color: var(--secondary);">${b.title}</h3>
+          <p class="text-sm mb-3" style="color: #1f2937;">${b.subject}</p>
+          <div class="rating">⭐⭐⭐⭐⭐ (Coming soon!)</div>
+          <button class="read-btn" data-url="${b.url}" data-title="${b.title}">Open Adventure!</button>
+        `;
+        if (append) booksGrid.appendChild(card);
+        else booksGrid.innerHTML += card.outerHTML;  // For filter reset
       });
-    });
 
-    searchInput.addEventListener('input', () => {
-      const query = searchInput.value.toLowerCase().trim();
-      const filtered = allBooks.filter(([id, b]) =>
-        b.title.toLowerCase().includes(query) ||
-        b.subject.toLowerCase().includes(query) ||
-        childClass.toLowerCase().includes(query) // Bonus: Search by class
-      );
-      booksGrid.innerHTML = '';
-      if (filtered.length === 0) {
-        noBooks.classList.remove('hidden');
-        noBooks.innerHTML = `<i class="fas fa-search text-5xl mb-4 block" style="color: var(--primary);"></i>No matches—try "Math" or "Class 7"! 🔍`;
-      } else {
-        noBooks.classList.add('hidden');
-        renderBooks(filtered, childClass);
-      }
-    });
-  }
+      // Re-attach read buttons
+      document.querySelectorAll('.read-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const pdfUrl = btn.dataset.url;
+          const title = btn.dataset.title;
+          const proxyUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfUrl)}`;
+          console.log('Opening:', title, proxyUrl);
 
-  function renderBooks(bookEntries, childClass) {
-    const booksGrid = document.getElementById('booksGrid');
-    booksGrid.innerHTML = '';
-    bookEntries.forEach(([id, b]) => {
-      const thumbnailUrl = b.url ? b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/') : 'https://via.placeholder.com/150?text=No+Image';
-      console.log('Rendering book:', b.title, 'Thumbnail:', thumbnailUrl);
-      const card = document.createElement('div');
-      card.className = 'book-card';
-      card.innerHTML = `
-        <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail" onerror="this.src='https://via.placeholder.com/150?text=📖'">
-        <h3 class="text-lg font-bold mt-2" style="color: var(--secondary);">${b.title}</h3>
-        <p class="text-sm mb-3" style="color: #1f2937;">${b.subject} • ${childClass}</p>
-        <button class="read-btn" data-url="${b.url}" data-id="${id}" data-title="${b.title}">Open Adventure! 🚀</button>
-      `;
-      booksGrid.appendChild(card);
-    });
-
-    // Event listeners for read buttons
-    document.querySelectorAll('.read-btn').forEach(button => {
-      button.addEventListener('click', () => {
-        const bookId = button.getAttribute('data-id');
-        const pdfUrl = button.getAttribute('data-url');
-        const bookTitle = button.getAttribute('data-title');
-        const proxyUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfUrl)}`;
-        console.log('Opening book:', bookTitle, 'URL:', proxyUrl);
-        const modal = document.getElementById('pdfModal');
-        const modalTitle = document.getElementById('modalTitle');
-        const modalPdfFrame = document.getElementById('modalPdfFrame');
-
-        modal.classList.remove('hidden');
-        modalTitle.textContent = `${bookTitle} (${childClass})`;
-        modalPdfFrame.src = proxyUrl;
-        modalPdfFrame.style.transform = 'scale(1)'; // Reset zoom
+          const modal = document.getElementById('pdfModal');
+          document.getElementById('modalTitle').textContent = title;
+          document.getElementById('modalPdfFrame').src = proxyUrl;
+          modal.classList.remove('hidden');
+        });
       });
-    });
+    }
 
-    // Modal controls (improved zoom with bounds)
+    // Modal controls
     let zoomLevel = 1;
-    const zoomInBtn = document.getElementById('zoomInModal');
-    const zoomOutBtn = document.getElementById('zoomOutModal');
-    const modalFrame = document.getElementById('modalPdfFrame');
-
-    zoomInBtn.addEventListener('click', () => {
-      zoomLevel = Math.min(zoomLevel + 0.2, 3); // Max 3x
-      modalFrame.style.transform = `scale(${zoomLevel})`;
+    document.getElementById('zoomInModal').addEventListener('click', () => {
+      zoomLevel = Math.min(zoomLevel + 0.2, 3);
+      document.getElementById('modalPdfFrame').style.transform = `scale(${zoomLevel})`;
     });
-    zoomOutBtn.addEventListener('click', () => {
-      zoomLevel = Math.max(zoomLevel - 0.2, 0.5); // Min 0.5x
-      modalFrame.style.transform = `scale(${zoomLevel})`;
+    document.getElementById('zoomOutModal').addEventListener('click', () => {
+      zoomLevel = Math.max(zoomLevel - 0.2, 0.5);
+      document.getElementById('modalPdfFrame').style.transform = `scale(${zoomLevel})`;
     });
     document.getElementById('closeModal').addEventListener('click', () => {
       const modal = document.getElementById('pdfModal');
+      const frame = document.getElementById('modalPdfFrame');
       modal.classList.add('hidden');
-      modalFrame.src = '';
+      frame.src = '';
       zoomLevel = 1;
-      modalFrame.style.transform = 'scale(1)';
+      frame.style.transform = 'scale(1)';
+    });
+    document.getElementById('pdfModal').addEventListener('click', e => {
+      if (e.target === document.getElementById('pdfModal')) document.getElementById('closeModal').click();
     });
 
-    // Close modal on outside click/ESC
-    document.getElementById('pdfModal').addEventListener('click', (e) => {
-      if (e.target.id === 'pdfModal') closeModal();
+    // Security
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && (e.key === 'p' || e.key === 's' || e.key === 'u')) {
+        e.preventDefault();
+        Swal.fire({ icon: 'warning', title: 'Protected!', text: 'No printing/saving - copyright rules! 📜', confirmButtonColor: '#ff6f61' });
+      }
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+        e.preventDefault();
+        Swal.fire({ icon: 'info', title: 'Dev Mode Off', text: 'Focus on books, not code! 😊', confirmButtonColor: '#ff6f61' });
+      }
     });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeModal();
-    });
-    function closeModal() {
-      document.getElementById('pdfModal').classList.add('hidden');
-      modalFrame.src = '';
-      zoomLevel = 1;
-      modalFrame.style.transform = 'scale(1)';
-    }
-  }
-
-  // Security: Disable print/download/context (your original + dev tools hint)
-  document.addEventListener('keydown', e => {
-    if (e.ctrlKey && (e.key === 'p' || e.key === 's' || (e.key === 'u' && e.shiftKey))) {
+    window.print = () => Swal.fire({ icon: 'warning', title: 'No Print', text: 'Disabled for protection!', confirmButtonColor: '#ff6f61' });
+    document.addEventListener('contextmenu', e => {
       e.preventDefault();
-      Swal.fire({
-        icon: 'warning',
-        title: 'Action Disabled',
-        text: 'Printing, saving, or dev tools blocked for copyright—focus on learning! 📚',
-        confirmButtonColor: '#ff6f61'
-      });
-    }
-    if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
-      e.preventDefault();
-      Swal.fire({ icon: 'info', title: 'Sneaky!', text: 'Dev tools? Nah, read the book instead! 😜', confirmButtonColor: '#ff6f61' });
-    }
-  });
-  window.print = () => Swal.fire({ icon: 'warning', title: 'Blocked!', text: 'Print disabled—share via SoMAp chat!', confirmButtonColor: '#ff6f61' });
-  document.addEventListener('contextmenu', e => {
-    e.preventDefault();
-    Swal.fire({ icon: 'warning', title: 'Right-Click Nope', text: 'Copy-paste blocked—type it out for extra learning! ✏️', confirmButtonColor: '#ff6f61' });
-  });
-
-  // Error boundary for unhandled issues
-  window.addEventListener('error', (e) => {
-    console.error('Global error:', e.error);
-    Swal.fire({ icon: 'error', title: 'Glitch!', text: 'Something broke—refresh? (Check console.)', confirmButtonColor: '#ff6f61' });
-  });
+      Swal.fire({ icon: 'warning', title: 'Right-Click Blocked', text: 'No copying - learn by reading! ✏️', confirmButtonColor: '#ff6f61' });
+    });
   </script>
 </body>
 </html>

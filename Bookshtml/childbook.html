@@ -6,8 +6,9 @@
   <title>SoMAp — My Fun Books!</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <script src="../firebase.js"></script>
+  <script src="../firebase.js"></script> <!-- Assuming this has compat libs; if not, add below -->
   <style>
+    /* Your styles unchanged – love the gradients & stars! */
     :root {
       --primary: #ff6f61;
       --secondary: #6b48ff;
@@ -205,6 +206,22 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    .error-toast {
+      position: fixed;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #ef4444;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      z-index: 3000;
+      animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+      to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
     @media (max-width: 768px) {
       .book-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -236,7 +253,7 @@
     <div id="loading" class="loading"><div class="spinner"></div><p>Loading your fun books...</p></div>
     <div id="noBooks" class="no-books hidden"><i class="fas fa-book-open text-5xl mb-4 block" style="color: var(--primary);"></i>No books yet—ask your teacher for more adventures! 🌟</div>
   </div>
-  <!-- Modal for full-screen PDF -->
+  <!-- Modal unchanged -->
   <div id="pdfModal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
@@ -250,8 +267,16 @@
       <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0"></iframe>
     </div>
   </div>
+
+  <!-- Firebase Compat Scripts (as you pasted – no reCAPTCHA) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+
   <script>
-    // Firebase Config
+    // Firebase Config (unchanged)
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
       authDomain: "somaptestt.firebaseapp.com",
@@ -267,112 +292,93 @@
     const auth = firebase.auth();
     const db = firebase.database();
 
+    // Helper: Show error toast
+    function showError(message) {
+      const toast = document.createElement('div');
+      toast.className = 'error-toast';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 5000);
+    }
+
     auth.onAuthStateChanged(user => {
       if (!user) {
-        console.log('No user logged in, redirecting to login');
+        console.log('No user, redirect to login');
         window.location.href = '../login.html';
         return;
       }
 
-      // Determine userKey based on auth method (handles both email and phone)
-      let userKey;
-      if (user.email) {
-        userKey = user.email.replace(/\./g, '_');
-      } else {
-        userKey = user.uid;
-      }
-      console.log('User key:', userKey);
+      // Simplified User Key: Always use UID (standardize DB to users/{uid})
+      const userKey = user.uid; // Fix: Use UID for all (email/phone). Update DB keys if needed.
+      console.log('User UID/Key:', userKey, 'Phone:', user.phoneNumber);
 
-      // Fetch user data from users/
+      // Fetch from users/{uid} – prioritize this for simplicity
       db.ref(`users/${userKey}`).once('value').then(userSnap => {
         const userData = userSnap.val();
-        console.log('User data:', userData);
+        console.log('User data from users/:', userData);
 
-        let className, childName;
+        let className = null;
+        let childName = 'Super Student'; // Default
 
         if (userData) {
-          if (userData.role === 'parent') {
-            if (!userData.childClass || !userData.childNames) {
-              console.error('Missing child info for parent');
-              handleError('Missing child information. Please update your profile.');
-              return;
-            }
-            className = userData.childClass;
+          if (userData.role === 'parent' && userData.childClass && userData.childNames) {
+            className = userData.childClass.trim().toLowerCase().replace(/\s+/g, ''); // e.g., "class 7" → "class7"
             childName = userData.childNames;
-          } else if (userData.role === 'student') {
-            if (!userData.class || !userData.names) {
-              console.error('Missing class info for student');
-              handleError('Missing class information. Contact admin.');
-              return;
-            }
-            className = userData.class;
+          } else if (userData.role === 'student' && userData.class && userData.names) {
+            className = userData.class.trim().toLowerCase().replace(/\s+/g, ''); // e.g., "7" or "class 7" → "7" or "class7"
             childName = userData.names;
-          } else {
-            console.log('Invalid or unknown role, falling back to students query');
-            // Fall through to fallback
           }
-        } else {
-          console.log('No user data found, falling back to students query');
-          // Fall through to fallback
         }
 
-        // If className not set, do fallback query on students
+        // Simple Fallback: Only if no class (e.g., legacy data). Search students by phone.
         if (!className) {
+          console.log('No class in users/, fallback to students');
           db.ref('students').once('value').then(studentsSnap => {
             const students = studentsSnap.val() || {};
-            console.log('Students data:', students);
-
             let matchingChild = null;
 
-            // First, try matching as student's own phone
+            // Match by student phone first
             if (user.phoneNumber) {
               matchingChild = Object.values(students).find(s => (s.phone || '') === user.phoneNumber);
             }
-
-            // If not found, try as parent phone
+            // Then parent phone
             if (!matchingChild && user.phoneNumber) {
               matchingChild = Object.values(students).find(s => (s.parentPhone || '') === user.phoneNumber);
             }
-
-            // If still not, and we have userData with names, try by names (less secure, but fallback)
+            // Last: By name (if available)
             if (!matchingChild && userData && userData.names) {
               matchingChild = Object.values(students).find(s => s.names === userData.names);
             }
 
-            if (!matchingChild || !matchingChild.class) {
-              console.error('No matching child found for phone:', user.phoneNumber);
-              handleError('No class found for your account. Contact admin.');
+            if (matchingChild && matchingChild.class) {
+              className = matchingChild.class.trim().toLowerCase().replace(/\s+/g, ''); // Normalize
+              childName = matchingChild.names || childName;
+              console.log('Matched child via fallback:', matchingChild);
+            } else {
+              showError('No class found for ' + childName + '. Contact teacher!');
               return;
             }
 
-            console.log('Child found via fallback:', matchingChild);
-            className = matchingChild.class;
-            childName = matchingChild.names;
-
             setupPage(className, childName);
           }).catch(err => {
-            console.error('Students query error:', err);
-            handleError('Error fetching student data: ' + err.message);
+            console.error('Fallback error:', err);
+            showError('Oops! Check connection: ' + err.message);
           });
         } else {
-          // Use data from users/
-          console.log('Using class from user data:', className);
+          // Direct from users/
+          console.log('Using class from users/:', className);
           setupPage(className, childName);
         }
       }).catch(err => {
-        console.error('User data error:', err);
-        handleError('Error fetching user data: ' + err.message);
+        console.error('users/ fetch error:', err);
+        showError('Profile load failed: ' + err.message);
       });
     });
 
     function setupPage(className, childName) {
       document.getElementById('hero-subtitle').textContent = `${childName}'s ${className} Adventures!`;
+      document.getElementById('hero-title').textContent = `${childName}'s Super Fun Books! 📚✨`;
       fetchBooks(className);
-    }
-
-    function handleError(message) {
-      alert(message);
-      window.location.href = '../index.html';
     }
 
     function fetchBooks(className) {
@@ -382,20 +388,24 @@
       const searchInput = document.getElementById('searchInput');
       let allBooks = [];
 
-      // Normalize className
-      const normalizedClassName = className.trim().toLowerCase();
-      const classPath = `class_books/${encodeURIComponent(normalizedClassName)}`;
-      console.log('Fetching books for path:', classPath);
+      // Fix: No encodeURIComponent – Firebase handles spaces. Use normalized class (e.g., "7")
+      const classPath = `class_books/${className}`; // e.g., "class_books/7"
+      console.log('Fetching from:', classPath);
+
       loading.classList.remove('hidden');
 
-      db.ref(classPath).on('value', snap => {
+      // Real-time listener
+      const booksRef = db.ref(classPath);
+      booksRef.on('value', snap => {
         loading.classList.add('hidden');
         booksGrid.innerHTML = '';
         const books = snap.val() || {};
-        console.log('Books data:', books);
-        allBooks = Object.entries(books);
+        console.log('Raw books data:', books);
+        allBooks = Object.entries(books).filter(([id, b]) => b && b.title && b.url); // Filter junk
+        console.log('Filtered books:', allBooks.length);
+
         if (allBooks.length === 0) {
-          console.log('No books found for class:', normalizedClassName);
+          console.log('No books for', className);
           noBooks.classList.remove('hidden');
           return;
         }
@@ -403,130 +413,132 @@
         renderBooks(allBooks);
       }, err => {
         loading.classList.add('hidden');
-        console.error('Firebase error for path', classPath, ':', err);
-        alert('Error loading books: ' + err.message + '\nPath: ' + classPath);
+        console.error('Books fetch error:', err);
+        showError('Books load failed: ' + err.message + ' (Path: ' + classPath + ')');
+        // Offload listener on error
+        booksRef.off();
       });
 
+      // Search (unchanged, but debounced for perf)
+      let searchTimeout;
       searchInput.addEventListener('input', () => {
-        const query = searchInput.value.toLowerCase().trim();
-        const filtered = allBooks.filter(([id, b]) =>
-          b.title.toLowerCase().includes(query) || b.subject.toLowerCase().includes(query)
-        );
-        booksGrid.innerHTML = '';
-        if (filtered.length === 0) {
-          noBooks.classList.remove('hidden');
-        } else {
-          noBooks.classList.add('hidden');
-          renderBooks(filtered);
-        }
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+          const query = searchInput.value.toLowerCase().trim();
+          const filtered = allBooks.filter(([id, b]) =>
+            b.title.toLowerCase().includes(query) || (b.subject || '').toLowerCase().includes(query)
+          );
+          booksGrid.innerHTML = '';
+          if (filtered.length === 0 && query) {
+            noBooks.innerHTML = '<i class="fas fa-search text-5xl mb-4 block" style="color: var(--primary);"></i>No matches—try another adventure! 🔍';
+            noBooks.classList.remove('hidden');
+          } else if (filtered.length === 0) {
+            noBooks.classList.remove('hidden');
+          } else {
+            noBooks.classList.add('hidden');
+            renderBooks(filtered);
+          }
+        }, 300);
       });
+
+      // Cleanup on unload
+      window.addEventListener('beforeunload', () => booksRef.off());
     }
 
     function renderBooks(bookEntries) {
       const booksGrid = document.getElementById('booksGrid');
       booksGrid.innerHTML = '';
       bookEntries.forEach(([id, b]) => {
+        // Thumbnail: Cloudinary sanitize (unchanged)
         const thumbnailUrl = b.url ? b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/') : 'https://via.placeholder.com/150?text=No+Thumbnail';
-        console.log('Rendering book:', b.title, 'Thumbnail:', thumbnailUrl);
+        console.log('Book:', b.title, 'Thumb:', thumbnailUrl);
         const card = document.createElement('div');
         card.className = 'book-card';
         card.innerHTML = `
           <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail" onerror="this.src='https://via.placeholder.com/150?text=No+Image';">
           <h3 class="text-lg font-bold mt-2" style="color: var(--secondary);">${b.title}</h3>
-          <p class="text-sm mb-3" style="color: #1f2937;">${b.subject}</p>
+          <p class="text-sm mb-3" style="color: #1f2937;">${b.subject || 'Fun Read'}</p>
           <button class="read-btn" data-url="${b.url}" data-id="${id}" data-title="${b.title}">Open Adventure! 🚀</button>
         `;
         booksGrid.appendChild(card);
       });
 
-      // Add event listeners for read buttons
-      document.querySelectorAll('.read-btn').forEach(button => {
-        button.addEventListener('click', () => {
-          const bookId = button.getAttribute('data-id');
+      // Event listeners for buttons (use delegation for perf)
+      booksGrid.addEventListener('click', (e) => {
+        if (e.target.classList.contains('read-btn')) {
+          const button = e.target;
           const pdfUrl = button.getAttribute('data-url');
           const bookTitle = button.getAttribute('data-title');
           const proxyUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfUrl)}`;
-          console.log('Opening book:', bookTitle, 'URL:', proxyUrl);
+          console.log('Opening:', bookTitle, proxyUrl);
           openModal(bookTitle, proxyUrl);
-        });
+        }
       });
 
-      // Modal controls (zoom, close) - attach once
       setupModalControls();
     }
 
+    // Modal functions (unchanged, but with zoom reset)
+    let globalZoomLevel = 1;
     function openModal(title, url) {
       const modal = document.getElementById('pdfModal');
       const modalTitle = document.getElementById('modalTitle');
       const modalPdfFrame = document.getElementById('modalPdfFrame');
-
       modal.classList.remove('hidden');
       modalTitle.textContent = title;
       modalPdfFrame.src = url;
-      // Reset zoom
-      let zoomLevel = 1;
-      modalPdfFrame.style.transform = `scale(${zoomLevel})`;
+      globalZoomLevel = 1;
+      modalPdfFrame.style.transform = `scale(${globalZoomLevel})`;
     }
 
     function setupModalControls() {
-      let zoomLevel = 1;
       const zoomInBtn = document.getElementById('zoomInModal');
       const zoomOutBtn = document.getElementById('zoomOutModal');
       const closeBtn = document.getElementById('closeModal');
       const modalPdfFrame = document.getElementById('modalPdfFrame');
 
-      if (zoomInBtn && !zoomInBtn.dataset.listenerAdded) {
-        zoomInBtn.addEventListener('click', () => {
-          zoomLevel = Math.min(zoomLevel + 0.2, 3); // Cap at 3x
-          modalPdfFrame.style.transform = `scale(${zoomLevel})`;
-        });
-        zoomInBtn.dataset.listenerAdded = 'true';
-      }
-
-      if (zoomOutBtn && !zoomOutBtn.dataset.listenerAdded) {
-        zoomOutBtn.addEventListener('click', () => {
-          zoomLevel = Math.max(zoomLevel - 0.2, 0.5); // Min 0.5x
-          modalPdfFrame.style.transform = `scale(${zoomLevel})`;
-        });
-        zoomOutBtn.dataset.listenerAdded = 'true';
-      }
-
-      if (closeBtn && !closeBtn.dataset.listenerAdded) {
-        closeBtn.addEventListener('click', () => {
-          const modal = document.getElementById('pdfModal');
-          modal.classList.add('hidden');
-          modalPdfFrame.src = '';
-          zoomLevel = 1;
-          modalPdfFrame.style.transform = 'scale(1)';
-        });
-        closeBtn.dataset.listenerAdded = 'true';
-      }
-
-      // Close on outside click
-      const modal = document.getElementById('pdfModal');
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          closeBtn.click();
+      const addListener = (el, handler) => {
+        if (!el.dataset.listenerAdded) {
+          el.addEventListener('click', handler);
+          el.dataset.listenerAdded = 'true';
         }
+      };
+
+      addListener(zoomInBtn, () => {
+        globalZoomLevel = Math.min(globalZoomLevel + 0.2, 3);
+        modalPdfFrame.style.transform = `scale(${globalZoomLevel})`;
+      });
+
+      addListener(zoomOutBtn, () => {
+        globalZoomLevel = Math.max(globalZoomLevel - 0.2, 0.5);
+        modalPdfFrame.style.transform = `scale(${globalZoomLevel})`;
+      });
+
+      addListener(closeBtn, () => {
+        document.getElementById('pdfModal').classList.add('hidden');
+        modalPdfFrame.src = '';
+        globalZoomLevel = 1;
+        modalPdfFrame.style.transform = 'scale(1)';
+      });
+
+      // Outside click close
+      document.getElementById('pdfModal').addEventListener('click', (e) => {
+        if (e.target.id === 'pdfModal') closeBtn.click();
       });
     }
 
-    // Disable print, save, and right-click for copyright protection
+    // Security (unchanged)
     document.addEventListener('keydown', e => {
       if (e.ctrlKey && (e.key === 'p' || e.key === 's' || e.key === 'o')) {
         e.preventDefault();
-        alert('Printing, saving, and downloading disabled for copyright protection. Enjoy reading!');
+        alert('Printing/saving disabled – enjoy reading!');
       }
-      if (e.key === 'F12') {
-        e.preventDefault();
-      }
+      if (e.key === 'F12') e.preventDefault();
     });
-    window.print = () => {
-      alert('Printing disabled for copyright protection. Enjoy reading!');
-    };
+    window.print = () => alert('Printing disabled – enjoy reading!');
     document.addEventListener('contextmenu', e => e.preventDefault());
 
-    // Initialize modal controls on load
+    // Init
     setupModalControls();
   </script>
 </body>

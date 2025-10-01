@@ -8,20 +8,38 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script src="../firebase.js"></script>
   <style>
-    body { font-family: Inter, sans-serif; background: #f0f9ff; margin: 0; padding: 20px; }
-    .card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-    .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
-    .book-card { background: #fff; border: 1px solid #e0e7ff; border-radius: 8px; padding: 12px; text-align: center; }
-    .book-card i { font-size: 48px; color: #7c3aed; }
-    .back-btn { position: fixed; top: 20px; left: 20px; background: #0ea5a4; color: white; padding: 8px 16px; border-radius: 999px; }
+    body { font-family: Inter, sans-serif; background: linear-gradient(135deg, #e0f2fe, #f0f9ff); margin: 0; padding: 0; color: #1f2937; }
+    .hero { background: linear-gradient(90deg, #4f46e5, #7c3aed); color: white; padding: 40px 20px; text-align: center; border-radius: 0 0 20px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .search-bar { max-width: 600px; margin: 20px auto; }
+    .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 24px; padding: 20px; }
+    .book-card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 6px 12px rgba(0,0,0,0.05); text-align: center; transition: transform 0.3s; }
+    .book-card:hover { transform: translateY(-4px); }
+    .book-thumbnail { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .back-btn { position: fixed; top: 20px; left: 20px; background: #0ea5e9; color: white; padding: 10px 20px; border-radius: 999px; z-index: 1000; text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .content { padding: 20px 20px 20px 80px; } /* Prevent overlap with back button */
+    .forecast { background: #f9fafb; border-radius: 12px; padding: 20px; margin: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.05); }
+    .no-books { text-align: center; color: #6b7280; font-size: 18px; margin: 40px 0; }
+    .notification-item { background: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
   </style>
 </head>
 <body>
-  <a href="../staff.html" class="back-btn"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
-  <div class="max-w-6xl mx-auto">
-    <h1 class="text-2xl font-bold mb-4">Your Class Books</h1>
-    <div id="booksGrid" class="book-grid"></div>
-    <div id="noBooks" class="hidden text-center text-gray-500 mt-8">No books available for your class yet.</div>
+  <a href="../staff.html" class="back-btn"><i class="fas fa-arrow-left mr-2"></i> Back to Dashboard</a>
+  <div class="content">
+    <div class="hero">
+      <h1 class="text-3xl font-bold mb-2" id="hero-title">Your Class Books</h1>
+      <p class="text-lg opacity-90 mb-4">Explore and manage books for your class</p>
+      <div class="search-bar">
+        <input id="searchInput" type="text" placeholder="Search books by title or subject..." class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white text-white placeholder-white/70">
+      </div>
+    </div>
+    <div class="max-w-7xl mx-auto px-4">
+      <div id="booksGrid" class="book-grid"></div>
+      <div id="noBooks" class="no-books hidden"><i class="fas fa-book-open text-4xl mb-4 block"></i>No books available yet. Check back soon!</div>
+    </div>
+    <div class="forecast">
+      <h2 class="text-xl font-semibold mb-3">Upcoming Books & Notifications</h2>
+      <div id="notificationsList" class="text-gray-600"></div>
+    </div>
   </div>
   <script>
   firebase.auth().onAuthStateChanged(user => {
@@ -29,30 +47,101 @@
     const userKey = user.email.replace(/\./g, '_');
     firebase.database().ref(`users/${userKey}`).once('value').then(snap => {
       const data = snap.val();
-      if (!data || data.role !== 'teacher' || !data.class) { alert('Invalid teacher access'); return; }
-      fetchBooks(data.class);
+      if (!data || data.role !== 'teacher' || !data.class) {
+        alert('Invalid teacher access. Please contact admin.');
+        window.location.href = '../index.html';
+        return;
+      }
+      const className = data.class.trim(); // Normalize class name
+      document.getElementById('hero-title').textContent = `${className} Books`;
+      console.log('Debug: Fetching books for class:', className, 'Encoded:', encodeURIComponent(className)); // Debug in console
+      fetchBooks(className);
+      fetchNotifications(userKey);
+    }).catch(err => {
+      console.error('Error fetching user data:', err);
+      alert('Error accessing user data: ' + err.message);
     });
   });
 
   function fetchBooks(className) {
     const booksGrid = document.getElementById('booksGrid');
     const noBooks = document.getElementById('noBooks');
-    firebase.database().ref(`class_books/${encodeURIComponent(className)}`).on('value', snap => {
+    const searchInput = document.getElementById('searchInput');
+    let allBooks = [];
+
+    const classPath = `class_books/${encodeURIComponent(className)}`;
+    console.log('Debug: Querying Firebase path:', classPath); // Debug path
+    firebase.database().ref(classPath).on('value', snap => {
       booksGrid.innerHTML = '';
       const books = snap.val() || {};
-      if (Object.keys(books).length === 0) { noBooks.classList.remove('hidden'); return; }
+      console.log('Debug: Books data:', books); // Debug data received
+      allBooks = Object.entries(books);
+      if (allBooks.length === 0) {
+        noBooks.classList.remove('hidden');
+        console.log('Debug: No books found for', className);
+        return;
+      }
       noBooks.classList.add('hidden');
-      Object.entries(books).forEach(([id, b]) => {
-        const card = document.createElement('div');
-        card.className = 'book-card';
-        card.innerHTML = `
-          <i class="fas fa-book"></i>
-          <h3 class="text-lg font-semibold mt-2">${b.title}</h3>
-          <p class="text-sm text-gray-600">${b.subject}</p>
-          <a href="viewer.html?url=${encodeURIComponent(b.url)}&type=book" class="mt-2 inline-block px-4 py-2 bg-indigo-600 text-white rounded-md">Read</a>
-        `;
-        booksGrid.appendChild(card);
+      renderBooks(allBooks);
+    }, err => {
+      console.error('Firebase error:', err);
+      alert('Error fetching books: ' + err.message);
+    });
+
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value.toLowerCase().trim();
+      const filtered = allBooks.filter(([id, b]) => 
+        b.title.toLowerCase().includes(query) || b.subject.toLowerCase().includes(query)
+      );
+      booksGrid.innerHTML = '';
+      if (filtered.length === 0) {
+        noBooks.classList.remove('hidden');
+      } else {
+        noBooks.classList.add('hidden');
+        renderBooks(filtered);
+      }
+    });
+  }
+
+  function renderBooks(bookEntries) {
+    const booksGrid = document.getElementById('booksGrid');
+    bookEntries.forEach(([id, b]) => {
+      const thumbnailUrl = b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/'); // Cloudinary thumbnail
+      const card = document.createElement('div');
+      card.className = 'book-card';
+      card.innerHTML = `
+        <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail" onerror="this.src='https://via.placeholder.com/150?text=Book+Cover'">
+        <h3 class="text-lg font-semibold mt-2">${b.title}</h3>
+        <p class="text-sm text-gray-600 mb-3">${b.subject}</p>
+        <a href="viewer.html?url=${encodeURIComponent(b.url)}&type=book" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition">Read Book</a>
+      `;
+      booksGrid.appendChild(card);
+    });
+  }
+
+  function fetchNotifications(userKey) {
+    const notificationsList = document.getElementById('notificationsList');
+    firebase.database().ref(`notifications/${userKey}`).orderByChild('time').limitToLast(5).on('value', snap => {
+      notificationsList.innerHTML = '';
+      const notifs = snap.val() || {};
+      if (Object.keys(notifs).length === 0) {
+        notificationsList.innerHTML = '<p class="text-gray-600">No recent notifications. Stay tuned for new books!</p>';
+        return;
+      }
+      Object.entries(notifs).reverse().forEach(([id, n]) => {
+        if (n.type === 'new-book') {
+          const notif = document.createElement('div');
+          notif.className = 'notification-item';
+          notif.innerHTML = `
+            <p><strong>New Book:</strong> ${n.title} (${n.subject}) for ${n.class}</p>
+            <p class="text-sm text-gray-500">Added on ${new Date(n.time).toLocaleDateString()}</p>
+          `;
+          notificationsList.appendChild(notif);
+        }
       });
+    }, err => {
+      console.error('Error fetching notifications:', err);
+      notificationsList.innerHTML = '<p class="text-gray-600">Error loading notifications.</p>';
     });
   }
 </script>

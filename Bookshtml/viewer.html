@@ -1,72 +1,126 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>SoMAp — Document Viewer</title>
-  <script src="pdf.js"></script> <!-- Download from https://mozilla.github.io/pdf.js/ -->
-  <script src="pdf.worker.js"></script> <!-- Worker for PDF.js -->
-  <script src="../firebase.js"></script> <!-- For auth check -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Book Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- PDF.js CDN (stable v3.4.120) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; background: #f0f9ff; }
-    #viewer { height: 100vh; width: 100vw; display: flex; flex-direction: column; align-items: center; }
-    canvas { margin: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    #controls { position: fixed; top: 10px; right: 10px; z-index: 10; background: white; padding: 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .hidden { display: none; }
+    body { font-family: Inter, sans-serif; background: linear-gradient(135deg, #e0f2fe, #f0f9ff); margin: 0; padding: 0; color: #1f2937; }
+    .hero { background: linear-gradient(90deg, #4f46e5, #7c3aed); color: white; padding: 20px; text-align: center; border-radius: 0 0 20px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .back-btn { position: fixed; top: 20px; left: 20px; background: #0ea5e9; color: white; padding: 10px 20px; border-radius: 999px; z-index: 1000; text-decoration: none; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .content { padding: 20px 20px 20px 80px; }
+    .pdf-container { max-width: 1000px; margin: 20px auto; text-align: center; }
+    #pdfCanvas { border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); width: 100%; max-width: 800px; }
+    .controls { margin: 20px 0; }
+    .error { text-align: center; color: #dc2626; font-size: 18px; margin: 40px 0; }
+    .loading { text-align: center; color: #6b7280; font-size: 16px; margin: 40px 0; }
+    .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 0 auto; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <div id="viewer"></div>
-  <div id="controls">
-    <button onclick="zoomIn()">Zoom In</button>
-    <button onclick="zoomOut()">Zoom Out</button>
+  <a href="classbook.html" class="back-btn"><i class="fas fa-arrow-left mr-2"></i> Back to Books</a>
+  <div class="content">
+    <div class="hero">
+      <h1 class="text-2xl font-bold mb-2">Book Viewer</h1>
+      <p class="text-lg opacity-90">Reading <span id="bookTitle">Book</span></p>
+    </div>
+    <div class="pdf-container">
+      <div class="controls">
+        <button id="zoomIn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 mr-2"><i class="fas fa-search-plus mr-1"></i> Zoom In</button>
+        <button id="zoomOut" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 mr-2"><i class="fas fa-search-minus mr-1"></i> Zoom Out</button>
+        <button id="prevPage" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 mr-2"><i class="fas fa-arrow-left mr-1"></i> Previous</button>
+        <button id="nextPage" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-arrow-right mr-1"></i> Next</button>
+        <span id="pageInfo" class="ml-4 text-gray-600"></span>
+      </div>
+      <div id="loading" class="loading"><div class="spinner"></div><p>Loading PDF...</p></div>
+      <div id="error" class="error hidden"></div>
+      <canvas id="pdfCanvas"></canvas>
+    </div>
   </div>
   <script>
-    // Auth check (redirect if not logged in)
-    firebase.auth().onAuthStateChanged(user => {
-      if (!user) { window.location.href = '../login.html'; } // Adjust to your login page
-    });
+    // Configure PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const pdfUrl = urlParams.get('url');
-    const isBook = urlParams.get('type') === 'book' || pdfUrl.includes('/raw/upload/'); // Books use Cloudinary raw/upload
-    if (!pdfUrl) { alert('No document URL provided'); return; }
+    // Get URL and type from query string
+    const params = new URLSearchParams(window.location.search);
+    const pdfUrl = decodeURIComponent(params.get('url') || '');
+    const bookType = params.get('type') || 'book';
+    const bookTitle = pdfUrl.split('/').pop().split('.')[0].replace(/%20/g, ' ') || 'Book';
+    document.getElementById('bookTitle').textContent = bookTitle;
 
+    if (!pdfUrl) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('error').classList.remove('hidden');
+      document.getElementById('error').textContent = 'Error: No PDF URL provided.';
+      return;
+    }
+
+    // Use Cloudinary raw endpoint to bypass CORS
+    const rawPdfUrl = pdfUrl.replace('/image/upload/', '/raw/upload/');
     let pdfDoc = null;
+    let pageNum = 1;
     let scale = 1.5; // Default zoom
+    const canvas = document.getElementById('pdfCanvas');
+    const ctx = canvas.getContext('2d');
+    const loading = document.getElementById('loading');
+    const error = document.getElementById('error');
 
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.js';
-
-    pdfjsLib.getDocument(pdfUrl).promise.then(pdf => {
-      pdfDoc = pdf;
-      renderAllPages();
-    }).catch(err => alert('Error loading document: ' + err.message));
-
-    function renderAllPages() {
-      const viewer = document.getElementById('viewer');
-      viewer.innerHTML = '';
-      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-        pdfDoc.getPage(pageNum).then(page => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const viewport = page.getViewport({ scale });
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-          page.render({ canvasContext: ctx, viewport }).promise.then(() => viewer.appendChild(canvas));
-        });
+    async function renderPage(num) {
+      try {
+        const page = await pdfDoc.getPage(num);
+        const viewport = page.getViewport({ scale });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        document.getElementById('pageInfo').textContent = `Page ${num} of ${pdfDoc.numPages}`;
+        loading.classList.add('hidden');
+      } catch (err) {
+        loading.classList.add('hidden');
+        error.classList.remove('hidden');
+        error.textContent = 'Error rendering PDF: ' + err.message;
+        console.error('Render error:', err);
       }
     }
 
-    function zoomIn() { scale += 0.25; renderAllPages(); }
-    function zoomOut() { if (scale > 0.5) scale -= 0.25; renderAllPages(); }
+    // Load PDF
+    loading.classList.remove('hidden');
+    pdfjsLib.getDocument(rawPdfUrl).promise.then(pdf => {
+      pdfDoc = pdf;
+      renderPage(pageNum);
+    }).catch(err => {
+      loading.classList.add('hidden');
+      error.classList.remove('hidden');
+      error.textContent = 'Error loading PDF: ' + err.message;
+      console.error('Load error:', err);
+      alert('Failed to load PDF: ' + err.message + '\nURL: ' + rawPdfUrl);
+    });
 
-    // Apply restrictions only for books
-    if (isBook) {
-      document.addEventListener('contextmenu', e => e.preventDefault());
-      document.addEventListener('keydown', e => { if (e.ctrlKey && (e.key === 'p' || e.key === 's')) e.preventDefault(); });
-      window.print = () => alert('Printing disabled for books to protect copyright.');
-      history.pushState(null, '', window.location.pathname); // Hide URL
-    }
-    // Non-books (IDs, reports) allow browser-native print/download via direct URL if needed
+    // Zoom and navigation controls
+    document.getElementById('zoomIn').addEventListener('click', () => {
+      scale += 0.2;
+      renderPage(pageNum);
+    });
+    document.getElementById('zoomOut').addEventListener('click', () => {
+      if (scale > 0.5) scale -= 0.2;
+      renderPage(pageNum);
+    });
+    document.getElementById('prevPage').addEventListener('click', () => {
+      if (pageNum > 1) {
+        pageNum--;
+        renderPage(pageNum);
+      }
+    });
+    document.getElementById('nextPage').addEventListener('click', () => {
+      if (pageNum < pdfDoc.numPages) {
+        pageNum++;
+        renderPage(pageNum);
+      }
+    });
   </script>
 </body>
 </html>

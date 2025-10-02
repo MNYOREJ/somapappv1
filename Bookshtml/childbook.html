@@ -1,71 +1,402 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Child Book</title>
-  <script>
-    // Define the book list per class
-    const booksByClass = {
-      "Baby Class": ["Baby Steps Book 1", "Baby Rhymes"],
-      "Middle Class": ["Middle English Book", "Counting Fun"],
-      "Preunit": ["Preunit English", "Preunit Math"],
-      "Class 1": ["Class 1 English", "Class 1 Math", "Class 1 Science"],
-      "Class 1AB": ["Class 1AB English", "Class 1AB Math"],
-      "Class 2": ["Class 2 English", "Class 2 Math", "Class 2 Science"],
-      "Class 2AB": ["Class 2AB English", "Class 2AB Math"],
-      "Class 3": ["Class 3 English", "Class 3 Math", "Class 3 Science"],
-      "Class 4": ["Class 4 English", "Class 4 Math", "Class 4 Science"],
-      "Class 5": ["Class 5 English", "Class 5 Math", "Class 5 Science"],
-      "Class 6": ["Class 6 English", "Class 6 Math", "Class 6 Science"],
-      "Class 7": ["Class 7 English", "Class 7 Math", "Class 7 Science"]
-    };
-
-    // Function to read query parameters
-    function getQueryParams() {
-      const params = {};
-      window.location.search.substring(1).split("&").forEach(function (pair) {
-        const [key, value] = pair.split("=");
-        params[decodeURIComponent(key)] = decodeURIComponent(value || "");
-      });
-      return params;
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — My Magical Books</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Firebase CDN SDKs (compat v9.6.10) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <style>
+    body { 
+      font-family: 'Comic Sans MS', 'Inter', sans-serif; 
+      background: linear-gradient(135deg, #ffafbd, #ffc3a0, #ffdf94, #c3e88d, #89ddff, #7daaf2); 
+      margin: 0; 
+      padding: 0; 
+      color: #1f2937; 
+      animation: rainbow-bg 10s linear infinite;
     }
-
-    function loadChildBooks() {
-      const params = getQueryParams();
-      const childName = params["child"];
-      const className = params["class"];
-
-      if (!childName || !className) {
-        document.getElementById("content").innerHTML =
-          "<p style='color:red;'>Missing child or class. Please go back.</p>";
-        return;
-      }
-
-      const books = booksByClass[className];
-
-      if (!books) {
-        document.getElementById("content").innerHTML =
-          "<p style='color:red;'>Class not found. Please go back.</p>";
-        return;
-      }
-
-      // Display child name, class, and book list
-      let html = `<h2>${childName} — ${className}</h2>`;
-      html += "<ul>";
-      books.forEach(book => {
-        html += `<li>${book}</li>`;
-      });
-      html += "</ul>";
-
-      document.getElementById("content").innerHTML = html;
+    @keyframes rainbow-bg {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
     }
-
-    window.onload = loadChildBooks;
-  </script>
+    .hero { 
+      background: linear-gradient(90deg, #ff6b6b, #ffd93d); 
+      color: #fff; 
+      padding: 50px 20px; 
+      text-align: center; 
+      border-radius: 0 0 30px 30px; 
+      box-shadow: 0 6px 15px rgba(0,0,0,0.15); 
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '⭐ 📚 🌈';
+      position: absolute;
+      top: 10px;
+      left: 0;
+      right: 0;
+      font-size: 2rem;
+      opacity: 0.2;
+    }
+    .search-bar { max-width: 600px; margin: 20px auto; }
+    .book-grid { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); 
+      gap: 24px; 
+      padding: 20px; 
+    }
+    .book-card { 
+      background: #fff; 
+      border-radius: 20px; 
+      padding: 16px; 
+      box-shadow: 0 8px 16px rgba(0,0,0,0.1); 
+      text-align: center; 
+      transition: transform 0.3s ease, box-shadow 0.3s ease; 
+      border: 2px solid #ffd93d;
+    }
+    .book-card:hover { 
+      transform: scale(1.05) rotate(2deg); 
+      box-shadow: 0 12px 24px rgba(0,0,0,0.15); 
+    }
+    .book-thumbnail { 
+      width: 100%; 
+      height: 180px; 
+      object-fit: cover; 
+      border-radius: 15px; 
+      margin-bottom: 12px; 
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+    }
+    .back-btn { 
+      position: fixed; 
+      top: 20px; 
+      left: 20px; 
+      background: #ff6b6b; 
+      color: white; 
+      padding: 12px 24px; 
+      border-radius: 999px; 
+      z-index: 1000; 
+      text-decoration: none; 
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2); 
+      transition: transform 0.2s;
+    }
+    .back-btn:hover { transform: scale(1.1); }
+    .content { padding: 20px 20px 20px 80px; }
+    .forecast { 
+      background: rgba(255,255,255,0.9); 
+      border-radius: 20px; 
+      padding: 20px; 
+      margin: 20px; 
+      box-shadow: 0 6px 12px rgba(0,0,0,0.1); 
+    }
+    .no-books { 
+      text-align: center; 
+      color: #ff6b6b; 
+      font-size: 24px; 
+      margin: 40px 0; 
+      font-weight: bold;
+    }
+    .notification-item { 
+      background: #fff; 
+      padding: 12px; 
+      border-radius: 12px; 
+      margin-bottom: 12px; 
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+      border-left: 5px solid #4caf50;
+    }
+    .loading { 
+      text-align: center; 
+      color: #ffd93d; 
+      font-size: 20px; 
+      margin: 40px 0; 
+      font-weight: bold;
+    }
+    .spinner { 
+      border: 6px solid #f3f3f3; 
+      border-top: 6px solid #ff6b6b; 
+      border-radius: 50%; 
+      width: 50px; 
+      height: 50px; 
+      animation: spin 1.5s linear infinite; 
+      margin: 0 auto; 
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .modal { 
+      position: fixed; 
+      top: 0; 
+      left: 0; 
+      width: 100%; 
+      height: 100%; 
+      background: rgba(0,0,0,0.7); 
+      z-index: 2000; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+    }
+    .modal.hidden { display: none; }
+    .modal-content { 
+      background: #fff; 
+      border-radius: 20px; 
+      width: 95%; 
+      max-width: 1200px; 
+      height: 95vh; 
+      display: flex; 
+      flex-direction: column; 
+      box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+    }
+    .modal-header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding: 16px; 
+      border-bottom: 1px solid #e5e7eb; 
+      background: #ffd93d; 
+      border-radius: 20px 20px 0 0;
+    }
+    .close-btn { 
+      background: #ff6b6b; 
+      color: white; 
+      padding: 10px 15px; 
+      border-radius: 999px; 
+      border: none; 
+      cursor: pointer; 
+      transition: transform 0.2s;
+    }
+    .close-btn:hover { transform: scale(1.1); }
+    .modal-controls { 
+      padding: 12px 16px; 
+      display: flex; 
+      gap: 10px; 
+      border-bottom: 1px solid #e5e7eb; 
+      background: #ffafbd;
+    }
+    .modal-pdf-frame { 
+      flex: 1; 
+      width: 100%; 
+      border: none; 
+      border-radius: 0 0 20px 20px; 
+    }
+    h1, h3 { font-family: 'Comic Sans MS', cursive; }
+    button { transition: transform 0.2s; }
+    button:hover { transform: scale(1.05); }
+  </style>
 </head>
 <body>
-  <h1>Child Book Records</h1>
-  <div id="content"></div>
+  <a href="parent.html" class="back-btn"><i class="fas fa-arrow-left mr-2"></i> Back to Dashboard</a>
+  <div class="content">
+    <div class="hero">
+      <h1 class="text-4xl font-bold mb-2" id="hero-title">Your Magical Books! 📚✨</h1>
+      <p class="text-xl opacity-90 mb-4">Discover fun stories and learn new things!</p>
+      <div class="search-bar">
+        <input id="searchInput" type="text" placeholder="Search for adventures... 🔍" class="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white text-white placeholder-white/70">
+      </div>
+    </div>
+    <div class="max-w-7xl mx-auto px-4">
+      <div id="booksGrid" class="book-grid"></div>
+      <div id="loading" class="loading"><div class="spinner"></div><p>Loading your magical books...</p></div>
+      <div id="noBooks" class="no-books hidden"><i class="fas fa-book-open text-5xl mb-4 block"></i>Oh no! No books here yet. Ask your teacher for more adventures! 🌟</div>
+    </div>
+    <div class="forecast">
+      <h2 class="text-2xl font-semibold mb-3">Fun Updates & New Books! 🎉</h2>
+      <div id="notificationsList" class="text-gray-600"></div>
+    </div>
+  </div>
+  <script>
+    // Inline Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const auth = firebase.auth();
+    const db = firebase.database();
+
+    // Check for student session
+    const studentKey = localStorage.getItem('studentKey');
+    if (!studentKey) {
+      alert('Please log in as parent first.');
+      window.location.href = 'index.html';
+      return;
+    }
+
+    // Fetch student data to get class
+    db.ref(`students/${studentKey}`).once('value').then(snap => {
+      const data = snap.val();
+      if (!data || !data.classLevel) {
+        alert('Invalid access. Please contact admin.');
+        window.location.href = 'index.html';
+        return;
+      }
+      const className = data.classLevel.trim(); // Normalize
+      document.getElementById('hero-title').textContent = `${className} Magical Books! 📖`;
+      fetchBooks(className);
+      fetchNotifications(studentKey);
+    }).catch(err => {
+      console.error('Student data error:', err);
+      alert('Error: ' + err.message);
+    });
+
+    function fetchBooks(className) {
+      const booksGrid = document.getElementById('booksGrid');
+      const noBooks = document.getElementById('noBooks');
+      const loading = document.getElementById('loading');
+      const searchInput = document.getElementById('searchInput');
+      let allBooks = [];
+
+      loading.classList.remove('hidden'); // Show spinner
+      const classPath = `class_books/${encodeURIComponent(className)}`;
+      console.log('Path:', classPath);
+      db.ref(classPath).on('value', snap => {
+        loading.classList.add('hidden');
+        booksGrid.innerHTML = '';
+        const books = snap.val() || {};
+        console.log('Raw books data:', books);
+        allBooks = Object.entries(books);
+        if (allBooks.length === 0) {
+          noBooks.classList.remove('hidden');
+          return;
+        }
+        noBooks.classList.add('hidden');
+        renderBooks(allBooks);
+      }, err => {
+        loading.classList.add('hidden');
+        console.error('Firebase error:', err);
+        alert('Firebase Error: ' + err.message + '\nPath: ' + classPath);
+      });
+
+      searchInput.addEventListener('input', () => {
+        const query = searchInput.value.toLowerCase().trim();
+        const filtered = allBooks.filter(([id, b]) =>
+          b.title.toLowerCase().includes(query) || b.subject.toLowerCase().includes(query)
+        );
+        booksGrid.innerHTML = '';
+        if (filtered.length === 0) {
+          noBooks.classList.remove('hidden');
+        } else {
+          noBooks.classList.add('hidden');
+          renderBooks(filtered);
+        }
+      });
+    }
+
+    function renderBooks(bookEntries) {
+      const booksGrid = document.getElementById('booksGrid');
+      booksGrid.innerHTML = ''; // Clear existing content
+      bookEntries.forEach(([id, b]) => {
+        const thumbnailUrl = b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/'); // Thumbnail
+        const card = document.createElement('div');
+        card.className = 'book-card';
+        card.innerHTML = `
+          <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail">
+          <h3 class="text-xl font-bold mt-2">${b.title}</h3>
+          <p class="text-md text-gray-600 mb-3">${b.subject}</p>
+          <button class="read-btn inline-block px-5 py-3 bg-gradient-to-r from-pink-500 to-yellow-500 text-white rounded-xl hover:from-pink-600 hover:to-yellow-600 transition" data-url="${b.url}" data-id="${id}" data-title="${b.title}">Read Adventure! 🚀</button>
+        `;
+        booksGrid.appendChild(card);
+      });
+
+      // Add event listeners for read buttons
+      document.querySelectorAll('.read-btn').forEach(button => {
+        button.addEventListener('click', () => {
+          const bookId = button.getAttribute('data-id');
+          const pdfUrl = button.getAttribute('data-url');
+          const bookTitle = button.getAttribute('data-title');
+          const proxyUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfUrl)}`;
+          const modal = document.getElementById('pdfModal');
+          const modalTitle = document.getElementById('modalTitle');
+          const modalPdfFrame = document.getElementById('modalPdfFrame');
+
+          // Show modal
+          modal.classList.remove('hidden');
+          modalTitle.textContent = bookTitle;
+          modalPdfFrame.src = proxyUrl; // Use Google Docs Viewer
+        });
+      });
+
+      // Modal controls
+      let zoomLevel = 1;
+      document.getElementById('zoomInModal').addEventListener('click', () => {
+        zoomLevel += 0.2;
+        document.getElementById('modalPdfFrame').style.transform = `scale(${zoomLevel})`;
+      });
+      document.getElementById('zoomOutModal').addEventListener('click', () => {
+        if (zoomLevel > 0.5) {
+          zoomLevel -= 0.2;
+          document.getElementById('modalPdfFrame').style.transform = `scale(${zoomLevel})`;
+        }
+      });
+      document.getElementById('closeModal').addEventListener('click', () => {
+        const modal = document.getElementById('pdfModal');
+        const modalPdfFrame = document.getElementById('modalPdfFrame');
+        modal.classList.add('hidden');
+        modalPdfFrame.src = ''; // Clear iframe
+        zoomLevel = 1; // Reset zoom
+        modalPdfFrame.style.transform = 'scale(1)';
+      });
+    }
+
+    // Disable print and download (partial protection)
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && (e.key === 'p' || e.key === 's')) {
+        e.preventDefault();
+        alert('Printing and saving disabled for copyright protection.');
+      }
+    });
+    window.print = () => {
+      alert('Printing disabled for copyright protection.');
+    };
+    document.addEventListener('contextmenu', e => e.preventDefault());
+
+    function fetchNotifications(studentKey) {
+      const notificationsList = document.getElementById('notificationsList');
+      db.ref(`notifications/${studentKey}`).orderByChild('time').limitToLast(5).on('value', snap => {
+        notificationsList.innerHTML = '';
+        const notifs = snap.val() || {};
+        if (Object.keys(notifs).length === 0) {
+          notificationsList.innerHTML = '<p class="text-gray-600">No fun updates yet. Check back soon! 🎈</p>';
+          return;
+        }
+        Object.entries(notifs).reverse().forEach(([id, n]) => {
+          if (n.type === 'new-book') {
+            const notif = document.createElement('div');
+            notif.className = 'notification-item';
+            notif.innerHTML = `
+              <p><strong>New Adventure:</strong> ${n.title} (${n.subject}) for ${n.class} 🚀</p>
+              <p class="text-sm text-gray-500">Added on ${new Date(n.time).toLocaleDateString()}</p>
+            `;
+            notificationsList.appendChild(notif);
+          }
+        });
+      }, err => {
+        console.error('Notifications error:', err);
+        notificationsList.innerHTML = '<p class="text-gray-600">Error loading updates.</p>';
+      });
+    }
+  </script>
+  <!-- Modal for full-screen PDF -->
+  <div id="pdfModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle" class="text-2xl font-bold"></h2>
+        <button id="closeModal" class="close-btn"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-controls">
+        <button id="zoomInModal" class="px-5 py-3 bg-gradient-to-r from-blue-500 to-green-500 text-white rounded-xl hover:from-blue-600 hover:to-green-600"><i class="fas fa-search-plus mr-1"></i> Zoom In</button>
+        <button id="zoomOutModal" class="px-5 py-3 bg-gradient-to-r from-blue-500 to-green-500 text-white rounded-xl hover:from-blue-600 hover:to-green-600"><i class="fas fa-search-minus mr-1"></i> Zoom Out</button>
+      </div>
+      <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0"></iframe>
+    </div>
+  </div>
 </body>
 </html>

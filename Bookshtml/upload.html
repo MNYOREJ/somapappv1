@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -269,7 +269,7 @@
       if(!files || files.length===0) return;
       const f = files[0];
       if(!f.name.toLowerCase().endsWith('.pdf') && f.type !== 'application/pdf'){ showError('Please upload a PDF file.'); return; }
-     if(f.size > MAX_FILE_SIZE){ showError('File too large. Keep under 9.5 MB (Cloudinary free limit). Compress with smallpdf.com.'); return; }
+      if(f.size > MAX_FILE_SIZE){ showError('File too large. Keep under 9.5 MB (Cloudinary free limit). Compress with smallpdf.com.'); return; }
       selectedFile = f;
       fileNameEl.textContent = f.name;
       fileSizeEl.textContent = readableSize(f.size);
@@ -327,7 +327,7 @@
       cloudNameInput.addEventListener('change', ()=> localStorage.setItem('cloudName', cloudNameInput.value.trim()));
       uploadPresetInput.addEventListener('change', ()=> localStorage.setItem('uploadPreset', uploadPresetInput.value.trim()));
       parserWebhookInput.addEventListener('change', ()=> { localStorage.setItem('parserWebhook', parserWebhookInput.value.trim()); PARSER_WEBHOOK = parserWebhookInput.value.trim(); });
-      parserApiKeyInput.addEventListener('change', ()=> { localStorage.setItem('parserApiKey', parserApiKeyInput.value.trim()); PARSER_API_KEY = parserApiKeyInput.value.trim(); });
+      parserApiKeyInput.addEventListener('change', () => { localStorage.setItem('parserApiKey', parserApiKeyInput.value.trim()); PARSER_API_KEY = parserApiKeyInput.value.trim(); });
 
       // initial load recent uploads
       renderRecentUploads();
@@ -366,10 +366,10 @@
       try{
         // Upload to Cloudinary (unsigned) via XHR for progress
         const formData = new FormData();
-formData.append("file", file);
-formData.append("upload_preset", uploadPreset);
+        formData.append("file", selectedFile);
+        formData.append("upload_preset", uploadPreset);
         // optional: folder
-        // form.append('folder', `books/${cls.replace(/\s+/g,'_')}`);
+        // formData.append('folder', `books/${cls.replace(/\s+/g,'_')}`);
 
         const cloudUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/raw/upload`;
         const xhr = new XMLHttpRequest();
@@ -388,7 +388,7 @@ formData.append("upload_preset", uploadPreset);
             }
           };
           xhr.onerror = function(){ reject(new Error('Network error during upload.')); };
-          xhr.send(form);
+          xhr.send(formData);
         });
 
         const cloudData = uploadResult;
@@ -417,12 +417,12 @@ formData.append("upload_preset", uploadPreset);
         };
 
         // Write to /books
-        const newBookRef = await firebase.database().ref('books').push(bookMeta);
+        const newBookRef = await db.ref('books').push(bookMeta);
         const bookId = newBookRef.key;
 
         // Index by class for quick retrieval
         try {
-          await firebase.database().ref(`class_books/${encodeURIComponent(cls)}/${bookId}`).set({
+          await db.ref(`class_books/${encodeURIComponent(cls)}/${bookId}`).set({
             title, subject, url: secureUrl, uploadedAt: Date.now()
           });
         } catch(err){
@@ -435,7 +435,7 @@ formData.append("upload_preset", uploadPreset);
           const candidatePaths = ['students','children','kids','pupils','users'];
           const addedToStudents = [];
           for(const path of candidatePaths){
-            const snap = await firebase.database().ref(path).once('value');
+            const snap = await db.ref(path).once('value');
             if(!snap.exists()) continue;
             const all = snap.val() || {};
             // For nodes that are user records, check role==='student' or class match
@@ -447,12 +447,12 @@ formData.append("upload_preset", uploadPreset);
               if(rec.class && rec.class === cls){
                 // attach pointer under student_books/<student_key>/<bookId> = true
                 try {
-                  await firebase.database().ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
+                  await db.ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
                   addedToStudents.push(k);
                 } catch(e){ /* continue */ }
               } else if(rec.role && rec.role === 'student' && rec.class && rec.class === cls){
                 try {
-                  await firebase.database().ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
+                  await db.ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
                   addedToStudents.push(k);
                 } catch(e){ /* continue */ }
               }
@@ -460,7 +460,7 @@ formData.append("upload_preset", uploadPreset);
           }
           if(addedToStudents.length > 0){
             // write notified list on book node
-            await firebase.database().ref(`books/${bookId}/studentsAttached`).set(addedToStudents);
+            await db.ref(`books/${bookId}/studentsAttached`).set(addedToStudents);
           }
         } catch(e){
           console.warn('Student-attachment pass failed (non-fatal)', e);
@@ -468,20 +468,20 @@ formData.append("upload_preset", uploadPreset);
 
         // Notify teachers of this class
         try {
-          const usersSnap = await firebase.database().ref('users').once('value');
+          const usersSnap = await db.ref('users').once('value');
           const users = usersSnap.val() || {};
           const notified = [];
           for(const userKey of Object.keys(users)){
             const u = users[userKey];
             if(u && u.role === 'teacher' && u.class && u.class === cls){
-              await firebase.database().ref(`notifications/${userKey}`).push({
+              await db.ref(`notifications/${userKey}`).push({
                 type:'new-book', bookId, title, subject, class:cls, time: Date.now()
               });
               notified.push(userKey);
             }
           }
           // store notified list
-          await firebase.database().ref(`books/${bookId}/notifiedTo`).set(notified);
+          await db.ref(`books/${bookId}/notifiedTo`).set(notified);
         } catch(e){
           console.warn('Failed to notify teachers', e);
         }
@@ -499,13 +499,13 @@ formData.append("upload_preset", uploadPreset);
             });
           } catch(parserErr){
             console.warn('Parser webhook failed (non-fatal):', parserErr);
-            await firebase.database().ref('book_parser_errors').push({ bookId, error: '' + (parserErr.message || parserErr), time: Date.now() });
+            await db.ref('book_parser_errors').push({ bookId, error: '' + (parserErr.message || parserErr), time: Date.now() });
           }
         } else {
           // Fallback: create a small demo quiz (useful to show parents/teachers immediately)
           try {
             const demoQuestions = generateDemoQuestions(title, subject);
-            await firebase.database().ref(`questions/${bookId}`).set({ autoGenerated: true, items: demoQuestions, createdAt: Date.now() });
+            await db.ref(`questions/${bookId}`).set({ autoGenerated: true, items: demoQuestions, createdAt: Date.now() });
           } catch(e){
             console.warn('Demo question generation failed', e);
           }
@@ -535,7 +535,7 @@ formData.append("upload_preset", uploadPreset);
             try {
               await fetch(PARSER_WEBHOOK, {
                 method:'POST',
-                headers:{ 'Content-Type':'application/json', 'x-api-key': PARSER_API_KEY || '' },
+                headers: { 'Content-Type':'application/json', 'x-api-key': PARSER_API_KEY || '' },
                 body: JSON.stringify({ bookId, cloudinaryUrl: secureUrl, metadata: bookMeta })
               });
               showSuccess('Parser re-run requested.');
@@ -568,7 +568,7 @@ formData.append("upload_preset", uploadPreset);
     async function renderRecentUploads(){
       recentList.innerHTML = '<div class="small muted">Loading…</div>';
       try {
-        const snap = await firebase.database().ref('books').orderByChild('uploadedAt').limitToLast(40).once('value');
+        const snap = await db.ref('books').orderByChild('uploadedAt').limitToLast(40).once('value');
         const books = snap.val() || {};
         recentList.innerHTML = '';
         const items = Object.entries(books).sort((a,b)=> (b[1].uploadedAt||0) - (a[1].uploadedAt||0));

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -97,7 +97,7 @@
 
         <div id="fileDrop" class="file-drop" title="Click or drag and drop a PDF">
           <div style="font-weight:700;color:var(--accent-1)">Drag & Drop PDF here</div>
-          <div class="small">or click to browse — PDF only, max 9.5MB (Cloudinary free limit)</div>
+          <div class="small">or click to browse — PDF only, max 9.5MB recommended</div>
           <input id="fileInput" type="file" accept="application/pdf" style="display:none" />
         </div>
 
@@ -183,7 +183,7 @@
   <script>
   (function(){
     /* ---------------- CONFIG ---------------- */
-    const MAX_FILE_SIZE = 9.5 * 1024 * 1024; // 9.5 MB
+    const MAX_FILE_SIZE = 70 * 1024 * 1024; // 70 MB
     const DEFAULT_CLOUD_NAME = 'dg7vnrkgd'; // your cloud name (public)
     const DEFAULT_UPLOAD_PRESET = 'books_unsigned'; // recommended unsigned preset name
     let PARSER_WEBHOOK = '';
@@ -269,7 +269,7 @@
       if(!files || files.length===0) return;
       const f = files[0];
       if(!f.name.toLowerCase().endsWith('.pdf') && f.type !== 'application/pdf'){ showError('Please upload a PDF file.'); return; }
-      if(f.size > MAX_FILE_SIZE){ showError('File too large. Keep under 9.5 MB (Cloudinary free limit). Compress with smallpdf.com.'); return; }
+      if(f.size > MAX_FILE_SIZE){ showError('File too large. Keep file under ' + readableSize(MAX_FILE_SIZE)); return; }
       selectedFile = f;
       fileNameEl.textContent = f.name;
       fileSizeEl.textContent = readableSize(f.size);
@@ -327,7 +327,7 @@
       cloudNameInput.addEventListener('change', ()=> localStorage.setItem('cloudName', cloudNameInput.value.trim()));
       uploadPresetInput.addEventListener('change', ()=> localStorage.setItem('uploadPreset', uploadPresetInput.value.trim()));
       parserWebhookInput.addEventListener('change', ()=> { localStorage.setItem('parserWebhook', parserWebhookInput.value.trim()); PARSER_WEBHOOK = parserWebhookInput.value.trim(); });
-      parserApiKeyInput.addEventListener('change', () => { localStorage.setItem('parserApiKey', parserApiKeyInput.value.trim()); PARSER_API_KEY = parserApiKeyInput.value.trim(); });
+      parserApiKeyInput.addEventListener('change', ()=> { localStorage.setItem('parserApiKey', parserApiKeyInput.value.trim()); PARSER_API_KEY = parserApiKeyInput.value.trim(); });
 
       // initial load recent uploads
       renderRecentUploads();
@@ -366,10 +366,10 @@
       try{
         // Upload to Cloudinary (unsigned) via XHR for progress
         const formData = new FormData();
-        formData.append("file", selectedFile);
-        formData.append("upload_preset", uploadPreset);
+formData.append("file", file);
+formData.append("upload_preset", uploadPreset);
         // optional: folder
-        // formData.append('folder', `books/${cls.replace(/\s+/g,'_')}`);
+        // form.append('folder', `books/${cls.replace(/\s+/g,'_')}`);
 
         const cloudUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/raw/upload`;
         const xhr = new XMLHttpRequest();
@@ -388,7 +388,7 @@
             }
           };
           xhr.onerror = function(){ reject(new Error('Network error during upload.')); };
-          xhr.send(formData);
+          xhr.send(form);
         });
 
         const cloudData = uploadResult;
@@ -417,12 +417,12 @@
         };
 
         // Write to /books
-        const newBookRef = await db.ref('books').push(bookMeta);
+        const newBookRef = await firebase.database().ref('books').push(bookMeta);
         const bookId = newBookRef.key;
 
         // Index by class for quick retrieval
         try {
-          await db.ref(`class_books/${encodeURIComponent(cls)}/${bookId}`).set({
+          await firebase.database().ref(`class_books/${encodeURIComponent(cls)}/${bookId}`).set({
             title, subject, url: secureUrl, uploadedAt: Date.now()
           });
         } catch(err){
@@ -435,7 +435,7 @@
           const candidatePaths = ['students','children','kids','pupils','users'];
           const addedToStudents = [];
           for(const path of candidatePaths){
-            const snap = await db.ref(path).once('value');
+            const snap = await firebase.database().ref(path).once('value');
             if(!snap.exists()) continue;
             const all = snap.val() || {};
             // For nodes that are user records, check role==='student' or class match
@@ -447,12 +447,12 @@
               if(rec.class && rec.class === cls){
                 // attach pointer under student_books/<student_key>/<bookId> = true
                 try {
-                  await db.ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
+                  await firebase.database().ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
                   addedToStudents.push(k);
                 } catch(e){ /* continue */ }
               } else if(rec.role && rec.role === 'student' && rec.class && rec.class === cls){
                 try {
-                  await db.ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
+                  await firebase.database().ref(`student_books/${k}/${bookId}`).set({ title, subject, url: secureUrl, time: Date.now() });
                   addedToStudents.push(k);
                 } catch(e){ /* continue */ }
               }
@@ -460,7 +460,7 @@
           }
           if(addedToStudents.length > 0){
             // write notified list on book node
-            await db.ref(`books/${bookId}/studentsAttached`).set(addedToStudents);
+            await firebase.database().ref(`books/${bookId}/studentsAttached`).set(addedToStudents);
           }
         } catch(e){
           console.warn('Student-attachment pass failed (non-fatal)', e);
@@ -468,20 +468,20 @@
 
         // Notify teachers of this class
         try {
-          const usersSnap = await db.ref('users').once('value');
+          const usersSnap = await firebase.database().ref('users').once('value');
           const users = usersSnap.val() || {};
           const notified = [];
           for(const userKey of Object.keys(users)){
             const u = users[userKey];
             if(u && u.role === 'teacher' && u.class && u.class === cls){
-              await db.ref(`notifications/${userKey}`).push({
+              await firebase.database().ref(`notifications/${userKey}`).push({
                 type:'new-book', bookId, title, subject, class:cls, time: Date.now()
               });
               notified.push(userKey);
             }
           }
           // store notified list
-          await db.ref(`books/${bookId}/notifiedTo`).set(notified);
+          await firebase.database().ref(`books/${bookId}/notifiedTo`).set(notified);
         } catch(e){
           console.warn('Failed to notify teachers', e);
         }
@@ -499,13 +499,13 @@
             });
           } catch(parserErr){
             console.warn('Parser webhook failed (non-fatal):', parserErr);
-            await db.ref('book_parser_errors').push({ bookId, error: '' + (parserErr.message || parserErr), time: Date.now() });
+            await firebase.database().ref('book_parser_errors').push({ bookId, error: '' + (parserErr.message || parserErr), time: Date.now() });
           }
         } else {
           // Fallback: create a small demo quiz (useful to show parents/teachers immediately)
           try {
             const demoQuestions = generateDemoQuestions(title, subject);
-            await db.ref(`questions/${bookId}`).set({ autoGenerated: true, items: demoQuestions, createdAt: Date.now() });
+            await firebase.database().ref(`questions/${bookId}`).set({ autoGenerated: true, items: demoQuestions, createdAt: Date.now() });
           } catch(e){
             console.warn('Demo question generation failed', e);
           }
@@ -535,7 +535,7 @@
             try {
               await fetch(PARSER_WEBHOOK, {
                 method:'POST',
-                headers: { 'Content-Type':'application/json', 'x-api-key': PARSER_API_KEY || '' },
+                headers:{ 'Content-Type':'application/json', 'x-api-key': PARSER_API_KEY || '' },
                 body: JSON.stringify({ bookId, cloudinaryUrl: secureUrl, metadata: bookMeta })
               });
               showSuccess('Parser re-run requested.');
@@ -568,7 +568,7 @@
     async function renderRecentUploads(){
       recentList.innerHTML = '<div class="small muted">Loading…</div>';
       try {
-        const snap = await db.ref('books').orderByChild('uploadedAt').limitToLast(40).once('value');
+        const snap = await firebase.database().ref('books').orderByChild('uploadedAt').limitToLast(40).once('value');
         const books = snap.val() || {};
         recentList.innerHTML = '';
         const items = Object.entries(books).sort((a,b)=> (b[1].uploadedAt||0) - (a[1].uploadedAt||0));

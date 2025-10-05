@@ -12,7 +12,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } label { display: block; margin-bottom: 0.5rem; font-weight: bold; color: #f3f4f6; } </style>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } label { display: block; margin-bottom: 0.5rem; font-weight: bold; color: #f3f4f6; } #totalFeeDisplay { background: linear-gradient(to right, #10b981, #059669); font-size: 1.1rem; } </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
   <div class="max-w-4xl mx-auto">
@@ -52,7 +52,11 @@
           </div>
           <div>
             <label for="reportingDate">Date of Reporting *</label>
-            <input type="date" id="reportingDate" class="p-2 rounded w-full bg-white/20 text-white" required title="Enter Reporting Date (when child joined Preform One, e.g., 2025-09-15 for mid-Sept—key for pro-rated fees)">
+            <input type="date" id="reportingDate" class="p-2 rounded w-full bg-white/20 text-white" required title="Enter Reporting Date (when child joined Preform One, e.g., 2025-09-15 for mid-Sept—key for pro-rated fees)" onchange="updateTotalFee()">
+          </div>
+          <div class="md:col-span-2">
+            <label for="totalFeeDisplay">Total Fee for Program (Auto-Calculated based on Reporting Date)</label>
+            <input type="text" id="totalFeeDisplay" class="p-2 rounded w-full bg-green-500/30 text-white font-bold text-lg" readonly value="TSh 0 (Enter Reporting Date to calculate)">
           </div>
           <div class="md:col-span-2">
             <label for="formerSchool">Former Primary School *</label>
@@ -89,6 +93,48 @@
   </div>
 
   <script>
+    // Auto-calculate Total Fee on Reporting Date change
+    function updateTotalFee() {
+      const reportingDateInput = document.getElementById('reportingDate');
+      const totalFeeDisplay = document.getElementById('totalFeeDisplay');
+      if (!reportingDateInput.value) {
+        totalFeeDisplay.value = 'TSh 0 (Enter Reporting Date to calculate)';
+        return;
+      }
+      
+      const reportingDate = new Date(reportingDateInput.value);
+      const endDate = new Date(currentYear, 11, 15); // Dec 15 of currentYear (e.g., 2025-12-15)
+      
+      if (reportingDate > endDate) {
+        totalFeeDisplay.value = 'TSh 0 (Reporting date after program end)';
+        return;
+      }
+      
+      let totalFee = 0;
+      let current = new Date(reportingDate.getFullYear(), reportingDate.getMonth(), reportingDate.getDate());
+      
+      while (current <= endDate) {
+        const monthEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0); // Last day of current month
+        const daysInMonth = monthEnd.getDate();
+        const daysEnrolled = Math.min(endDate.getDate(), daysInMonth) - current.getDate() + 1;
+        
+        if (current.getMonth() === 11) { // December: Pro-rate to 15th
+          const decDays = 15; // Up to Dec 15
+          const enrolledDecDays = Math.min(decDays - current.getDate() + 1, decDays);
+          totalFee += Math.round((enrolledDecDays / 30) * 15000);
+        } else {
+          // Full month: 15,000 TSh
+          totalFee += 15000;
+        }
+        
+        // Move to next month
+        current.setMonth(current.getMonth() + 1);
+        current.setDate(1); // Start of next month
+      }
+      
+      totalFeeDisplay.value = `TSh ${totalFee.toLocaleString()} (Pro-rated from ${reportingDateInput.value})`;
+    }
+    
     function showForm() { 
       document.getElementById('admissionForm').style.display = 'block'; 
       document.getElementById('searchResults').scrollIntoView({ behavior: 'smooth' }); // Smooth scroll to form
@@ -126,7 +172,7 @@
           }
         }
         
-        // Generate ADM No and calculate fee
+        // Generate ADM No and calculate fee (use same logic as display)
         const admNo = generateAdmNo();
         const totalFee = calculateTotalFee(reportingDate);
         
@@ -160,6 +206,7 @@
           confirmButtonText: 'OK'
         });
         document.getElementById('admForm').reset();
+        document.getElementById('totalFeeDisplay').value = 'TSh 0 (Enter Reporting Date to calculate)'; // Reset display
         document.getElementById('admissionForm').style.display = 'none';
         searchStudents(); // Auto-refresh list
         

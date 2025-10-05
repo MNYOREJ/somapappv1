@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Admissions</title>
+  <!-- Same scripts as dashboard -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-user-plus"></i> Preform One Admissions</h1>
+    <a href="prefonedashboard.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back</a>
+    
+    <!-- Create New -->
+    <button onclick="showForm()" class="bg-green-500 hover:bg-green-600 p-3 rounded mb-4">Create New Admission</button>
+    
+    <div id="admissionForm" style="display:none;" class="bg-white/10 p-6 rounded-lg">
+      <form id="admForm">
+        <div class="grid grid-cols-2 gap-4">
+          <input type="text" id="firstName" placeholder="First Name *" class="p-2 rounded bg-white/20 text-white" required>
+          <input type="text" id="middleName" placeholder="Middle Name" class="p-2 rounded bg-white/20 text-white">
+          <input type="text" id="lastName" placeholder="Last Name *" class="p-2 rounded bg-white/20 text-white" required>
+          <select id="gender" class="p-2 rounded bg-white/20 text-white" required><option>Male</option><option>Female</option><option>Other</option></select>
+          <input type="date" id="dob" class="p-2 rounded bg-white/20 text-white" required>
+          <input type="date" id="reportingDate" placeholder="Reporting Date *" class="p-2 rounded bg-white/20 text-white" required>
+          <input type="tel" id="contact" placeholder="Student Contact" class="p-2 rounded bg-white/20 text-white">
+          <input type="tel" id="parentContact" placeholder="Parent Contact *" class="p-2 rounded bg-white/20 text-white" required>
+          <input type="file" id="photo" accept="image/*" class="p-2 rounded bg-white/20 text-white">
+        </div>
+        <button type="submit" class="mt-4 bg-blue-500 p-2 rounded">Register Student</button>
+      </form>
+    </div>
+    
+    <!-- Search Results -->
+    <div id="searchResults" class="mt-8">
+      <h2 class="text-xl mb-4">Quick Search (Live)</h2>
+      <input type="text" id="searchInput" placeholder="Search by Name/ID" class="p-2 rounded w-full mb-4" oninput="searchStudents()">
+      <table class="w-full bg-white/10 rounded overflow-hidden">
+        <thead><tr class="bg-white/20"><th>Name</th><th>ID</th><th>Total Fee</th><th>Balance</th><th>Actions</th></tr></thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    function showForm() { document.getElementById('admissionForm').style.display = 'block'; }
+    
+    document.getElementById('admForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const file = form.get('photo');
+      let photoUrl = '';
+      if (file) {
+        uploadToCloudinary(file, 'preformone/photos').then(url => {
+          photoUrl = url;
+          saveStudent(photoUrl);
+        });
+      } else saveStudent(photoUrl);
+    });
+    
+    function saveStudent(photoUrl) {
+      const admNo = generateAdmNo();
+      const reportingDate = document.getElementById('reportingDate').value;
+      const totalFee = calculateTotalFee(reportingDate);
+      const student = {
+        firstName: document.getElementById('firstName').value,
+        middleName: document.getElementById('middleName').value,
+        lastName: document.getElementById('lastName').value,
+        gender: document.getElementById('gender').value,
+        dob: document.getElementById('dob').value,
+        reportingDate,
+        contact: document.getElementById('contact').value,
+        parentContact: document.getElementById('parentContact').value,
+        photoUrl,
+        totalFee,
+        payments: [],
+        attendance: [],
+        scores: [],
+        shifted: false
+      };
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${admNo}`).set(student).then(() => {
+        Swal.fire('Success', 'Student Registered!', 'success');
+        document.getElementById('admForm').reset();
+        document.getElementById('admissionForm').style.display = 'none';
+        searchStudents();
+      });
+    }
+    
+    function searchStudents() {
+      const query = document.getElementById('searchInput').value.toLowerCase();
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const students = Object.entries(snap.val() || {});
+        const filtered = students.filter(([adm, s]) => 
+          s.firstName.toLowerCase().includes(query) || adm.includes(query)
+        );
+        const tbody = document.getElementById('resultsBody');
+        tbody.innerHTML = filtered.map(([adm, s]) => {
+          const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
+          const balance = s.totalFee - paid;
+          return `<tr><td>${s.firstName} ${s.lastName}</td><td>${adm}</td><td>${s.totalFee} TSh</td><td>${balance} TSh</td><td><button onclick="editStudent('${adm}')">Edit</button> <button onclick="deleteStudent('${adm}')">Delete</button></td></tr>`;
+        }).join('');
+      });
+    }
+    
+    function editStudent(adm) { /* Impl: Load form, update */ Swal.fire('Edit', 'Coming soon'); }
+    function deleteStudent(adm) { db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).remove(); searchStudents(); }
+    
+    searchStudents(); // Initial load
+  </script>
+</body>
+</html>

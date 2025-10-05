@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Parent Dashboard</title>
+  <!-- Same -->
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-home"></i> Preform One Parent Dashboard</h1>
+    <button onclick="logout()" class="bg-red-500 p-2 rounded mb-4">Logout</button>
+    
+    <!-- Child Selector (if multiple) -->
+    <select id="childSelect" onchange="loadParentData()" class="p-2 rounded bg-white/20 text-white mb-4">
+      <!-- Populated dynamically -->
+    </select>
+    
+    <!-- Cards -->
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <a href="prefonechildattendance.html" class="bg-blue-500 p-4 rounded text-center"><i class="fas fa-calendar"></i><br>Attendance</a>
+      <a href="prefoneacademic.html?view=parent" class="bg-green-500 p-4 rounded text-center"><i class="fas fa-chart-bar"></i><br>Scores</a>
+      <a href="prefonebooks.html" class="bg-yellow-500 p-4 rounded text-center"><i class="fas fa-book"></i><br>Books</a>
+      <a href="prefoneclassjournal.html?view=parent" class="bg-purple-500 p-4 rounded text-center"><i class="fas fa-comments"></i><br>Class Journal (Confirm)</a>
+    </div>
+    
+    <!-- Summary -->
+    <div id="parentSummary" class="bg-white/10 p-4 rounded"></div>
+  </div>
+
+  <script>
+    // From auth: Assume localStorage has parentContact, load children
+    const parentContact = localStorage.getItem('parentContact') || '';
+    db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).orderByChild('parentContact').equalTo(parentContact).once('value', snap => {
+      const children = Object.entries(snap.val() || {});
+      const select = document.getElementById('childSelect');
+      select.innerHTML = children.map(([adm, s]) => `<option value="${adm}">${s.firstName} ${s.lastName}</option>`).join('');
+      if (children.length) loadParentData();
+    });
+    
+    function loadParentData() {
+      const adm = document.getElementById('childSelect').value;
+      if (!adm) return;
+      localStorage.setItem('currentChildAdm', adm);
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).once('value', snap => {
+        const s = snap.val();
+        const summary = document.getElementById('parentSummary');
+        const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
+        summary.innerHTML = `
+          <h2>${s.firstName} ${s.lastName}</h2>
+          <p>Reporting Date: ${s.reportingDate}</p>
+          <p>Total Fee: ${s.totalFee} TSh | Paid: ${paid} TSh | Balance: ${s.totalFee - paid} TSh</p>
+          <p>Contact: ${s.contact}</p>
+          <img src="${s.photoUrl}" alt="Photo" class="w-32 h-32 rounded">
+        `;
+      });
+    }
+    
+    function logout() { localStorage.clear(); window.location.href = '../index.html'; }
+  </script>
+</body>
+</html>

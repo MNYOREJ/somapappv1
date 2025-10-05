@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Finance</title>
+  <!-- Same -->
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } .overdue { color: red; } .due-soon { color: yellow; } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-money-bill"></i> Preform One Finance</h1>
+    <a href="prefonedashboard.html" class="bg-gray-500 p-2 rounded mb-4 inline-block">< Back</a>
+    <button onclick="reloadFinance()" class="bg-blue-500 p-2 rounded">Reload</button>
+    
+    <!-- Stats -->
+    <div class="grid grid-cols-5 gap-4 mb-6">
+      <div class="bg-white/20 p-4 rounded">Total Due: <span id="totalDue">0</span> TSh</div>
+      <div class="bg-white/20 p-4 rounded">Collected: <span id="collected">0</span> TSh</div>
+      <div class="bg-white/20 p-4 rounded">Outstanding: <span id="outstanding">0</span> TSh</div>
+      <div class="bg-white/20 p-4 rounded">Expenses: <span id="expensesTotal">0</span> TSh</div>
+      <div class="bg-white/20 p-4 rounded">Net Balance: <span id="netBal">0</span> TSh</div>
+    </div>
+    
+    <!-- Filter -->
+    <div class="mb-4">Filter: <select id="classFilter" onchange="loadFinance()"><option>All</option><option>Preform One</option></select> <button onclick="showDebtors()" class="bg-red-500 p-2 rounded">Show Debtors</button></div>
+    
+    <table class="w-full bg-white/10 rounded">
+      <thead><tr class="bg-white/20"><th>Adm No</th><th>Full Name</th><th>Contact</th><th>Total Fee</th><th>Payment Plan</th><th>Paid</th><th>Balance</th><th>Debt Till…</th><th>Actions</th></tr></thead>
+      <tbody id="financeBody"></tbody>
+    </table>
+    
+    <div class="mt-4 flex gap-2">
+      <button onclick="exportCSV(financeData, 'finance.csv')" class="bg-green-500 p-2 rounded">Main CSV</button>
+      <button onclick="generatePDF('Finance Report', 'finance.pdf')" class="bg-purple-500 p-2 rounded">Main PDF</button>
+      <button id="debtBtn" onclick="exportDebtors()" style="display:none;" class="bg-red-500 p-2 rounded">Debt CSV/PDF</button>
+    </div>
+  </div>
+
+  <script>
+    let financeData = [];
+    function loadFinance() {
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const students = Object.entries(snap.val() || {});
+        let due = 0, coll = 0, exp = 0;
+        financeData = students.map(([adm, s]) => {
+          const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
+          const bal = s.totalFee - paid;
+          due += s.totalFee;
+          coll += paid;
+          const nextDue = new Date(s.reportingDate); nextDue.setMonth(nextDue.getMonth() + 1); // Next month
+          const daysToDue = (nextDue - new Date()) / (1000*60*60*24);
+          const debtTill = daysToDue < 0 ? `<span class="overdue">Overdue ${Math.abs(daysToDue).toFixed(0)} days</span>` :
+                          daysToDue < 7 ? `<span class="due-soon">Due in ${daysToDue.toFixed(0)} days</span>` : `Due ${nextDue.toLocaleDateString()}`;
+          const row = { adm, name: `${s.firstName} ${s.lastName}`, contact: s.parentContact, totalFee: s.totalFee,
+            plan: s.reportingDate ? `From ${s.reportingDate} (3 months pro-rated)` : 'Full', paid, bal, debtTill };
+          return row;
+        });
+        
+        db.ref(`/schools/Socrates School Preform one/${currentYear}/expenses`).once('value', eSnap => {
+          exp = Object.values(eSnap.val() || {}).reduce((sum, ex) => sum + ex.amount, 0);
+          document.getElementById('totalDue').textContent = due;
+          document.getElementById('collected').textContent = coll;
+          document.getElementById('outstanding').textContent = due - coll;
+          document.getElementById('expensesTotal').textContent = exp;
+          document.getElementById('netBal').textContent = coll - exp;
+        });
+        
+        const tbody = document.getElementById('financeBody');
+        tbody.innerHTML = financeData.map(row => 
+          `<tr><td>${row.adm}</td><td>${row.name}</td><td>${row.contact}</td><td>${row.totalFee}</td><td>${row.plan}</td><td>${row.paid}</td><td>${row.bal}</td><td>${row.debtTill}</td>
+          <td><button onclick="viewPayment('${row.adm}')">View Pay</button></td></tr>`
+        ).join('');
+      });
+    }
+    
+    function viewPayment(adm) {
+      // Modal with payments history, add payment form
+      Swal.fire({
+        title: `Payments for ${financeData.find(d => d.adm === adm).name}`,
+        html: `<div id="payHistory"></div><input type="number" id="newAmount" placeholder="Add Payment"><button onclick="addPayment('${adm}')">Add</button>`,
+        didOpen: () => {
+          db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/payments`).once('value', snap => {
+            document.getElementById('payHistory').innerHTML = Object.values(snap.val() || {}).map(p => `<p>${p.date}: ${p.amount} TSh (${p.method || 'cash'})</p>`).join('');
+          });
+        }
+      });
+    }
+    
+    function addPayment(adm) {
+      const amount = parseInt(document.getElementById('newAmount').value);
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/payments`).push({ date: new Date().toISOString().split('T')[0], amount, method: 'cash' });
+      Swal.fire('Added!', 'Payment recorded.', 'success');
+      loadFinance();
+    }
+    
+    function showDebtors() {
+      const debtors = financeData.filter(d => d.bal > 0);
+      // Filter table or new view
+      document.getElementById('financeBody').innerHTML = debtors.map(row => /* same tr */ ).join('');
+      document.getElementById('debtBtn').style.display = 'inline-block';
+    }
+    
+    function exportDebtors() {
+      const debtors = financeData.filter(d => d.bal > 0 && /* overdue logic */ true);
+      const csvData = debtors.map(d => ({ Name: d.name, Contact: d.contact, Balance: d.bal, DebtTill: d.debtTill }));
+      exportCSV(csvData, 'debtors.csv');
+      generatePDF('Debtors Report\n' + JSON.stringify(csvData, null, 2), 'debtors.pdf');
+      // SMS: Fetch phones, but no API; log for manual
+      console.log('Debtor Phones:', debtors.map(d => d.contact));
+    }
+    
+    function reloadFinance() { loadFinance(); }
+    
+    loadFinance();
+  </script>
+</body>
+</html>

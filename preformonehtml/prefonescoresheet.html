@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Scoresheet</title>
+  <!-- Same scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } table { border-collapse: collapse; } th, td { border: 1px solid white; padding: 4px; } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4 overflow-x-auto">
+  <div class="max-w-full mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-table"></i> Preform One Scoresheet</h1>
+    <a href="prefoneacademic.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back to Academic</a>
+    <div class="flex gap-2 mb-4">
+      <button onclick="toggleFullscreen()" class="bg-gray-500 p-2 rounded">Fullscreen</button>
+      <button onclick="saveScores()" class="bg-blue-500 p-2 rounded">Save</button>
+      <button onclick="exportCSV(allData, 'scores.csv')" class="bg-green-500 p-2 rounded">CSV</button>
+      <button onclick="generateReportCards()" class="bg-purple-500 p-2 rounded">PDF Reports</button>
+    </div>
+    
+    <!-- Filters (sync with academic) -->
+    <div class="grid grid-cols-4 gap-4 mb-4 bg-white/10 p-2 rounded">
+      <select id="examType" onchange="loadScores()" class="p-1 rounded bg-white/20 text-white"><option>Monthly</option><!-- etc --></select>
+      <select id="month" onchange="loadScores()" class="p-1 rounded bg-white/20 text-white"><option>Sep</option><!-- etc --></select>
+      <select id="maxScore" class="p-1 rounded bg-white/20 text-white"><option>50</option><option>100</option></select>
+    </div>
+    
+    <table id="scoresTable">
+      <thead>
+        <tr class="bg-white/20">
+          <th>#</th><th>Adm</th><th>Student (Preform One)</th><th>Fee Due/Paid/Bal (TSh)</th>
+          <!-- Dynamic subjects -->
+          ${subjects.map(sub => `<th>${sub}<br>(Max/Pstn)</th>`).join('')}
+          <th>Total/Max</th><th>% Avg</th><th>Pos</th><th>Grade</th><th>Pres/Abs</th><th>Comment</th>
+        </tr>
+      </thead>
+      <tbody id="scoresBody"></tbody>
+    </table>
+    <p class="mt-4">Total Students: <span id="totalStudents">0</span> | Subjects: ${subjects.length}</p>
+  </div>
+
+  <script>
+    let allData = [], maxScore = 100;
+    function loadScores() {
+      maxScore = parseInt(document.getElementById('maxScore').value);
+      const examType = document.getElementById('examType').value;
+      const month = document.getElementById('month').value;
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const students = Object.entries(snap.val() || {});
+        let position = 1;
+        allData = students.map(([adm, s], idx) => {
+          const scoreData = s.scores?.find(sc => sc.examType === examType && sc.month === month) || { subjects: {} };
+          subjects.forEach(sub => { if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; });
+          const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
+          const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
+          const avg = (total / maxTotal * 100).toFixed(2);
+          const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
+          const row = {
+            adm, name: `${s.firstName} ${s.lastName} (Preform One)`, due: s.totalFee, paid, bal: s.totalFee - paid,
+            subjects: scoreData.subjects, total, maxTotal, avg, pos: position++, grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
+            pres: s.attendance.filter(a => a.present).length, abs: s.attendance.length - s.pres
+          };
+          position = row.pos; // Sort later for true pos
+          return row;
+        }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 })); // Re-position
+        
+        document.getElementById('totalStudents').textContent = allData.length;
+        const tbody = document.getElementById('scoresBody');
+        tbody.innerHTML = allData.map(row => `
+          <tr>
+            <td>${row.pos}</td><td>${row.adm}</td><td>${row.name} ${row.reportingDate ? `<br>${row.reportingDate}` : ''}</td>
+            <td>${row.due}k/${row.paid}k/${row.bal}k</td>
+            ${subjects.map(sub => `<td>${row.subjects[sub].score}/${row.subjects[sub].max}/${row.pos}</td>`).join('')}
+            <td>${row.total}/${row.maxTotal}</td><td>${row.avg}</td><td>${row.pos}</td><td>${row.grade}</td>
+            <td>${row.pres}/${row.abs}</td><td><input type="text" value="${row.comment || ''}" onchange="updateComment('${row.adm}', this.value)"></td>
+          </tr>
+        `).join('');
+      });
+    }
+    
+    function saveScores() {
+      // Push updates to DB (loop allData, update scores)
+      allData.forEach(row => {
+        db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/scores`).update({ examType: document.getElementById('examType').value, month: document.getElementById('month').value, subjects: row.subjects });
+      });
+      Swal.fire('Saved!', 'Scores updated.', 'success');
+    }
+    
+    function updateComment(adm, comment) {
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ comment });
+    }
+    
+    function generateReportCards() {
+      allData.forEach(row => {
+        const content = `Report Card: ${row.name}\nAvg: ${row.avg}%\nSubjects: ${JSON.stringify(row.subjects, null, 2)}\nPhoto: [${row.photoUrl}]`;
+        generatePDF(content, `${row.name}_report_${currentYear}.pdf`);
+      });
+      Swal.fire('PDFs Generated!', `${allData.length} reports saved.`);
+    }
+    
+    function toggleFullscreen() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); }
+    
+    loadScores();
+  </script>
+</body>
+</html>

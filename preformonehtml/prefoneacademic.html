@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Academic</title>
+  <!-- Same scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-book"></i> Preform One Academic & Exams</h1>
+    <a href="prefonedashboard.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back</a>
+    
+    <!-- Filters -->
+    <div class="grid grid-cols-4 gap-4 mb-6 bg-white/10 p-4 rounded">
+      <select id="examType" class="p-2 rounded bg-white/20 text-white"><option>Monthly</option><option>Midterm 1</option><option>End Term</option><option>Midterm 2</option><option>Annual</option></select>
+      <select id="month" class="p-2 rounded bg-white/20 text-white"><option>Sep</option><option>Oct</option><option>Nov</option><option>Dec</option></select>
+      <select id="year" onchange="loadYear(this.value)" class="p-2 rounded bg-white/20 text-white"><option>2025</option></select>
+      <button onclick="loadAcademicData()" class="bg-blue-500 p-2 rounded">Load</button>
+    </div>
+    
+    <!-- Stats -->
+    <div class="grid grid-cols-4 gap-4 mb-6">
+      <div class="bg-white/20 p-4 rounded">Top Student: <span id="topStudent"></span> — <span id="topScore"></span>%</div>
+      <div class="bg-white/20 p-4 rounded">Bottom Student: <span id="bottomStudent"></span> — <span id="bottomScore"></span>%</div>
+      <div class="bg-white/20 p-4 rounded">Class Max: <span id="classMax"></span>%</div>
+      <div class="bg-white/20 p-4 rounded">Class Avg: <span id="classAvg"></span>%</div>
+      <div class="bg-white/20 p-4 rounded">Attendance: <span id="attendance"></span>% Present</div>
+      <div class="bg-white/20 p-4 rounded">Fee Summary: Required <span id="required"></span> | Paid <span id="paid"></span> | Balance <span id="bal"></span></div>
+      <div class="bg-white/20 p-4 rounded">Best Subject Avg: <span id="bestSub"></span></div>
+    </div>
+    
+    <!-- Scores Link -->
+    <a href="prefonescoresheet.html" class="bg-yellow-500 p-3 rounded mb-4 inline-block"><i class="fas fa-table"></i> Scoresheet</a>
+    
+    <!-- Simple Graph Placeholder (use Chart.js if added; for now text) -->
+    <div class="bg-white/10 p-4 rounded mb-4">Subject Performance Chart: [Auto-gen averages per subject]</div>
+  </div>
+
+  <script>
+    function loadAcademicData() {
+      const examType = document.getElementById('examType').value;
+      const month = document.getElementById('month').value;
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const students = Object.values(snap.val() || {});
+        let topScore = 0, bottomScore = 100, topName = '', bottomName = '', totalAvg = 0, presentDays = 0, totalDays = 0;
+        let required = 0, paid = 0;
+        const subAvgs = {};
+        subjects.forEach(sub => subAvgs[sub] = 0);
+        
+        students.forEach(s => {
+          const scoreData = s.scores?.find(sc => sc.examType === examType && sc.month === month);
+          const avg = scoreData ? Object.values(scoreData.subjects).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length : 0;
+          totalAvg += avg;
+          if (avg > topScore) { topScore = avg; topName = s.firstName + ' ' + s.lastName; }
+          if (avg < bottomScore) { bottomScore = avg; bottomName = s.firstName + ' ' + s.lastName; }
+          
+          // Attendance
+          s.attendance?.forEach(a => { if (a.present) presentDays++; totalDays++; });
+          
+          // Fees
+          required += s.totalFee;
+          paid += s.payments.reduce((sum, p) => sum + p.amount, 0);
+          
+          // Subjects
+          if (scoreData) Object.entries(scoreData.subjects).forEach(([sub, data]) => {
+            subAvgs[sub] += (data.score / data.max * 100);
+          });
+        });
+        
+        const classAvg = totalAvg / students.length;
+        const attPct = (presentDays / totalDays * 100).toFixed(1);
+        const bestSub = Object.entries(subAvgs).reduce((a, b) => a[1] > b[1] ? a : b)[0];
+        
+        document.getElementById('topStudent').textContent = topName;
+        document.getElementById('topScore').textContent = topScore.toFixed(2);
+        document.getElementById('bottomStudent').textContent = bottomName;
+        document.getElementById('bottomScore').textContent = bottomScore.toFixed(2);
+        document.getElementById('classMax').textContent = topScore.toFixed(2);
+        document.getElementById('classAvg').textContent = classAvg.toFixed(2);
+        document.getElementById('attendance').textContent = attPct;
+        document.getElementById('required').textContent = required + ' TSh';
+        document.getElementById('paid').textContent = paid + ' TSh';
+        document.getElementById('bal').textContent = (required - paid) + ' TSh';
+        document.getElementById('bestSub').textContent = bestSub;
+      });
+    }
+    loadAcademicData();
+  </script>
+</body>
+</html>

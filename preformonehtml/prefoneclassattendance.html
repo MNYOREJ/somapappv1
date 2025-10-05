@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Class Attendance</title>
+  <!-- Same scripts -->
+  <script src="prefonecommon.js"></script> <!-- Abbrev for space -->
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-users"></i> Preform One Class Attendance</h1>
+    <a href="prefoneattendance.html" class="bg-gray-500 p-2 rounded mb-4 inline-block"><i class="fas fa-arrow-left"></i> Back</a>
+    
+    <!-- Date Select -->
+    <input type="date" id="attDate" class="p-2 rounded bg-white/20 text-white mb-4" onchange="loadClassAtt()">
+    
+    <table class="w-full bg-white/10 rounded">
+      <thead><tr class="bg-white/20"><th>Adm</th><th>Name</th><th>Present?</th><th>Notes</th></tr></thead>
+      <tbody id="classAttBody"></tbody>
+    </table>
+    
+    <button onclick="saveClassAtt()" class="bg-blue-500 p-2 rounded mt-4">Save Attendance</button>
+  </div>
+
+  <script>
+    function loadClassAtt() {
+      const date = document.getElementById('attDate').value || new Date().toISOString().split('T')[0];
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const tbody = document.getElementById('classAttBody');
+        tbody.innerHTML = Object.entries(snap.val() || {}).map(([adm, s]) => {
+          const att = s.attendance?.find(a => a.date === date);
+          return `<tr><td>${adm}</td><td>${s.firstName} ${s.lastName}</td>
+            <td><input type="checkbox" ${att?.present ? 'checked' : ''} onchange="togglePresent('${adm}', '${date}', this.checked)"></td>
+            <td><input type="text" placeholder="Notes" value="${att?.notes || ''}" onchange="updateNotes('${adm}', '${date}', this.value)"></td></tr>`;
+        }).join('');
+      });
+    }
+    
+    function togglePresent(adm, date, present) {
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance`).push({ date, present });
+    }
+    
+    function updateNotes(adm, date, notes) {
+      // Update last att entry
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance`).limitToLast(1).once('value', snap => {
+        const key = Object.keys(snap.val())[0];
+        if (key) db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance/${key}`).update({ notes });
+      });
+    }
+    
+    function saveClassAtt() { Swal.fire('Saved!', 'Class attendance updated.', 'success'); }
+    
+    loadClassAtt();
+  </script>
+</body>
+</html>

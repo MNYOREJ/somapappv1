@@ -318,6 +318,25 @@
         }
         const auth = firebase.auth();
         const db = firebase.database();
+        // Helper function for Preform One: Match at least 2 names (case-insensitive) in student data
+function namesMatch(studentData, inputNames) {
+  if (!studentData || !inputNames) return false;
+  const inputs = inputNames.toLowerCase().split(/\s+/).filter(word => word.length >= 2); // Split into words >=2 letters
+  if (inputs.length < 2) return false;
+  let totalMatches = 0;
+  for (const student of Object.values(studentData)) {
+    const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.toLowerCase();
+    let studentMatches = 0;
+    for (const inputWord of inputs) {
+      if (fullName.includes(inputWord)) studentMatches++;
+    }
+    if (studentMatches >= 2) {
+      totalMatches += studentMatches; // Found a match
+      break; // Stop on first full match
+    }
+  }
+  return totalMatches >= 2;
+}
         function normalizePhone(phone) {
             if (!phone) return "";
             phone = phone.trim().replace(/[\s-()]/g, "");
@@ -397,6 +416,14 @@
                 }
                 localStorage.setItem('role', userData.role || '');
                 if (userData.class) localStorage.setItem('class', userData.class);
+                // Preform One access flags (safe addition - no route changes)
+const currentYear = new Date().getFullYear(); // Auto 2025
+if (user.email === 'ssclass72023@gmail.com') {
+  localStorage.setItem('preformAccess', 'true'); // Enables icon in staff.html
+}
+if (user.email === 'socratesschool2020@gmail.com') {
+  localStorage.setItem('adminAccess', 'true'); // Full access for dashboard.html
+}
                 if (userData.role === 'accountant') {
                     window.location.href = 'mhasibu.html';
                 } else if (userData.role === 'teacher') {
@@ -464,22 +491,54 @@
                     }
                 }
                 btn.disabled = false;
-                btn.textContent = 'Sign In as Parent';
-                if (!foundStudent) {
-                    msgEl.textContent = 'No matching student found. Check names and phone.';
-                    msgEl.classList.remove('hidden');
-                    return;
-                }
-                localStorage.setItem('role', 'parent');
-                localStorage.setItem('studentKey', foundKey);
-                Swal.fire({
-                    title: 'Welcome',
-                    text: `Signed in for ${foundStudent.firstName || ''} ${foundStudent.lastName || ''}`,
-                    icon: 'success',
-                    timer: 1100,
-                    showConfirmButton: false
-                });
-                setTimeout(() => { window.location.href = 'parent.html'; }, 900);
+btn.textContent = 'Sign In as Parent';
+
+// Preform One check (parallel query - fallback to regular if no match)
+const currentYear = new Date().getFullYear(); // Auto 2025
+const phoneNorm = phone; // Use normalized phone
+const inputNamesFull = rawName; // Full input for matching
+
+const preformSnap = await db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).orderByChild('parentContact').equalTo(phoneNorm).once('value');
+if (preformSnap.exists()) {
+  const preformData = preformSnap.val();
+  if (namesMatch(preformData, inputNamesFull)) {
+    // Direct to Preform One parent dashboard
+    localStorage.setItem('role', 'parent');
+    localStorage.setItem('preformParent', 'true');
+    // Also set studentKey for consistency (use first match key)
+    const preformKeys = Object.keys(preformData);
+    localStorage.setItem('studentKey', preformKeys[0]); // First matching student
+    Swal.fire({
+      title: 'Welcome to Preform One',
+      text: `Access granted for Preform One student`,
+      icon: 'success',
+      timer: 1100,
+      showConfirmButton: false
+    });
+    setTimeout(() => { window.location.href = 'preformonehtml/prefoneparent.html'; }, 900);
+    return; // Exit early - don't run regular logic
+  }
+}
+
+if (!foundStudent) {
+    msgEl.textContent = 'No matching student found. Check names and phone.';
+    msgEl.classList.remove('hidden');
+    return;
+}
+               localStorage.setItem('role', 'parent');
+localStorage.setItem('studentKey', foundKey);
+// Enable Preform One icon for Class 7 parents (if applicable)
+if (foundStudent.classLevel === 'Class 7' || foundStudent.class === 'Class 7') {  // Adjust field if your DB uses 'class' instead
+  localStorage.setItem('preformParentIcon', 'true'); // Shows icon in parent.html
+}
+Swal.fire({
+    title: 'Welcome',
+    text: `Signed in for ${foundStudent.firstName || ''} ${foundStudent.lastName || ''}`,
+    icon: 'success',
+    timer: 1100,
+    showConfirmButton: false
+});
+setTimeout(() => { window.location.href = 'parent.html'; }, 900);
             } catch (err) {
                 btn.disabled = false;
                 btn.textContent = 'Sign In as Parent';

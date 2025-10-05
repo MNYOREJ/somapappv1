@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Lesson Plan</title>
+  <!-- Same -->
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } form { display: grid; gap: 1rem; } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-5xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-clipboard-list"></i> Preform One Lesson Plan</h1>
+    <a href="prefonedashboard.html" class="bg-gray-500 p-2 rounded mb-4 inline-block">< Back</a>
+    
+    <form id="planForm">
+      <input type="text" id="subject" placeholder="Subject" required>
+      <input type="text" id="teacherName" placeholder="Teacher’s Name" required>
+      <input type="date" id="planDate" required>
+      <input type="number" id="numStudents" placeholder="Registered Students (auto)" readonly>
+      <textarea id="competences" placeholder="Competences"></textarea>
+      <textarea id="generalObjective" placeholder="General Objective"></textarea>
+      <input type="text" id="mainTopic" placeholder="Main Topic">
+      <input type="text" id="subTopic" placeholder="Sub-Topic">
+      <textarea id="specificObjectives" placeholder="Specific Objectives"></textarea>
+      <input type="text" id="teachingAids" placeholder="Teaching Aids/Resources">
+      <input type="text" id="references" placeholder="References">
+      
+      <!-- Stages Table -->
+      <table class="bg-white/10">
+        <thead><tr><th>Stage</th><th>Time (min)</th><th>Teaching Activities</th><th>Learning Activities</th><th>Assessment</th></tr></thead>
+        <tbody>
+          <tr><td>Introduction</td><td><input type="number" value="5"></td><td><textarea placeholder="What you'll teach"></textarea></td><td><textarea></textarea><td><textarea></textarea></tr>
+          <tr><td>New Knowledge</td><td><input type="number" value="20"></td><td><textarea></textarea></td><td><textarea></textarea><td><textarea></textarea></tr>
+          <tr><td>Application/Reinforcements</td><td><input type="number" value="10"></td><td><textarea></textarea></td><td><textarea></textarea><td><textarea></textarea></tr>
+          <tr><td>Reflection</td><td><input type="number" value="3"></td><td><textarea></textarea></td><td><textarea></textarea><td><textarea></textarea></tr>
+          <tr><td>Conclusion</td><td><input type="number" value="2"></td><td><textarea></textarea></td><td><textarea></textarea><td><textarea></textarea></tr>
+        </tbody>
+      </table>
+      
+      <textarea id="studentsEval" placeholder="Students’ Evaluation"></textarea>
+      <textarea id="teachersEval" placeholder="Teachers’ Evaluation"></textarea>
+      <textarea id="remarks" placeholder="Remarks"></textarea>
+      <button type="submit" class="bg-blue-500 p-2 rounded">Save Plan</button>
+    </form>
+    
+    <button onclick="downloadPlans()" class="bg-green-500 p-2 rounded mt-4">Download Bulk Plans (Date Range)</button>
+  </div>
+
+  <script>
+    // Auto-fill numStudents
+    db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+      document.getElementById('numStudents').value = Object.keys(snap.val() || {}).length;
+    });
+    
+    document.getElementById('planForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const stages = []; // Extract table rows
+      Array.from(e.target.querySelectorAll('tbody tr')).forEach(tr => {
+        const tds = tr.querySelectorAll('td');
+        stages.push({
+          stage: tds[0].textContent,
+          time: tds[1].querySelector('input').value,
+          teaching: tds[2].querySelector('textarea').value,
+          learning: tds[3].querySelector('textarea').value,
+          assessment: tds[4].querySelector('textarea').value
+        });
+      });
+      const plan = {
+        subject: document.getElementById('subject').value,
+        teacherName: document.getElementById('teacherName').value,
+        date: document.getElementById('planDate').value,
+        numStudents: document.getElementById('numStudents').value,
+        competences: document.getElementById('competences').value,
+        generalObjective: document.getElementById('generalObjective').value,
+        mainTopic: document.getElementById('mainTopic').value,
+        subTopic: document.getElementById('subTopic').value,
+        specificObjectives: document.getElementById('specificObjectives').value,
+        teachingAids: document.getElementById('teachingAids').value,
+        references: document.getElementById('references').value,
+        stages,
+        studentsEval: document.getElementById('studentsEval').value,
+        teachersEval: document.getElementById('teachersEval').value,
+        remarks: document.getElementById('remarks').value
+      };
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/lessonplans`).push(plan).then(() => {
+        Swal.fire('Saved!', 'Lesson plan added.', 'success');
+        e.target.reset();
+      });
+    });
+    
+    function downloadPlans() {
+      const from = prompt('From Date (YYYY-MM-DD)'); const to = prompt('To Date');
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/lessonplans`).orderByChild('date').startAt(from).endAt(to).once('value', snap => {
+        const plans = Object.values(snap.val() || {});
+        const content = plans.map(p => `Plan for ${p.date} - ${p.subject}\nStages: ${JSON.stringify(p.stages, null, 2)}\n`).join('\n---\n');
+        generatePDF(content, `lessonplans_${from}_to_${to}.pdf`);
+      });
+    }
+  </script>
+</body>
+</html>

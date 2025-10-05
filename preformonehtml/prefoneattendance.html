@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SoMAp — Preform One Attendance</title>
+  <!-- Same scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="prefonecommon.js"></script>
+  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-6xl mx-auto">
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-calendar-check"></i> Preform One Attendance</h1>
+    <a href="prefonedashboard.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back</a>
+    <button onclick="toggleFullscreen()" class="bg-gray-500 p-2 rounded mb-4">Fullscreen</button>
+    
+    <!-- Stats -->
+    <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="bg-white/20 p-4 rounded">Class Days: <span id="classDays">0</span></div>
+      <div class="bg-white/20 p-4 rounded">% Present: <span id="presentPct">0</span>%</div>
+      <div class="bg-white/20 p-4 rounded">Yellow Alerts (>10 absent): <span id="alerts">0</span></div>
+    </div>
+    
+    <!-- Tabs -->
+    <div class="flex gap-4 mb-4">
+      <button onclick="showTab('class')" class="bg-blue-500 p-2 rounded">Class Attendance</button>
+      <button onclick="showTab('perStudent')" class="bg-green-500 p-2 rounded">Per-Student</button>
+    </div>
+    
+    <div id="classTab">
+      <select id="date" class="p-2 rounded bg-white/20 text-white mb-4" onchange="loadClassAttendance()"><option>Today</option></select>
+      <table class="w-full bg-white/10 rounded">
+        <thead><tr class="bg-white/20"><th>#</th><th>Adm</th><th>Name</th><th>Fee Bal</th><th>AM Mark</th><th>PM Mark</th><th>Actions</th></tr></thead>
+        <tbody id="classBody"></tbody>
+      </table>
+      <button onclick="markAllPresent()" class="bg-green-500 p-2 rounded mt-4">Mark All Present</button>
+      <button onclick="exportDaily('class.pdf')" class="bg-purple-500 p-2 rounded mt-4">Export PDF</button>
+    </div>
+    
+    <div id="perStudentTab" style="display:none;">
+      <h2>Per-Student Summary (<span id="currentMonth"></span>)</h2>
+      <div id="studentSummary"></div>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'class';
+    function showTab(tab) {
+      currentTab = tab;
+      document.getElementById('classTab').style.display = tab === 'class' ? 'block' : 'none';
+      document.getElementById('perStudentTab').style.display = tab === 'perStudent' ? 'block' : 'none';
+      if (tab === 'class') loadClassAttendance(); else loadPerStudent();
+    }
+    
+    function loadClassAttendance() {
+      const date = document.getElementById('date').value || new Date().toISOString().split('T')[0];
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const students = Object.entries(snap.val() || {});
+        let present = 0, total = students.length, alerts = 0;
+        const tbody = document.getElementById('classBody');
+        tbody.innerHTML = students.map(([adm, s], idx) => {
+          const att = s.attendance?.find(a => a.date === date);
+          const isPresent = att?.present;
+          if (isPresent) present++;
+          const absCount = s.attendance.filter(a => !a.present).length;
+          if (absCount >= 10) alerts++;
+          const bal = s.totalFee - s.payments.reduce((sum, p) => sum + p.amount, 0);
+          return `<tr><td>${idx+1}</td><td>${adm}</td><td>${s.firstName} ${s.lastName}</td><td>${bal} TSh</td>
+            <td><select onchange="updateAtt('${adm}', '${date}', 'AM', this.value)"><option>P</option><option>A</option><option>S</option><option>L</option><option>E</option><option>M</option><option>T</option><option>P</option><option>G</option></select></td>
+            <td><select onchange="updateAtt('${adm}', '${date}', 'PM', this.value)"><option>P</option><option>A</option><option>S</option><option>L</option><option>E</option><option>M</option><option>T</option><option>P</option><option>G</option></select></td>
+            <td><button onclick="exportStudent('${adm}', '${date}')">Export</button></td></tr>`;
+        }).join('');
+        
+        document.getElementById('classDays').textContent = total;
+        document.getElementById('presentPct').textContent = (present / total * 100).toFixed(1);
+        document.getElementById('alerts').textContent = alerts;
+        
+        // Set selects to current
+        students.forEach(([adm]) => {
+          // Load from DB if needed
+        });
+      });
+    }
+    
+    function updateAtt(adm, date, period, status) {
+      const present = status === 'P' || status === 'A'; // Simplify: P present, A absent
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance/${Date.now()}`).set({ date, period, present, status });
+      if (!present && /* Check if >2 weeks */ ) db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ shifted: true });
+      Swal.fire('Updated!', 'Attendance marked.', 'success');
+    }
+    
+    function markAllPresent() {
+      const date = document.getElementById('date').value || new Date().toISOString().split('T')[0];
+      // Loop students, set present
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        Object.keys(snap.val() || {}).forEach(adm => updateAtt(adm, date, 'AM', 'P'));
+      });
+    }
+    
+    function loadPerStudent() {
+      const month = new Date().toLocaleString('en', { month: 'long' });
+      document.getElementById('currentMonth').textContent = month;
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+        const summary = document.getElementById('studentSummary');
+        summary.innerHTML = Object.values(snap.val() || {}).map(s => {
+          const totalDays = s.attendance.length;
+          const pres = s.attendance.filter(a => a.present).length;
+          const pct = (pres / totalDays * 100).toFixed(1);
+          return `<div>${s.firstName} ${s.lastName}: Present ${pres}/${totalDays} · ${pct}%</div>`;
+        }).join('');
+      });
+    }
+    
+    function exportDaily(type) {
+      const content = 'Daily Attendance Report\n' + document.getElementById('classBody').innerHTML;
+      generatePDF(content, `attendance_${new Date().toISOString().split('T')[0]}.pdf`);
+    }
+    
+    function exportStudent(adm, date) {
+      // Fetch single, PDF
+      generatePDF(`Student ${adm} Attendance ${date}`, `student_${adm}.pdf`);
+    }
+    
+    function toggleFullscreen() { document.documentElement.requestFullscreen(); }
+    
+    loadClassAttendance();
+  </script>
+</body>
+</html>

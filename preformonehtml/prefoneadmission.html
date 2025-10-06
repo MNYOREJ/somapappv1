@@ -14,7 +14,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   
-  <!-- Shared Preform One Logic (keep if exists, but inline Firebase for reliability) -->
+  <!-- Shared Preform One Logic -->
   <script src="prefonecommon.js"></script>
   
   <style>
@@ -159,33 +159,34 @@
   </div>
 
   <script>
-    // Inline Firebase Config and Init (fixes loading issue, best practice for reliability)
+    // Inline Firebase Config and Init as backup (with corrected authDomain for reliability)
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-      authDomain: "somapv2i.com",
+      authDomain: "somaptestt.firebaseapp.com", // Corrected to default—fix for custom domain issues
       databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
       projectId: "somaptestt",
       storageBucket: "somaptestt.appspot.com",
       messagingSenderId: "105526245138",
       appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
     };
-    if (!firebase.apps.length) {
+    if (typeof firebase === 'undefined' || !firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
     }
-    const db = firebase.database(); // Now defined even if common.js fails
+    if (typeof db === 'undefined') {
+      const db = firebase.database(); // Define if common.js failed
+    }
 
     // Ensure currentYear is available (from prefonecommon.js or fallback)
-    let currentYear = new Date().getFullYear(); // Fallback to current year (e.g., 2025)
+    if (typeof currentYear === 'undefined') {
+      currentYear = new Date().getFullYear(); // 2025
+    }
     
     // Handle date input for live updates (fires on every keystroke for type="date")
-    let debounceTimer;
     function handleDateInput(input) {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        if (input.value.length >= 10) { // Full YYYY-MM-DD
-          updateTotalFee();
-        }
-      }, 300); // Debounce for smooth real-time calc
+      // For date inputs, oninput helps with partial typing, but onchange is main trigger
+      if (input.value.length >= 8) { // Basic check for valid partial date
+        setTimeout(updateTotalFee, 300); // Delay to avoid spam
+      }
     }
     
     // Auto-calculate Total Fee on Reporting Date change (triggered by onchange/oninput)
@@ -223,7 +224,7 @@
             totalFee += Math.round((enrolledDecDays / 30) * 15000);
           }
         } else {
-          // Full month fee: 15,000 TSh (even if partial start in month, per your examples)
+          // Full month fee: 15,000 TSh (even if partial start in month)
           totalFee += 15000;
         }
         
@@ -233,12 +234,12 @@
         if (current.getFullYear() !== currentYearMonth) break; // Stop if year changes
       }
       
-      // Display with example breakdown for clarity
+      // Display with corrected/dynamic breakdown for clarity
       const breakdown = reportingDateInput.value.startsWith(`${currentYear}-09`) ? ' (Full Sep + Oct + Nov + Pro Dec)' : 
-                       reportingDateInput.value.startsWith(`${currentYear}-10`) ? ' (Full Oct + Nov + Pro Dec)' : 
-                       reportingDateInput.value.startsWith(`${currentYear}-11`) ? ' (Full Nov + Pro Dec)' : 
-                       reportingDateInput.value.startsWith(`${currentYear}-12`) ? ' (Pro Dec)' : 
-                       ' (Pro-rated from start)';
+                        reportingDateInput.value.startsWith(`${currentYear}-10`) ? ' (Full Oct + Nov + Pro Dec)' : 
+                        reportingDateInput.value.startsWith(`${currentYear}-11`) ? ' (Full Nov + Pro Dec)' : 
+                        reportingDateInput.value.startsWith(`${currentYear}-12`) ? ' (Pro Dec)' : 
+                        ' (Pro-rated from start)';
       totalFeeDisplay.value = `TSh ${totalFee.toLocaleString()}${breakdown}`;
     }
     
@@ -275,23 +276,47 @@
           throw new Error('Parent Contact must be in Tanzania format (e.g., +255712345678).');
         }
         
-        // Handle photo upload (assuming uploadToCloudinary from common.js; fallback if missing)
+        // Handle photo upload
         const photoFile = document.getElementById('photo').files[0];
         let photoUrl = '';
         if (photoFile) {
           if (photoFile.size > 5 * 1024 * 1024) { // 5MB limit
             throw new Error('Photo must be less than 5MB.');
           }
-          if (typeof uploadToCloudinary === 'function') { // Check if defined
+          try {
             photoUrl = await uploadToCloudinary(photoFile, 'preformone/photos');
-          } else {
-            console.warn('uploadToCloudinary not defined—skipping photo.');
+          } catch (uploadErr) {
+            console.warn('Photo upload failed:', uploadErr);
+            // Continue without photo—non-blocking
           }
         }
         
-        // Generate ADM No and calculate fee (assuming generateAdmNo and calculateTotalFee from common.js; add fallbacks)
+        // Generate ADM No and calculate fee (from common.js or inline fallback)
         const admNo = typeof generateAdmNo === 'function' ? generateAdmNo() : `PF1-${Date.now()}`;
-        const totalFee = typeof calculateTotalFee === 'function' ? calculateTotalFee(reportingDate) : parseInt(document.getElementById('totalFeeDisplay').value.match(/\d+/)[0] || 0);
+        let totalFee;
+        if (typeof calculateTotalFee === 'function') {
+          totalFee = calculateTotalFee(reportingDate);
+        } else {
+          // Inline fallback (same as updateTotalFee calc)
+          const reportingDateObj = new Date(reportingDate);
+          const endDate = new Date(currentYear, 11, 15, 23, 59, 59);
+          totalFee = 0;
+          let current = new Date(reportingDateObj.getFullYear(), reportingDateObj.getMonth(), reportingDateObj.getDate());
+          while (current <= endDate) {
+            const currentMonth = current.getMonth();
+            if (currentMonth === 11) {
+              const decDaysAvailable = 15;
+              const enrolledDecDays = Math.min(decDaysAvailable - current.getDate() + 1, decDaysAvailable);
+              if (enrolledDecDays > 0) {
+                totalFee += Math.round((enrolledDecDays / 30) * 15000);
+              }
+            } else {
+              totalFee += 15000;
+            }
+            current.setDate(1);
+            current.setMonth(currentMonth + 1);
+          }
+        }
         
         // Student object (full details)
         const student = {
@@ -322,7 +347,7 @@
           })
           .catch((err) => {
             console.error('DB save error:', err);
-            throw new Error('Failed to save to database: ' + err.message);
+            throw new Error('Failed to save to database: ' + err.message); // Shows exact issue, e.g., "permission denied"
           });
         
         // Success: Detailed alert, reset form, refresh search
@@ -444,8 +469,13 @@
       });
     }
     
-    // Initial load: Search students
-    searchStudents();
+    // Initial load: Search students (with try-catch to prevent script halt)
+    try {
+      searchStudents();
+    } catch (initErr) {
+      console.error('Initial load error:', initErr);
+      Swal.fire('Load Error', 'Failed to load students initially: ' + initErr.message + '. Check console and refresh.', 'error');
+    }
   </script>
 </body>
 </html>

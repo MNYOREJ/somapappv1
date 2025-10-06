@@ -2,116 +2,461 @@
 <html lang="en">
 <head>
   <title>SoMAp — Preform One Finance</title>
-  <!-- Same -->
+  <!-- Firebase Compat SDKs (v9.6.10 for consistency with repo) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  
+  <!-- UI Libraries -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  
+  <!-- Shared Preform One Logic -->
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } .overdue { color: red; } .due-soon { color: yellow; } </style>
+  
+  <style>
+    body { 
+      background: linear-gradient(to right, #667eea, #764ba2); 
+    }
+    .card { border-radius: 1rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); background: white; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .finance-card { background: linear-gradient(135deg, #10b981, #059669); color: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .table { width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 1rem; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    .table th, .table td { padding: 1rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.2); }
+    .table th { background: rgba(255,255,255,0.1); font-weight: bold; }
+    .status-pill { padding: 0.25rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .status-paid { background: #dcfce7; color: #166534; }
+    .status-partial { background: #fef9c3; color: #854d0e; }
+    .status-overdue { background: #fee2e2; color: #991b1b; }
+    .overdue { color: red; }
+    .due-soon { color: yellow; }
+    .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); padding-top: 60px; }
+    .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 800px; border-radius: 8px; }
+    .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+    .close:hover { color: black; }
+  </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
   <div class="max-w-6xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-money-bill"></i> Preform One Finance</h1>
-    <a href="prefonedashboard.html" class="bg-gray-500 p-2 rounded mb-4 inline-block">< Back</a>
-    <button onclick="reloadFinance()" class="bg-blue-500 p-2 rounded">Reload</button>
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-money-bill-wave"></i> Preform One Finance</h1>
+    <a href="prefonedashboard.html" class="mb-4 inline-block bg-gray-500 hover:bg-gray-600 p-2 rounded text-white"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
     
     <!-- Stats -->
-    <div class="grid grid-cols-5 gap-4 mb-6">
-      <div class="bg-white/20 p-4 rounded">Total Due: <span id="totalDue">0</span> TSh</div>
-      <div class="bg-white/20 p-4 rounded">Collected: <span id="collected">0</span> TSh</div>
-      <div class="bg-white/20 p-4 rounded">Outstanding: <span id="outstanding">0</span> TSh</div>
-      <div class="bg-white/20 p-4 rounded">Expenses: <span id="expensesTotal">0</span> TSh</div>
-      <div class="bg-white/20 p-4 rounded">Net Balance: <span id="netBal">0</span> TSh</div>
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div class="finance-card">
+        <h3 class="text-sm font-semibold mb-2">Total Due (All Students)</h3>
+        <p id="totalDue" class="text-xl font-bold">TSh 0</p>
+      </div>
+      <div class="finance-card">
+        <h3 class="text-sm font-semibold mb-2">Total Collected</h3>
+        <p id="collected" class="text-xl font-bold">TSh 0</p>
+      </div>
+      <div class="finance-card">
+        <h3 class="text-sm font-semibold mb-2">Total Outstanding</h3>
+        <p id="outstanding" class="text-xl font-bold">TSh 0</p>
+      </div>
+      <div class="finance-card">
+        <h3 class="text-sm font-semibold mb-2">Total Expenses</h3>
+        <p id="expensesTotal" class="text-xl font-bold">TSh 0</p>
+      </div>
+      <div class="finance-card">
+        <h3 class="text-sm font-semibold mb-2">Net Balance</h3>
+        <p id="netBal" class="text-xl font-bold">TSh 0</p>
+      </div>
     </div>
     
-    <!-- Filter -->
-    <div class="mb-4">Filter: <select id="classFilter" onchange="loadFinance()"><option>All</option><option>Preform One</option></select> <button onclick="showDebtors()" class="bg-red-500 p-2 rounded">Show Debtors</button></div>
+    <!-- Filter and Buttons -->
+    <div class="flex flex-wrap items-center justify-between mb-4 gap-4">
+      <div class="flex items-center gap-3">
+        <label class="text-sm">Filter:</label>
+        <select id="classFilter" class="p-2 rounded bg-white/20 text-white" onchange="loadFinance()">
+          <option value="">All Preform One</option>
+          <option>September Joiners</option>
+          <option>October Joiners</option>
+          <option>November Joiners</option>
+        </select>
+        <button onclick="toggleDebtors()" class="bg-yellow-500 hover:bg-yellow-600 p-2 rounded text-white"><i class="fas fa-exclamation-triangle mr-1"></i> Show Debtors</button>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button onclick="exportMainCSV()" class="bg-green-500 hover:bg-green-600 p-2 rounded text-white"><i class="fas fa-file-csv mr-1"></i> Main CSV</button>
+        <button onclick="exportMainPDF()" class="bg-red-500 hover:bg-red-600 p-2 rounded text-white"><i class="fas fa-file-pdf mr-1"></i> Main PDF</button>
+        <button onclick="exportDebtorsCSV()" class="bg-amber-500 hover:bg-amber-600 p-2 rounded text-white"><i class="fas fa-file-csv mr-1"></i> Debtors CSV</button>
+        <button onclick="exportDebtorsPDF()" class="bg-amber-600 hover:bg-amber-700 p-2 rounded text-white"><i class="fas fa-file-pdf mr-1"></i> Debtors PDF</button>
+      </div>
+    </div>
     
-    <table class="w-full bg-white/10 rounded">
-      <thead><tr class="bg-white/20"><th>Adm No</th><th>Full Name</th><th>Contact</th><th>Total Fee</th><th>Payment Plan</th><th>Paid</th><th>Balance</th><th>Debt Till…</th><th>Actions</th></tr></thead>
-      <tbody id="financeBody"></tbody>
-    </table>
-    
-    <div class="mt-4 flex gap-2">
-      <button onclick="exportCSV(financeData, 'finance.csv')" class="bg-green-500 p-2 rounded">Main CSV</button>
-      <button onclick="generatePDF('Finance Report', 'finance.pdf')" class="bg-purple-500 p-2 rounded">Main PDF</button>
-      <button id="debtBtn" onclick="exportDebtors()" style="display:none;" class="bg-red-500 p-2 rounded">Debt CSV/PDF</button>
+    <!-- Finance Table -->
+    <div class="overflow-x-auto bg-white/10 rounded-lg shadow-md">
+      <table class="w-full text-sm">
+        <thead class="bg-white/20">
+          <tr>
+            <th class="p-3 text-left">ADM No</th>
+            <th class="p-3 text-left">Full Name</th>
+            <th class="p-3 text-left">Parent Contact</th>
+            <th class="p-3 text-left">Total Fee</th>
+            <th class="p-3 text-left">Payment Plan</th>
+            <th class="p-3 text-left">Paid</th>
+            <th class="p-3 text-left">Balance</th>
+            <th class="p-3 text-left">Debt Till</th>
+            <th class="p-3 text-left">Status</th>
+            <th class="p-3 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="financeBody" class="bg-white/5"></tbody>
+      </table>
+    </div>
+
+    <!-- Expenses Section -->
+    <div class="mt-8 bg-white/10 rounded-lg shadow-md p-6">
+      <h2 class="text-xl font-bold mb-4"><i class="fas fa-receipt mr-2"></i> Expenses</h2>
+      <form id="expenseForm" class="grid md:grid-cols-4 gap-4 mb-6">
+        <select id="expenseCategory" class="p-2 rounded bg-white/20 text-white" required>
+          <option value="">Select Category</option>
+          <option>FOOD</option>
+          <option>SALARIES</option>
+          <option>OFFICE</option>
+          <option>EDUCATION</option>
+          <option>WATER & ELECTRICITY</option>
+          <option>SANITATION</option>
+          <option>ENVIRONMENT</option>
+          <option>HEALTH</option>
+          <option>SECURITY</option>
+          <option>CLOTHING</option>
+          <option>SHELTER</option>
+          <option>RECREATION</option>
+          <option>PROJECTS</option>
+          <option>TRANSPORT</option>
+          <option>PURCHASES</option>
+          <option>SIL</option>
+          <option>MAINTENANCE</option>
+          <option>BOOKS</option>
+          <option>EMERGENCY</option>
+          <option>MISCELLANEOUS</option>
+        </select>
+        <input id="expenseDescription" type="text" placeholder="Description" class="p-2 rounded bg-white/20 text-white" required>
+        <input id="expenseAmount" type="number" min="1" placeholder="Amount" class="p-2 rounded bg-white/20 text-white" required>
+        <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 p-2 rounded text-white font-bold">Add Expense</button>
+      </form>
+      <div class="flex gap-2 mb-4">
+        <button onclick="exportExpenseCSV()" class="bg-green-500 hover:bg-green-600 p-2 rounded text-white"><i class="fas fa-file-csv mr-1"></i> Expenses CSV</button>
+        <button onclick="exportExpensePDF()" class="bg-red-500 hover:bg-red-600 p-2 rounded text-white"><i class="fas fa-file-pdf mr-1"></i> Expenses PDF</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full bg-white/10 rounded">
+          <thead class="bg-white/20">
+            <tr>
+              <th class="p-3 text-left">Category</th>
+              <th class="p-3 text-left">Description</th>
+              <th class="p-3 text-left">Amount</th>
+              <th class="p-3 text-left">Date</th>
+            </tr>
+          </thead>
+          <tbody id="expenseBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Modal -->
+  <div id="paymentModal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden z-50">
+    <div class="bg-white p-6 rounded-lg shadow-xl max-w-md w-full text-gray-800">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700"><i class="fas fa-money-check mr-2"></i> Add Payment</h2>
+      <form id="paymentForm">
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Amount</label>
+          <input id="paymentAmount" type="number" min="1" class="w-full p-2 border rounded" required>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Method</label>
+          <select id="paymentMethod" class="w-full p-2 border rounded">
+            <option>Cash</option>
+            <option>MPesa</option>
+            <option>Airtel Money</option>
+            <option>TigoPesa</option>
+            <option>Bank Transfer</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Note (optional)</label>
+          <input id="paymentNote" type="text" class="w-full p-2 border rounded">
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="bg-blue-500 hover:bg-blue-600 p-2 rounded text-white font-bold">Save</button>
+          <button type="button" onclick="closeModal('paymentModal')" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white font-bold">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Details Modal -->
+  <div id="detailsModal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden z-50">
+    <div class="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full text-gray-800 overflow-y-auto max-h-80vh">
+      <h2 class="text-xl font-bold mb-4 text-indigo-700"><i class="fas fa-info-circle mr-2"></i> Student Finance Details</h2>
+      <div id="detailsContent" class="space-y-2"></div>
+      <button onclick="closeModal('detailsModal')" class="mt-4 bg-gray-500 hover:bg-gray-600 p-2 rounded text-white font-bold">Close</button>
     </div>
   </div>
 
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    // Initialize Firebase (compat)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
     let financeData = [];
+    let showingDebtors = false;
+    let selectedAdm = '';
+
     function loadFinance() {
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
         const students = Object.entries(snap.val() || {});
-        let due = 0, coll = 0, exp = 0;
+        let due = 0, coll = 0;
         financeData = students.map(([adm, s]) => {
-          const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
+          const paid = (s.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
           const bal = s.totalFee - paid;
           due += s.totalFee;
           coll += paid;
-          const nextDue = new Date(s.reportingDate); nextDue.setMonth(nextDue.getMonth() + 1); // Next month
-          const daysToDue = (nextDue - new Date()) / (1000*60*60*24);
+          const nextDue = new Date(s.reportingDate);
+          nextDue.setMonth(nextDue.getMonth() + 1);
+          const daysToDue = (nextDue - new Date()) / (1000 * 60 * 60 * 24);
           const debtTill = daysToDue < 0 ? `<span class="overdue">Overdue ${Math.abs(daysToDue).toFixed(0)} days</span>` :
                           daysToDue < 7 ? `<span class="due-soon">Due in ${daysToDue.toFixed(0)} days</span>` : `Due ${nextDue.toLocaleDateString()}`;
-          const row = { adm, name: `${s.firstName} ${s.lastName}`, contact: s.parentContact, totalFee: s.totalFee,
-            plan: s.reportingDate ? `From ${s.reportingDate} (3 months pro-rated)` : 'Full', paid, bal, debtTill };
-          return row;
+          const status = bal <= 0 ? 'paid' : daysToDue < 0 ? 'overdue' : 'partial';
+          return { adm, name: `${s.firstName} ${s.lastName}`, contact: s.parentContact, totalFee: s.totalFee, plan: s.reportingDate ? `From ${s.reportingDate}` : 'Full', paid, bal, debtTill, status, photoUrl: s.photoUrl };
         });
         
-        db.ref(`/schools/Socrates School Preform one/${currentYear}/expenses`).once('value', eSnap => {
-          exp = Object.values(eSnap.val() || {}).reduce((sum, ex) => sum + ex.amount, 0);
-          document.getElementById('totalDue').textContent = due;
-          document.getElementById('collected').textContent = coll;
-          document.getElementById('outstanding').textContent = due - coll;
-          document.getElementById('expensesTotal').textContent = exp;
-          document.getElementById('netBal').textContent = coll - exp;
+        db.ref(`/schools/Socrates School Preform one/${currentYear}/expenses`).once('value').then(eSnap => {
+          const exp = Object.values(eSnap.val() || {}).reduce((sum, ex) => sum + Number(ex.amount), 0);
+          document.getElementById('totalDue').textContent = `TSh ${due.toLocaleString()}`;
+          document.getElementById('collected').textContent = `TSh ${coll.toLocaleString()}`;
+          document.getElementById('outstanding').textContent = `TSh ${(due - coll).toLocaleString()}`;
+          document.getElementById('expensesTotal').textContent = `TSh ${exp.toLocaleString()}`;
+          document.getElementById('netBal').textContent = `TSh ${(coll - exp).toLocaleString()}`;
         });
         
-        const tbody = document.getElementById('financeBody');
-        tbody.innerHTML = financeData.map(row => 
-          `<tr><td>${row.adm}</td><td>${row.name}</td><td>${row.contact}</td><td>${row.totalFee}</td><td>${row.plan}</td><td>${row.paid}</td><td>${row.bal}</td><td>${row.debtTill}</td>
-          <td><button onclick="viewPayment('${row.adm}')">View Pay</button></td></tr>`
-        ).join('');
+        renderTable();
+      }).catch(err => {
+        console.error('Load error:', err);
+        Swal.fire('Error', 'Failed to load finance data: ' + err.message, 'error');
       });
     }
-    
-    function viewPayment(adm) {
-      // Modal with payments history, add payment form
-      Swal.fire({
-        title: `Payments for ${financeData.find(d => d.adm === adm).name}`,
-        html: `<div id="payHistory"></div><input type="number" id="newAmount" placeholder="Add Payment"><button onclick="addPayment('${adm}')">Add</button>`,
-        didOpen: () => {
-          db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/payments`).once('value', snap => {
-            document.getElementById('payHistory').innerHTML = Object.values(snap.val() || {}).map(p => `<p>${p.date}: ${p.amount} TSh (${p.method || 'cash'})</p>`).join('');
-          });
-        }
+
+    function renderTable() {
+      const tbody = document.getElementById('financeBody');
+      tbody.innerHTML = '';
+      financeData.forEach(row => {
+        if (showingDebtors && row.bal <= 0) return;
+        tbody.innerHTML += `
+          <tr class="hover:bg-white/10">
+            <td class="p-3">${row.adm}</td>
+            <td class="p-3">${row.name}</td>
+            <td class="p-3">${row.contact}</td>
+            <td class="p-3">TSh ${row.totalFee.toLocaleString()}</td>
+            <td class="p-3">${row.plan}</td>
+            <td class="p-3">TSh ${row.paid.toLocaleString()}</td>
+            <td class="p-3">TSh ${row.bal.toLocaleString()}</td>
+            <td class="p-3">${row.debtTill}</td>
+            <td class="p-3"><span class="status-pill status-${row.status}">${row.status.charAt(0).toUpperCase() + row.status.slice(1)}</span></td>
+            <td class="p-3">
+              <button class="bg-blue-500 hover:bg-blue-600 p-1 rounded text-xs text-white" onclick="viewDetails('${row.adm}')"><i class="fas fa-eye mr-1"></i> View</button>
+              <button class="bg-green-500 hover:bg-green-600 p-1 rounded text-xs text-white ml-2" onclick="openPaymentModal('${row.adm}')"><i class="fas fa-money-bill mr-1"></i> Pay</button>
+            </td>
+          </tr>
+        `;
       });
     }
-    
-    function addPayment(adm) {
-      const amount = parseInt(document.getElementById('newAmount').value);
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/payments`).push({ date: new Date().toISOString().split('T')[0], amount, method: 'cash' });
-      Swal.fire('Added!', 'Payment recorded.', 'success');
-      loadFinance();
+
+    function openPaymentModal(adm) {
+      selectedAdm = adm;
+      document.getElementById('paymentModal').style.display = 'flex';
     }
-    
-    function showDebtors() {
-      const debtors = financeData.filter(d => d.bal > 0);
-      // Filter table or new view
-      document.getElementById('financeBody').innerHTML = debtors.map(row => /* same tr */ ).join('');
-      document.getElementById('debtBtn').style.display = 'inline-block';
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).style.display = 'none';
     }
-    
-    function exportDebtors() {
-      const debtors = financeData.filter(d => d.bal > 0 && /* overdue logic */ true);
-      const csvData = debtors.map(d => ({ Name: d.name, Contact: d.contact, Balance: d.bal, DebtTill: d.debtTill }));
-      exportCSV(csvData, 'debtors.csv');
-      generatePDF('Debtors Report\n' + JSON.stringify(csvData, null, 2), 'debtors.pdf');
-      // SMS: Fetch phones, but no API; log for manual
-      console.log('Debtor Phones:', debtors.map(d => d.contact));
+
+    document.getElementById('paymentForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const amount = parseInt(document.getElementById('paymentAmount').value);
+      const method = document.getElementById('paymentMethod').value;
+      const note = document.getElementById('paymentNote').value;
+      if (!amount) return Swal.fire('Error', 'Enter amount', 'error');
+      try {
+        await db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${selectedAdm}/payments`).push({ amount, method, note, date: new Date().toISOString().split('T')[0] });
+        Swal.fire('Success', 'Payment added', 'success');
+        closeModal('paymentModal');
+        loadFinance();
+      } catch (err) {
+        Swal.fire('Error', 'Failed to add payment: ' + err.message, 'error');
+      }
+    });
+
+    function viewDetails(adm) {
+      const row = financeData.find(r => r.adm === adm);
+      let html = `
+        <p><strong>Name:</strong> ${row.name}</p>
+        <p><strong>Contact:</strong> ${row.contact}</p>
+        <p><strong>Total Fee:</strong> TSh ${row.totalFee.toLocaleString()}</p>
+        <p><strong>Paid:</strong> TSh ${row.paid.toLocaleString()}</p>
+        <p><strong>Balance:</strong> TSh ${row.bal.toLocaleString()}</p>
+        <p><strong>Debt Till:</strong> ${row.debtTill}</p>
+        ${row.photoUrl ? `<img src="${row.photoUrl}" alt="Photo" class="w-32 h-32 rounded-full mx-auto mb-4">` : ''}
+      `;
+      document.getElementById('detailsContent').innerHTML = html;
+      document.getElementById('detailsModal').style.display = 'flex';
     }
-    
-    function reloadFinance() { loadFinance(); }
-    
+
+    function loadExpenses() {
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/expenses`).once('value').then(snap => {
+        const expenses = Object.entries(snap.val() || {});
+        const tbody = document.getElementById('expenseBody');
+        tbody.innerHTML = '';
+        expenses.forEach(([key, ex]) => {
+          tbody.innerHTML += `
+            <tr class="hover:bg-white/10">
+              <td class="p-3">${ex.category}</td>
+              <td class="p-3">${ex.description}</td>
+              <td class="p-3">TSh ${ex.amount.toLocaleString()}</td>
+              <td class="p-3">${ex.date}</td>
+            </tr>
+          `;
+        });
+      }).catch(err => {
+        console.error('Expenses load error:', err);
+      });
+    }
+
+    document.getElementById('expenseForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const category = document.getElementById('expenseCategory').value;
+      const description = document.getElementById('expenseDescription').value;
+      const amount = parseInt(document.getElementById('expenseAmount').value);
+      if (!category || !description || !amount) return Swal.fire('Error', 'Fill all fields', 'error');
+      try {
+        await db.ref(`/schools/Socrates School Preform one/${currentYear}/expenses`).push({ category, description, amount, date: new Date().toISOString().split('T')[0] });
+        Swal.fire('Success', 'Expense added', 'success');
+        document.getElementById('expenseForm').reset();
+        loadFinance();
+        loadExpenses();
+      } catch (err) {
+        Swal.fire('Error', 'Failed to add expense: ' + err.message, 'error');
+      }
+    });
+
+    function toggleDebtors() {
+      showingDebtors = !showingDebtors;
+      document.querySelector('[onclick="toggleDebtors()"]').textContent = showingDebtors ? '<i class="fas fa-exclamation-triangle mr-1"></i> Show All' : '<i class="fas fa-exclamation-triangle mr-1"></i> Show Debtors';
+      renderTable();
+    }
+
+    function exportMainCSV() {
+      const data = financeData.map(row => ({
+        ADM: row.adm,
+        Name: row.name,
+        Contact: row.contact,
+        TotalFee: row.totalFee,
+        Plan: row.plan,
+        Paid: row.paid,
+        Balance: row.bal,
+        DebtTill: row.debtTill,
+        Status: row.status
+      }));
+      const csv = Papa.unparse(data);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'preform_finance.csv';
+      a.click();
+    }
+
+    function exportMainPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape');
+      doc.autoTable({
+        head: [['ADM No', 'Full Name', 'Parent Contact', 'Total Fee', 'Plan', 'Paid', 'Balance', 'Debt Till', 'Status']],
+        body: financeData.map(row => [row.adm, row.name, row.contact, row.totalFee, row.plan, row.paid, row.bal, row.debtTill, row.status]),
+        styles: { fontSize: 8 },
+      });
+      doc.save('preform_finance.pdf');
+    }
+
+    function exportDebtorsCSV() {
+      const debtors = financeData.filter(row => row.bal > 0);
+      const csv = Papa.unparse(debtors.map(row => ({
+        ADM: row.adm,
+        Name: row.name,
+        Contact: row.contact,
+        Balance: row.bal,
+        DebtTill: row.debtTill
+      })));
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'preform_debtors.csv';
+      a.click();
+    }
+
+    function exportDebtorsPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape');
+      doc.autoTable({
+        head: [['ADM No', 'Full Name', 'Parent Contact', 'Balance', 'Debt Till']],
+        body: financeData.filter(row => row.bal > 0).map(row => [row.adm, row.name, row.contact, row.bal, row.debtTill]),
+        styles: { fontSize: 8 },
+      });
+      doc.save('preform_debtors.pdf');
+    }
+
+    function exportExpenseCSV() {
+      const data = []; // Fetch from expenseBody
+      document.getElementById('expenseBody').querySelectorAll('tr').forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll('td')).map(td => td.textContent);
+        data.push(cells);
+      });
+      const csv = Papa.unparse(data);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'preform_expenses.csv';
+      a.click();
+    }
+
+    function exportExpensePDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      const body = [];
+      document.getElementById('expenseBody').querySelectorAll('tr').forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll('td')).map(td => td.textContent);
+        body.push(cells);
+      });
+      doc.autoTable({
+        head: [['Category', 'Description', 'Amount', 'Date']],
+        body,
+        styles: { fontSize: 10 },
+      });
+      doc.save('preform_expenses.pdf');
+    }
+
     loadFinance();
+    loadExpenses();
   </script>
 </body>
 </html>

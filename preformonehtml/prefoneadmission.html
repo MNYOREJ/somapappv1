@@ -274,7 +274,31 @@
         
         // Generate ADM No and calculate fee
         const admNo = generateAdmNo();
-        const totalFee = calculateTotalFee(reportingDate);
+        // Calculate fee with fallback if common.js missing
+let totalFee;
+if (typeof calculateTotalFee === 'function') {
+  totalFee = calculateTotalFee(reportingDate);
+} else {
+  // Inline fallback
+  const reportingDateObj = new Date(reportingDate);
+  const endDate = new Date(currentYear, 11, 15, 23, 59, 59);
+  totalFee = 0;
+  let current = new Date(reportingDateObj.getFullYear(), reportingDateObj.getMonth(), reportingDateObj.getDate());
+  while (current <= endDate) {
+    const currentMonth = current.getMonth();
+    if (currentMonth === 11) {
+      const decDaysAvailable = 15;
+      const enrolledDecDays = Math.min(decDaysAvailable - current.getDate() + 1, decDaysAvailable);
+      if (enrolledDecDays > 0) {
+        totalFee += Math.round((enrolledDecDays / 30) * 15000);
+      }
+    } else {
+      totalFee += 15000;
+    }
+    current.setDate(1);
+    current.setMonth(currentMonth + 1);
+  }
+}
         
         // Student object (full details)
         const student = {
@@ -298,7 +322,16 @@
         };
         
         // Save to Firebase RTDB (parallel path, no conflict with existing /students)
-        await db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${admNo}`).set(student);
+        // Save to Firebase RTDB with error handling
+const refPath = `/schools/Socrates School Preform one/${currentYear}/students/${admNo}`;
+await db.ref(refPath).set(student)
+  .then(() => {
+    console.log('Save successful to:', refPath); // Logs in browser console (F12)
+  })
+  .catch((err) => {
+    console.error('DB save error:', err);
+    throw new Error('Failed to save to database: ' + err.message); // Shows in alert
+  });
         
         // Success: Detailed alert, reset form, refresh search
         Swal.fire({
@@ -416,6 +449,22 @@
     
     // Initial load: Search students
     searchStudents();
+    // Inline Firebase backup (add this to fix init issues)
+const firebaseConfig = {
+  apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+  authDomain: "somaptestt.firebaseapp.com", // Fixed to default—your custom domain may cause errors
+  databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+  projectId: "somaptestt",
+  storageBucket: "somaptestt.appspot.com",
+  messagingSenderId: "105526245138",
+  appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+};
+if (typeof firebase !== 'undefined' && !firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+if (typeof db === 'undefined') {
+  const db = firebase.database();
+}
   </script>
 </body>
 </html>

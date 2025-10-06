@@ -1,17 +1,3 @@
-// Shared for all Preform One files
-const firebaseConfig = {
-  apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-  authDomain: "somapv2i.com",
-  databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-  projectId: "somaptestt",
-  storageBucket: "somaptestt.appspot.com",
-  messagingSenderId: "105526245138",
-  appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
-};
-if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-const db = firebase.database(); window.db = db;
-const storage = firebase.storage(); window.storage = storage;
-
 // Cloudinary Unsigned Upload (updated for presets)
 function uploadToCloudinary(file, folder = 'preformone', preset = 'somap_unsigned') {  // Default somap_unsigned for photos
   if (file.name.toLowerCase().includes('book') || file.type === 'application/pdf') {

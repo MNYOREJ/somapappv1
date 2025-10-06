@@ -159,26 +159,9 @@
   </div>
 
   <script>
-    // Inline Firebase Config and Init as backup (with corrected authDomain for reliability)
-    const firebaseConfig = {
-      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-      authDomain: "somaptestt.firebaseapp.com", // Corrected to default—fix for custom domain issues
-      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-      projectId: "somaptestt",
-      storageBucket: "somaptestt.appspot.com",
-      messagingSenderId: "105526245138",
-      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
-    };
-    if (typeof firebase === 'undefined' || !firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    if (typeof db === 'undefined') {
-      const db = firebase.database(); // Define if common.js failed
-    }
-
-    // Ensure currentYear is available (from prefonecommon.js or fallback)
+    // Ensure currentYear is available (from prefonecommon.js)
     if (typeof currentYear === 'undefined') {
-      currentYear = new Date().getFullYear(); // 2025
+      currentYear = new Date().getFullYear(); // Fallback to 2025
     }
     
     // Handle date input for live updates (fires on every keystroke for type="date")
@@ -224,7 +207,7 @@
             totalFee += Math.round((enrolledDecDays / 30) * 15000);
           }
         } else {
-          // Full month fee: 15,000 TSh (even if partial start in month)
+          // Full month fee: 15,000 TSh (even if partial start in month, per your examples)
           totalFee += 15000;
         }
         
@@ -234,12 +217,10 @@
         if (current.getFullYear() !== currentYearMonth) break; // Stop if year changes
       }
       
-      // Display with corrected/dynamic breakdown for clarity
-      const breakdown = reportingDateInput.value.startsWith(`${currentYear}-09`) ? ' (Full Sep + Oct + Nov + Pro Dec)' : 
-                        reportingDateInput.value.startsWith(`${currentYear}-10`) ? ' (Full Oct + Nov + Pro Dec)' : 
-                        reportingDateInput.value.startsWith(`${currentYear}-11`) ? ' (Full Nov + Pro Dec)' : 
-                        reportingDateInput.value.startsWith(`${currentYear}-12`) ? ' (Pro Dec)' : 
-                        ' (Pro-rated from start)';
+      // Display with example breakdown for clarity
+      const breakdown = reportingDateInput.value.startsWith('2025-09') ? ' (Full Sep + Oct + Pro Dec)' : 
+                       reportingDateInput.value.startsWith('2025-10') ? ' (Full Oct + Nov + Pro Dec)' : 
+                       ' (Pro-rated from start)';
       totalFeeDisplay.value = `TSh ${totalFee.toLocaleString()}${breakdown}`;
     }
     
@@ -291,32 +272,9 @@
           }
         }
         
-        // Generate ADM No and calculate fee (from common.js or inline fallback)
-        const admNo = typeof generateAdmNo === 'function' ? generateAdmNo() : `PF1-${Date.now()}`;
-        let totalFee;
-        if (typeof calculateTotalFee === 'function') {
-          totalFee = calculateTotalFee(reportingDate);
-        } else {
-          // Inline fallback (same as updateTotalFee calc)
-          const reportingDateObj = new Date(reportingDate);
-          const endDate = new Date(currentYear, 11, 15, 23, 59, 59);
-          totalFee = 0;
-          let current = new Date(reportingDateObj.getFullYear(), reportingDateObj.getMonth(), reportingDateObj.getDate());
-          while (current <= endDate) {
-            const currentMonth = current.getMonth();
-            if (currentMonth === 11) {
-              const decDaysAvailable = 15;
-              const enrolledDecDays = Math.min(decDaysAvailable - current.getDate() + 1, decDaysAvailable);
-              if (enrolledDecDays > 0) {
-                totalFee += Math.round((enrolledDecDays / 30) * 15000);
-              }
-            } else {
-              totalFee += 15000;
-            }
-            current.setDate(1);
-            current.setMonth(currentMonth + 1);
-          }
-        }
+        // Generate ADM No and calculate fee
+        const admNo = generateAdmNo();
+        const totalFee = calculateTotalFee(reportingDate);
         
         // Student object (full details)
         const student = {
@@ -339,16 +297,8 @@
           school: 'Socrates School Preform One' // Fixed for tracking
         };
         
-        // Save to Firebase RTDB with .then/.catch for error handling
-        const refPath = `/schools/Socrates School Preform one/${currentYear}/students/${admNo}`;
-        await db.ref(refPath).set(student)
-          .then(() => {
-            console.log('Save successful to:', refPath);
-          })
-          .catch((err) => {
-            console.error('DB save error:', err);
-            throw new Error('Failed to save to database: ' + err.message); // Shows exact issue, e.g., "permission denied"
-          });
+        // Save to Firebase RTDB (parallel path, no conflict with existing /students)
+        await db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${admNo}`).set(student);
         
         // Success: Detailed alert, reset form, refresh search
         Swal.fire({
@@ -395,46 +345,43 @@
       const tbody = document.getElementById('resultsBody');
       tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75"><i class="fas fa-spinner fa-spin mr-2"></i>Loading students...</td></tr>';
       
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value')
-        .then((snap) => {
-          const studentsObj = snap.val() || {};
-          const students = Object.entries(studentsObj);
-          
-          let filtered = students;
-          if (query) {
-            filtered = students.filter(([adm, s]) => 
-              `${s.firstName} ${s.lastName} ${s.parentName} ${s.parentContact}`.toLowerCase().includes(query) ||
-              adm.toLowerCase().includes(query)
-            );
-          }
-          
-          if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75">No students match your search. Try creating a new admission above.</td></tr>';
-            return;
-          }
-          
-          tbody.innerHTML = filtered.map(([adm, s]) => {
-            const paid = (s.payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-            const balance = Number(s.totalFee || 0) - paid;
-            const fullName = `${s.firstName} ${s.lastName}`;
-            return `<tr class="hover:bg-white/5">
-              <td class="p-3">${fullName}</td>
-              <td class="p-3">${adm}</td>
-              <td class="p-3">${s.reportingDate ? new Date(s.reportingDate).toLocaleDateString('en-GB') : 'N/A'}</td>
-              <td class="p-3">TSh ${Number(s.totalFee || 0).toLocaleString()}</td>
-              <td class="p-3 ${balance > 0 ? 'text-red-300' : 'text-green-300'}">TSh ${balance.toLocaleString()}</td>
-              <td class="p-3">
-                <button class="bg-yellow-500 text-white px-3 py-1 rounded mr-2 text-sm" onclick="editStudent('${adm}')"><i class="fas fa-edit mr-1"></i>Edit</button>
-                <button class="bg-red-500 text-white px-3 py-1 rounded text-sm" onclick="deleteStudent('${adm}')"><i class="fas fa-trash mr-1"></i>Delete</button>
-              </td>
-            </tr>`;
-          }).join('');
-        })
-        .catch((err) => {
-          console.error('Search error:', err);
-          tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-red-300"><i class="fas fa-exclamation-triangle mr-2"></i>Error loading students. Please try again.</td></tr>';
-          Swal.fire('Load Error', 'Failed to fetch students: ' + err.message, 'error');
-        });
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then((snap) => {
+        const studentsObj = snap.val() || {};
+        const students = Object.entries(studentsObj);
+        
+        let filtered = students;
+        if (query) {
+          filtered = students.filter(([adm, s]) => 
+            `${s.firstName} ${s.lastName} ${s.parentName} ${s.parentContact}`.toLowerCase().includes(query) ||
+            adm.toLowerCase().includes(query)
+          );
+        }
+        
+        if (filtered.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75">No students match your search. Try creating a new admission above.</td></tr>';
+          return;
+        }
+        
+        tbody.innerHTML = filtered.map(([adm, s]) => {
+          const paid = (s.payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          const balance = Number(s.totalFee || 0) - paid;
+          const fullName = `${s.firstName} ${s.lastName}`;
+          return `<tr class="hover:bg-white/5">
+            <td class="p-3">${fullName}</td>
+            <td class="p-3">${adm}</td>
+            <td class="p-3">${s.reportingDate ? new Date(s.reportingDate).toLocaleDateString('en-GB') : 'N/A'}</td>
+            <td class="p-3">TSh ${Number(s.totalFee || 0).toLocaleString()}</td>
+            <td class="p-3 ${balance > 0 ? 'text-red-300' : 'text-green-300'}">TSh ${balance.toLocaleString()}</td>
+            <td class="p-3">
+              <button class="bg-yellow-500 text-white px-3 py-1 rounded mr-2 text-sm" onclick="editStudent('${adm}')"><i class="fas fa-edit mr-1"></i>Edit</button>
+              <button class="bg-red-500 text-white px-3 py-1 rounded text-sm" onclick="deleteStudent('${adm}')"><i class="fas fa-trash mr-1"></i>Delete</button>
+            </td>
+          </tr>`;
+        }).join('');
+      }).catch((err) => {
+        console.error('Search error:', err);
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-red-300"><i class="fas fa-exclamation-triangle mr-2"></i>Error loading students. Please try again.</td></tr>';
+      });
     }
     
     function editStudent(adm) {
@@ -457,25 +404,18 @@
         confirmButtonText: 'Yes, Delete'
       }).then((result) => {
         if (result.isConfirmed) {
-          db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).remove()
-            .then(() => {
-              Swal.fire('Deleted!', 'Student record removed successfully.', 'success');
-              searchStudents(); // Refresh list
-            })
-            .catch((err) => {
-              Swal.fire('Error', 'Delete failed: ' + err.message, 'error');
-            });
+          db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).remove().then(() => {
+            Swal.fire('Deleted!', 'Student record removed successfully.', 'success');
+            searchStudents(); // Refresh list
+          }).catch((err) => {
+            Swal.fire('Error', 'Delete failed: ' + err.message, 'error');
+          });
         }
       });
     }
     
-    // Initial load: Search students (with try-catch to prevent script halt)
-    try {
-      searchStudents();
-    } catch (initErr) {
-      console.error('Initial load error:', initErr);
-      Swal.fire('Load Error', 'Failed to load students initially: ' + initErr.message + '. Check console and refresh.', 'error');
-    }
+    // Initial load: Search students
+    searchStudents();
   </script>
 </body>
 </html>

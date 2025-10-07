@@ -43,7 +43,7 @@
   <div class="max-w-7xl mx-auto">
     <h1 class="text-4xl font-bold mb-6 text-center fade-in"><i class="fas fa-table mr-2"></i> Preform One Scoresheet</h1>
     <div class="flex justify-between mb-4">
-      <a href="prefoneacademic.html" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white fade-in"><i class="fas fa-arrow-left mr-1"></i> Back to Academic</a>
+      <a href="prefoneacademic.html" onclick="syncFiltersToAcademic()" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white fade-in"><i class="fas fa-arrow-left mr-1"></i> Back to Academic</a>
       <button onclick="toggleFullscreen()" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white fade-in"><i class="fas fa-expand mr-1"></i> Fullscreen</button>
     </div>
     
@@ -53,14 +53,14 @@
       <button onclick="generateReportCards()" class="bg-purple-500 hover:bg-purple-600 p-2 rounded text-white fade-in"><i class="fas fa-file-pdf mr-1"></i> PDF Reports</button>
     </div>
     
-    <!-- Filters (with year selector like academic) -->
+    <!-- Filters (shared with academic via localStorage) -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md fade-in">
-      <select id="examType" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
+      <select id="examType" onchange="saveFiltersAndLoad()" class="p-2 rounded bg-white/20 text-white">
         <option value="Monthly">Monthly</option>
         <option value="Midterm">Midterm</option>
         <option value="End Term">End Term</option>
       </select>
-      <select id="month" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
+      <select id="month" onchange="saveFiltersAndLoad()" class="p-2 rounded bg-white/20 text-white">
         <option value="Sep">Sep</option>
         <option value="Oct">Oct</option>
         <option value="Nov">Nov</option>
@@ -71,7 +71,7 @@
         <option value="100">Max 100</option>
       </select>
       <select id="yearSelect" onchange="setYearAndLoad()" class="p-2 rounded bg-white/20 text-white">
-        <!-- Populated dynamically below -->
+        <!-- Populated dynamically -->
       </select>
     </div>
     
@@ -99,16 +99,7 @@
             <th class="p-3">ADM</th>
             <th class="p-3">Student (Preform One)</th>
             <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
-            <th class="p-3">Physics<br>(Score/Max)</th>
-            <th class="p-3">Chemistry<br>(Score/Max)</th>
-            <th class="p-3">Biology<br>(Score/Max)</th>
-            <th class="p-3">Historia ya Tanzania<br>(Score/Max)</th>
-            <th class="p-3">French<br>(Score/Max)</th>
-            <th class="p-3">Geography<br>(Score/Max)</th>
-            <th class="p-3">Basic Math<br>(Score/Max)</th>
-            <th class="p-3">English Language/Course<br>(Score/Max)</th>
-            <th class="p-3">Computer Studies<br>(Score/Max)</th>
-            <th class="p-3">Business Studies<br>(Score/Max)</th>
+            ${subjects.map(sub => `<th class="p-3">${sub}<br>(Score/Max)</th>`).join('')}
             <th class="p-3">Total/Max</th>
             <th class="p-3">% Avg</th>
             <th class="p-3">Pos</th>
@@ -121,7 +112,7 @@
       </table>
     </div>
     
-    <p class="text-center mt-4 fade-in">Total Students: <span id="totalStudentsFooter">0</span> | Subjects: 10 | Class Avg: <span id="classAvgFooter">0</span>% | Ready for marking? Filters auto-sync with Academic dashboard.</p>
+    <p class="text-center mt-4 fade-in">Total Students: <span id="totalStudentsFooter">0</span> | Subjects: 10 | Class Avg: <span id="classAvgFooter">0</span>%</p>
   </div>
 
   <script>
@@ -136,27 +127,22 @@
       measurementId: "G-4HKX7KN6Q3"
     };
 
-    // Initialize Firebase (compat)
     if (!firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
     }
     const db = firebase.database();
 
-    // Ensure currentYear is available (from prefonecommon.js) - LOG FOR DEBUG
     if (typeof currentYear === 'undefined') {
-      currentYear = new Date().getFullYear(); // Fallback to current year
+      currentYear = new Date().getFullYear();
     }
-    console.log('Scoresheet init: currentYear from common.js/fallback:', currentYear); // DEBUG: Check this in Console
 
     const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
 
     let allData = [], maxScore = 100;
-    let editingData = {}; // Temp storage for edits
+    let editingData = {};
 
-    // Populate years like academic (2024-2030, save/load from localStorage)
     function populateYears() {
       const select = document.getElementById('yearSelect');
-      select.innerHTML = ''; // Clear
       for (let y = 2024; y <= 2030; y++) {
         const opt = document.createElement('option');
         opt.value = y;
@@ -164,7 +150,6 @@
         if (y == currentYear) opt.selected = true;
         select.appendChild(opt);
       }
-      // Load saved year
       const savedYear = localStorage.getItem('prefone_year');
       if (savedYear) {
         select.value = savedYear;
@@ -175,18 +160,31 @@
     function setYearAndLoad() {
       currentYear = parseInt(document.getElementById('yearSelect').value);
       localStorage.setItem('prefone_year', currentYear);
-      console.log('Year changed to:', currentYear); // DEBUG
       loadScores();
     }
 
     function loadFilters() {
-      const savedExamType = localStorage.getItem('prefone_examType');
-      const savedMonth = localStorage.getItem('prefone_month');
-      if (savedExamType) document.getElementById('examType').value = savedExamType;
-      if (savedMonth) document.getElementById('month').value = savedMonth;
+      const savedExamType = localStorage.getItem('prefone_examType') || 'Monthly';
+      const savedMonth = localStorage.getItem('prefone_month') || 'Sep';
+      document.getElementById('examType').value = savedExamType;
+      document.getElementById('month').value = savedMonth;
     }
 
-    // Global stats update (like academic's inline calcs)
+    function saveFilters() {
+      localStorage.setItem('prefone_examType', document.getElementById('examType').value);
+      localStorage.setItem('prefone_month', document.getElementById('month').value);
+    }
+
+    function saveFiltersAndLoad() {
+      saveFilters();
+      loadScores();
+    }
+
+    function syncFiltersToAcademic() {
+      saveFilters();
+      window.location.href = 'prefoneacademic.html';
+    }
+
     function updateGlobalStats(allData) {
       const classAvg = allData.length > 0 ? allData.reduce((sum, row) => sum + row.avg, 0) / allData.length : 0;
       const topGrade = allData.length > 0 ? allData[0].grade : 'N/A';
@@ -197,39 +195,31 @@
       document.getElementById('classAvgFooter').textContent = classAvg.toFixed(2) + '%';
     }
 
-    // Direct fetch like admissions/academic (no modular Promise—simpler, matches working files)
     function loadScores() {
       maxScore = parseInt(document.getElementById('maxScore').value);
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
-      localStorage.setItem('prefone_examType', examType);
-      localStorage.setItem('prefone_month', month);
-
-      console.log('Fetching from path:', `/schools/Socrates School Preform one/${currentYear}/students`); // DEBUG: Verify path
+      saveFilters(); // Sync for academic
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
         const studentsObj = snap.val() || {};
-        const students = Object.entries(studentsObj); // Like admissions: [adm, s] pairs
-        console.log('Raw students fetched:', students.length, students[0]); // DEBUG: Log first entry or empty
-
+        const students = Object.entries(studentsObj); // Match attendance
         let grandTotal = 0;
         allData = [];
 
         if (students.length === 0) {
-          console.warn('No students in path—check RTDB or year'); // DEBUG
           updateGlobalStats([]);
-          renderScoresTable(); // Shows "No students" message
+          renderScoresTable();
           return;
         }
 
         allData = students.map(([adm, s]) => {
-          // Find or create score entry (same as before)
           const scoresArray = Object.values(s.scores || {});
           let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
           if (!scoreData) {
             scoreData = { examType, month, subjects: {} };
-            subjects.forEach(sub => { scoreData.subjects[sub] = { score: 0, max: maxScore }; });
+            subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
           } else {
             subjects.forEach(sub => { 
               if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
@@ -241,16 +231,11 @@
           const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
           grandTotal += parseFloat(avg);
 
-          // Attendance for the month (like academic)
           const attRecords = Object.values(s.attendance || {});
-          const monthAtt = attRecords.filter(a => {
-            const attDate = new Date(a.date);
-            return attDate.toLocaleString('en', { month: 'long' }) === monthFull;
-          });
+          const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
           const pres = monthAtt.filter(a => a.present).length;
           const abs = monthAtt.length - pres;
 
-          // Payments (like admissions)
           const paymentsArray = Object.values(s.payments || {});
           const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
           const bal = Number(s.totalFee || 0) - paid;
@@ -276,20 +261,17 @@
           return row;
         }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
 
-        console.log('Processed allData:', allData.length); // DEBUG
         updateGlobalStats(allData);
         renderScoresTable();
       }).catch(err => {
-        console.error('Direct fetch error:', err); // DEBUG: Full error in Console
-        Swal.fire('Error', `Failed to load scores: ${err.message}. Check Console (F12) for details or add students via Admissions.`, 'error');
+        Swal.fire('Error', 'Failed to load scores: ' + err.message, 'error');
       });
     }
 
-    // renderScoresTable, updateSubject, saveScores, updateComment, generateReportCards, exportCSV, toggleFullscreen (unchanged from your version)
     function renderScoresTable() {
       const tbody = document.getElementById('scoresBody');
       if (allData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="20" class="text-center p-4 opacity-75"><a href="prefoneadmission.html" class="text-blue-300 underline">No students found. Register some in Admissions first.</a></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="20" class="text-center p-4 opacity-75">No students found. <a href="prefoneadmission.html" class="text-blue-300 underline">Register in Admissions</a>.</td></tr>';
         return;
       }
       tbody.innerHTML = allData.map(row => `
@@ -356,19 +338,15 @@
           else ref.push(scoreEntry);
           saved++;
           if (saved === allData.length) {
-            Swal.fire('Saved!', 'All scores updated successfully.', 'success');
-            loadScores(); // Refresh
+            Swal.fire('Saved!', 'All scores updated. Refresh Academic for updated stats.', 'success');
+            loadScores();
           }
-        }).catch(err => {
-          console.error('Save error for ' + row.adm + ':', err);
-        });
+        }).catch(err => console.error('Save error:', err));
       });
     }
 
     function updateComment(adm, comment) {
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ comment }).catch(err => {
-        console.error('Comment update error:', err);
-      });
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ comment }).catch(err => console.error('Comment error:', err));
     }
 
     function generateReportCards() {
@@ -376,35 +354,30 @@
       allData.forEach(row => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
-        if (row.photoUrl) {
-          doc.addImage(row.photoUrl, 'JPEG', 10, 10, 30, 30);
-        }
+        if (row.photoUrl) doc.addImage(row.photoUrl, 'JPEG', 10, 10, 30, 30);
         doc.text(`Report Card - ${row.name}`, 10, row.photoUrl ? 50 : 20);
-        doc.text(`ADM: ${row.adm} | Reporting: ${new Date(row.reportingDate).toLocaleDateString('en-GB')}`, 10, 60);
-        doc.text(`Exam: ${document.getElementById('examType').value} ${document.getElementById('month').value}`, 10, 70);
-        doc.text(`Average: ${row.avg}% | Grade: ${row.grade}`, 10, 80);
-        doc.text(`Fee Balance: TSh ${row.bal.toLocaleString()}`, 10, 90);
+        doc.text(`ADM: ${row.adm} | Exam: ${document.getElementById('examType').value} ${document.getElementById('month').value}`, 10, 60);
+        doc.text(`Average: ${row.avg}% | Grade: ${row.grade} | Balance: TSh ${row.bal.toLocaleString()}`, 10, 70);
         doc.autoTable({
-          startY: 100,
+          startY: 80,
           head: [['Subject', 'Score/Max']],
           body: subjects.map(sub => [sub, `${editingData[row.adm][sub].score}/${editingData[row.adm][sub].max}`]),
           styles: { fontSize: 8 }
         });
-        const attY = doc.lastAutoTable.finalY + 10;
-        doc.text(`Attendance: ${row.pres}/${row.pres + row.abs} Present`, 10, attY);
-        doc.text(`Comment: ${row.comment || 'N/A'}`, 10, attY + 10);
+        const finalY = doc.lastAutoTable.finalY;
+        doc.text(`Attendance: ${row.pres}/${row.pres + row.abs} | Comment: ${row.comment || 'N/A'}`, 10, finalY + 10);
         doc.save(`${row.name.replace(/\s+/g, '_')}_report_${currentYear}.pdf`);
       });
-      Swal.fire('PDFs Generated!', `${allData.length} individual report cards saved.`, 'success');
+      Swal.fire('Success', `${allData.length} reports generated!`, 'success');
     }
 
     function exportCSV(data, filename) {
       const exportData = data.map(row => {
-        const obj = { ADM: row.adm, Name: row.name, 'Reporting Date': row.reportingDate, 'Fee Bal': row.bal, Grade: row.grade, 'Attendance Pres/Abs': `${row.pres}/${row.abs}`, Comment: row.comment };
+        const obj = { ADM: row.adm, Name: row.name, Grade: row.grade, 'Pres/Abs': `${row.pres}/${row.abs}`, Comment: row.comment };
         subjects.forEach(sub => obj[sub] = `${editingData[row.adm][sub].score}/${editingData[row.adm][sub].max}`);
         obj['Total/Max'] = `${row.total}/${row.maxTotal}`;
         obj['Avg %'] = row.avg;
-        obj['Position'] = row.pos;
+        obj['Pos'] = row.pos;
         return obj;
       });
       const csv = Papa.unparse(exportData);
@@ -421,7 +394,7 @@
       else document.exitFullscreen(); 
     }
 
-    // Initial load (like academic: populate years, load filters, fetch)
+    // Initial load (match attendance: populate, load filters, fetch)
     populateYears();
     loadFilters();
     loadScores();

@@ -14,8 +14,24 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   
-  <!-- Shared Preform One Logic -->
-  <script src="prefonecommon.js"></script>
+  <!-- Inline Firebase Config (fixes db undefined) -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+    window.db = db;
+    console.log('Firebase init success, db ready'); // Temp test log
+  </script>
   
   <style>
     body { 
@@ -227,26 +243,30 @@
         const students = Object.entries(snap.val() || {});
         let due = 0, coll = 0;
         financeData = students.map(([adm, s]) => {
-          const paid = (s.payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
-          const bal = s.totalFee - paid;
-          due += s.totalFee;
+          const paymentsArray = Object.values(s.payments || {});
+          const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          const bal = Number(s.totalFee || 0) - paid;
+          due += Number(s.totalFee || 0);
           coll += paid;
-          const nextDue = new Date(s.reportingDate);
+          const nextDue = new Date(s.reportingDate || new Date());
           nextDue.setMonth(nextDue.getMonth() + 1);
           const daysToDue = (nextDue - new Date()) / (1000 * 60 * 60 * 24);
-          const debtTill = daysToDue < 0 ? `<span class="overdue">Overdue ${Math.abs(daysToDue).toFixed(0)} days</span>` :
-                          daysToDue < 7 ? `<span class="due-soon">Due in ${daysToDue.toFixed(0)} days</span>` : `Due ${nextDue.toLocaleDateString()}`;
+          const debtTill = daysToDue < 0 ? `<span class="overdue">Overdue ${Math.abs(daysToDue).toFixed(0)} days</span>` : 
+                          daysToDue < 7 ? `<span class="due-soon">Due in ${daysToDue.toFixed(0)} days</span>` : `Due ${nextDue.toLocaleDateString('en-GB')}`;
           const status = bal <= 0 ? 'paid' : daysToDue < 0 ? 'overdue' : 'partial';
-          return { adm, name: `${s.firstName} ${s.lastName}`, contact: s.parentContact, totalFee: s.totalFee, plan: s.reportingDate ? `From ${s.reportingDate}` : 'Full', paid, bal, debtTill, status, photoUrl: s.photoUrl };
+          return { adm, name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), contact: s.parentContact || '', totalFee: Number(s.totalFee || 0), plan: s.reportingDate ? `From ${new Date(s.reportingDate).toLocaleDateString('en-GB')}` : 'Full Program', paid, bal, debtTill, status, photoUrl: s.photoUrl || '' };
         });
         
         db.ref(`/schools/Socrates School Preform one/${currentYear}/expenses`).once('value').then(eSnap => {
-          const exp = Object.values(eSnap.val() || {}).reduce((sum, ex) => sum + Number(ex.amount), 0);
+          const expensesArray = Object.values(eSnap.val() || {});
+          const exp = expensesArray.reduce((sum, ex) => sum + Number(ex.amount || 0), 0);
           document.getElementById('totalDue').textContent = `TSh ${due.toLocaleString()}`;
           document.getElementById('collected').textContent = `TSh ${coll.toLocaleString()}`;
           document.getElementById('outstanding').textContent = `TSh ${(due - coll).toLocaleString()}`;
           document.getElementById('expensesTotal').textContent = `TSh ${exp.toLocaleString()}`;
           document.getElementById('netBal').textContent = `TSh ${(coll - exp).toLocaleString()}`;
+        }).catch(err => {
+          console.error('Expenses load error:', err);
         });
         
         renderTable();

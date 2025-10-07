@@ -26,7 +26,7 @@
     <a href="prefoneattendance.html" class="bg-gray-500 p-2 rounded mb-4 inline-block"><i class="fas fa-arrow-left"></i> Back to Attendance Dashboard</a>
     
     <!-- Date Select -->
-    <input type="date" id="attDate" class="p-2 rounded bg-white/20 text-white mb-4" value="${new Date().toISOString().split('T')[0]}" onchange="loadClassAtt()">
+    <input type="date" id="attDate" class="p-2 rounded bg-white/20 text-white mb-4" onchange="loadClassAtt()">
     
     <table class="w-full bg-white/10 rounded table">
       <thead class="bg-white/20">
@@ -54,17 +54,29 @@
   <script>
     let classData = [];
 
+    // Set default date to today
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('attDate').value = new Date().toISOString().split('T')[0];
+      loadClassAtt();
+    });
+
     function loadClassAtt() {
       const date = document.getElementById('attDate').value;
       if (!date) return;
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-        const students = Object.entries(snap.val() || {});
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        const studentsObj = snap.val() || {};
+        const students = Object.entries(studentsObj);
         classData = students.map(([adm, s], idx) => {
-          const att = (s.attendance || []).find(a => a.date === date) || { am: 'P', pm: 'P', notes: '', present: true };
-          const bal = (s.totalFee || 0) - (s.payments || []).reduce((sum, p) => sum + p.amount, 0);
-          return { idx: idx + 1, adm, name: `${s.firstName} ${s.lastName}`, bal, ...att };
+          const attRecords = Object.values(s.attendance || {});
+          const att = attRecords.find(a => a.date === date) || { am: 'P', pm: 'P', notes: '', present: true };
+          const paymentsArray = Object.values(s.payments || {});
+          const bal = Number(s.totalFee || 0) - paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          return { idx: idx + 1, adm, name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), bal, ...att };
         });
         renderClassTable();
+      }).catch(err => {
+        console.error('Load error:', err);
+        Swal.fire('Error', 'Failed to load students: ' + err.message, 'error');
       });
     }
 
@@ -100,7 +112,7 @@
               <option ${row.pm === 'G' ? 'selected' : ''}>G (Guardian)</option>
             </select>
           </td>
-          <td><input type="text" class="p-1 rounded bg-white text-black" value="${row.notes}" onchange="updateNotes('${row.adm}', this.value)"></td>
+          <td><input type="text" class="p-1 rounded bg-white text-black" value="${row.notes || ''}" onchange="updateNotes('${row.adm}', this.value)"></td>
           <td><button class="bg-red-500 p-1 rounded text-xs text-white" onclick="clearAtt('${row.adm}')"><i class="fas fa-trash"></i></button></td>
         </tr>
       `).join('');
@@ -108,18 +120,16 @@
 
     function updateStatus(adm, period, value) {
       const row = classData.find(r => r.adm === adm);
-      row[period] = value;
-      row.present = (row.am === 'P' && row.pm === 'P');
-      if (row.present === false && checkShifted(row)) db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ shifted: true });
+      if (row) {
+        row[period] = value;
+        row.present = (row.am === 'P' && row.pm === 'P');
+        // Optionally check for shifted status
+      }
     }
 
     function updateNotes(adm, notes) {
-      classData.find(r => r.adm === adm).notes = notes;
-    }
-
-    function checkShifted(row) {
-      // Logic to check >2 weeks abs, assume from full att history
-      return false; // Placeholder
+      const row = classData.find(r => r.adm === adm);
+      if (row) row.notes = notes;
     }
 
     function markAllPresent() {
@@ -134,25 +144,31 @@
 
     function saveClassAtt() {
       const date = document.getElementById('attDate').value;
-      const batch = firebase.database.ServerValue.TIMESTAMP;
+      if (!date) return Swal.fire('Error', 'Select a date first.', 'error');
+      
+      const updates = {};
       classData.forEach(row => {
-        const attRef = db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/attendance`);
-        attRef.orderByChild('date').equalTo(date).once('value').then(snap => {
-          const existingKey = Object.keys(snap.val() || {})[0];
-          const updateData = { date, am: row.am, pm: row.pm, present: row.present, notes: row.notes };
-          if (existingKey) attRef.child(existingKey).update(updateData);
-          else attRef.push(updateData);
+        const attPath = `/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/attendance`;
+        // To handle existing, but since date unique, perhaps use date as key, but current is push
+        // For simplicity, remove existing for date and push new
+        db.ref(attPath).orderByChild('date').equalTo(date).once('value').then(snap => {
+          snap.forEach(child => child.ref.remove());
+        }).then(() => {
+          db.ref(attPath).push({ date, am: row.am, pm: row.pm, present: row.present, notes: row.notes || '' });
         });
       });
-      Swal.fire('Saved!', 'Attendance updated in database.', 'success');
+      Swal.fire('Saved!', 'Attendance updated. Changes will reflect in the dashboard upon refresh.', 'success');
     }
 
     function clearAtt(adm) {
       const date = document.getElementById('attDate').value;
+      if (!date) return;
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance`).orderByChild('date').equalTo(date).once('value', snap => {
         snap.forEach(child => child.ref.remove());
+      }).then(() => {
+        loadClassAtt();
+        Swal.fire('Cleared!', 'Attendance for this student on selected date cleared.', 'success');
       });
-      loadClassAtt();
     }
 
     function exportClassPDF() {
@@ -160,11 +176,12 @@
       const doc = new jsPDF('landscape');
       doc.autoTable({
         head: [['#', 'ADM', 'Name', 'Fee Bal', 'AM', 'PM', 'Notes']],
-        body: classData.map(row => [row.idx, row.adm, row.name, row.bal, row.am, row.pm, row.notes])
+        body: classData.map(row => [row.idx, row.adm, row.name, row.bal.toLocaleString(), row.am, row.pm, row.notes || ''])
       });
       doc.save(`class_attendance_${document.getElementById('attDate').value}.pdf`);
     }
 
+    // Initial load
     loadClassAtt();
   </script>
 </body>

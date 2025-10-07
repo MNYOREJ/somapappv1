@@ -23,12 +23,14 @@
     <div class="grid grid-cols-4 gap-4 mb-6 bg-white/10 p-4 rounded">
       <select id="examType" class="p-2 rounded bg-white/20 text-white"><option>Monthly</option><option>Midterm 1</option><option>End Term</option><option>Midterm 2</option><option>Annual</option></select>
       <select id="month" class="p-2 rounded bg-white/20 text-white"><option>Sep</option><option>Oct</option><option>Nov</option><option>Dec</option></select>
-      <select id="year" onchange="loadYear(this.value)" class="p-2 rounded bg-white/20 text-white"><option>2025</option></select>
+      <select id="year" onchange="loadYear(this.value)" class="p-2 rounded bg-white/20 text-white">
+        <!-- Populated dynamically -->
+      </select>
       <button onclick="loadAcademicData()" class="bg-blue-500 p-2 rounded">Load</button>
     </div>
     
     <!-- Stats -->
-    <div class="grid grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
       <div class="bg-white/20 p-4 rounded">Top Student: <span id="topStudent"></span> — <span id="topScore"></span>%</div>
       <div class="bg-white/20 p-4 rounded">Bottom Student: <span id="bottomStudent"></span> — <span id="bottomScore"></span>%</div>
       <div class="bg-white/20 p-4 rounded">Class Max: <span id="classMax"></span>%</div>
@@ -46,53 +48,109 @@
   </div>
 
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    // Initialize Firebase (compat)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    // Ensure currentYear is available (from prefonecommon.js)
+    if (typeof currentYear === 'undefined') {
+      currentYear = new Date().getFullYear(); // Fallback to current year
+    }
+
+    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
+
+    function populateYears() {
+      const select = document.getElementById('year');
+      for (let y = 2024; y <= 2030; y++) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        if (y == currentYear) opt.selected = true;
+        select.appendChild(opt);
+      }
+    }
+
+    function loadYear(year) {
+      currentYear = year;
+      loadAcademicData();
+    }
+
     function loadAcademicData() {
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-        const students = Object.values(snap.val() || {});
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        const studentsObj = snap.val() || {};
+        const students = Object.values(studentsObj);
         let topScore = 0, bottomScore = 100, topName = '', bottomName = '', totalAvg = 0, presentDays = 0, totalDays = 0;
         let required = 0, paid = 0;
         const subAvgs = {};
         subjects.forEach(sub => subAvgs[sub] = 0);
         
         students.forEach(s => {
-          const scoreData = s.scores?.find(sc => sc.examType === examType && sc.month === month);
+          // Scores
+          const scoresArray = Object.values(s.scores || {});
+          const scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
           const avg = scoreData ? Object.values(scoreData.subjects).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length : 0;
           totalAvg += avg;
-          if (avg > topScore) { topScore = avg; topName = s.firstName + ' ' + s.lastName; }
-          if (avg < bottomScore) { bottomScore = avg; bottomName = s.firstName + ' ' + s.lastName; }
+          if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
+          if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
           
           // Attendance
-          s.attendance?.forEach(a => { if (a.present) presentDays++; totalDays++; });
+          const attRecords = Object.values(s.attendance || {});
+          attRecords.forEach(a => { 
+            if (a.present) presentDays++; 
+            totalDays++; 
+          });
           
           // Fees
-          required += s.totalFee;
-          paid += s.payments.reduce((sum, p) => sum + p.amount, 0);
+          required += Number(s.totalFee || 0);
+          const paymentsArray = Object.values(s.payments || {});
+          paid += paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
           
-          // Subjects
-          if (scoreData) Object.entries(scoreData.subjects).forEach(([sub, data]) => {
-            subAvgs[sub] += (data.score / data.max * 100);
-          });
+          // Subjects avgs
+          if (scoreData) {
+            Object.entries(scoreData.subjects).forEach(([sub, data]) => {
+              subAvgs[sub] += (data.score / data.max * 100);
+            });
+          }
         });
         
-        const classAvg = totalAvg / students.length;
-        const attPct = (presentDays / totalDays * 100).toFixed(1);
-        const bestSub = Object.entries(subAvgs).reduce((a, b) => a[1] > b[1] ? a : b)[0];
+        const numStudents = students.length;
+        const classAvg = numStudents > 0 ? (totalAvg / numStudents).toFixed(2) : 0;
+        const attPct = totalDays > 0 ? (presentDays / totalDays * 100).toFixed(1) : 0;
+        const bestSub = Object.entries(subAvgs).reduce((max, [sub, avg]) => (avg > max[1] ? [sub, avg] : max), ['', 0])[0];
         
-        document.getElementById('topStudent').textContent = topName;
+        document.getElementById('topStudent').textContent = topName || 'N/A';
         document.getElementById('topScore').textContent = topScore.toFixed(2);
-        document.getElementById('bottomStudent').textContent = bottomName;
+        document.getElementById('bottomStudent').textContent = bottomName || 'N/A';
         document.getElementById('bottomScore').textContent = bottomScore.toFixed(2);
         document.getElementById('classMax').textContent = topScore.toFixed(2);
-        document.getElementById('classAvg').textContent = classAvg.toFixed(2);
+        document.getElementById('classAvg').textContent = classAvg;
         document.getElementById('attendance').textContent = attPct;
-        document.getElementById('required').textContent = required + ' TSh';
-        document.getElementById('paid').textContent = paid + ' TSh';
-        document.getElementById('bal').textContent = (required - paid) + ' TSh';
-        document.getElementById('bestSub').textContent = bestSub;
+        document.getElementById('required').textContent = required.toLocaleString() + ' TSh';
+        document.getElementById('paid').textContent = paid.toLocaleString() + ' TSh';
+        document.getElementById('bal').textContent = (required - paid).toLocaleString() + ' TSh';
+        document.getElementById('bestSub').textContent = bestSub || 'N/A';
+      }).catch(err => {
+        console.error('Load error:', err);
+        Swal.fire('Error', 'Failed to load academic data: ' + err.message, 'error');
       });
     }
+
+    populateYears();
     loadAcademicData();
   </script>
 </body>

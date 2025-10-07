@@ -53,8 +53,8 @@
       <button onclick="generateReportCards()" class="bg-purple-500 hover:bg-purple-600 p-2 rounded text-white fade-in"><i class="fas fa-file-pdf mr-1"></i> PDF Reports</button>
     </div>
     
-    <!-- Filters (sync with academic) -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md fade-in">
+    <!-- Filters (with year selector like academic) -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md fade-in">
       <select id="examType" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
         <option value="Monthly">Monthly</option>
         <option value="Midterm">Midterm</option>
@@ -69,6 +69,9 @@
       <select id="maxScore" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
         <option value="50">Max 50</option>
         <option value="100">Max 100</option>
+      </select>
+      <select id="yearSelect" onchange="setYearAndLoad()" class="p-2 rounded bg-white/20 text-white">
+        <!-- Populated dynamically below -->
       </select>
     </div>
     
@@ -139,38 +142,51 @@
     }
     const db = firebase.database();
 
-    // Ensure currentYear is available (from prefonecommon.js)
+    // Ensure currentYear is available (from prefonecommon.js) - LOG FOR DEBUG
     if (typeof currentYear === 'undefined') {
       currentYear = new Date().getFullYear(); // Fallback to current year
     }
+    console.log('Scoresheet init: currentYear from common.js/fallback:', currentYear); // DEBUG: Check this in Console
 
     const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
 
     let allData = [], maxScore = 100;
     let editingData = {}; // Temp storage for edits
 
-    // Modular fetch helper (finance-style: clean, reusable for other files like academic)
-    async function loadStudents() {
-      return new Promise((resolve, reject) => {
-        db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value')
-          .then(snap => {
-            const studentsObj = snap.val() || {};
-            resolve(Object.entries(studentsObj)); // Return raw [adm, student] array
-          })
-          .catch(reject);
-      });
+    // Populate years like academic (2024-2030, save/load from localStorage)
+    function populateYears() {
+      const select = document.getElementById('yearSelect');
+      select.innerHTML = ''; // Clear
+      for (let y = 2024; y <= 2030; y++) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        if (y == currentYear) opt.selected = true;
+        select.appendChild(opt);
+      }
+      // Load saved year
+      const savedYear = localStorage.getItem('prefone_year');
+      if (savedYear) {
+        select.value = savedYear;
+        currentYear = parseInt(savedYear);
+      }
+    }
+
+    function setYearAndLoad() {
+      currentYear = parseInt(document.getElementById('yearSelect').value);
+      localStorage.setItem('prefone_year', currentYear);
+      console.log('Year changed to:', currentYear); // DEBUG
+      loadScores();
     }
 
     function loadFilters() {
       const savedExamType = localStorage.getItem('prefone_examType');
       const savedMonth = localStorage.getItem('prefone_month');
-      const savedYear = localStorage.getItem('prefone_year');
       if (savedExamType) document.getElementById('examType').value = savedExamType;
       if (savedMonth) document.getElementById('month').value = savedMonth;
-      if (savedYear) currentYear = savedYear;
     }
 
-    // Global stats update (borrowed from finance's chained calc)
+    // Global stats update (like academic's inline calcs)
     function updateGlobalStats(allData) {
       const classAvg = allData.length > 0 ? allData.reduce((sum, row) => sum + row.avg, 0) / allData.length : 0;
       const topGrade = allData.length > 0 ? allData[0].grade : 'N/A';
@@ -181,24 +197,40 @@
       document.getElementById('classAvgFooter').textContent = classAvg.toFixed(2) + '%';
     }
 
+    // Direct fetch like admissions/academic (no modular Promise—simpler, matches working files)
     function loadScores() {
       maxScore = parseInt(document.getElementById('maxScore').value);
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
+      localStorage.setItem('prefone_examType', examType);
+      localStorage.setItem('prefone_month', month);
 
-      loadStudents().then(students => {
+      console.log('Fetching from path:', `/schools/Socrates School Preform one/${currentYear}/students`); // DEBUG: Verify path
+
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        const studentsObj = snap.val() || {};
+        const students = Object.entries(studentsObj); // Like admissions: [adm, s] pairs
+        console.log('Raw students fetched:', students.length, students[0]); // DEBUG: Log first entry or empty
+
         let grandTotal = 0;
+        allData = [];
+
+        if (students.length === 0) {
+          console.warn('No students in path—check RTDB or year'); // DEBUG
+          updateGlobalStats([]);
+          renderScoresTable(); // Shows "No students" message
+          return;
+        }
 
         allData = students.map(([adm, s]) => {
-          // Find or create score entry
+          // Find or create score entry (same as before)
           const scoresArray = Object.values(s.scores || {});
           let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
           if (!scoreData) {
             scoreData = { examType, month, subjects: {} };
             subjects.forEach(sub => { scoreData.subjects[sub] = { score: 0, max: maxScore }; });
           } else {
-            // Ensure all subjects
             subjects.forEach(sub => { 
               if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
             });
@@ -209,7 +241,7 @@
           const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
           grandTotal += parseFloat(avg);
 
-          // Attendance for the month
+          // Attendance for the month (like academic)
           const attRecords = Object.values(s.attendance || {});
           const monthAtt = attRecords.filter(a => {
             const attDate = new Date(a.date);
@@ -218,7 +250,7 @@
           const pres = monthAtt.filter(a => a.present).length;
           const abs = monthAtt.length - pres;
 
-          // Payments
+          // Payments (like admissions)
           const paymentsArray = Object.values(s.payments || {});
           const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
           const bal = Number(s.totalFee || 0) - paid;
@@ -240,24 +272,24 @@
             comment: s.comment || ''
           };
 
-          // Temp editing data
           editingData[adm] = { ...row.scoreData.subjects };
-
           return row;
         }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
 
+        console.log('Processed allData:', allData.length); // DEBUG
         updateGlobalStats(allData);
         renderScoresTable();
       }).catch(err => {
-        console.error('Load error:', err);
-        Swal.fire('Error', 'Failed to load scores: ' + err.message, 'error');
+        console.error('Direct fetch error:', err); // DEBUG: Full error in Console
+        Swal.fire('Error', `Failed to load scores: ${err.message}. Check Console (F12) for details or add students via Admissions.`, 'error');
       });
     }
 
+    // renderScoresTable, updateSubject, saveScores, updateComment, generateReportCards, exportCSV, toggleFullscreen (unchanged from your version)
     function renderScoresTable() {
       const tbody = document.getElementById('scoresBody');
       if (allData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="20" class="text-center p-4 opacity-75">No students found. Register some in Admissions first.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="20" class="text-center p-4 opacity-75"><a href="prefoneadmission.html" class="text-blue-300 underline">No students found. Register some in Admissions first.</a></td></tr>';
         return;
       }
       tbody.innerHTML = allData.map(row => `
@@ -286,7 +318,6 @@
       const numScore = parseInt(score);
       if (isNaN(numScore) || numScore < 0 || numScore > maxScore) return;
       editingData[adm][sub].score = numScore;
-      // Re-calculate row
       const row = allData.find(r => r.adm === adm);
       if (row) {
         const total = Object.values(editingData[adm]).reduce((sum, subData) => sum + subData.score, 0);
@@ -296,10 +327,9 @@
         row.maxTotal = maxTotal;
         row.avg = parseFloat(avg);
         row.grade = avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F';
-        // Re-sort and re-position
         allData.sort((a, b) => b.avg - a.avg);
         allData.forEach((r, idx) => r.pos = idx + 1);
-        updateGlobalStats(allData); // Refresh stats on update
+        updateGlobalStats(allData);
         renderScoresTable();
       }
     }
@@ -391,7 +421,8 @@
       else document.exitFullscreen(); 
     }
 
-    // Initial load
+    // Initial load (like academic: populate years, load filters, fetch)
+    populateYears();
     loadFilters();
     loadScores();
   </script>

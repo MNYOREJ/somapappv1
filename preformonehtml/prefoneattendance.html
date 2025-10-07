@@ -1,135 +1,360 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>SoMAp — Preform One Attendance</title>
-  <!-- Same scripts -->
+  <title>SoMAp — Preform One Attendance Dashboard</title>
+  <!-- Firebase Compat SDKs (v9.6.10 for consistency with repo) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  
+  <!-- UI Libraries -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Added for charts -->
+  
+  <!-- Shared Preform One Logic -->
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+  
+  <style>
+    body { 
+      background: linear-gradient(to right, #667eea, #764ba2); 
+    }
+    .card { border-radius: 1rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); background: white; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .attendance-card { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.3s; }
+    .attendance-card:hover { transform: translateY(-5px); }
+    .table { width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 1rem; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    .table th, .table td { padding: 1rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.2); }
+    .table th { background: rgba(255,255,255,0.1); font-weight: bold; }
+    .status-present { background: #dcfce7; color: #166534; }
+    .status-absent { background: #fee2e2; color: #991b1b; }
+    .status-late { background: #fef9c3; color: #854d0e; }
+    .status-pill { padding: 0.25rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); padding-top: 60px; }
+    .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 800px; border-radius: 8px; color: #333; }
+    .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+    .close:hover { color: black; }
+    .fade-in { animation: fadeIn 0.5s; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
-  <div class="max-w-6xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-calendar-check"></i> Preform One Attendance</h1>
-    <a href="prefonedashboard.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back</a>
-    <button onclick="toggleFullscreen()" class="bg-gray-500 p-2 rounded mb-4">Fullscreen</button>
-    
-    <!-- Stats -->
-    <div class="grid grid-cols-3 gap-4 mb-6">
-      <div class="bg-white/20 p-4 rounded">Class Days: <span id="classDays">0</span></div>
-      <div class="bg-white/20 p-4 rounded">% Present: <span id="presentPct">0</span>%</div>
-      <div class="bg-white/20 p-4 rounded">Yellow Alerts (>10 absent): <span id="alerts">0</span></div>
+  <div class="max-w-7xl mx-auto">
+    <h1 class="text-4xl font-bold mb-6 text-center"><i class="fas fa-calendar-check mr-2"></i> Preform One Attendance Dashboard</h1>
+    <div class="flex justify-between mb-4">
+      <a href="prefonedashboard.html" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white"><i class="fas fa-arrow-left mr-1"></i> Back to Dashboard</a>
+      <button onclick="toggleFullscreen()" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white"><i class="fas fa-expand mr-1"></i> Fullscreen</button>
     </div>
     
-    <!-- Tabs -->
-    <div class="flex gap-4 mb-4">
-      <button onclick="showTab('class')" class="bg-blue-500 p-2 rounded">Class Attendance</button>
-      <button onclick="showTab('perStudent')" class="bg-green-500 p-2 rounded">Per-Student</button>
+    <!-- Year and Date Selectors for Historical Views -->
+    <div class="flex flex-wrap items-center gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md">
+      <label class="text-sm">Year:</label>
+      <select id="selectedYear" class="p-2 rounded bg-white/20 text-white" onchange="loadAttendanceData()">
+        <!-- Populated dynamically -->
+      </select>
+      <label class="text-sm">Month:</label>
+      <select id="selectedMonth" class="p-2 rounded bg-white/20 text-white" onchange="loadAttendanceData()">
+        <option value="">All Months</option>
+        <option value="September">September</option>
+        <option value="October">October</option>
+        <option value="November">November</option>
+        <option value="December">December</option>
+      </select>
+      <label class="text-sm">Date:</label>
+      <input type="date" id="selectedDate" class="p-2 rounded bg-white/20 text-white" onchange="loadAttendanceData()">
     </div>
     
-    <div id="classTab">
-      <select id="date" class="p-2 rounded bg-white/20 text-white mb-4" onchange="loadClassAttendance()"><option>Today</option></select>
-      <table class="w-full bg-white/10 rounded">
-        <thead><tr class="bg-white/20"><th>#</th><th>Adm</th><th>Name</th><th>Fee Bal</th><th>AM Mark</th><th>PM Mark</th><th>Actions</th></tr></thead>
-        <tbody id="classBody"></tbody>
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-school mr-1"></i> Total Students</h3>
+        <p id="totalStudents" class="text-2xl font-bold">0</p>
+      </div>
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-check-circle mr-1"></i> % Present (Avg)</h3>
+        <p id="presentPct" class="text-2xl font-bold">0%</p>
+      </div>
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-exclamation-triangle mr-1"></i> Absence Alerts (>10 abs)</h3>
+        <p id="alerts" class="text-2xl font-bold">0</p>
+      </div>
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-calendar-days mr-1"></i> Class Days Tracked</h3>
+        <p id="classDays" class="text-2xl font-bold">0</p>
+      </div>
+    </div>
+    
+    <!-- Navigation to Sub-Pages -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+      <a href="prefoneclassattendance.html" class="bg-blue-500 hover:bg-blue-600 p-4 rounded-lg text-center text-white font-bold shadow-md transition-transform hover:transform hover:scale-105">
+        <i class="fas fa-users text-3xl mb-2"></i><br>Mark Class Attendance
+      </a>
+      <button onclick="showPerStudentModal()" class="bg-green-500 hover:bg-green-600 p-4 rounded-lg text-center text-white font-bold shadow-md transition-transform hover:transform hover:scale-105">
+        <i class="fas fa-user-check text-3xl mb-2"></i><br>Per-Student Summaries
+      </button>
+    </div>
+    
+    <!-- Daily Summary Table (for selected date) -->
+    <div class="overflow-x-auto bg-white/10 rounded-lg shadow-md mb-8">
+      <h2 class="text-xl font-bold p-4"><i class="fas fa-table mr-2"></i> Daily Attendance Summary</h2>
+      <table class="w-full text-sm table">
+        <thead class="bg-white/20">
+          <tr>
+            <th class="p-3">#</th>
+            <th class="p-3">ADM No</th>
+            <th class="p-3">Name</th>
+            <th class="p-3">Fee Balance</th>
+            <th class="p-3">AM Status</th>
+            <th class="p-3">PM Status</th>
+            <th class="p-3">Overall</th>
+            <th class="p-3">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="dailyBody" class="bg-white/5"></tbody>
       </table>
-      <button onclick="markAllPresent()" class="bg-green-500 p-2 rounded mt-4">Mark All Present</button>
-      <button onclick="exportDaily('class.pdf')" class="bg-purple-500 p-2 rounded mt-4">Export PDF</button>
     </div>
     
-    <div id="perStudentTab" style="display:none;">
-      <h2>Per-Student Summary (<span id="currentMonth"></span>)</h2>
-      <div id="studentSummary"></div>
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+      <div class="bg-white/10 rounded-lg shadow-md p-4">
+        <h2 class="text-xl font-bold mb-4"><i class="fas fa-chart-bar mr-2"></i> Attendance Trends</h2>
+        <canvas id="trendChart"></canvas>
+      </div>
+      <div class="bg-white/10 rounded-lg shadow-md p-4">
+        <h2 class="text-xl font-bold mb-4"><i class="fas fa-chart-pie mr-2"></i> Absence Reasons</h2>
+        <canvas id="reasonsChart"></canvas>
+      </div>
+    </div>
+    
+    <!-- Export Buttons -->
+    <div class="flex flex-wrap gap-4 justify-center">
+      <button onclick="exportDailyPDF()" class="bg-purple-500 hover:bg-purple-600 p-2 rounded text-white"><i class="fas fa-file-pdf mr-1"></i> Daily PDF</button>
+      <button onclick="exportDailyCSV()" class="bg-green-500 hover:bg-green-600 p-2 rounded text-white"><i class="fas fa-file-csv mr-1"></i> Daily CSV</button>
+      <button onclick="exportMonthlyPDF()" class="bg-red-500 hover:bg-red-600 p-2 rounded text-white"><i class="fas fa-file-pdf mr-1"></i> Monthly PDF</button>
+      <button onclick="exportMonthlyCSV()" class="bg-amber-500 hover:bg-amber-600 p-2 rounded text-white"><i class="fas fa-file-csv mr-1"></i> Monthly CSV</button>
+      <button onclick="exportAlertsPDF()" class="bg-yellow-500 hover:bg-yellow-600 p-2 rounded text-white"><i class="fas fa-exclamation-triangle mr-1"></i> Alerts PDF</button>
+    </div>
+  </div>
+
+  <!-- Per-Student Modal -->
+  <div id="perStudentModal" class="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeModal('perStudentModal')">&times;</span>
+      <h2 class="text-xl font-bold mb-4"><i class="fas fa-user mr-2"></i> Per-Student Attendance Summary</h2>
+      <input type="text" id="studentSearch" placeholder="Search Student..." class="w-full p-2 border rounded mb-4" oninput="filterStudents()">
+      <div id="studentSummaries" class="space-y-4"></div>
     </div>
   </div>
 
   <script>
-    let currentTab = 'class';
-    function showTab(tab) {
-      currentTab = tab;
-      document.getElementById('classTab').style.display = tab === 'class' ? 'block' : 'none';
-      document.getElementById('perStudentTab').style.display = tab === 'perStudent' ? 'block' : 'none';
-      if (tab === 'class') loadClassAttendance(); else loadPerStudent();
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
     }
-    
-    function loadClassAttendance() {
-      const date = document.getElementById('date').value || new Date().toISOString().split('T')[0];
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
+    const db = firebase.database();
+
+    let attendanceData = [];
+    let selectedYear = currentYear || new Date().getFullYear().toString();
+    let selectedMonth = '';
+    let selectedDate = new Date().toISOString().split('T')[0];
+    let trendChart, reasonsChart;
+
+    function populateYears() {
+      const select = document.getElementById('selectedYear');
+      for (let y = 2024; y <= 2030; y++) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y;
+        if (y == selectedYear) opt.selected = true;
+        select.appendChild(opt);
+      }
+    }
+
+    function loadAttendanceData() {
+      selectedYear = document.getElementById('selectedYear').value;
+      selectedMonth = document.getElementById('selectedMonth').value;
+      selectedDate = document.getElementById('selectedDate').value || new Date().toISOString().split('T')[0];
+
+      const refPath = `/schools/Socrates School Preform one/${selectedYear}/students`;
+      db.ref(refPath).once('value').then(snap => {
         const students = Object.entries(snap.val() || {});
-        let present = 0, total = students.length, alerts = 0;
-        const tbody = document.getElementById('classBody');
-        tbody.innerHTML = students.map(([adm, s], idx) => {
-          const att = s.attendance?.find(a => a.date === date);
-          const isPresent = att?.present;
-          if (isPresent) present++;
-          const absCount = s.attendance.filter(a => !a.present).length;
+        let totalStudents = students.length;
+        let classDays = 0, totalPresent = 0, alerts = 0, absenceReasons = { A: 0, S: 0, L: 0, E: 0, M: 0, T: 0, G: 0 };
+        let trendData = { labels: [], data: [] }; // For chart
+
+        attendanceData = students.map(([adm, s], idx) => {
+          let attRecords = s.attendance || [];
+          if (selectedMonth) attRecords = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === selectedMonth);
+          if (selectedDate) attRecords = attRecords.filter(a => a.date === selectedDate);
+
+          const absCount = attRecords.filter(a => !a.present).length;
           if (absCount >= 10) alerts++;
-          const bal = s.totalFee - s.payments.reduce((sum, p) => sum + p.amount, 0);
-          return `<tr><td>${idx+1}</td><td>${adm}</td><td>${s.firstName} ${s.lastName}</td><td>${bal} TSh</td>
-            <td><select onchange="updateAtt('${adm}', '${date}', 'AM', this.value)"><option>P</option><option>A</option><option>S</option><option>L</option><option>E</option><option>M</option><option>T</option><option>P</option><option>G</option></select></td>
-            <td><select onchange="updateAtt('${adm}', '${date}', 'PM', this.value)"><option>P</option><option>A</option><option>S</option><option>L</option><option>E</option><option>M</option><option>T</option><option>P</option><option>G</option></select></td>
-            <td><button onclick="exportStudent('${adm}', '${date}')">Export</button></td></tr>`;
-        }).join('');
-        
-        document.getElementById('classDays').textContent = total;
-        document.getElementById('presentPct').textContent = (present / total * 100).toFixed(1);
-        document.getElementById('alerts').textContent = alerts;
-        
-        // Set selects to current
-        students.forEach(([adm]) => {
-          // Load from DB if needed
+          const bal = (s.totalFee || 0) - (s.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+          const recentAtt = attRecords[attRecords.length - 1] || { am: 'N/A', pm: 'N/A', present: false };
+
+          attRecords.forEach(a => {
+            classDays = Math.max(classDays, attRecords.length);
+            if (a.present) totalPresent++;
+            if (!a.present) absenceReasons[a.am]++; // Assume am/pm status for reasons
+          });
+
+          // For trends: Aggregate by date or month
+          // Simplified: Assume monthly avg for now
+          trendData.labels.push(s.firstName + ' ' + s.lastName);
+          trendData.data.push((attRecords.filter(a => a.present).length / attRecords.length * 100) || 0);
+
+          return { idx: idx + 1, adm, name: `${s.firstName} ${s.lastName}`, bal, am: recentAtt.am, pm: recentAtt.pm, overall: recentAtt.present ? 'Present' : 'Absent', attRecords, photoUrl: s.photoUrl || '' };
         });
+
+        document.getElementById('totalStudents').textContent = totalStudents;
+        document.getElementById('presentPct').textContent = totalStudents > 0 ? ((totalPresent / (totalStudents * classDays) * 100) || 0).toFixed(1) + '%' : '0%';
+        document.getElementById('alerts').textContent = alerts;
+        document.getElementById('classDays').textContent = classDays;
+
+        renderDailyTable();
+        renderCharts(trendData, absenceReasons);
+      }).catch(err => {
+        Swal.fire('Error', 'Failed to load data: ' + err.message, 'error');
       });
     }
-    
-    function updateAtt(adm, date, period, status) {
-      const present = status === 'P' || status === 'A'; // Simplify: P present, A absent
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance/${Date.now()}`).set({ date, period, present, status });
-      if (!present && /* Check if >2 weeks */ ) db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ shifted: true });
-      Swal.fire('Updated!', 'Attendance marked.', 'success');
+
+    function renderDailyTable() {
+      const tbody = document.getElementById('dailyBody');
+      tbody.innerHTML = attendanceData.map(row => `
+        <tr class="hover:bg-white/10">
+          <td class="p-3">${row.idx}</td>
+          <td class="p-3">${row.adm}</td>
+          <td class="p-3">${row.name}</td>
+          <td class="p-3 ${row.bal > 0 ? 'text-yellow-300' : ''}">TSh ${row.bal.toLocaleString()}</td>
+          <td class="p-3"><span class="status-pill ${row.am === 'P' ? 'status-present' : 'status-absent'}">${row.am}</span></td>
+          <td class="p-3"><span class="status-pill ${row.pm === 'P' ? 'status-present' : 'status-absent'}">${row.pm}</span></td>
+          <td class="p-3"><span class="status-pill status-${row.overall.toLowerCase()}">${row.overall}</span></td>
+          <td class="p-3">
+            <button class="bg-blue-500 p-1 rounded text-xs text-white" onclick="viewStudentDetails('${row.adm}')"><i class="fas fa-eye"></i></button>
+          </td>
+        </tr>
+      `).join('');
     }
-    
-    function markAllPresent() {
-      const date = document.getElementById('date').value || new Date().toISOString().split('T')[0];
-      // Loop students, set present
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-        Object.keys(snap.val() || {}).forEach(adm => updateAtt(adm, date, 'AM', 'P'));
+
+    function renderCharts(trend, reasons) {
+      if (trendChart) trendChart.destroy();
+      trendChart = new Chart(document.getElementById('trendChart'), {
+        type: 'line',
+        data: { labels: trend.labels.slice(0,10), datasets: [{ label: '% Present', data: trend.data.slice(0,10), borderColor: '#10b981' }] },
+        options: { scales: { y: { beginAtZero: true } } }
+      });
+
+      if (reasonsChart) reasonsChart.destroy();
+      reasonsChart = new Chart(document.getElementById('reasonsChart'), {
+        type: 'pie',
+        data: { labels: Object.keys(reasons), datasets: [{ data: Object.values(reasons), backgroundColor: ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'] }] }
       });
     }
-    
-    function loadPerStudent() {
-      const month = new Date().toLocaleString('en', { month: 'long' });
-      document.getElementById('currentMonth').textContent = month;
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-        const summary = document.getElementById('studentSummary');
-        summary.innerHTML = Object.values(snap.val() || {}).map(s => {
-          const totalDays = s.attendance.length;
-          const pres = s.attendance.filter(a => a.present).length;
-          const pct = (pres / totalDays * 100).toFixed(1);
-          return `<div>${s.firstName} ${s.lastName}: Present ${pres}/${totalDays} · ${pct}%</div>`;
-        }).join('');
+
+    function showPerStudentModal() {
+      const summaries = document.getElementById('studentSummaries');
+      summaries.innerHTML = attendanceData.map(row => `
+        <div class="bg-white p-4 rounded shadow">
+          <h3 class="font-bold">${row.name} (ADM: ${row.adm})</h3>
+          <p>Present: ${row.attRecords.filter(a => a.present).length} / ${row.attRecords.length} (${(row.attRecords.filter(a => a.present).length / row.attRecords.length * 100).toFixed(1)}%)</p>
+          <p>Recent Absences: ${row.attRecords.filter(a => !a.present).slice(-3).map(a => a.date).join(', ')}</p>
+          ${row.photoUrl ? `<img src="${row.photoUrl}" alt="Photo" class="w-20 h-20 rounded-full">` : ''}
+        </div>
+      `).join('');
+      document.getElementById('perStudentModal').style.display = 'block';
+    }
+
+    function filterStudents() {
+      const query = document.getElementById('studentSearch').value.toLowerCase();
+      document.querySelectorAll('#studentSummaries > div').forEach(div => {
+        div.style.display = div.textContent.toLowerCase().includes(query) ? 'block' : 'none';
       });
     }
-    
-    function exportDaily(type) {
-      const content = 'Daily Attendance Report\n' + document.getElementById('classBody').innerHTML;
-      generatePDF(content, `attendance_${new Date().toISOString().split('T')[0]}.pdf`);
+
+    function viewStudentDetails(adm) {
+      const row = attendanceData.find(r => r.adm === adm);
+      Swal.fire({
+        title: `${row.name}'s Details`,
+        html: `<p>Fee Bal: TSh ${row.bal}</p><p>Attendance History: ${row.attRecords.map(a => `${a.date}: ${a.present ? 'Present' : 'Absent'}`).join('<br>')}</p>`,
+        imageUrl: row.photoUrl,
+        imageWidth: 200,
+        imageHeight: 200
+      });
     }
-    
-    function exportStudent(adm, date) {
-      // Fetch single, PDF
-      generatePDF(`Student ${adm} Attendance ${date}`, `student_${adm}.pdf`);
+
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
     }
-    
-    function toggleFullscreen() { document.documentElement.requestFullscreen(); }
-    
-    loadClassAttendance();
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+
+    function exportDailyPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape');
+      doc.autoTable({
+        head: [['#', 'ADM', 'Name', 'Fee Bal', 'AM', 'PM', 'Overall']],
+        body: attendanceData.map(row => [row.idx, row.adm, row.name, row.bal, row.am, row.pm, row.overall]),
+        styles: { fontSize: 8 }
+      });
+      doc.save(`attendance_daily_${selectedDate}.pdf`);
+    }
+
+    function exportDailyCSV() {
+      const data = attendanceData.map(row => ({ '#': row.idx, ADM: row.adm, Name: row.name, 'Fee Bal': row.bal, AM: row.am, PM: row.pm, Overall: row.overall }));
+      const csv = Papa.unparse(data);
+      downloadCSV(csv, `attendance_daily_${selectedDate}.csv`);
+    }
+
+    function exportMonthlyPDF() {
+      // Similar, but aggregate monthly
+      const doc = new jsPDF('landscape');
+      doc.text(`Monthly Attendance for ${selectedMonth || 'All'}`, 10, 10);
+      // Add table or summary
+      doc.save(`attendance_monthly_${selectedMonth}.pdf`);
+    }
+
+    function exportMonthlyCSV() {
+      // Aggregate
+      const csv = Papa.unparse(attendanceData); // Placeholder
+      downloadCSV(csv, `attendance_monthly_${selectedMonth}.csv`);
+    }
+
+    function exportAlertsPDF() {
+      const alertsData = attendanceData.filter(row => row.attRecords.filter(a => !a.present).length >= 10);
+      const doc = new jsPDF();
+      doc.autoTable({
+        head: [['ADM', 'Name', 'Absences']],
+        body: alertsData.map(row => [row.adm, row.name, row.attRecords.filter(a => !a.present).length])
+      });
+      doc.save('attendance_alerts.pdf');
+    }
+
+    function downloadCSV(csv, filename) {
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    }
+
+    populateYears();
+    loadAttendanceData();
   </script>
 </body>
 </html>

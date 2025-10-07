@@ -52,7 +52,29 @@
   </div>
 
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    // Initialize Firebase (compat)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
     let classData = [];
+
+    // Ensure currentYear is available (from prefonecommon.js)
+    if (typeof currentYear === 'undefined') {
+      currentYear = new Date().getFullYear(); // Fallback to current year
+    }
 
     // Set default date to today
     document.addEventListener('DOMContentLoaded', () => {
@@ -82,6 +104,10 @@
 
     function renderClassTable() {
       const tbody = document.getElementById('classAttBody');
+      if (classData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center p-4 opacity-75">No students found. Register some in Admissions first.</td></tr>';
+        return;
+      }
       tbody.innerHTML = classData.map(row => `
         <tr>
           <td>${row.idx}</td>
@@ -146,18 +172,25 @@
       const date = document.getElementById('attDate').value;
       if (!date) return Swal.fire('Error', 'Select a date first.', 'error');
       
-      const updates = {};
+      let savedCount = 0;
+      const total = classData.length;
       classData.forEach(row => {
         const attPath = `/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/attendance`;
-        // To handle existing, but since date unique, perhaps use date as key, but current is push
-        // For simplicity, remove existing for date and push new
+        // Remove existing for date
         db.ref(attPath).orderByChild('date').equalTo(date).once('value').then(snap => {
           snap.forEach(child => child.ref.remove());
         }).then(() => {
-          db.ref(attPath).push({ date, am: row.am, pm: row.pm, present: row.present, notes: row.notes || '' });
+          // Push new
+          db.ref(attPath).push({ date, am: row.am, pm: row.pm, present: row.present, notes: row.notes || '' }).then(() => {
+            savedCount++;
+            if (savedCount === total) {
+              Swal.fire('Saved!', 'All attendance updated. Refresh the dashboard to see changes.', 'success');
+            }
+          });
+        }).catch(err => {
+          console.error('Save error for ' + row.adm + ':', err);
         });
       });
-      Swal.fire('Saved!', 'Attendance updated. Changes will reflect in the dashboard upon refresh.', 'success');
     }
 
     function clearAtt(adm) {
@@ -168,6 +201,9 @@
       }).then(() => {
         loadClassAtt();
         Swal.fire('Cleared!', 'Attendance for this student on selected date cleared.', 'success');
+      }).catch(err => {
+        console.error('Clear error:', err);
+        Swal.fire('Error', 'Failed to clear attendance.', 'error');
       });
     }
 
@@ -176,7 +212,7 @@
       const doc = new jsPDF('landscape');
       doc.autoTable({
         head: [['#', 'ADM', 'Name', 'Fee Bal', 'AM', 'PM', 'Notes']],
-        body: classData.map(row => [row.idx, row.adm, row.name, row.bal.toLocaleString(), row.am, row.pm, row.notes || ''])
+        body: classData.map(row => [row.idx, row.adm, row.name, `TSh ${row.bal.toLocaleString()}`, row.am, row.pm, row.notes || ''])
       });
       doc.save(`class_attendance_${document.getElementById('attDate').value}.pdf`);
     }

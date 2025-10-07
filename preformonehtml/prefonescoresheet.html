@@ -149,6 +149,18 @@
     let allData = [], maxScore = 100;
     let editingData = {}; // Temp storage for edits
 
+    // Modular fetch helper (finance-style: clean, reusable for other files like academic)
+    async function loadStudents() {
+      return new Promise((resolve, reject) => {
+        db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value')
+          .then(snap => {
+            const studentsObj = snap.val() || {};
+            resolve(Object.entries(studentsObj)); // Return raw [adm, student] array
+          })
+          .catch(reject);
+      });
+    }
+
     function loadFilters() {
       const savedExamType = localStorage.getItem('prefone_examType');
       const savedMonth = localStorage.getItem('prefone_month');
@@ -158,15 +170,24 @@
       if (savedYear) currentYear = savedYear;
     }
 
+    // Global stats update (borrowed from finance's chained calc)
+    function updateGlobalStats(allData) {
+      const classAvg = allData.length > 0 ? allData.reduce((sum, row) => sum + row.avg, 0) / allData.length : 0;
+      const topGrade = allData.length > 0 ? allData[0].grade : 'N/A';
+      document.getElementById('totalStudents').textContent = allData.length;
+      document.getElementById('classAvg').textContent = classAvg.toFixed(2) + '%';
+      document.getElementById('topGrade').textContent = topGrade;
+      document.getElementById('totalStudentsFooter').textContent = allData.length;
+      document.getElementById('classAvgFooter').textContent = classAvg.toFixed(2) + '%';
+    }
+
     function loadScores() {
       maxScore = parseInt(document.getElementById('maxScore').value);
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
 
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
-        const studentsObj = snap.val() || {};
-        const students = Object.entries(studentsObj);
+      loadStudents().then(students => {
         let grandTotal = 0;
 
         allData = students.map(([adm, s]) => {
@@ -225,14 +246,7 @@
           return row;
         }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
 
-        const classAvg = allData.length > 0 ? (grandTotal / allData.length).toFixed(2) : 0;
-        const topGrade = allData.length > 0 ? allData[0].grade : 'N/A';
-        document.getElementById('totalStudents').textContent = allData.length;
-        document.getElementById('classAvg').textContent = classAvg + '%';
-        document.getElementById('topGrade').textContent = topGrade;
-        document.getElementById('totalStudentsFooter').textContent = allData.length;
-        document.getElementById('classAvgFooter').textContent = classAvg + '%';
-
+        updateGlobalStats(allData);
         renderScoresTable();
       }).catch(err => {
         console.error('Load error:', err);
@@ -285,6 +299,7 @@
         // Re-sort and re-position
         allData.sort((a, b) => b.avg - a.avg);
         allData.forEach((r, idx) => r.pos = idx + 1);
+        updateGlobalStats(allData); // Refresh stats on update
         renderScoresTable();
       }
     }

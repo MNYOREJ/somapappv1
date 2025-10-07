@@ -32,6 +32,7 @@
     .status-absent { background: #fee2e2; color: #991b1b; }
     .status-late { background: #fef9c3; color: #854d0e; }
     .status-pill { padding: 0.25rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .status-notmarked { background: #d1d5db; color: #6b7280; }
     .modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); padding-top: 60px; }
     .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 800px; border-radius: 8px; color: #333; }
     .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
@@ -171,6 +172,11 @@
     let selectedDate = new Date().toISOString().split('T')[0];
     let trendChart, reasonsChart;
 
+    // Ensure currentYear is available (from prefonecommon.js)
+    if (typeof currentYear === 'undefined') {
+      currentYear = new Date().getFullYear(); // Fallback to current year
+    }
+
     function populateYears() {
       const select = document.getElementById('selectedYear');
       for (let y = 2024; y <= 2030; y++) {
@@ -189,33 +195,49 @@
 
       const refPath = `/schools/Socrates School Preform one/${selectedYear}/students`;
       db.ref(refPath).once('value').then(snap => {
-        const students = Object.entries(snap.val() || {});
+        const studentsObj = snap.val() || {};
+        const students = Object.entries(studentsObj);
         let totalStudents = students.length;
-        let classDays = 0, totalPresent = 0, alerts = 0, absenceReasons = { A: 0, S: 0, L: 0, E: 0, M: 0, T: 0, G: 0 };
+        let classDays = 0, totalPresent = 0, alerts = 0, absenceReasons = { A: 0, S: 0, L: 0, E: 0, M: 0, T: 0, G: 0, P: 0 };
         let trendData = { labels: [], data: [] }; // For chart
 
         attendanceData = students.map(([adm, s], idx) => {
-          let attRecords = s.attendance || [];
+          let attRecords = Object.values(s.attendance || {});
           if (selectedMonth) attRecords = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === selectedMonth);
           if (selectedDate) attRecords = attRecords.filter(a => a.date === selectedDate);
 
           const absCount = attRecords.filter(a => !a.present).length;
           if (absCount >= 10) alerts++;
-          const bal = (s.totalFee || 0) - (s.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
-          const recentAtt = attRecords[attRecords.length - 1] || { am: 'N/A', pm: 'N/A', present: false };
+          const paymentsArray = Object.values(s.payments || {});
+          const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          const bal = Number(s.totalFee || 0) - paid;
+          const recentAtt = attRecords.length > 0 ? attRecords[attRecords.length - 1] : { am: 'N/A', pm: 'N/A', present: false };
 
-          attRecords.forEach(a => {
-            classDays = Math.max(classDays, attRecords.length);
+          // For global stats (unfiltered for broader view)
+          const allAttRecords = Object.values(s.attendance || {});
+          allAttRecords.forEach(a => {
+            classDays = Math.max(classDays, allAttRecords.length);
             if (a.present) totalPresent++;
-            if (!a.present) absenceReasons[a.am]++; // Assume am/pm status for reasons
+            if (!a.present && a.am) absenceReasons[a.am]++;
           });
 
-          // For trends: Aggregate by date or month
-          // Simplified: Assume monthly avg for now
-          trendData.labels.push(s.firstName + ' ' + s.lastName);
-          trendData.data.push((attRecords.filter(a => a.present).length / attRecords.length * 100) || 0);
+          // For trends: % for the filtered period
+          const filteredPresentPct = attRecords.length > 0 ? (attRecords.filter(a => a.present).length / attRecords.length * 100) : 0;
+          trendData.labels.push(`${s.firstName || ''} ${s.lastName || ''}`.trim());
+          trendData.data.push(filteredPresentPct);
 
-          return { idx: idx + 1, adm, name: `${s.firstName} ${s.lastName}`, bal, am: recentAtt.am, pm: recentAtt.pm, overall: recentAtt.present ? 'Present' : 'Absent', attRecords, photoUrl: s.photoUrl || '' };
+          const overallStatus = recentAtt.present ? 'Present' : (attRecords.length > 0 ? 'Absent' : 'Not Marked');
+          return { 
+            idx: idx + 1, 
+            adm, 
+            name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
+            bal, 
+            am: recentAtt.am || 'N/A', 
+            pm: recentAtt.pm || 'N/A', 
+            overall: overallStatus, 
+            attRecords, 
+            photoUrl: s.photoUrl || '' 
+          };
         });
 
         document.getElementById('totalStudents').textContent = totalStudents;
@@ -226,26 +248,33 @@
         renderDailyTable();
         renderCharts(trendData, absenceReasons);
       }).catch(err => {
+        console.error('Load error:', err);
         Swal.fire('Error', 'Failed to load data: ' + err.message, 'error');
       });
     }
 
     function renderDailyTable() {
       const tbody = document.getElementById('dailyBody');
-      tbody.innerHTML = attendanceData.map(row => `
-        <tr class="hover:bg-white/10">
-          <td class="p-3">${row.idx}</td>
-          <td class="p-3">${row.adm}</td>
-          <td class="p-3">${row.name}</td>
-          <td class="p-3 ${row.bal > 0 ? 'text-yellow-300' : ''}">TSh ${row.bal.toLocaleString()}</td>
-          <td class="p-3"><span class="status-pill ${row.am === 'P' ? 'status-present' : 'status-absent'}">${row.am}</span></td>
-          <td class="p-3"><span class="status-pill ${row.pm === 'P' ? 'status-present' : 'status-absent'}">${row.pm}</span></td>
-          <td class="p-3"><span class="status-pill status-${row.overall.toLowerCase()}">${row.overall}</span></td>
-          <td class="p-3">
-            <button class="bg-blue-500 p-1 rounded text-xs text-white" onclick="viewStudentDetails('${row.adm}')"><i class="fas fa-eye"></i></button>
-          </td>
-        </tr>
-      `).join('');
+      tbody.innerHTML = attendanceData.map(row => {
+        const statusClass = row.overall === 'Present' ? 'status-present' : 
+                           row.overall === 'Absent' ? 'status-absent' : 'status-notmarked';
+        const amClass = row.am === 'P' ? 'status-present' : (row.am === 'N/A' ? 'status-notmarked' : 'status-absent');
+        const pmClass = row.pm === 'P' ? 'status-present' : (row.pm === 'N/A' ? 'status-notmarked' : 'status-absent');
+        return `
+          <tr class="hover:bg-white/10">
+            <td class="p-3">${row.idx}</td>
+            <td class="p-3">${row.adm}</td>
+            <td class="p-3">${row.name}</td>
+            <td class="p-3 ${row.bal > 0 ? 'text-yellow-300' : ''}">TSh ${row.bal.toLocaleString()}</td>
+            <td class="p-3"><span class="status-pill ${amClass}">${row.am}</span></td>
+            <td class="p-3"><span class="status-pill ${pmClass}">${row.pm}</span></td>
+            <td class="p-3"><span class="status-pill ${statusClass}">${row.overall}</span></td>
+            <td class="p-3">
+              <button class="bg-blue-500 p-1 rounded text-xs text-white" onclick="viewStudentDetails('${row.adm}')"><i class="fas fa-eye"></i></button>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function renderCharts(trend, reasons) {
@@ -259,20 +288,26 @@
       if (reasonsChart) reasonsChart.destroy();
       reasonsChart = new Chart(document.getElementById('reasonsChart'), {
         type: 'pie',
-        data: { labels: Object.keys(reasons), datasets: [{ data: Object.values(reasons), backgroundColor: ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899'] }] }
+        data: { labels: Object.keys(reasons), datasets: [{ data: Object.values(reasons), backgroundColor: ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#10b981'] }] }
       });
     }
 
     function showPerStudentModal() {
       const summaries = document.getElementById('studentSummaries');
-      summaries.innerHTML = attendanceData.map(row => `
-        <div class="bg-white p-4 rounded shadow">
-          <h3 class="font-bold">${row.name} (ADM: ${row.adm})</h3>
-          <p>Present: ${row.attRecords.filter(a => a.present).length} / ${row.attRecords.length} (${(row.attRecords.filter(a => a.present).length / row.attRecords.length * 100).toFixed(1)}%)</p>
-          <p>Recent Absences: ${row.attRecords.filter(a => !a.present).slice(-3).map(a => a.date).join(', ')}</p>
-          ${row.photoUrl ? `<img src="${row.photoUrl}" alt="Photo" class="w-20 h-20 rounded-full">` : ''}
-        </div>
-      `).join('');
+      summaries.innerHTML = attendanceData.map(row => {
+        const presentCount = row.attRecords.filter(a => a.present).length;
+        const totalCount = row.attRecords.length;
+        const pct = totalCount > 0 ? (presentCount / totalCount * 100).toFixed(1) : 0;
+        const recentAbsences = row.attRecords.filter(a => !a.present).slice(-3).map(a => a.date).join(', ') || 'None';
+        return `
+          <div class="bg-white p-4 rounded shadow">
+            <h3 class="font-bold">${row.name} (ADM: ${row.adm})</h3>
+            <p>Present: ${presentCount} / ${totalCount} (${pct}%)</p>
+            <p>Recent Absences: ${recentAbsences}</p>
+            ${row.photoUrl ? `<img src="${row.photoUrl}" alt="Photo" class="w-20 h-20 rounded-full">` : ''}
+          </div>
+        `;
+      }).join('');
       document.getElementById('perStudentModal').style.display = 'block';
     }
 
@@ -285,9 +320,10 @@
 
     function viewStudentDetails(adm) {
       const row = attendanceData.find(r => r.adm === adm);
+      const history = row.attRecords.map(a => `${a.date}: ${a.present ? 'Present' : 'Absent'}`).join('<br>');
       Swal.fire({
         title: `${row.name}'s Details`,
-        html: `<p>Fee Bal: TSh ${row.bal}</p><p>Attendance History: ${row.attRecords.map(a => `${a.date}: ${a.present ? 'Present' : 'Absent'}`).join('<br>')}</p>`,
+        html: `<p>Fee Bal: TSh ${row.bal.toLocaleString()}</p><p>Attendance History: ${history || 'No records yet'}</p>`,
         imageUrl: row.photoUrl,
         imageWidth: 200,
         imageHeight: 200
@@ -321,21 +357,32 @@
     }
 
     function exportMonthlyPDF() {
-      // Similar, but aggregate monthly
+      const { jsPDF } = window.jspdf;
       const doc = new jsPDF('landscape');
-      doc.text(`Monthly Attendance for ${selectedMonth || 'All'}`, 10, 10);
-      // Add table or summary
-      doc.save(`attendance_monthly_${selectedMonth}.pdf`);
+      doc.text(`Monthly Attendance for ${selectedMonth || 'All'} ${selectedYear}`, 10, 10);
+      doc.autoTable({
+        head: [['ADM', 'Name', 'Present Days', 'Total Days', '%']],
+        body: attendanceData.map(row => [row.adm, row.name, row.attRecords.filter(a => a.present).length, row.attRecords.length, ((row.attRecords.filter(a => a.present).length / row.attRecords.length * 100) || 0).toFixed(1)]),
+        styles: { fontSize: 8 }
+      });
+      doc.save(`attendance_monthly_${selectedMonth || 'all'}_${selectedYear}.pdf`);
     }
 
     function exportMonthlyCSV() {
-      // Aggregate
-      const csv = Papa.unparse(attendanceData); // Placeholder
-      downloadCSV(csv, `attendance_monthly_${selectedMonth}.csv`);
+      const data = attendanceData.map(row => ({
+        ADM: row.adm,
+        Name: row.name,
+        'Present Days': row.attRecords.filter(a => a.present).length,
+        'Total Days': row.attRecords.length,
+        '%': ((row.attRecords.filter(a => a.present).length / row.attRecords.length * 100) || 0).toFixed(1)
+      }));
+      const csv = Papa.unparse(data);
+      downloadCSV(csv, `attendance_monthly_${selectedMonth || 'all'}_${selectedYear}.csv`);
     }
 
     function exportAlertsPDF() {
       const alertsData = attendanceData.filter(row => row.attRecords.filter(a => !a.present).length >= 10);
+      const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
       doc.autoTable({
         head: [['ADM', 'Name', 'Absences']],

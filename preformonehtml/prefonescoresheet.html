@@ -2,37 +2,59 @@
 <html lang="en">
 <head>
   <title>SoMAp — Preform One Scoresheet</title>
-  <!-- Same scripts -->
+  <!-- Firebase Compat SDKs (v9.6.10 for consistency with repo) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  
+  <!-- UI Libraries -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="prefonecommon.js"></script>
-  <style> 
-    body { background: linear-gradient(to right, #667eea, #764ba2); } 
-    table { border-collapse: collapse; } 
-    th, td { border: 1px solid rgba(255,255,255,0.2); padding: 8px; } 
+  
+  <style>
+    body { 
+      background: linear-gradient(to right, #667eea, #764ba2); 
+    }
+    .card { border-radius: 1rem; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); background: white; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .table { width: 100%; border-collapse: separate; border-spacing: 0; border-radius: 1rem; overflow: hidden; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+    .table th, .table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.2); }
+    .table th { background: rgba(255,255,255,0.1); font-weight: bold; }
     input[type="number"] { width: 60px; background: white; color: black; border-radius: 4px; padding: 2px; }
     .score-input { font-weight: bold; }
+    .status-pill { padding: 0.25rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .grade-a { background: #dcfce7; color: #166534; }
+    .grade-b { background: #fef9c3; color: #854d0e; }
+    .grade-f { background: #fee2e2; color: #991b1b; }
+    .avg-green { color: #10b981; }
+    .avg-yellow { color: #f59e0b; }
+    .avg-red { color: #ef4444; }
+    .fade-in { animation: fadeIn 0.5s; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .attendance-card { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.3s; }
+    .attendance-card:hover { transform: translateY(-5px); }
   </style>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4 overflow-x-auto">
-  <div class="max-w-full mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-table"></i> Preform One Scoresheet</h1>
-    <a href="prefoneacademic.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back to Academic</a>
+<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
+  <div class="max-w-7xl mx-auto">
+    <h1 class="text-4xl font-bold mb-6 text-center fade-in"><i class="fas fa-table mr-2"></i> Preform One Scoresheet</h1>
+    <div class="flex justify-between mb-4">
+      <a href="prefoneacademic.html" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white fade-in"><i class="fas fa-arrow-left mr-1"></i> Back to Academic</a>
+      <button onclick="toggleFullscreen()" class="bg-gray-500 hover:bg-gray-600 p-2 rounded text-white fade-in"><i class="fas fa-expand mr-1"></i> Fullscreen</button>
+    </div>
+    
     <div class="flex gap-2 mb-4">
-      <button onclick="toggleFullscreen()" class="bg-gray-500 p-2 rounded">Fullscreen</button>
-      <button onclick="saveScores()" class="bg-blue-500 p-2 rounded">Save All</button>
-      <button onclick="exportCSV(allData, 'scores.csv')" class="bg-green-500 p-2 rounded">CSV</button>
-      <button onclick="generateReportCards()" class="bg-purple-500 p-2 rounded">PDF Reports</button>
+      <button onclick="saveScores()" class="bg-blue-500 hover:bg-blue-600 p-2 rounded text-white fade-in"><i class="fas fa-save mr-1"></i> Save All</button>
+      <button onclick="exportCSV(allData, 'scores.csv')" class="bg-green-500 hover:bg-green-600 p-2 rounded text-white fade-in"><i class="fas fa-file-csv mr-1"></i> CSV</button>
+      <button onclick="generateReportCards()" class="bg-purple-500 hover:bg-purple-600 p-2 rounded text-white fade-in"><i class="fas fa-file-pdf mr-1"></i> PDF Reports</button>
     </div>
     
     <!-- Filters (sync with academic) -->
-    <div class="grid grid-cols-4 gap-4 mb-4 bg-white/10 p-2 rounded">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md fade-in">
       <select id="examType" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
         <option value="Monthly">Monthly</option>
         <option value="Midterm">Midterm</option>
@@ -50,34 +72,53 @@
       </select>
     </div>
     
-    <table id="scoresTable" class="w-full bg-white/10 rounded overflow-hidden">
-      <thead class="bg-white/20">
-        <tr>
-          <th class="p-3">#</th>
-          <th class="p-3">Adm</th>
-          <th class="p-3">Student (Preform One)</th>
-          <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
-          <th class="p-3">Physics<br>(Score/Max)</th>
-          <th class="p-3">Chemistry<br>(Score/Max)</th>
-          <th class="p-3">Biology<br>(Score/Max)</th>
-          <th class="p-3">Historia ya Tanzania<br>(Score/Max)</th>
-          <th class="p-3">French<br>(Score/Max)</th>
-          <th class="p-3">Geography<br>(Score/Max)</th>
-          <th class="p-3">Basic Math<br>(Score/Max)</th>
-          <th class="p-3">English Language/Course<br>(Score/Max)</th>
-          <th class="p-3">Computer Studies<br>(Score/Max)</th>
-          <th class="p-3">Business Studies<br>(Score/Max)</th>
-          <th class="p-3">Total/Max</th>
-          <th class="p-3">% Avg</th>
-          <th class="p-3">Pos</th>
-          <th class="p-3">Grade</th>
-          <th class="p-3">Pres/Abs (Month)</th>
-          <th class="p-3">Comment</th>
-        </tr>
-      </thead>
-      <tbody id="scoresBody"></tbody>
-    </table>
-    <p class="mt-4">Total Students: <span id="totalStudents">0</span> | Subjects: 10 | Class Avg: <span id="classAvg">0</span>%</p>
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-users mr-1"></i> Total Students</h3>
+        <p id="totalStudents" class="text-2xl font-bold">0</p>
+      </div>
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-chart-line mr-1"></i> Class Avg</h3>
+        <p id="classAvg" class="text-2xl font-bold">0%</p>
+      </div>
+      <div class="attendance-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-trophy mr-1"></i> Top Grade</h3>
+        <p id="topGrade" class="text-2xl font-bold">N/A</p>
+      </div>
+    </div>
+    
+    <div class="overflow-x-auto bg-white/10 rounded-lg shadow-md mb-8 fade-in">
+      <table id="scoresTable" class="w-full text-sm table">
+        <thead class="bg-white/20">
+          <tr>
+            <th class="p-3">#</th>
+            <th class="p-3">ADM</th>
+            <th class="p-3">Student (Preform One)</th>
+            <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
+            <th class="p-3">Physics<br>(Score/Max)</th>
+            <th class="p-3">Chemistry<br>(Score/Max)</th>
+            <th class="p-3">Biology<br>(Score/Max)</th>
+            <th class="p-3">Historia ya Tanzania<br>(Score/Max)</th>
+            <th class="p-3">French<br>(Score/Max)</th>
+            <th class="p-3">Geography<br>(Score/Max)</th>
+            <th class="p-3">Basic Math<br>(Score/Max)</th>
+            <th class="p-3">English Language/Course<br>(Score/Max)</th>
+            <th class="p-3">Computer Studies<br>(Score/Max)</th>
+            <th class="p-3">Business Studies<br>(Score/Max)</th>
+            <th class="p-3">Total/Max</th>
+            <th class="p-3">% Avg</th>
+            <th class="p-3">Pos</th>
+            <th class="p-3">Grade</th>
+            <th class="p-3">Pres/Abs (Month)</th>
+            <th class="p-3">Comment</th>
+          </tr>
+        </thead>
+        <tbody id="scoresBody" class="bg-white/5"></tbody>
+      </table>
+    </div>
+    
+    <p class="text-center mt-4 fade-in">Total Students: <span id="totalStudentsFooter">0</span> | Subjects: 10 | Class Avg: <span id="classAvgFooter">0</span>% | Ready for marking? Filters auto-sync with Academic dashboard.</p>
   </div>
 
   <script>
@@ -185,8 +226,12 @@
         }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
 
         const classAvg = allData.length > 0 ? (grandTotal / allData.length).toFixed(2) : 0;
+        const topGrade = allData.length > 0 ? allData[0].grade : 'N/A';
         document.getElementById('totalStudents').textContent = allData.length;
-        document.getElementById('classAvg').textContent = classAvg;
+        document.getElementById('classAvg').textContent = classAvg + '%';
+        document.getElementById('topGrade').textContent = topGrade;
+        document.getElementById('totalStudentsFooter').textContent = allData.length;
+        document.getElementById('classAvgFooter').textContent = classAvg + '%';
 
         renderScoresTable();
       }).catch(err => {
@@ -198,11 +243,11 @@
     function renderScoresTable() {
       const tbody = document.getElementById('scoresBody');
       if (allData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="16" class="text-center p-4 opacity-75">No students found. Register some in Admissions first.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="20" class="text-center p-4 opacity-75">No students found. Register some in Admissions first.</td></tr>';
         return;
       }
       tbody.innerHTML = allData.map(row => `
-        <tr class="hover:bg-white/5">
+        <tr class="hover:bg-white/10">
           <td class="p-3">${row.pos}</td>
           <td class="p-3">${row.adm}</td>
           <td class="p-3">${row.name}${row.reportingDate ? `<br><small>${new Date(row.reportingDate).toLocaleDateString('en-GB')}</small>` : ''}</td>
@@ -214,9 +259,9 @@
             </td>
           `).join('')}
           <td class="p-3 font-bold">${row.total}/${row.maxTotal}</td>
-          <td class="p-3 font-bold text-${row.avg >= 70 ? 'green' : row.avg >= 50 ? 'yellow' : 'red'}-300">${row.avg}%</td>
+          <td class="p-3 font-bold ${row.avg >= 70 ? 'avg-green' : row.avg >= 50 ? 'avg-yellow' : 'avg-red'}">${row.avg}%</td>
           <td class="p-3">${row.pos}</td>
-          <td class="p-3 ${row.grade === 'A' ? 'text-green-300' : row.grade === 'B' ? 'text-yellow-300' : 'text-red-300'} font-bold">${row.grade}</td>
+          <td class="p-3"><span class="status-pill ${row.grade === 'A' ? 'grade-a' : row.grade === 'B' ? 'grade-b' : 'grade-f'}">${row.grade}</span></td>
           <td class="p-3">${row.pres}/${row.abs}</td>
           <td class="p-3"><input type="text" value="${row.comment}" class="w-full p-1 bg-white/20 text-white rounded" onchange="updateComment('${row.adm}', this.value)"></td>
         </tr>
@@ -286,20 +331,23 @@
       allData.forEach(row => {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
-        doc.addImage(row.photoUrl || '', 'JPEG', 10, 10, 30, 30); // Photo if available
-        doc.text(`Report Card - ${row.name}`, 10, 50);
+        if (row.photoUrl) {
+          doc.addImage(row.photoUrl, 'JPEG', 10, 10, 30, 30);
+        }
+        doc.text(`Report Card - ${row.name}`, 10, row.photoUrl ? 50 : 20);
         doc.text(`ADM: ${row.adm} | Reporting: ${new Date(row.reportingDate).toLocaleDateString('en-GB')}`, 10, 60);
         doc.text(`Exam: ${document.getElementById('examType').value} ${document.getElementById('month').value}`, 10, 70);
         doc.text(`Average: ${row.avg}% | Grade: ${row.grade}`, 10, 80);
         doc.text(`Fee Balance: TSh ${row.bal.toLocaleString()}`, 10, 90);
-        let y = 100;
-        subjects.forEach(sub => {
-          const subData = editingData[row.adm][sub];
-          doc.text(`${sub}: ${subData.score}/${subData.max}`, 10, y);
-          y += 10;
+        doc.autoTable({
+          startY: 100,
+          head: [['Subject', 'Score/Max']],
+          body: subjects.map(sub => [sub, `${editingData[row.adm][sub].score}/${editingData[row.adm][sub].max}`]),
+          styles: { fontSize: 8 }
         });
-        doc.text(`Attendance: ${row.pres}/${row.pres + row.abs} Present`, 10, y);
-        doc.text(`Comment: ${row.comment || 'N/A'}`, 10, y + 10);
+        const attY = doc.lastAutoTable.finalY + 10;
+        doc.text(`Attendance: ${row.pres}/${row.pres + row.abs} Present`, 10, attY);
+        doc.text(`Comment: ${row.comment || 'N/A'}`, 10, attY + 10);
         doc.save(`${row.name.replace(/\s+/g, '_')}_report_${currentYear}.pdf`);
       });
       Swal.fire('PDFs Generated!', `${allData.length} individual report cards saved.`, 'success');

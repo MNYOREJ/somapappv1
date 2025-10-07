@@ -1,55 +1,170 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>SoMAp — Preform One Class Attendance</title>
-  <!-- Same scripts -->
-  <script src="prefonecommon.js"></script> <!-- Abbrev for space -->
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+  <title>SoMAp — Preform One Class Attendance Marking</title>
+  <!-- Same scripts as dashboard -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="prefonecommon.js"></script>
+  <style>
+    body { background: linear-gradient(to right, #667eea, #764ba2); }
+    .table th, .table td { padding: 1rem; }
+    .status-select { background: white; color: black; border-radius: 0.25rem; padding: 0.25rem; }
+    .mark-all-btn { transition: background 0.3s; }
+    .mark-all-btn:hover { background: #16a34a; }
+  </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
   <div class="max-w-6xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-users"></i> Preform One Class Attendance</h1>
-    <a href="prefoneattendance.html" class="bg-gray-500 p-2 rounded mb-4 inline-block"><i class="fas fa-arrow-left"></i> Back</a>
+    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-users"></i> Preform One Class Attendance Marking</h1>
+    <a href="prefoneattendance.html" class="bg-gray-500 p-2 rounded mb-4 inline-block"><i class="fas fa-arrow-left"></i> Back to Attendance Dashboard</a>
     
     <!-- Date Select -->
-    <input type="date" id="attDate" class="p-2 rounded bg-white/20 text-white mb-4" onchange="loadClassAtt()">
+    <input type="date" id="attDate" class="p-2 rounded bg-white/20 text-white mb-4" value="${new Date().toISOString().split('T')[0]}" onchange="loadClassAtt()">
     
-    <table class="w-full bg-white/10 rounded">
-      <thead><tr class="bg-white/20"><th>Adm</th><th>Name</th><th>Present?</th><th>Notes</th></tr></thead>
+    <table class="w-full bg-white/10 rounded table">
+      <thead class="bg-white/20">
+        <tr>
+          <th>#</th>
+          <th>ADM</th>
+          <th>Name</th>
+          <th>Fee Bal</th>
+          <th>AM Status</th>
+          <th>PM Status</th>
+          <th>Notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
       <tbody id="classAttBody"></tbody>
     </table>
     
-    <button onclick="saveClassAtt()" class="bg-blue-500 p-2 rounded mt-4">Save Attendance</button>
+    <div class="flex gap-4 mt-4">
+      <button onclick="markAllPresent()" class="bg-green-500 p-2 rounded mark-all-btn">Mark All Present</button>
+      <button onclick="saveClassAtt()" class="bg-blue-500 p-2 rounded">Save Changes</button>
+      <button onclick="exportClassPDF()" class="bg-purple-500 p-2 rounded">Export PDF</button>
+    </div>
   </div>
 
   <script>
+    let classData = [];
+
     function loadClassAtt() {
-      const date = document.getElementById('attDate').value || new Date().toISOString().split('T')[0];
+      const date = document.getElementById('attDate').value;
+      if (!date) return;
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-        const tbody = document.getElementById('classAttBody');
-        tbody.innerHTML = Object.entries(snap.val() || {}).map(([adm, s]) => {
-          const att = s.attendance?.find(a => a.date === date);
-          return `<tr><td>${adm}</td><td>${s.firstName} ${s.lastName}</td>
-            <td><input type="checkbox" ${att?.present ? 'checked' : ''} onchange="togglePresent('${adm}', '${date}', this.checked)"></td>
-            <td><input type="text" placeholder="Notes" value="${att?.notes || ''}" onchange="updateNotes('${adm}', '${date}', this.value)"></td></tr>`;
-        }).join('');
+        const students = Object.entries(snap.val() || {});
+        classData = students.map(([adm, s], idx) => {
+          const att = (s.attendance || []).find(a => a.date === date) || { am: 'P', pm: 'P', notes: '', present: true };
+          const bal = (s.totalFee || 0) - (s.payments || []).reduce((sum, p) => sum + p.amount, 0);
+          return { idx: idx + 1, adm, name: `${s.firstName} ${s.lastName}`, bal, ...att };
+        });
+        renderClassTable();
       });
     }
-    
-    function togglePresent(adm, date, present) {
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance`).push({ date, present });
+
+    function renderClassTable() {
+      const tbody = document.getElementById('classAttBody');
+      tbody.innerHTML = classData.map(row => `
+        <tr>
+          <td>${row.idx}</td>
+          <td>${row.adm}</td>
+          <td>${row.name}</td>
+          <td ${row.bal > 0 ? 'class="text-yellow-300"' : ''}>TSh ${row.bal.toLocaleString()}</td>
+          <td>
+            <select class="status-select" onchange="updateStatus('${row.adm}', 'am', this.value)">
+              <option ${row.am === 'P' ? 'selected' : ''}>P (Present)</option>
+              <option ${row.am === 'A' ? 'selected' : ''}>A (Absent)</option>
+              <option ${row.am === 'S' ? 'selected' : ''}>S (Sick)</option>
+              <option ${row.am === 'L' ? 'selected' : ''}>L (Late)</option>
+              <option ${row.am === 'E' ? 'selected' : ''}>E (Excused)</option>
+              <option ${row.am === 'M' ? 'selected' : ''}>M (Medical)</option>
+              <option ${row.am === 'T' ? 'selected' : ''}>T (Travel)</option>
+              <option ${row.am === 'G' ? 'selected' : ''}>G (Guardian)</option>
+            </select>
+          </td>
+          <td>
+            <select class="status-select" onchange="updateStatus('${row.adm}', 'pm', this.value)">
+              <option ${row.pm === 'P' ? 'selected' : ''}>P (Present)</option>
+              <option ${row.pm === 'A' ? 'selected' : ''}>A (Absent)</option>
+              <option ${row.pm === 'S' ? 'selected' : ''}>S (Sick)</option>
+              <option ${row.pm === 'L' ? 'selected' : ''}>L (Late)</option>
+              <option ${row.pm === 'E' ? 'selected' : ''}>E (Excused)</option>
+              <option ${row.pm === 'M' ? 'selected' : ''}>M (Medical)</option>
+              <option ${row.pm === 'T' ? 'selected' : ''}>T (Travel)</option>
+              <option ${row.pm === 'G' ? 'selected' : ''}>G (Guardian)</option>
+            </select>
+          </td>
+          <td><input type="text" class="p-1 rounded bg-white text-black" value="${row.notes}" onchange="updateNotes('${row.adm}', this.value)"></td>
+          <td><button class="bg-red-500 p-1 rounded text-xs text-white" onclick="clearAtt('${row.adm}')"><i class="fas fa-trash"></i></button></td>
+        </tr>
+      `).join('');
     }
-    
-    function updateNotes(adm, date, notes) {
-      // Update last att entry
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance`).limitToLast(1).once('value', snap => {
-        const key = Object.keys(snap.val())[0];
-        if (key) db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance/${key}`).update({ notes });
+
+    function updateStatus(adm, period, value) {
+      const row = classData.find(r => r.adm === adm);
+      row[period] = value;
+      row.present = (row.am === 'P' && row.pm === 'P');
+      if (row.present === false && checkShifted(row)) db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ shifted: true });
+    }
+
+    function updateNotes(adm, notes) {
+      classData.find(r => r.adm === adm).notes = notes;
+    }
+
+    function checkShifted(row) {
+      // Logic to check >2 weeks abs, assume from full att history
+      return false; // Placeholder
+    }
+
+    function markAllPresent() {
+      classData.forEach(row => {
+        row.am = 'P';
+        row.pm = 'P';
+        row.present = true;
       });
+      renderClassTable();
+      Swal.fire('Marked!', 'All students marked present.', 'success');
     }
-    
-    function saveClassAtt() { Swal.fire('Saved!', 'Class attendance updated.', 'success'); }
-    
+
+    function saveClassAtt() {
+      const date = document.getElementById('attDate').value;
+      const batch = firebase.database.ServerValue.TIMESTAMP;
+      classData.forEach(row => {
+        const attRef = db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/attendance`);
+        attRef.orderByChild('date').equalTo(date).once('value').then(snap => {
+          const existingKey = Object.keys(snap.val() || {})[0];
+          const updateData = { date, am: row.am, pm: row.pm, present: row.present, notes: row.notes };
+          if (existingKey) attRef.child(existingKey).update(updateData);
+          else attRef.push(updateData);
+        });
+      });
+      Swal.fire('Saved!', 'Attendance updated in database.', 'success');
+    }
+
+    function clearAtt(adm) {
+      const date = document.getElementById('attDate').value;
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}/attendance`).orderByChild('date').equalTo(date).once('value', snap => {
+        snap.forEach(child => child.ref.remove());
+      });
+      loadClassAtt();
+    }
+
+    function exportClassPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape');
+      doc.autoTable({
+        head: [['#', 'ADM', 'Name', 'Fee Bal', 'AM', 'PM', 'Notes']],
+        body: classData.map(row => [row.idx, row.adm, row.name, row.bal, row.am, row.pm, row.notes])
+      });
+      doc.save(`class_attendance_${document.getElementById('attDate').value}.pdf`);
+    }
+
     loadClassAtt();
   </script>
 </body>

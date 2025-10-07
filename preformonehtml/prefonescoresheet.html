@@ -12,7 +12,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } table { border-collapse: collapse; } th, td { border: 1px solid white; padding: 4px; } </style>
+  <style> 
+    body { background: linear-gradient(to right, #667eea, #764ba2); } 
+    table { border-collapse: collapse; } 
+    th, td { border: 1px solid rgba(255,255,255,0.2); padding: 8px; } 
+    input[type="number"] { width: 60px; background: white; color: black; border-radius: 4px; padding: 2px; }
+    .score-input { font-weight: bold; }
+  </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4 overflow-x-auto">
   <div class="max-w-full mx-auto">
@@ -20,93 +26,289 @@
     <a href="prefoneacademic.html" class="mb-4 inline-block bg-gray-500 p-2 rounded"><i class="fas fa-arrow-left"></i> Back to Academic</a>
     <div class="flex gap-2 mb-4">
       <button onclick="toggleFullscreen()" class="bg-gray-500 p-2 rounded">Fullscreen</button>
-      <button onclick="saveScores()" class="bg-blue-500 p-2 rounded">Save</button>
+      <button onclick="saveScores()" class="bg-blue-500 p-2 rounded">Save All</button>
       <button onclick="exportCSV(allData, 'scores.csv')" class="bg-green-500 p-2 rounded">CSV</button>
       <button onclick="generateReportCards()" class="bg-purple-500 p-2 rounded">PDF Reports</button>
     </div>
     
     <!-- Filters (sync with academic) -->
     <div class="grid grid-cols-4 gap-4 mb-4 bg-white/10 p-2 rounded">
-      <select id="examType" onchange="loadScores()" class="p-1 rounded bg-white/20 text-white"><option>Monthly</option><!-- etc --></select>
-      <select id="month" onchange="loadScores()" class="p-1 rounded bg-white/20 text-white"><option>Sep</option><!-- etc --></select>
-      <select id="maxScore" class="p-1 rounded bg-white/20 text-white"><option>50</option><option>100</option></select>
+      <select id="examType" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
+        <option value="Monthly">Monthly</option>
+        <option value="Midterm">Midterm</option>
+        <option value="End Term">End Term</option>
+      </select>
+      <select id="month" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
+        <option value="Sep">Sep</option>
+        <option value="Oct">Oct</option>
+        <option value="Nov">Nov</option>
+        <option value="Dec">Dec</option>
+      </select>
+      <select id="maxScore" onchange="loadScores()" class="p-2 rounded bg-white/20 text-white">
+        <option value="50">Max 50</option>
+        <option value="100">Max 100</option>
+      </select>
     </div>
     
-    <table id="scoresTable">
-      <thead>
-        <tr class="bg-white/20">
-          <th>#</th><th>Adm</th><th>Student (Preform One)</th><th>Fee Due/Paid/Bal (TSh)</th>
+    <table id="scoresTable" class="w-full bg-white/10 rounded overflow-hidden">
+      <thead class="bg-white/20">
+        <tr>
+          <th class="p-3">#</th>
+          <th class="p-3">Adm</th>
+          <th class="p-3">Student (Preform One)</th>
+          <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
           <!-- Dynamic subjects -->
-          ${subjects.map(sub => `<th>${sub}<br>(Max/Pstn)</th>`).join('')}
-          <th>Total/Max</th><th>% Avg</th><th>Pos</th><th>Grade</th><th>Pres/Abs</th><th>Comment</th>
+          ${subjects.map(sub => `<th class="p-3">${sub}<br>(Score/Max)</th>`).join('')}
+          <th class="p-3">Total/Max</th>
+          <th class="p-3">% Avg</th>
+          <th class="p-3">Pos</th>
+          <th class="p-3">Grade</th>
+          <th class="p-3">Pres/Abs (Month)</th>
+          <th class="p-3">Comment</th>
         </tr>
       </thead>
       <tbody id="scoresBody"></tbody>
     </table>
-    <p class="mt-4">Total Students: <span id="totalStudents">0</span> | Subjects: ${subjects.length}</p>
+    <p class="mt-4">Total Students: <span id="totalStudents">0</span> | Subjects: ${subjects.length} | Class Avg: <span id="classAvg">0</span>%</p>
   </div>
 
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    // Initialize Firebase (compat)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    // Ensure currentYear is available (from prefonecommon.js)
+    if (typeof currentYear === 'undefined') {
+      currentYear = new Date().getFullYear(); // Fallback to current year
+    }
+
+    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
+
     let allData = [], maxScore = 100;
+    let editingData = {}; // Temp storage for edits
+
     function loadScores() {
       maxScore = parseInt(document.getElementById('maxScore').value);
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-        const students = Object.entries(snap.val() || {});
-        let position = 1;
-        allData = students.map(([adm, s], idx) => {
-          const scoreData = s.scores?.find(sc => sc.examType === examType && sc.month === month) || { subjects: {} };
-          subjects.forEach(sub => { if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; });
+      const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
+
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        const studentsObj = snap.val() || {};
+        const students = Object.entries(studentsObj);
+        let grandTotal = 0;
+
+        allData = students.map(([adm, s]) => {
+          // Find or create score entry
+          const scoresArray = Object.values(s.scores || {});
+          let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+          if (!scoreData) {
+            scoreData = { examType, month, subjects: {} };
+            subjects.forEach(sub => { scoreData.subjects[sub] = { score: 0, max: maxScore }; });
+          } else {
+            // Ensure all subjects
+            subjects.forEach(sub => { 
+              if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
+            });
+          }
+
           const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
           const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
-          const avg = (total / maxTotal * 100).toFixed(2);
-          const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
+          const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
+          grandTotal += parseFloat(avg);
+
+          // Attendance for the month
+          const attRecords = Object.values(s.attendance || {});
+          const monthAtt = attRecords.filter(a => {
+            const attDate = new Date(a.date);
+            return attDate.toLocaleString('en', { month: 'long' }) === monthFull;
+          });
+          const pres = monthAtt.filter(a => a.present).length;
+          const abs = monthAtt.length - pres;
+
+          // Payments
+          const paymentsArray = Object.values(s.payments || {});
+          const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          const bal = Number(s.totalFee || 0) - paid;
+
           const row = {
-            adm, name: `${s.firstName} ${s.lastName} (Preform One)`, due: s.totalFee, paid, bal: s.totalFee - paid,
-            subjects: scoreData.subjects, total, maxTotal, avg, pos: position++, grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
-            pres: s.attendance.filter(a => a.present).length, abs: s.attendance.length - s.pres
+            adm, 
+            name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
+            reportingDate: s.reportingDate || '', 
+            due: Number(s.totalFee || 0), 
+            paid, 
+            bal, 
+            scoreData, 
+            total, 
+            maxTotal, 
+            avg: parseFloat(avg), 
+            grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
+            pres, 
+            abs,
+            comment: s.comment || ''
           };
-          position = row.pos; // Sort later for true pos
+
+          // Temp editing data
+          editingData[adm] = { ...row.scoreData.subjects };
+
           return row;
-        }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 })); // Re-position
-        
+        }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
+
+        const classAvg = allData.length > 0 ? (grandTotal / allData.length).toFixed(2) : 0;
         document.getElementById('totalStudents').textContent = allData.length;
-        const tbody = document.getElementById('scoresBody');
-        tbody.innerHTML = allData.map(row => `
-          <tr>
-            <td>${row.pos}</td><td>${row.adm}</td><td>${row.name} ${row.reportingDate ? `<br>${row.reportingDate}` : ''}</td>
-            <td>${row.due}k/${row.paid}k/${row.bal}k</td>
-            ${subjects.map(sub => `<td>${row.subjects[sub].score}/${row.subjects[sub].max}/${row.pos}</td>`).join('')}
-            <td>${row.total}/${row.maxTotal}</td><td>${row.avg}</td><td>${row.pos}</td><td>${row.grade}</td>
-            <td>${row.pres}/${row.abs}</td><td><input type="text" value="${row.comment || ''}" onchange="updateComment('${row.adm}', this.value)"></td>
-          </tr>
-        `).join('');
+        document.getElementById('classAvg').textContent = classAvg;
+
+        renderScoresTable();
+      }).catch(err => {
+        console.error('Load error:', err);
+        Swal.fire('Error', 'Failed to load scores: ' + err.message, 'error');
       });
     }
-    
+
+    function renderScoresTable() {
+      const tbody = document.getElementById('scoresBody');
+      if (allData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="13" class="text-center p-4 opacity-75">No students found. Register some in Admissions first.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = allData.map(row => `
+        <tr class="hover:bg-white/5">
+          <td class="p-3">${row.pos}</td>
+          <td class="p-3">${row.adm}</td>
+          <td class="p-3">${row.name}${row.reportingDate ? `<br><small>${new Date(row.reportingDate).toLocaleDateString('en-GB')}</small>` : ''}</td>
+          <td class="p-3">${row.due.toLocaleString()}/${row.paid.toLocaleString()}/${row.bal.toLocaleString()}</td>
+          ${subjects.map(sub => `
+            <td class="p-3">
+              <input type="number" min="0" max="${maxScore}" value="${editingData[row.adm][sub].score || 0}" class="score-input" onchange="updateSubject('${row.adm}', '${sub}', this.value, ${row.pos})">
+              <br><small>/${editingData[row.adm][sub].max}</small>
+            </td>
+          `).join('')}
+          <td class="p-3 font-bold">${row.total}/${row.maxTotal}</td>
+          <td class="p-3 font-bold text-${row.avg >= 70 ? 'green' : row.avg >= 50 ? 'yellow' : 'red'}-300">${row.avg}%</td>
+          <td class="p-3">${row.pos}</td>
+          <td class="p-3 ${row.grade === 'A' ? 'text-green-300' : row.grade === 'B' ? 'text-yellow-300' : 'text-red-300'} font-bold">${row.grade}</td>
+          <td class="p-3">${row.pres}/${row.abs}</td>
+          <td class="p-3"><input type="text" value="${row.comment}" class="w-full p-1 bg-white/20 text-white rounded" onchange="updateComment('${row.adm}', this.value)"></td>
+        </tr>
+      `).join('');
+    }
+
+    function updateSubject(adm, sub, score, pos) {
+      const numScore = parseInt(score);
+      if (isNaN(numScore) || numScore < 0) return;
+      editingData[adm][sub].score = numScore;
+      // Re-calculate row
+      const row = allData.find(r => r.adm === adm);
+      if (row) {
+        const total = Object.values(editingData[adm]).reduce((sum, subData) => sum + subData.score, 0);
+        const maxTotal = Object.values(editingData[adm]).reduce((sum, subData) => sum + subData.max, 0);
+        const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
+        row.total = total;
+        row.maxTotal = maxTotal;
+        row.avg = parseFloat(avg);
+        row.grade = avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F';
+        // Re-sort and re-position
+        allData.sort((a, b) => b.avg - a.avg);
+        allData.forEach((r, idx) => r.pos = idx + 1);
+        renderScoresTable();
+      }
+    }
+
     function saveScores() {
-      // Push updates to DB (loop allData, update scores)
+      if (allData.length === 0) return Swal.fire('No Data', 'No scores to save.', 'info');
+      const examType = document.getElementById('examType').value;
+      const month = document.getElementById('month').value;
+      let saved = 0;
       allData.forEach(row => {
-        db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/scores`).update({ examType: document.getElementById('examType').value, month: document.getElementById('month').value, subjects: row.subjects });
+        const scoreEntry = {
+          examType,
+          month,
+          subjects: editingData[row.adm],
+          total: row.total,
+          maxTotal: row.maxTotal,
+          avg: row.avg,
+          grade: row.grade
+        };
+        // Update or push to scores array
+        db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/scores`).push(scoreEntry).then(() => {
+          saved++;
+          if (saved === allData.length) {
+            Swal.fire('Saved!', 'All scores updated successfully.', 'success');
+            loadScores(); // Refresh
+          }
+        }).catch(err => {
+          console.error('Save error for ' + row.adm + ':', err);
+        });
       });
-      Swal.fire('Saved!', 'Scores updated.', 'success');
     }
-    
+
     function updateComment(adm, comment) {
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ comment });
-    }
-    
-    function generateReportCards() {
-      allData.forEach(row => {
-        const content = `Report Card: ${row.name}\nAvg: ${row.avg}%\nSubjects: ${JSON.stringify(row.subjects, null, 2)}\nPhoto: [${row.photoUrl}]`;
-        generatePDF(content, `${row.name}_report_${currentYear}.pdf`);
+      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ comment }).catch(err => {
+        console.error('Comment update error:', err);
       });
-      Swal.fire('PDFs Generated!', `${allData.length} reports saved.`);
     }
-    
-    function toggleFullscreen() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); }
-    
+
+    function generateReportCards() {
+      if (allData.length === 0) return Swal.fire('No Data', 'No reports to generate.', 'info');
+      allData.forEach(row => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.addImage(row.photoUrl || '', 'JPEG', 10, 10, 30, 30); // Photo if available
+        doc.text(`Report Card - ${row.name}`, 10, 50);
+        doc.text(`ADM: ${row.adm} | Reporting: ${new Date(row.reportingDate).toLocaleDateString('en-GB')}`, 10, 60);
+        doc.text(`Exam: ${document.getElementById('examType').value} ${document.getElementById('month').value}`, 10, 70);
+        doc.text(`Average: ${row.avg}% | Grade: ${row.grade}`, 10, 80);
+        doc.text(`Fee Balance: TSh ${row.bal.toLocaleString()}`, 10, 90);
+        let y = 100;
+        subjects.forEach(sub => {
+          const subData = row.scoreData.subjects[sub];
+          doc.text(`${sub}: ${subData.score}/${subData.max}`, 10, y);
+          y += 10;
+        });
+        doc.text(`Attendance: ${row.pres}/${row.pres + row.abs} Present`, 10, y);
+        doc.text(`Comment: ${row.comment || 'N/A'}`, 10, y + 10);
+        doc.save(`${row.name.replace(/\s+/g, '_')}_report_${currentYear}.pdf`);
+      });
+      Swal.fire('PDFs Generated!', `${allData.length} individual report cards saved.`, 'success');
+    }
+
+    function exportCSV(data, filename) {
+      const exportData = data.map(row => {
+        const obj = { ADM: row.adm, Name: row.name, 'Reporting Date': row.reportingDate, 'Fee Bal': row.bal, Grade: row.grade, 'Attendance Pres/Abs': `${row.pres}/${row.abs}`, Comment: row.comment };
+        subjects.forEach(sub => obj[sub] = `${row.scoreData.subjects[sub].score}/${row.scoreData.subjects[sub].max}`);
+        obj['Total/Max'] = `${row.total}/${row.maxTotal}`;
+        obj['Avg %'] = row.avg;
+        obj['Position'] = row.pos;
+        return obj;
+      });
+      const csv = Papa.unparse(exportData);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    }
+
+    function toggleFullscreen() { 
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen(); 
+      else document.exitFullscreen(); 
+    }
+
+    // Initial load
     loadScores();
   </script>
 </body>

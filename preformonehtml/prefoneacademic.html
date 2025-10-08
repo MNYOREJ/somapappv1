@@ -126,9 +126,8 @@
     }
     const db = firebase.database();
 
-    if (typeof currentYear === 'undefined') {
-      currentYear = new Date().getFullYear();
-    }
+    // Fallback for currentYear if common.js fails
+    let currentYear = localStorage.getItem('prefone_year') || new Date().getFullYear();
 
     const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
 
@@ -168,9 +167,7 @@
     }
 
     function syncFiltersToScoresheet() {
-      // Save current filters for scoresheet to load
       saveFilters();
-      // Redirect with sync
       window.location.href = 'prefonescoresheet.html';
     }
 
@@ -188,66 +185,75 @@
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
-        console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
-        const studentsObj = snap.val() || {};
-        const students = Object.entries(studentsObj); // Match attendance: [adm, s]
-        const numStudents = students.length;
-        let topScore = 0, bottomScore = 100, topName = '', bottomName = '', totalAvg = 0, presentDays = 0, totalDays = 0;
-        let required = 0, paid = 0;
-        const subAvgs = {};
-        subjects.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
+        try {
+          console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
+          const studentsObj = snap.val() || {};
+          const students = Object.entries(studentsObj); // Match attendance: [adm, s]
+          const numStudents = students.length;
+          let topScore = 0, bottomScore = 100, topName = '', bottomName = '', totalAvg = 0, presentDays = 0, totalDays = 0;
+          let required = 0, paid = 0;
+          const subAvgs = {};
+          subjects.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
 
-        students.forEach(([adm, s]) => {
-          // Scores (filter by exam/month)
-          const scoresArray = Object.values(s.scores || {});
-          const scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
-          let avg = 0;
-          if (scoreData) {
-            avg = Object.values(scoreData.subjects).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length;
-            // Subject avgs
-            Object.entries(scoreData.subjects).forEach(([sub, data]) => {
-              subAvgs[sub].total += (data.score / data.max * 100);
-              subAvgs[sub].count++;
+          students.forEach(([adm, s]) => {
+            // Scores (filter by exam/month)
+            const scoresArray = Object.values(s.scores || {});
+            const scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+            let avg = 0;
+            if (scoreData) {
+              avg = Object.values(scoreData.subjects).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length;
+              // Subject avgs
+              Object.entries(scoreData.subjects).forEach(([sub, data]) => {
+                subAvgs[sub].total += (data.score / data.max * 100);
+                subAvgs[sub].count++;
+              });
+            }
+            totalAvg += avg;
+            if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
+            if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
+
+            // Attendance (month filter like scoresheet)
+            const attRecords = Object.values(s.attendance || {});
+            const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
+            monthAtt.forEach(a => { 
+              if (a.present) presentDays++; 
+              totalDays++; 
             });
-          }
-          totalAvg += avg;
-          if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
-          if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
 
-          // Attendance (month filter like scoresheet)
-          const attRecords = Object.values(s.attendance || {});
-          const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
-          monthAtt.forEach(a => { 
-            if (a.present) presentDays++; 
-            totalDays++; 
+            // Fees
+            required += Number(s.totalFee || 0);
+            const paymentsArray = Object.values(s.payments || {});
+            paid += paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
           });
 
-          // Fees
-          required += Number(s.totalFee || 0);
-          const paymentsArray = Object.values(s.payments || {});
-          paid += paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-        });
+          const classAvg = numStudents > 0 ? (totalAvg / numStudents).toFixed(2) : 0;
+          const attPct = totalDays > 0 ? (presentDays / totalDays * 100).toFixed(1) : 0;
+          const bestSub = Object.entries(subAvgs).reduce((max, [sub, stats]) => (stats.count > 0 && stats.total / stats.count > max[1] ? [sub, stats.total / stats.count] : max), ['', 0])[0] || 'N/A';
 
-        const classAvg = numStudents > 0 ? (totalAvg / numStudents).toFixed(2) : 0;
-        const attPct = totalDays > 0 ? (presentDays / totalDays * 100).toFixed(1) : 0;
-        const bestSub = Object.entries(subAvgs).reduce((max, [sub, stats]) => (stats.count > 0 && stats.total / stats.count > max[1] ? [sub, stats.total / stats.count] : max), ['', 0])[0] || 'N/A';
+          // Update stats
+          document.getElementById('topStudent').innerHTML = (topName || 'N/A') + ' — ' + topScore.toFixed(2) + '%';
+          document.getElementById('bottomStudent').innerHTML = (bottomName || 'N/A') + ' — ' + bottomScore.toFixed(2) + '%';
+          document.getElementById('classMax').textContent = topScore.toFixed(2) + '%';
+          document.getElementById('classAvg').textContent = classAvg + '%';
+          document.getElementById('attendance').textContent = attPct + '% Present';
+          document.getElementById('required').textContent = required.toLocaleString();
+          document.getElementById('paid').textContent = paid.toLocaleString();
+          document.getElementById('bal').textContent = (required - paid).toLocaleString();
+          document.getElementById('bestSub').textContent = bestSub;
+          document.getElementById('totalStudents').textContent = numStudents;
 
-        // Update stats
-        document.getElementById('topStudent').innerHTML = (topName || 'N/A') + ' — ' + topScore.toFixed(2) + '%';
-        document.getElementById('bottomStudent').innerHTML = (bottomName || 'N/A') + ' — ' + bottomScore.toFixed(2) + '%';
-        document.getElementById('classMax').textContent = topScore.toFixed(2) + '%';
-        document.getElementById('classAvg').textContent = classAvg + '%';
-        document.getElementById('attendance').textContent = attPct + '% Present';
-        document.getElementById('required').textContent = required.toLocaleString();
-        document.getElementById('paid').textContent = paid.toLocaleString();
-        document.getElementById('bal').textContent = (required - paid).toLocaleString();
-        document.getElementById('bestSub').textContent = bestSub;
-        document.getElementById('totalStudents').textContent = numStudents;
+          if (numStudents === 0) {
+            Swal.fire('No Data', 'No students found for ' + currentYear + '. Add students in Admission or select a different year.', 'info');
+          }
 
-        // Render subject chart (like attendance trends)
-        renderSubjectChart(subAvgs);
-
-        document.getElementById('loading').style.display = 'none';
+          // Render subject chart (like attendance trends)
+          renderSubjectChart(subAvgs);
+        } catch (err) {
+          console.error('Processing error:', err);
+          Swal.fire('Error', 'Error processing data: ' + err.message, 'error');
+        } finally {
+          document.getElementById('loading').style.display = 'none';
+        }
       }).catch(err => {
         console.error('Load error:', err);
         Swal.fire('Error', 'Failed to load academic data: ' + err.message, 'error');
@@ -256,25 +262,30 @@
     }
 
     function renderSubjectChart(subAvgs) {
-      const ctx = document.getElementById('subjectChart').getContext('2d');
-      if (subjectChart) subjectChart.destroy();
-      subjectChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: subjects,
-          datasets: [{
-            label: 'Average %',
-            data: subjects.map(sub => subAvgs[sub].count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
-            backgroundColor: 'rgba(59, 130, 246, 0.5)',
-            borderColor: 'rgba(59, 130, 246, 1)',
-            borderWidth: 1
-          }]
-        },
-        options: {
-          scales: { y: { beginAtZero: true, max: 100 } },
-          responsive: true
-        }
-      });
+      try {
+        const ctx = document.getElementById('subjectChart').getContext('2d');
+        if (subjectChart) subjectChart.destroy();
+        subjectChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: subjects,
+            datasets: [{
+              label: 'Average %',
+              data: subjects.map(sub => subAvgs[sub].count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
+              backgroundColor: 'rgba(59, 130, 246, 0.5)',
+              borderColor: 'rgba(59, 130, 246, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            scales: { y: { beginAtZero: true, max: 100 } },
+            responsive: true
+          }
+        });
+      } catch (err) {
+        console.error('Chart error:', err);
+        // Optional: Hide chart div or show message
+      }
     }
 
     // Initial load (match attendance)

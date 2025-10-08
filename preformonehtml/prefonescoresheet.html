@@ -97,18 +97,8 @@
     <div class="overflow-x-auto bg-white/10 rounded-lg shadow-md mb-8 fade-in">
       <table id="scoresTable" class="w-full text-sm table">
         <thead class="bg-white/20">
-          <tr>
-            <th class="p-3">#</th>
-            <th class="p-3">ADM</th>
-            <th class="p-3">Student (Preform One)</th>
-            <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
-            ${subjects.map(sub => `<th class="p-3">${sub}<br>(Score/Max/Pos)</th>`).join('')} <!-- Added per-subject pos like main project -->
-            <th class="p-3">Total/Max</th>
-            <th class="p-3">% Avg</th>
-            <th class="p-3">Pos</th>
-            <th class="p-3">Grade</th>
-            <th class="p-3">Pres/Abs (Month)</th>
-            <th class="p-3">Comment</th>
+          <tr id="theadRow">
+            <!-- Headers built dynamically in JS -->
           </tr>
         </thead>
         <tbody id="scoresBody" class="bg-white/5"></tbody>
@@ -135,9 +125,8 @@
     }
     const db = firebase.database();
 
-    if (typeof currentYear === 'undefined') {
-      currentYear = new Date().getFullYear();
-    }
+    // Fallback for currentYear if common.js fails
+    let currentYear = localStorage.getItem('prefone_year') || new Date().getFullYear();
 
     const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
 
@@ -214,71 +203,78 @@
       saveFilters(); // Sync for academic
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
-        console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
-        const studentsObj = snap.val() || {};
-        const students = Object.entries(studentsObj); // Match attendance
-        let grandTotal = 0;
-        allData = [];
+        try {
+          console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
+          const studentsObj = snap.val() || {};
+          const students = Object.entries(studentsObj); // Match attendance
+          let grandTotal = 0;
+          allData = [];
 
-        if (students.length === 0) {
-          updateGlobalStats([]);
-          renderScoresTable();
-          document.getElementById('loading').style.display = 'none';
-          return;
-        }
-
-        allData = students.map(([adm, s]) => {
-          const scoresArray = Object.values(s.scores || {});
-          let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
-          if (!scoreData) {
-            scoreData = { examType, month, subjects: {} };
-            subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
-          } else {
-            subjects.forEach(sub => { 
-              if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
-            });
+          if (students.length === 0) {
+            Swal.fire('No Data', 'No students found for ' + currentYear + '. Add students in Admission or select a different year.', 'info');
+            updateGlobalStats([]);
+            renderScoresTable();
+            document.getElementById('loading').style.display = 'none';
+            return;
           }
 
-          const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
-          const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
-          const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
-          grandTotal += parseFloat(avg);
+          allData = students.map(([adm, s]) => {
+            const scoresArray = Object.values(s.scores || {});
+            let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+            if (!scoreData) {
+              scoreData = { examType, month, subjects: {} };
+              subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
+            } else {
+              subjects.forEach(sub => { 
+                if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
+              });
+            }
 
-          const attRecords = Object.values(s.attendance || {});
-          const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
-          const pres = monthAtt.filter(a => a.present).length;
-          const abs = monthAtt.length - pres;
+            const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
+            const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
+            const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
+            grandTotal += parseFloat(avg);
 
-          const paymentsArray = Object.values(s.payments || {});
-          const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-          const bal = Number(s.totalFee || 0) - paid;
+            const attRecords = Object.values(s.attendance || {});
+            const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
+            const pres = monthAtt.filter(a => a.present).length;
+            const abs = monthAtt.length - pres;
 
-          const row = {
-            adm, 
-            name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
-            reportingDate: s.reportingDate || '', 
-            due: Number(s.totalFee || 0), 
-            paid, 
-            bal, 
-            scoreData, 
-            total, 
-            maxTotal, 
-            avg: parseFloat(avg), 
-            grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
-            pres, 
-            abs,
-            comment: s.comment || '',
-            subjectPos: {} // For per-subject positions
-          };
+            const paymentsArray = Object.values(s.payments || {});
+            const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+            const bal = Number(s.totalFee || 0) - paid;
 
-          editingData[adm] = { ...row.scoreData.subjects };
-          return row;
-        }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
+            const row = {
+              adm, 
+              name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
+              reportingDate: s.reportingDate || '', 
+              due: Number(s.totalFee || 0), 
+              paid, 
+              bal, 
+              scoreData, 
+              total, 
+              maxTotal, 
+              avg: parseFloat(avg), 
+              grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
+              pres, 
+              abs,
+              comment: s.comment || '',
+              subjectPos: {} // For per-subject positions
+            };
 
-        calculateSubjectPositions(); // Added for per-subject pos
-        updateGlobalStats(allData);
-        renderScoresTable();
-        document.getElementById('loading').style.display = 'none';
+            editingData[adm] = { ...row.scoreData.subjects };
+            return row;
+          }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
+
+          calculateSubjectPositions(); // Added for per-subject pos
+          updateGlobalStats(allData);
+          renderScoresTable();
+        } catch (err) {
+          console.error('Processing error:', err);
+          Swal.fire('Error', 'Error processing data: ' + err.message, 'error');
+        } finally {
+          document.getElementById('loading').style.display = 'none';
+        }
       }).catch(err => {
         Swal.fire('Error', 'Failed to load scores: ' + err.message, 'error');
         document.getElementById('loading').style.display = 'none';
@@ -411,6 +407,21 @@
       if (!document.fullscreenElement) document.documentElement.requestFullscreen(); 
       else document.exitFullscreen(); 
     }
+
+    // Build table header dynamically
+    document.getElementById('theadRow').innerHTML = `
+      <th class="p-3">#</th>
+      <th class="p-3">ADM</th>
+      <th class="p-3">Student (Preform One)</th>
+      <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
+      ${subjects.map(sub => `<th class="p-3">${sub}<br>(Score/Max/Pos)</th>`).join('')}
+      <th class="p-3">Total/Max</th>
+      <th class="p-3">% Avg</th>
+      <th class="p-3">Pos</th>
+      <th class="p-3">Grade</th>
+      <th class="p-3">Pres/Abs (Month)</th>
+      <th class="p-3">Comment</th>
+    `;
 
     // Initial load (match attendance: populate, load filters, fetch)
     populateYears();

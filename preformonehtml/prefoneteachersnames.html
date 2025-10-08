@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoMAp - Preform One Teachers</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    body{min-height:100vh;font-family:'Inter',system-ui;background:linear-gradient(135deg,#0f172a,#1e3a8a);color:#e2e8f0;padding:3rem 1rem}
+    .glass{background:rgba(15,23,42,.8);backdrop-filter:blur(18px);border-radius:20px;border:1px solid rgba(148,163,184,.2);box-shadow:0 24px 50px rgba(15,23,42,.45)}
+    .chip{border-radius:9999px;background:rgba(59,130,246,.2);padding:.4rem .9rem;font-size:.75rem;color:#bfdbfe}
+    .teacher-card{background:rgba(15,23,42,.65);border-radius:18px;border:1px solid rgba(148,163,184,.18);padding:1.2rem;display:flex;flex-direction:column;gap:.75rem;box-shadow:0 16px 40px rgba(15,23,42,.35)}
+    .stat{background:rgba(15,23,42,.55);border-radius:18px;border:1px solid rgba(148,163,184,.16);padding:1.4rem;display:flex;flex-direction:column;gap:.3rem}
+    .stat .label{font-size:.73rem;text-transform:uppercase;letter-spacing:.08em;color:rgba(148,163,184,.75)}
+    .stat .value{font-size:1.85rem;font-weight:700;color:#bae6fd}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.82);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;padding:1rem;z-index:50}
+    .modal{width:100%;max-width:520px}
+    .field{background:rgba(255,255,255,.08);border:1px solid transparent;border-radius:.75rem;padding:.75rem 1rem;width:100%;color:#f8fafc}
+    .field:focus{outline:none;border-color:rgba(59,130,246,.8);background:rgba(15,23,42,.66);box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+  </style>
+</head>
+<body>
+  <div class="max-w-6xl mx-auto space-y-10">
+    <header class="space-y-3">
+      <div class="inline-flex items-center gap-3 text-sm text-slate-200/80"><span class="chip bg-violet-500/30 text-violet-100 uppercase tracking-widest">Preform One</span>Teacher Operations</div>
+      <h1 class="text-4xl font-semibold text-slate-50">Subject Teacher Registry</h1>
+      <p class="max-w-2xl text-slate-200/75">Maintain an up-to-date list of Preform One subject teachers, capture their salary agreements, and log every salary payment received.</p>
+      <div class="flex flex-wrap gap-3">
+        <a href="prefonedashboard.html" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/70 border border-slate-500/40 hover:bg-slate-700/70 transition"><i class="fas fa-arrow-left"></i><span>Back to Dashboard</span></a>
+        <button id="downloadTeachersCsv" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-500 text-slate-900 font-semibold hover:bg-sky-400 transition"><i class="fas fa-file-csv"></i><span>Download teacher CSV</span></button>
+      </div>
+    </header>
+
+    <section class="grid gap-4 md:grid-cols-3">
+      <div class="stat"><span class="label">Total teachers</span><span class="value" id="teacherCount">0</span><span class="text-sm text-slate-300/75">Active in Preform One</span></div>
+      <div class="stat"><span class="label">Average salary (TZS)</span><span class="value" id="avgSalary">0</span><span class="text-sm text-slate-300/75">Based on declared salaries</span></div>
+      <div class="stat"><span class="label">Salary paid this month</span><span class="value text-emerald-200" id="paidThisMonth">0</span><span class="text-sm text-slate-300/75">Sum of recorded payments</span></div>
+    </section>
+
+    <section class="glass p-6 md:p-8 space-y-6">
+      <div class="flex flex-col lg:flex-row lg:items-end gap-4 justify-between">
+        <div class="space-y-1">
+          <h2 class="text-2xl font-semibold">Teacher roster</h2>
+          <p class="text-sm text-slate-300/75">Tap on a card to update subject, salary, or record a salary payment.</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button id="addTeacherBtn" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-900 font-semibold hover:bg-emerald-400 transition"><i class="fas fa-user-plus"></i><span>Add teacher</span></button>
+          <button id="initDefaultsBtn" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/60 border border-slate-600/40 text-slate-100 hover:bg-slate-800/70 transition"><i class="fas fa-rotate"></i><span>Reload default list</span></button>
+        </div>
+      </div>
+      <div id="teacherGrid" class="grid gap-5 md:grid-cols-2 xl:grid-cols-3"></div>
+    </section>
+  </div>
+  <div id="teacherModal" class="modal-backdrop">
+    <div class="glass modal p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xl font-semibold" id="teacherModalTitle">Teacher details</h3>
+        <button class="text-slate-300 hover:text-white text-xl" data-close-modal>&times;</button>
+      </div>
+      <form id="teacherForm" class="space-y-4">
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Teacher name</label>
+          <input id="formTeacherName" class="field" placeholder="e.g. WYCLIFFE RIOBA" required>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Subject</label>
+          <input id="formTeacherSubject" class="field" placeholder="Subject taught">
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Email (optional)</label>
+          <input id="formTeacherEmail" class="field" placeholder="name@school.ac.tz">
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Base salary (TZS)</label>
+          <input id="formTeacherSalary" type="number" min="0" class="field" placeholder="Monthly salary e.g. 400000">
+        </div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" class="px-4 py-2.5 rounded-xl bg-slate-800/70 border border-slate-600/40 text-slate-100" data-close-modal>Cancel</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-sky-500 text-slate-900 font-semibold hover:bg-sky-400">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="paymentModal" class="modal-backdrop">
+    <div class="glass modal p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xl font-semibold" id="paymentModalTitle">Record salary payment</h3>
+        <button class="text-slate-300 hover:text-white text-xl" data-close-modal>&times;</button>
+      </div>
+      <form id="paymentForm" class="space-y-4">
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Amount (TZS)</label>
+          <input id="paymentAmount" type="number" min="0" class="field" required>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Payment date</label>
+          <input id="paymentDate" type="date" class="field" required>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-sm uppercase tracking-wide text-slate-200/70">Note</label>
+          <textarea id="paymentNote" class="field" placeholder="Optional note e.g. cash, bank transfer"></textarea>
+        </div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" class="px-4 py-2.5 rounded-xl bg-slate-800/70 border border-slate-600/40 text-slate-100" data-close-modal>Cancel</button>
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-emerald-500 text-slate-900 font-semibold hover:bg-emerald-400">Save payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script>
+    const firebaseConfig={apiKey:"AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",authDomain:"somaptestt.firebaseapp.com",databaseURL:"https://somaptestt-default-rtdb.firebaseio.com",projectId:"somaptestt",storageBucket:"somaptestt.appspot.com",messagingSenderId:"105526245138",appId:"1:105526245138:web:b8e7c0cb82a46e861965cb"};
+    if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
+    const db=firebase.database();
+
+    const TEACHER_REF='/schools/Socrates School Preform one/teachers';
+    const DEFAULT_TEACHERS=[
+      {id:'wycliffe_rioba',name:'WYCLIFFE RIOBA',subject:'Physics',email:'',salary:0},
+      {id:'basil_ouma',name:'BASIL OUMA',subject:'Chemistry',email:'',salary:0},
+      {id:'richard',name:'RICHARD',subject:'Biology',email:'',salary:0},
+      {id:'vumilia_kimaro',name:'VUMILIA KIMARO',subject:'English Language',email:'',salary:0},
+      {id:'buyeye_sayi',name:'BUYEYE SAYI',subject:'Historia ya Tanzania',email:'',salary:0},
+      {id:'amiri_kabi',name:'AMIRI KABI',subject:'Basic Mathematics',email:'',salary:0}
+    ];
+
+    const state={teachers:[],selectedTeacher:null};
+    const teacherGrid=document.getElementById('teacherGrid');
+    const teacherCount=document.getElementById('teacherCount');
+    const avgSalary=document.getElementById('avgSalary');
+    const paidThisMonth=document.getElementById('paidThisMonth');
+    const teacherModal=document.getElementById('teacherModal');
+    const paymentModal=document.getElementById('paymentModal');
+    const teacherForm=document.getElementById('teacherForm');
+    const paymentForm=document.getElementById('paymentForm');
+
+    document.addEventListener('DOMContentLoaded',()=>{
+      loadTeachers();
+      document.querySelectorAll('[data-close-modal]')?.forEach(btn=>btn.addEventListener('click',closeModals));
+      teacherModal.addEventListener('click',e=>{if(e.target===teacherModal)closeModals();});
+      paymentModal.addEventListener('click',e=>{if(e.target===paymentModal)closeModals();});
+      document.getElementById('addTeacherBtn').addEventListener('click',()=>openTeacherForm());
+      document.getElementById('initDefaultsBtn').addEventListener('click',confirmSeedDefaults);
+      document.getElementById('downloadTeachersCsv').addEventListener('click',downloadCsv);
+      teacherForm.addEventListener('submit',submitTeacherForm);
+      paymentForm.addEventListener('submit',submitPaymentForm);
+    });
+
+    function loadTeachers(){
+      db.ref(TEACHER_REF).once('value').then(snap=>{
+        if(!snap.exists()){
+          const payload={};
+          DEFAULT_TEACHERS.forEach(t=>payload[t.id]={name:t.name,subject:t.subject,email:t.email,salary:t.salary});
+          return db.ref(TEACHER_REF).set(payload).then(()=>payload);
+        }
+        return snap.val();
+      }).then(data=>{
+        const teachers=Object.entries(data||{}).map(([id,value])=>({
+          id,
+          name:(value.name||id).toUpperCase(),
+          subject:value.subject||'',
+          email:value.email||'',
+          salary:Number(value.salary||0),
+          payments:value.payments||{}
+        })).sort((a,b)=>a.name.localeCompare(b.name));
+        state.teachers=teachers;
+        renderTeachers();
+      }).catch(err=>{
+        console.error('Failed to load teachers:',err);
+        Swal.fire('Error','Failed to load teachers: '+err.message,'error');
+      });
+    }
+
+    function renderTeachers(){
+      if(!teacherGrid)return;
+      if(!state.teachers.length){
+        teacherGrid.innerHTML='<div class="col-span-full text-center text-slate-300/80 py-8">No teachers registered yet.</div>';
+      }else{
+        teacherGrid.innerHTML=state.teachers.map(buildTeacherCard).join('');
+        teacherGrid.querySelectorAll('[data-action]').forEach(button=>{
+          button.addEventListener('click',()=>{
+            const action=button.dataset.action;
+            const id=button.dataset.id;
+            const teacher=state.teachers.find(t=>t.id===id);
+            if(!teacher)return;
+            if(action==='edit')openTeacherForm(teacher);
+            if(action==='pay')openPaymentForm(teacher);
+            if(action==='history')showHistory(teacher);
+          });
+        });
+      }
+      updateStats();
+    }
+
+    function buildTeacherCard(teacher){
+      const paymentsArray=Object.values(teacher.payments||{});
+      const sortedPayments=paymentsArray.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+      const lastPayment=sortedPayments[0];
+      const totalYear=paymentsArray.filter(p=>new Date(p.date).getFullYear()===new Date().getFullYear()).reduce((sum,p)=>sum+Number(p.amount||0),0);
+      return `
+        <article class="teacher-card">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-xl font-semibold text-slate-50">${teacher.name}</h3>
+              <p class="text-sm text-slate-300/75">${teacher.subject||'Subject not set'}</p>
+            </div>
+            <button class="text-slate-300 hover:text-white" data-action="edit" data-id="${teacher.id}" title="Edit"><i class="fas fa-pen"></i></button>
+          </div>
+          <div class="text-sm text-slate-200/80 space-y-1">
+            <p><span class="text-slate-300/70 uppercase tracking-wide text-xs">Base salary</span><br><span class="text-lg font-semibold">TZS ${formatCurrency(teacher.salary||0)}</span></p>
+            <p><span class="text-slate-300/70 uppercase tracking-wide text-xs">Last payment</span><br>${lastPayment?`${formatDate(lastPayment.date)} � TZS ${formatCurrency(lastPayment.amount)}`:'No payment recorded'}</p>
+            <p><span class="text-slate-300/70 uppercase tracking-wide text-xs">Paid this year</span><br>TZS ${formatCurrency(totalYear)}</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-900 text-sm font-semibold hover:bg-emerald-400" data-action="pay" data-id="${teacher.id}"><i class="fas fa-coins mr-1"></i>Record payment</button>
+            <button class="px-3 py-1.5 rounded-xl bg-slate-900/60 border border-slate-600/40 text-sm" data-action="history" data-id="${teacher.id}"><i class="fas fa-clock-rotate-left mr-1"></i>History</button>
+          </div>
+        </article>`;
+    }
+    function updateStats(){
+      const total=state.teachers.length;
+      if(teacherCount)teacherCount.textContent=total;
+      const avg=total?Math.round(state.teachers.reduce((sum,t)=>sum+Number(t.salary||0),0)/total):0;
+      if(avgSalary)avgSalary.textContent=formatCurrency(avg);
+      const now=new Date();
+      const paid=state.teachers.flatMap(t=>Object.values(t.payments||{})).filter(p=>{
+        const date=new Date(p.date);
+        return date.getFullYear()===now.getFullYear()&&date.getMonth()===now.getMonth();
+      }).reduce((sum,p)=>sum+Number(p.amount||0),0);
+      if(paidThisMonth)paidThisMonth.textContent=formatCurrency(paid);
+    }
+
+    function openTeacherForm(teacher){
+      state.selectedTeacher=teacher||null;
+      teacherForm.reset();
+      document.getElementById('teacherModalTitle').textContent=teacher?'Edit teacher':'Add teacher';
+      document.getElementById('formTeacherName').value=teacher?.name||'';
+      document.getElementById('formTeacherSubject').value=teacher?.subject||'';
+      document.getElementById('formTeacherEmail').value=teacher?.email||'';
+      document.getElementById('formTeacherSalary').value=teacher?.salary||'';
+      teacherModal.style.display='flex';
+    }
+
+    function openPaymentForm(teacher){
+      state.selectedTeacher=teacher;
+      paymentForm.reset();
+      document.getElementById('paymentModalTitle').textContent=`Record salary payment � ${teacher.name}`;
+      document.getElementById('paymentDate').value=new Date().toISOString().slice(0,10);
+      paymentModal.style.display='flex';
+    }
+
+    function closeModals(){
+      teacherModal.style.display='none';
+      paymentModal.style.display='none';
+      state.selectedTeacher=null;
+    }
+
+    function submitTeacherForm(event){
+      event.preventDefault();
+      const name=document.getElementById('formTeacherName').value.trim();
+      if(!name){Swal.fire('Missing name','Please enter the teacher name.','warning');return;}
+      const subject=document.getElementById('formTeacherSubject').value.trim();
+      const email=document.getElementById('formTeacherEmail').value.trim();
+      const salary=parseInt(document.getElementById('formTeacherSalary').value,10)||0;
+      const id=state.selectedTeacher?.id||generateId(name);
+      const payload={name:name.toUpperCase(),subject,email,salary};
+      db.ref(`${TEACHER_REF}/${id}`).update(payload).then(()=>{
+        closeModals();
+        loadTeachers();
+        Swal.fire('Saved','Teacher details updated.','success');
+      }).catch(err=>{
+        console.error('Teacher save error:',err);
+        Swal.fire('Error','Could not save teacher: '+err.message,'error');
+      });
+    }
+
+    function submitPaymentForm(event){
+      event.preventDefault();
+      const teacher=state.selectedTeacher;
+      if(!teacher){Swal.fire('No teacher selected','','info');return;}
+      const amount=parseInt(document.getElementById('paymentAmount').value,10)||0;
+      const date=document.getElementById('paymentDate').value;
+      const note=document.getElementById('paymentNote').value.trim();
+      if(!amount||!date){Swal.fire('Missing details','Provide amount and date.','warning');return;}
+      const path=`${TEACHER_REF}/${teacher.id}/payments`;
+      db.ref(path).push({amount,date,note,createdAt:firebase.database.ServerValue.TIMESTAMP}).then(()=>{
+        closeModals();
+        loadTeachers();
+        Swal.fire('Recorded','Payment saved.','success');
+      }).catch(err=>{
+        console.error('Payment save error:',err);
+        Swal.fire('Error','Could not save payment: '+err.message,'error');
+      });
+    }
+
+    function showHistory(teacher){
+      const payments=Object.values(teacher.payments||{}).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+      if(!payments.length){Swal.fire('No history',`No salary payments recorded for ${teacher.name}.`,'info');return;}
+      const html='<div class="text-left space-y-2">'+payments.map(p=>`<div><div class="text-sm text-slate-200/80">${formatDate(p.date)} � TZS ${formatCurrency(p.amount)}</div>${p.note?`<div class="text-xs text-slate-400">${escapeHtml(p.note)}</div>`:''}</div>`).join('')+'</div>';
+      Swal.fire({title:`Payments � ${teacher.name}`,html,confirmButtonText:'Close'});
+    }
+
+    function downloadCsv(){
+      if(!state.teachers.length){Swal.fire('No data','No teachers to export.','info');return;}
+      const rows=state.teachers.map(t=>({
+        ID:t.id,
+        Name:t.name,
+        Subject:t.subject,
+        Email:t.email,
+        Salary:t.salary,
+        Payments:Object.values(t.payments||{}).length
+      }));
+      const csv=Papa.unparse(rows);
+      const blob=new Blob([csv],{type:'text/csv'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=url;
+      link.download='prefone_teachers.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function confirmSeedDefaults(){
+      Swal.fire({
+        title:'Reload default teachers?',
+        text:'Existing teacher data will be replaced with the standard Preform One teacher list.',
+        icon:'warning',
+        showCancelButton:true,
+        confirmButtonText:'Yes, reload'
+      }).then(result=>{
+        if(!result.isConfirmed)return;
+        const payload={};
+        DEFAULT_TEACHERS.forEach(t=>{payload[t.id]={name:t.name,subject:t.subject,email:t.email,salary:t.salary};});
+        db.ref(TEACHER_REF).set(payload).then(()=>{
+          loadTeachers();
+          Swal.fire('Reloaded','Default teacher list restored.','success');
+        }).catch(err=>{
+          console.error('Seed error:',err);
+          Swal.fire('Error','Could not reload teachers: '+err.message,'error');
+        });
+      });
+    }
+
+    function generateId(name){
+      return name.trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`teacher_${Date.now()}`;
+    }
+
+    function formatCurrency(value){
+      return Number(value||0).toLocaleString('en-US');
+    }
+
+    function formatDate(value){
+      if(!value)return '-';
+      const date=new Date(value);
+      if(Number.isNaN(date.getTime()))return value;
+      return date.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'});
+    }
+
+    function escapeHtml(value){
+      if(value===undefined||value===null)return '';
+      return value.toString().replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]||ch));
+    }
+  </script>
+</body>
+</html>

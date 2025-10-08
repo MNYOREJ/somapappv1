@@ -25,6 +25,9 @@
     <h1 class="text-4xl font-bold mb-6 text-center fade-in"><i class="fas fa-book mr-2"></i> Preform One Academic & Exams</h1>
     <a href="prefonedashboard.html" class="mb-4 inline-block bg-gray-500 hover:bg-gray-600 p-2 rounded text-white fade-in"><i class="fas fa-arrow-left mr-1"></i> Back to Dashboard</a>
     
+    <!-- Loading Indicator -->
+    <div id="loading" class="text-center mb-4 fade-in"><i class="fas fa-spinner fa-spin mr-2"></i> Loading data...</div>
+    
     <!-- Filters (shared with scoresheet via localStorage) -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md fade-in">
       <select id="examType" onchange="saveFiltersAndLoad()" class="p-2 rounded bg-white/20 text-white">
@@ -41,21 +44,58 @@
       <select id="year" onchange="loadYear(this.value)" class="p-2 rounded bg-white/20 text-white">
         <!-- Populated dynamically -->
       </select>
+      <button onclick="loadAcademicData()" class="bg-blue-500 hover:bg-blue-600 p-2 rounded text-white"><i class="fas fa-sync mr-1"></i> Reload</button>
     </div>
     
-    <!-- Stats Cards (updated live from fetch) -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <!-- Student Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
       <div class="stats-card fade-in">
         <h3 class="text-sm font-semibold mb-2"><i class="fas fa-trophy mr-1"></i> Top Student</h3>
         <p id="topStudent" class="text-2xl font-bold">N/A — 0%</p>
+      </div>
+      <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-arrow-down mr-1"></i> Bottom Student</h3>
+        <p id="bottomStudent" class="text-2xl font-bold">N/A — 0%</p>
       </div>
       <div class="stats-card fade-in">
         <h3 class="text-sm font-semibold mb-2"><i class="fas fa-chart-line mr-1"></i> Class Avg</h3>
         <p id="classAvg" class="text-2xl font-bold">0%</p>
       </div>
       <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-arrow-up mr-1"></i> Class Max</h3>
+        <p id="classMax" class="text-2xl font-bold">0%</p>
+      </div>
+    </div>
+
+    <!-- Attendance and Best Subject -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="stats-card fade-in">
         <h3 class="text-sm font-semibold mb-2"><i class="fas fa-users mr-1"></i> Total Students</h3>
         <p id="totalStudents" class="text-2xl font-bold">0</p>
+      </div>
+      <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-check-circle mr-1"></i> Attendance %</h3>
+        <p id="attendance" class="text-2xl font-bold">0%</p>
+      </div>
+      <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-star mr-1"></i> Best Subject</h3>
+        <p id="bestSub" class="text-2xl font-bold">N/A</p>
+      </div>
+    </div>
+
+    <!-- Fee Summary -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-money-bill-wave mr-1"></i> Required Fees</h3>
+        <p id="required" class="text-2xl font-bold">TSh 0</p>
+      </div>
+      <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-money-check mr-1"></i> Paid Fees</h3>
+        <p id="paid" class="text-2xl font-bold">TSh 0</p>
+      </div>
+      <div class="stats-card fade-in">
+        <h3 class="text-sm font-semibold mb-2"><i class="fas fa-balance-scale mr-1"></i> Balance</h3>
+        <p id="bal" class="text-2xl font-bold">TSh 0</p>
       </div>
     </div>
     
@@ -142,11 +182,13 @@
     }
 
     function loadAcademicData() {
+      document.getElementById('loading').style.display = 'block';
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
         const studentsObj = snap.val() || {};
         const students = Object.entries(studentsObj); // Match attendance: [adm, s]
         const numStudents = students.length;
@@ -191,8 +233,8 @@
         const bestSub = Object.entries(subAvgs).reduce((max, [sub, stats]) => (stats.count > 0 && stats.total / stats.count > max[1] ? [sub, stats.total / stats.count] : max), ['', 0])[0] || 'N/A';
 
         // Update stats
-        document.getElementById('topStudent').innerHTML = topName || 'N/A' + ' — ' + topScore.toFixed(2) + '%';
-        document.getElementById('bottomStudent').innerHTML = bottomName || 'N/A' + ' — ' + bottomScore.toFixed(2) + '%';
+        document.getElementById('topStudent').innerHTML = (topName || 'N/A') + ' — ' + topScore.toFixed(2) + '%';
+        document.getElementById('bottomStudent').innerHTML = (bottomName || 'N/A') + ' — ' + bottomScore.toFixed(2) + '%';
         document.getElementById('classMax').textContent = topScore.toFixed(2) + '%';
         document.getElementById('classAvg').textContent = classAvg + '%';
         document.getElementById('attendance').textContent = attPct + '% Present';
@@ -200,15 +242,16 @@
         document.getElementById('paid').textContent = paid.toLocaleString();
         document.getElementById('bal').textContent = (required - paid).toLocaleString();
         document.getElementById('bestSub').textContent = bestSub;
-
         document.getElementById('totalStudents').textContent = numStudents;
 
         // Render subject chart (like attendance trends)
         renderSubjectChart(subAvgs);
 
+        document.getElementById('loading').style.display = 'none';
       }).catch(err => {
         console.error('Load error:', err);
         Swal.fire('Error', 'Failed to load academic data: ' + err.message, 'error');
+        document.getElementById('loading').style.display = 'none';
       });
     }
 

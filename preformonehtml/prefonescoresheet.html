@@ -125,9 +125,7 @@
     }
     const db = firebase.database();
 
-    // Fallback for currentYear if common.js fails
-    let currentYear = localStorage.getItem('prefone_year') || new Date().getFullYear();
-
+    // Use subjects from common.js
     const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
 
     let allData = [], maxScore = 100;
@@ -146,6 +144,9 @@
       if (savedYear) {
         select.value = savedYear;
         currentYear = parseInt(savedYear);
+      } else {
+        currentYear = 2024; // Fallback to 2024 if no saved, assuming data there
+        localStorage.setItem('prefone_year', currentYear);
       }
     }
 
@@ -203,6 +204,7 @@
       saveFilters(); // Sync for academic
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        console.log('Raw snap:', snap.val()); // Debug
         try {
           const studentsObj = snap.val() || {};
           const students = Object.entries(studentsObj); // Match attendance
@@ -218,9 +220,10 @@
           }
 
           allData = students.map(([adm, s]) => {
+            console.log('Processing student:', adm, s); // Debug per student
             try {
               const scoresArray = Object.values(s.scores || {});
-              let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+              let scoreData = scoresArray.find(sc => sc && sc.examType === examType && sc.month === month);
               if (!scoreData) {
                 scoreData = { examType, month, subjects: {} };
                 subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
@@ -238,6 +241,7 @@
               const attRecords = Object.values(s.attendance || {});
               const monthAtt = attRecords.filter(a => {
                 try {
+                  if (!a.date) return false;
                   return new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull;
                 } catch {
                   return false;

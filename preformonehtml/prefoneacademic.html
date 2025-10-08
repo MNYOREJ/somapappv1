@@ -126,9 +126,7 @@
     }
     const db = firebase.database();
 
-    // Fallback for currentYear if common.js fails
-    let currentYear = localStorage.getItem('prefone_year') || new Date().getFullYear();
-
+    // Use subjects from common.js
     const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
 
     let subjectChart; // Chart instance
@@ -147,6 +145,9 @@
       if (savedYear) {
         select.value = savedYear;
         currentYear = parseInt(savedYear);
+      } else {
+        currentYear = 2024; // Fallback to 2024 if no saved, assuming data there
+        localStorage.setItem('prefone_year', currentYear);
       }
     }
 
@@ -185,6 +186,7 @@
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
+        console.log('Raw snap:', snap.val()); // Debug
         try {
           const studentsObj = snap.val() || {};
           const students = Object.entries(studentsObj);
@@ -195,19 +197,22 @@
           subjects.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
 
           students.forEach(([adm, s]) => {
+            console.log('Processing student:', adm, s); // Debug per student
             try {
               // Scores
               const scoresArray = Object.values(s.scores || {});
-              const scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+              const scoreData = scoresArray.find(sc => sc && sc.examType === examType && sc.month === month);
               let avg = 0;
-              if (scoreData) {
-                avg = Object.values(scoreData.subjects || {}).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length;
-                Object.entries(scoreData.subjects || {}).forEach(([sub, data]) => {
-                  subAvgs[sub].total += (data.score / data.max * 100);
-                  subAvgs[sub].count++;
+              if (scoreData && scoreData.subjects) {
+                avg = Object.values(scoreData.subjects).reduce((sum, sub) => sum + (Number(sub.score) / Number(sub.max) * 100), 0) / subjects.length;
+                Object.entries(scoreData.subjects).forEach(([sub, data]) => {
+                  if (data && data.score && data.max) {
+                    subAvgs[sub].total += (Number(data.score) / Number(data.max) * 100);
+                    subAvgs[sub].count++;
+                  }
                 });
               }
-              totalAvg += avg;
+              totalAvg += avg || 0;
               if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
               if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
 
@@ -215,6 +220,7 @@
               const attRecords = Object.values(s.attendance || {});
               const monthAtt = attRecords.filter(a => {
                 try {
+                  if (!a.date) return false;
                   return new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull;
                 } catch {
                   return false;

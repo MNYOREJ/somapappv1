@@ -11,13 +11,14 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- For subject avgs chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="prefonecommon.js"></script>
   <style> 
     body { background: linear-gradient(to right, #667eea, #764ba2); } 
     .stats-card { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border-radius: 1rem; padding: 1.5rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
     .fade-in { animation: fadeIn 0.5s; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .error-card { background: #fee2e2; color: #991b1b; padding: 1rem; border-radius: 0.5rem; }
   </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
@@ -28,7 +29,7 @@
     <!-- Loading Indicator -->
     <div id="loading" class="text-center mb-4 fade-in"><i class="fas fa-spinner fa-spin mr-2"></i> Loading data...</div>
     
-    <!-- Filters (shared with scoresheet via localStorage) -->
+    <!-- Filters -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-white/10 p-4 rounded-lg shadow-md fade-in">
       <select id="examType" onchange="saveFiltersAndLoad()" class="p-2 rounded bg-white/20 text-white">
         <option value="Monthly">Monthly</option>
@@ -36,16 +37,19 @@
         <option value="End Term">End Term</option>
       </select>
       <select id="month" onchange="saveFiltersAndLoad()" class="p-2 rounded bg-white/20 text-white">
-        <option value="Sep">Sep</option>
-        <option value="Oct">Oct</option>
-        <option value="Nov">Nov</option>
-        <option value="Dec">Dec</option>
+        <option value="Sep">September</option>
+        <option value="Oct">October</option>
+        <option value="Nov">November</option>
+        <option value="Dec">December</option>
       </select>
       <select id="year" onchange="loadYear(this.value)" class="p-2 rounded bg-white/20 text-white">
         <!-- Populated dynamically -->
       </select>
       <button onclick="loadAcademicData()" class="bg-blue-500 hover:bg-blue-600 p-2 rounded text-white"><i class="fas fa-sync mr-1"></i> Reload</button>
     </div>
+    
+    <!-- Error Display -->
+    <div id="errorDisplay" class="error-card hidden mb-4"></div>
     
     <!-- Student Stats Cards -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -99,7 +103,7 @@
       </div>
     </div>
     
-    <!-- Scoresheet Link (syncs filters) -->
+    <!-- Scoresheet Link -->
     <a href="prefonescoresheet.html" onclick="syncFiltersToScoresheet()" class="bg-yellow-500 hover:bg-yellow-600 p-3 rounded mb-4 inline-block text-white font-bold fade-in"><i class="fas fa-table mr-2"></i> Open Scoresheet</a>
     
     <!-- Subject Avgs Chart -->
@@ -110,6 +114,7 @@
   </div>
 
   <script>
+    // Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
       authDomain: "somaptestt.firebaseapp.com",
@@ -126,29 +131,30 @@
     }
     const db = firebase.database();
 
-    // Use subjects from common.js
-    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
+    // Subjects from prefonecommon.js
+    let subjects = window.subjects || [
+      'Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French',
+      'Geography', 'Basic Mathematics', 'English Course', 'English Language',
+      'Computer Course', 'Business Studies'
+    ];
 
     let subjectChart; // Chart instance
+    let currentYear = 2025; // Default year
 
     function populateYears() {
       const select = document.getElementById('year');
+      select.innerHTML = ''; // Clear existing options
       for (let y = 2024; y <= 2030; y++) {
         const opt = document.createElement('option');
         opt.value = y;
         opt.textContent = y;
-        if (y == currentYear) opt.selected = true;
         select.appendChild(opt);
       }
-      // Load saved year
+      // Set saved or default year
       const savedYear = localStorage.getItem('prefone_year');
-      if (savedYear) {
-        select.value = savedYear;
-        currentYear = parseInt(savedYear);
-      } else {
-        currentYear = 2025; // Fallback to 2025
-        localStorage.setItem('prefone_year', currentYear);
-      }
+      select.value = savedYear || currentYear;
+      currentYear = parseInt(select.value);
+      localStorage.setItem('prefone_year', currentYear);
     }
 
     function loadYear(year) {
@@ -179,99 +185,144 @@
       document.getElementById('month').value = savedMonth;
     }
 
+    function showError(message) {
+      const errorDiv = document.getElementById('errorDisplay');
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+      setTimeout(() => errorDiv.classList.add('hidden'), 5000);
+    }
+
     function loadAcademicData() {
       document.getElementById('loading').style.display = 'block';
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
-      const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
+      const monthFull = {
+        Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December'
+      }[month] || month;
 
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
-        console.log('Raw snap:', snap.val()); // Debug
+      // Use standardized path (match case with database)
+      const dbPath = `/schools/Socrates School Preform One/${currentYear}/students`;
+      console.log(`Fetching data from: ${dbPath}`);
+
+      db.ref(dbPath).once('value').then(snap => {
+        console.log('Raw snap:', snap.val());
         try {
           const studentsObj = snap.val() || {};
           const students = Object.entries(studentsObj);
           const numStudents = students.length;
-          let topScore = 0, bottomScore = 100, topName = '', bottomName = '', totalAvg = 0, presentDays = 0, totalDays = 0;
+
+          if (numStudents === 0) {
+            Swal.fire('No Students', `No students found for ${currentYear}. Please add students via Admissions.`, 'info');
+            resetStats();
+            renderSubjectChart({});
+            document.getElementById('loading').style.display = 'none';
+            return;
+          }
+
+          let topScore = 0, bottomScore = 100, topName = '', bottomName = '';
+          let totalAvg = 0, presentDays = 0, totalDays = 0;
           let required = 0, paid = 0;
           const subAvgs = {};
           subjects.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
 
           students.forEach(([adm, s]) => {
-            console.log('Processing student:', adm, s); // Debug per student
+            console.log(`Processing student ${adm}:`, s);
             try {
               // Scores
-              const scoresArray = Object.values(s.scores || {});
-              const scoreData = scoresArray.find(sc => sc && sc.examType === examType && sc.month === month);
+              const scoresArray = s.scores ? Object.values(s.scores) : [];
+              const scoreData = scoresArray.find(sc => sc?.examType === examType && sc?.month === month) || { subjects: {} };
               let avg = 0;
-              if (scoreData && scoreData.subjects) {
-                avg = Object.values(scoreData.subjects).reduce((sum, sub) => sum + (Number(sub.score) / Number(sub.max) * 100), 0) / subjects.length;
-                Object.entries(scoreData.subjects).forEach(([sub, data]) => {
-                  if (data && data.score && data.max) {
-                    subAvgs[sub].total += (Number(data.score) / Number(data.max) * 100);
-                    subAvgs[sub].count++;
-                  }
-                });
+              if (scoreData.subjects) {
+                const validScores = Object.entries(scoreData.subjects).filter(([_, data]) => data?.score && data?.max);
+                avg = validScores.length > 0
+                  ? validScores.reduce((sum, [sub, data]) => {
+                      const percentage = (Number(data.score) / Number(data.max)) * 100;
+                      subAvgs[sub].total += percentage;
+                      subAvgs[sub].count++;
+                      return sum + percentage;
+                    }, 0) / subjects.length
+                  : 0;
               }
-              totalAvg += avg || 0;
-              if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
-              if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
+              totalAvg += avg;
+              if (avg > topScore) {
+                topScore = avg;
+                topName = `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unknown';
+              }
+              if (avg < bottomScore && avg > 0) {
+                bottomScore = avg;
+                bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unknown';
+              }
 
               // Attendance
-              const attRecords = Object.values(s.attendance || {});
+              const attRecords = s.attendance ? Object.values(s.attendance) : [];
               const monthAtt = attRecords.filter(a => {
                 try {
-                  if (!a.date) return false;
+                  if (!a?.date) return false;
                   return new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull;
                 } catch {
                   return false;
                 }
               });
-              monthAtt.forEach(a => { 
-                if (a.present) presentDays++; 
-                totalDays++; 
+              monthAtt.forEach(a => {
+                if (a.present) presentDays++;
+                totalDays++;
               });
 
               // Fees
               required += Number(s.totalFee || 0);
-              const paymentsArray = Object.values(s.payments || {});
+              const paymentsArray = s.payments ? Object.values(s.payments) : [];
               paid += paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
             } catch (loopErr) {
-              console.error('Error processing student ' + adm + ':', loopErr);
+              console.error(`Error processing student ${adm}:`, loopErr);
+              showError(`Error processing student ${adm}: ${loopErr.message}`);
             }
           });
 
           const classAvg = numStudents > 0 ? (totalAvg / numStudents).toFixed(2) : 0;
           const attPct = totalDays > 0 ? (presentDays / totalDays * 100).toFixed(1) : 0;
-          const bestSub = Object.entries(subAvgs).reduce((max, [sub, stats]) => (stats.count > 0 && stats.total / stats.count > max[1] ? [sub, stats.total / stats.count] : max), ['', 0])[0] || 'N/A';
+          const bestSub = Object.entries(subAvgs).reduce((max, [sub, stats]) =>
+            (stats.count > 0 && stats.total / stats.count > max[1] ? [sub, stats.total / stats.count] : max),
+            ['', 0])[0] || 'N/A';
 
-          // Update stats
+          // Update UI
           document.getElementById('topStudent').innerHTML = (topName || 'N/A') + ' — ' + topScore.toFixed(2) + '%';
-          document.getElementById('bottomStudent').innerHTML = (bottomName || 'N/A') + ' — ' + bottomScore.toFixed(2) + '%';
+          document.getElementById('bottomStudent').innerHTML = (bottomName || 'N/A') + ' — ' + (bottomScore < 100 ? bottomScore.toFixed(2) : '0') + '%';
           document.getElementById('classMax').textContent = topScore.toFixed(2) + '%';
           document.getElementById('classAvg').textContent = classAvg + '%';
           document.getElementById('attendance').textContent = attPct + '% Present';
-          document.getElementById('required').textContent = required.toLocaleString();
-          document.getElementById('paid').textContent = paid.toLocaleString();
-          document.getElementById('bal').textContent = (required - paid).toLocaleString();
+          document.getElementById('required').textContent = 'TSh ' + required.toLocaleString();
+          document.getElementById('paid').textContent = 'TSh ' + paid.toLocaleString();
+          document.getElementById('bal').textContent = 'TSh ' + (required - paid).toLocaleString();
           document.getElementById('bestSub').textContent = bestSub;
           document.getElementById('totalStudents').textContent = numStudents;
-
-          if (numStudents === 0) {
-            Swal.fire('No Students', 'No students found for the selected year. Check if students are added in the database for ' + currentYear + '.', 'info');
-          }
 
           renderSubjectChart(subAvgs);
         } catch (err) {
           console.error('Processing error:', err);
-          Swal.fire('Error', 'Error processing data: ' + err.message, 'error');
+          showError('Error processing data: ' + err.message);
+          resetStats();
         } finally {
           document.getElementById('loading').style.display = 'none';
         }
       }).catch(err => {
-        console.error('Load error:', err);
-        Swal.fire('Error', 'Failed to load academic data: ' + err.message, 'error');
+        console.error('Firebase error:', err);
+        showError('Failed to load data: ' + err.message);
+        resetStats();
         document.getElementById('loading').style.display = 'none';
       });
+    }
+
+    function resetStats() {
+      document.getElementById('topStudent').innerHTML = 'N/A — 0%';
+      document.getElementById('bottomStudent').innerHTML = 'N/A — 0%';
+      document.getElementById('classMax').textContent = '0%';
+      document.getElementById('classAvg').textContent = '0%';
+      document.getElementById('attendance').textContent = '0% Present';
+      document.getElementById('required').textContent = 'TSh 0';
+      document.getElementById('paid').textContent = 'TSh 0';
+      document.getElementById('bal').textContent = 'TSh 0';
+      document.getElementById('bestSub').textContent = 'N/A';
+      document.getElementById('totalStudents').textContent = '0';
     }
 
     function renderSubjectChart(subAvgs) {
@@ -283,7 +334,7 @@
           labels: subjects,
           datasets: [{
             label: 'Average %',
-            data: subjects.map(sub => subAvgs[sub].count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
+            data: subjects.map(sub => subAvgs[sub]?.count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
             backgroundColor: 'rgba(59, 130, 246, 0.5)',
             borderColor: 'rgba(59, 130, 246, 1)',
             borderWidth: 1
@@ -291,15 +342,25 @@
         },
         options: {
           scales: { y: { beginAtZero: true, max: 100 } },
-          responsive: true
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            title: { display: true, text: 'Subject Performance Averages', color: 'white' }
+          }
         }
       });
     }
 
-    // Initial load (match attendance)
-    loadFilters();
-    populateYears();
-    loadAcademicData();
+    // Initial load
+    try {
+      loadFilters();
+      populateYears();
+      loadAcademicData();
+    } catch (err) {
+      console.error('Initial load error:', err);
+      showError('Initialization failed: ' + err.message);
+      document.getElementById('loading').style.display = 'none';
+    }
   </script>
 </body>
 </html>

@@ -141,15 +141,35 @@
     }
     const db = firebase.database();
 
-    // Subjects from prefonecommon.js
-    let subjects = window.subjects || [
-      'Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French',
-      'Geography', 'Basic Mathematics', 'English Course', 'English Language',
-      'Computer Course', 'Business Studies'
-    ];
+    // Subjects from prefonecommon.js (fallback if shared script is missing)
+    const SUBJECTS = Array.isArray(window.subjects) && window.subjects.length
+      ? window.subjects
+      : [
+        'Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French',
+        'Geography', 'Basic Mathematics', 'English Course', 'English Language',
+        'Computer Course', 'Business Studies'
+      ];
+
+    if (!Array.isArray(window.subjects) || !window.subjects.length) {
+      window.subjects = SUBJECTS;
+    }
 
     let subjectChart; // Chart instance
-    let currentYear = 2025; // Default to 2025
+    const PREFONE_YEAR_KEY = 'prefone_year';
+    const YEAR_START = 2024;
+    const YEAR_END = 2030;
+    const DEFAULT_YEAR = 2025;
+
+    function resolveSelectedYear() {
+      const stored = parseInt(localStorage.getItem(PREFONE_YEAR_KEY), 10);
+      if (!Number.isNaN(stored) && stored >= YEAR_START && stored <= YEAR_END) {
+        return stored;
+      }
+      if (typeof currentYear === 'number' && currentYear >= YEAR_START && currentYear <= YEAR_END) {
+        return currentYear;
+      }
+      return DEFAULT_YEAR;
+    }
 
     function populateYears() {
       const select = document.getElementById('year');
@@ -158,24 +178,30 @@
         showError('Year dropdown failed to load. Please refresh the page.');
         return;
       }
-      select.innerHTML = ''; // Clear existing options
-      for (let y = 2024; y <= 2030; y++) {
+      const selectedYear = resolveSelectedYear();
+      select.innerHTML = '';
+      for (let y = YEAR_START; y <= YEAR_END; y++) {
         const opt = document.createElement('option');
         opt.value = y;
         opt.textContent = y;
-        if (y === 2025) opt.selected = true; // Set 2025 as default
+        if (y === selectedYear) opt.selected = true;
         select.appendChild(opt);
       }
-      currentYear = 2025; // Set default year
-      localStorage.setItem('prefone_year', currentYear);
-      console.log('Year dropdown populated: 2024-2030, default: 2025');
+      currentYear = selectedYear;
+      localStorage.setItem(PREFONE_YEAR_KEY, currentYear);
+      console.log(`Year dropdown populated: ${YEAR_START}-${YEAR_END}, default: ${currentYear}`);
     }
 
     function loadYear(year) {
-      currentYear = parseInt(year);
-      localStorage.setItem('prefone_year', currentYear);
+      const parsed = parseInt(year, 10);
+      if (Number.isNaN(parsed)) {
+        console.warn('Ignored invalid year selection:', year);
+        return;
+      }
+      currentYear = parsed;
+      localStorage.setItem(PREFONE_YEAR_KEY, currentYear);
       const select = document.getElementById('year');
-      if (select) select.value = currentYear; // Update dropdown
+      if (select) select.value = currentYear;
       console.log(`Year changed to: ${currentYear}`);
       loadAcademicData();
     }
@@ -213,6 +239,10 @@
       document.getElementById('loading').style.display = 'block';
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
+      if (!currentYear || currentYear < YEAR_START || currentYear > YEAR_END) {
+        currentYear = resolveSelectedYear();
+        localStorage.setItem(PREFONE_YEAR_KEY, currentYear);
+      }
       const monthFull = {
         Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December'
       }[month] || month;
@@ -239,7 +269,7 @@
           let totalAvg = 0, presentDays = 0, totalDays = 0;
           let required = 0, paid = 0;
           const subAvgs = {};
-          subjects.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
+          SUBJECTS.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
 
           students.forEach(([adm, s]) => {
             console.log(`Processing student ${adm}:`, s);
@@ -256,7 +286,7 @@
                       subAvgs[sub].total += percentage;
                       subAvgs[sub].count++;
                       return sum + percentage;
-                    }, 0) / subjects.length
+                    }, 0) / SUBJECTS.length
                   : 0;
               }
               totalAvg += avg;
@@ -347,10 +377,10 @@
       subjectChart = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels: subjects,
+          labels: SUBJECTS,
           datasets: [{
             label: 'Average %',
-            data: subjects.map(sub => subAvgs[sub]?.count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
+            data: SUBJECTS.map(sub => subAvgs[sub]?.count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
             backgroundColor: 'rgba(59, 130, 246, 0.5)',
             borderColor: 'rgba(59, 130, 246, 1)',
             borderWidth: 1
@@ -384,3 +414,6 @@
   </script>
 </body>
 </html>
+
+
+

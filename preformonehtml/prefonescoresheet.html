@@ -125,34 +125,65 @@
     }
     const db = firebase.database();
 
-    // Use subjects from common.js
-    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
+    // Use subjects from common.js (fallback if shared script is missing)
+    const SUBJECTS = Array.isArray(window.subjects) && window.subjects.length
+      ? window.subjects
+      : ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
+
+    if (!Array.isArray(window.subjects) || !window.subjects.length) {
+      window.subjects = SUBJECTS;
+    }
+
+    const PREFONE_YEAR_KEY = 'prefone_year';
+    const YEAR_START = 2024;
+    const YEAR_END = 2030;
+    const DEFAULT_YEAR = 2025;
 
     let allData = [], maxScore = 100;
     let editingData = {};
 
+    function resolveSelectedYear() {
+      const stored = parseInt(localStorage.getItem(PREFONE_YEAR_KEY), 10);
+      if (!Number.isNaN(stored) && stored >= YEAR_START && stored <= YEAR_END) {
+        return stored;
+      }
+      if (typeof currentYear === 'number' && currentYear >= YEAR_START && currentYear <= YEAR_END) {
+        return currentYear;
+      }
+      return DEFAULT_YEAR;
+    }
+
     function populateYears() {
       const select = document.getElementById('yearSelect');
-      for (let y = 2024; y <= 2030; y++) {
+      if (!select) {
+        console.error('Year selector not found on scoresheet page');
+        return;
+      }
+      const selectedYear = resolveSelectedYear();
+      select.innerHTML = '';
+      for (let y = YEAR_START; y <= YEAR_END; y++) {
         const opt = document.createElement('option');
         opt.value = y;
         opt.textContent = y;
-        if (y == currentYear) opt.selected = true;
+        if (y === selectedYear) opt.selected = true;
         select.appendChild(opt);
       }
-      const savedYear = localStorage.getItem('prefone_year');
-      if (savedYear) {
-        select.value = savedYear;
-        currentYear = parseInt(savedYear);
-      } else {
-        currentYear = 2025; // Fallback to 2025
-        localStorage.setItem('prefone_year', currentYear);
-      }
+      currentYear = selectedYear;
+      localStorage.setItem(PREFONE_YEAR_KEY, currentYear);
+      select.value = currentYear;
     }
 
     function setYearAndLoad() {
-      currentYear = parseInt(document.getElementById('yearSelect').value);
-      localStorage.setItem('prefone_year', currentYear);
+      const selector = document.getElementById('yearSelect');
+      if (!selector) return;
+      const parsed = parseInt(selector.value, 10);
+      if (Number.isNaN(parsed)) {
+        console.warn('Ignored invalid year selection:', selector.value);
+        selector.value = currentYear;
+        return;
+      }
+      currentYear = parsed;
+      localStorage.setItem(PREFONE_YEAR_KEY, currentYear);
       loadScores();
     }
 
@@ -189,9 +220,16 @@
     }
 
     function calculateSubjectPositions() {
-      subjects.forEach(sub => {
-        const sorted = [...allData].sort((a, b) => b.scoreData.subjects[sub].score - a.scoreData.subjects[sub].score);
-        sorted.forEach((row, idx) => row.subjectPos[sub] = idx + 1);
+      SUBJECTS.forEach(sub => {
+        const sorted = [...allData].sort((a, b) => {
+          const aScore = a?.scoreData?.subjects?.[sub]?.score ?? 0;
+          const bScore = b?.scoreData?.subjects?.[sub]?.score ?? 0;
+          return bScore - aScore;
+        });
+        sorted.forEach((row, idx) => {
+          if (!row.subjectPos) row.subjectPos = {};
+          row.subjectPos[sub] = idx + 1;
+        });
       });
     }
 
@@ -200,6 +238,12 @@
       maxScore = parseInt(document.getElementById('maxScore').value);
       const examType = document.getElementById('examType').value;
       const month = document.getElementById('month').value;
+      if (!currentYear || currentYear < YEAR_START || currentYear > YEAR_END) {
+        currentYear = resolveSelectedYear();
+        localStorage.setItem(PREFONE_YEAR_KEY, currentYear);
+        const selector = document.getElementById('yearSelect');
+        if (selector) selector.value = currentYear;
+      }
       const monthFull = { Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December' }[month] || month;
       saveFilters(); // Sync for academic
 
@@ -220,28 +264,37 @@
           }
 
           allData = students.map(([adm, s]) => {
-            console.log('Processing student:', adm, s); // Debug per student
+            console.log('Processing student:', adm, s);
             try {
               const scoresArray = Object.values(s.scores || {});
-              let scoreData = scoresArray.find(sc => sc && sc.examType === examType && sc.month === month);
-              if (!scoreData) {
-                scoreData = { examType, month, subjects: {} };
-                subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
-              } else {
-                subjects.forEach(sub => { 
-                  if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
-                });
-              }
+              const existingScoreData = scoresArray.find(sc => sc && sc.examType === examType && sc.month === month);
+              const normalizedScoreData = existingScoreData ? { ...existingScoreData } : { examType, month, subjects: {} };
+              const normalizedSubjects = {};
 
-              const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
-              const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
-              const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
-              grandTotal += parseFloat(avg);
+              SUBJECTS.forEach(sub => {
+                const entry = normalizedScoreData.subjects?.[sub] || {};
+                const rawScore = Number(entry.score);
+                const rawMax = Number(entry.max);
+                normalizedSubjects[sub] = {
+                  score: Number.isFinite(rawScore) ? rawScore : 0,
+                  max: Number.isFinite(rawMax) && rawMax > 0 ? rawMax : maxScore
+                };
+              });
+
+              normalizedScoreData.subjects = normalizedSubjects;
+
+              const totals = Object.values(normalizedSubjects).reduce((acc, subj) => {
+                acc.total += Number(subj.score) || 0;
+                acc.max += Number(subj.max) || 0;
+                return acc;
+              }, { total: 0, max: 0 });
+
+              const avgValue = totals.max > 0 ? (totals.total / totals.max) * 100 : 0;
 
               const attRecords = Object.values(s.attendance || {});
               const monthAtt = attRecords.filter(a => {
                 try {
-                  if (!a.date) return false;
+                  if (!a?.date) return false;
                   return new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull;
                 } catch {
                   return false;
@@ -254,26 +307,31 @@
               const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
               const bal = Number(s.totalFee || 0) - paid;
 
+              const subjectSnapshot = {};
+              SUBJECTS.forEach(sub => {
+                subjectSnapshot[sub] = { ...normalizedSubjects[sub] };
+              });
+
               const row = {
-                adm, 
-                name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
-                reportingDate: s.reportingDate || '', 
-                due: Number(s.totalFee || 0), 
-                paid, 
-                bal, 
-                scoreData, 
-                total, 
-                maxTotal, 
-                avg: parseFloat(avg), 
-                grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
-                pres, 
+                adm,
+                name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+                reportingDate: s.reportingDate || '',
+                due: Number(s.totalFee || 0),
+                paid,
+                bal,
+                scoreData: { ...normalizedScoreData, subjects: subjectSnapshot },
+                total: totals.total,
+                maxTotal: totals.max,
+                avg: Number(avgValue.toFixed(2)),
+                grade: avgValue >= 80 ? 'A' : avgValue >= 60 ? 'B' : 'F',
+                pres,
                 abs,
                 comment: s.comment || '',
-                subjectPos: {}, // For per-subject positions
+                subjectPos: {},
                 photoUrl: s.photoUrl || ''
               };
 
-              editingData[adm] = { ...row.scoreData.subjects };
+              editingData[adm] = subjectSnapshot;
               return row;
             } catch (loopErr) {
               console.error('Error processing student ' + adm + ':', loopErr);
@@ -309,7 +367,7 @@
           <td class="p-3">${row.adm}</td>
           <td class="p-3">${row.name}${row.reportingDate ? `<br><small>${new Date(row.reportingDate).toLocaleDateString('en-GB')}</small>` : ''}</td>
           <td class="p-3">${row.due.toLocaleString()}/${row.paid.toLocaleString()}/${row.bal.toLocaleString()}</td>
-          ${subjects.map(sub => `
+          ${SUBJECTS.map(sub => `
             <td class="p-3">
               <input type="number" min="0" max="${maxScore}" value="${editingData[row.adm][sub].score || 0}" class="score-input" onchange="updateSubject('${row.adm}', '${sub}', this.value)">
               <br><small>/${editingData[row.adm][sub].max} (Pos: ${row.subjectPos[sub] || '-'})</small>
@@ -330,7 +388,7 @@
       <th class="p-3">ADM</th>
       <th class="p-3">Student (Preform One)</th>
       <th class="p-3">Fee Due/Paid/Bal (TSh)</th>
-      ${subjects.map(sub => `<th class="p-3">${sub}<br>(Score/Max/Pos)</th>`).join('')}
+      ${SUBJECTS.map(sub => `<th class="p-3">${sub}<br>(Score/Max/Pos)</th>`).join('')}
       <th class="p-3">Total/Max</th>
       <th class="p-3">% Avg</th>
       <th class="p-3">Pos</th>
@@ -346,3 +404,4 @@
   </script>
 </body>
 </html>
+

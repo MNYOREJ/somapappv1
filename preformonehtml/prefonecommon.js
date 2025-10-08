@@ -20,7 +20,7 @@ function loadYear(year) {
 }
 
 // Subjects
-const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
+const subjects = window.subjects = window.subjects || ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
 
 // Fee Calc
 function calculateTotalFee(reportingDate) {

@@ -129,7 +129,7 @@
     // Fallback for currentYear if common.js fails
     let currentYear = localStorage.getItem('prefone_year') || new Date().getFullYear();
 
-    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
+    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
 
     let subjectChart; // Chart instance
 
@@ -186,9 +186,8 @@
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
         try {
-          console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
           const studentsObj = snap.val() || {};
-          const students = Object.entries(studentsObj); // Match attendance: [adm, s]
+          const students = Object.entries(studentsObj);
           const numStudents = students.length;
           let topScore = 0, bottomScore = 100, topName = '', bottomName = '', totalAvg = 0, presentDays = 0, totalDays = 0;
           let required = 0, paid = 0;
@@ -196,34 +195,43 @@
           subjects.forEach(sub => subAvgs[sub] = { total: 0, count: 0 });
 
           students.forEach(([adm, s]) => {
-            // Scores (filter by exam/month)
-            const scoresArray = Object.values(s.scores || {});
-            const scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
-            let avg = 0;
-            if (scoreData) {
-              avg = Object.values(scoreData.subjects).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length;
-              // Subject avgs
-              Object.entries(scoreData.subjects).forEach(([sub, data]) => {
-                subAvgs[sub].total += (data.score / data.max * 100);
-                subAvgs[sub].count++;
+            try {
+              // Scores
+              const scoresArray = Object.values(s.scores || {});
+              const scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+              let avg = 0;
+              if (scoreData) {
+                avg = Object.values(scoreData.subjects || {}).reduce((sum, sub) => sum + (sub.score / sub.max * 100), 0) / subjects.length;
+                Object.entries(scoreData.subjects || {}).forEach(([sub, data]) => {
+                  subAvgs[sub].total += (data.score / data.max * 100);
+                  subAvgs[sub].count++;
+                });
+              }
+              totalAvg += avg;
+              if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
+              if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
+
+              // Attendance
+              const attRecords = Object.values(s.attendance || {});
+              const monthAtt = attRecords.filter(a => {
+                try {
+                  return new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull;
+                } catch {
+                  return false;
+                }
               });
+              monthAtt.forEach(a => { 
+                if (a.present) presentDays++; 
+                totalDays++; 
+              });
+
+              // Fees
+              required += Number(s.totalFee || 0);
+              const paymentsArray = Object.values(s.payments || {});
+              paid += paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+            } catch (loopErr) {
+              console.error('Error processing student ' + adm + ':', loopErr);
             }
-            totalAvg += avg;
-            if (avg > topScore) { topScore = avg; topName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
-            if (avg < bottomScore && avg > 0) { bottomScore = avg; bottomName = `${s.firstName || ''} ${s.lastName || ''}`.trim(); }
-
-            // Attendance (month filter like scoresheet)
-            const attRecords = Object.values(s.attendance || {});
-            const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
-            monthAtt.forEach(a => { 
-              if (a.present) presentDays++; 
-              totalDays++; 
-            });
-
-            // Fees
-            required += Number(s.totalFee || 0);
-            const paymentsArray = Object.values(s.payments || {});
-            paid += paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
           });
 
           const classAvg = numStudents > 0 ? (totalAvg / numStudents).toFixed(2) : 0;
@@ -243,10 +251,9 @@
           document.getElementById('totalStudents').textContent = numStudents;
 
           if (numStudents === 0) {
-            Swal.fire('No Data', 'No students found for ' + currentYear + '. Add students in Admission or select a different year.', 'info');
+            Swal.fire('No Students', 'No students found for the selected year. Check if students are added in the database for ' + currentYear + '.', 'info');
           }
 
-          // Render subject chart (like attendance trends)
           renderSubjectChart(subAvgs);
         } catch (err) {
           console.error('Processing error:', err);
@@ -262,30 +269,25 @@
     }
 
     function renderSubjectChart(subAvgs) {
-      try {
-        const ctx = document.getElementById('subjectChart').getContext('2d');
-        if (subjectChart) subjectChart.destroy();
-        subjectChart = new Chart(ctx, {
-          type: 'bar',
-          data: {
-            labels: subjects,
-            datasets: [{
-              label: 'Average %',
-              data: subjects.map(sub => subAvgs[sub].count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
-              backgroundColor: 'rgba(59, 130, 246, 0.5)',
-              borderColor: 'rgba(59, 130, 246, 1)',
-              borderWidth: 1
-            }]
-          },
-          options: {
-            scales: { y: { beginAtZero: true, max: 100 } },
-            responsive: true
-          }
-        });
-      } catch (err) {
-        console.error('Chart error:', err);
-        // Optional: Hide chart div or show message
-      }
+      const ctx = document.getElementById('subjectChart').getContext('2d');
+      if (subjectChart) subjectChart.destroy();
+      subjectChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: subjects,
+          datasets: [{
+            label: 'Average %',
+            data: subjects.map(sub => subAvgs[sub].count > 0 ? (subAvgs[sub].total / subAvgs[sub].count).toFixed(1) : 0),
+            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+            borderColor: 'rgba(59, 130, 246, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: { y: { beginAtZero: true, max: 100 } },
+          responsive: true
+        }
+      });
     }
 
     // Initial load (match attendance)

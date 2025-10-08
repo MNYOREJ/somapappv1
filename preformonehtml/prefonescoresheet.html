@@ -128,7 +128,7 @@
     // Fallback for currentYear if common.js fails
     let currentYear = localStorage.getItem('prefone_year') || new Date().getFullYear();
 
-    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Math', 'English Language/Course', 'Computer Studies', 'Business Studies'];
+    const subjects = ['Physics', 'Chemistry', 'Biology', 'Historia ya Tanzania', 'French', 'Geography', 'Basic Mathematics', 'English Course', 'English Language', 'Computer Course', 'Business Studies'];
 
     let allData = [], maxScore = 100;
     let editingData = {};
@@ -204,14 +204,13 @@
 
       db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then(snap => {
         try {
-          console.log('Fetched students data:', snap.val()); // Debug: Check if data is returned
           const studentsObj = snap.val() || {};
           const students = Object.entries(studentsObj); // Match attendance
           let grandTotal = 0;
           allData = [];
 
           if (students.length === 0) {
-            Swal.fire('No Data', 'No students found for ' + currentYear + '. Add students in Admission or select a different year.', 'info');
+            Swal.fire('No Students', 'No students found for the selected year. Check if students are added in the database for ' + currentYear + '.', 'info');
             updateGlobalStats([]);
             renderScoresTable();
             document.getElementById('loading').style.display = 'none';
@@ -219,52 +218,64 @@
           }
 
           allData = students.map(([adm, s]) => {
-            const scoresArray = Object.values(s.scores || {});
-            let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
-            if (!scoreData) {
-              scoreData = { examType, month, subjects: {} };
-              subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
-            } else {
-              subjects.forEach(sub => { 
-                if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
+            try {
+              const scoresArray = Object.values(s.scores || {});
+              let scoreData = scoresArray.find(sc => sc.examType === examType && sc.month === month);
+              if (!scoreData) {
+                scoreData = { examType, month, subjects: {} };
+                subjects.forEach(sub => scoreData.subjects[sub] = { score: 0, max: maxScore });
+              } else {
+                subjects.forEach(sub => { 
+                  if (!scoreData.subjects[sub]) scoreData.subjects[sub] = { score: 0, max: maxScore }; 
+                });
+              }
+
+              const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
+              const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
+              const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
+              grandTotal += parseFloat(avg);
+
+              const attRecords = Object.values(s.attendance || {});
+              const monthAtt = attRecords.filter(a => {
+                try {
+                  return new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull;
+                } catch {
+                  return false;
+                }
               });
+              const pres = monthAtt.filter(a => a.present).length;
+              const abs = monthAtt.length - pres;
+
+              const paymentsArray = Object.values(s.payments || {});
+              const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const bal = Number(s.totalFee || 0) - paid;
+
+              const row = {
+                adm, 
+                name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
+                reportingDate: s.reportingDate || '', 
+                due: Number(s.totalFee || 0), 
+                paid, 
+                bal, 
+                scoreData, 
+                total, 
+                maxTotal, 
+                avg: parseFloat(avg), 
+                grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
+                pres, 
+                abs,
+                comment: s.comment || '',
+                subjectPos: {}, // For per-subject positions
+                photoUrl: s.photoUrl || ''
+              };
+
+              editingData[adm] = { ...row.scoreData.subjects };
+              return row;
+            } catch (loopErr) {
+              console.error('Error processing student ' + adm + ':', loopErr);
+              return null;
             }
-
-            const total = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.score, 0);
-            const maxTotal = Object.values(scoreData.subjects).reduce((sum, sub) => sum + sub.max, 0);
-            const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
-            grandTotal += parseFloat(avg);
-
-            const attRecords = Object.values(s.attendance || {});
-            const monthAtt = attRecords.filter(a => new Date(a.date).toLocaleString('en', { month: 'long' }) === monthFull);
-            const pres = monthAtt.filter(a => a.present).length;
-            const abs = monthAtt.length - pres;
-
-            const paymentsArray = Object.values(s.payments || {});
-            const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-            const bal = Number(s.totalFee || 0) - paid;
-
-            const row = {
-              adm, 
-              name: `${s.firstName || ''} ${s.lastName || ''}`.trim(), 
-              reportingDate: s.reportingDate || '', 
-              due: Number(s.totalFee || 0), 
-              paid, 
-              bal, 
-              scoreData, 
-              total, 
-              maxTotal, 
-              avg: parseFloat(avg), 
-              grade: avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F',
-              pres, 
-              abs,
-              comment: s.comment || '',
-              subjectPos: {} // For per-subject positions
-            };
-
-            editingData[adm] = { ...row.scoreData.subjects };
-            return row;
-          }).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
+          }).filter(row => row !== null).sort((a, b) => b.avg - a.avg).map((row, idx) => ({ ...row, pos: idx + 1 }));
 
           calculateSubjectPositions(); // Added for per-subject pos
           updateGlobalStats(allData);
@@ -276,6 +287,7 @@
           document.getElementById('loading').style.display = 'none';
         }
       }).catch(err => {
+        console.error('Load error:', err);
         Swal.fire('Error', 'Failed to load scores: ' + err.message, 'error');
         document.getElementById('loading').style.display = 'none';
       });
@@ -309,106 +321,6 @@
       `).join('');
     }
 
-    function updateSubject(adm, sub, score) {
-      const numScore = parseInt(score);
-      if (isNaN(numScore) || numScore < 0 || numScore > maxScore) return;
-      editingData[adm][sub].score = numScore;
-      const row = allData.find(r => r.adm === adm);
-      if (row) {
-        const total = Object.values(editingData[adm]).reduce((sum, subData) => sum + subData.score, 0);
-        const maxTotal = Object.values(editingData[adm]).reduce((sum, subData) => sum + subData.max, 0);
-        const avg = maxTotal > 0 ? (total / maxTotal * 100).toFixed(2) : 0;
-        row.total = total;
-        row.maxTotal = maxTotal;
-        row.avg = parseFloat(avg);
-        row.grade = avg >= 80 ? 'A' : avg >= 60 ? 'B' : 'F';
-        allData.sort((a, b) => b.avg - a.avg);
-        allData.forEach((r, idx) => r.pos = idx + 1);
-        calculateSubjectPositions();
-        updateGlobalStats(allData);
-        renderScoresTable();
-      }
-    }
-
-    function saveScores() {
-      if (allData.length === 0) return Swal.fire('No Data', 'No scores to save.', 'info');
-      const examType = document.getElementById('examType').value;
-      const month = document.getElementById('month').value;
-      let saved = 0;
-      allData.forEach(row => {
-        const scoreEntry = {
-          examType,
-          month,
-          subjects: editingData[row.adm],
-          total: row.total,
-          maxTotal: row.maxTotal,
-          avg: row.avg,
-          grade: row.grade
-        };
-        db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/scores`).orderByChild('month').equalTo(month).once('value').then(snap => {
-          const existingKey = Object.keys(snap.val() || {})[0];
-          const ref = db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${row.adm}/scores`);
-          if (existingKey) ref.child(existingKey).update(scoreEntry);
-          else ref.push(scoreEntry);
-          saved++;
-          if (saved === allData.length) {
-            Swal.fire('Saved!', 'All scores updated. Refresh Academic for updated stats.', 'success');
-            loadScores();
-          }
-        }).catch(err => console.error('Save error:', err));
-      });
-    }
-
-    function updateComment(adm, comment) {
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).update({ comment }).catch(err => console.error('Comment error:', err));
-    }
-
-    function generateReportCards() {
-      if (allData.length === 0) return Swal.fire('No Data', 'No reports to generate.', 'info');
-      allData.forEach(row => {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-        if (row.photoUrl) doc.addImage(row.photoUrl, 'JPEG', 10, 10, 30, 30);
-        doc.text(`Report Card - ${row.name}`, 10, row.photoUrl ? 50 : 20);
-        doc.text(`ADM: ${row.adm} | Exam: ${document.getElementById('examType').value} ${document.getElementById('month').value}`, 10, 60);
-        doc.text(`Average: ${row.avg}% | Grade: ${row.grade} | Balance: TSh ${row.bal.toLocaleString()}`, 10, 70);
-        doc.autoTable({
-          startY: 80,
-          head: [['Subject', 'Score/Max']],
-          body: subjects.map(sub => [sub, `${editingData[row.adm][sub].score}/${editingData[row.adm][sub].max}`]),
-          styles: { fontSize: 8 }
-        });
-        const finalY = doc.lastAutoTable.finalY;
-        doc.text(`Attendance: ${row.pres}/${row.pres + row.abs} | Comment: ${row.comment || 'N/A'}`, 10, finalY + 10);
-        doc.save(`${row.name.replace(/\s+/g, '_')}_report_${currentYear}.pdf`);
-      });
-      Swal.fire('Success', `${allData.length} reports generated!`, 'success');
-    }
-
-    function exportCSV(data, filename) {
-      const exportData = data.map(row => {
-        const obj = { ADM: row.adm, Name: row.name, Grade: row.grade, 'Pres/Abs': `${row.pres}/${row.abs}`, Comment: row.comment };
-        subjects.forEach(sub => obj[sub] = `${editingData[row.adm][sub].score}/${editingData[row.adm][sub].max}`);
-        obj['Total/Max'] = `${row.total}/${row.maxTotal}`;
-        obj['Avg %'] = row.avg;
-        obj['Pos'] = row.pos;
-        return obj;
-      });
-      const csv = Papa.unparse(exportData);
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-    }
-
-    function toggleFullscreen() { 
-      if (!document.fullscreenElement) document.documentElement.requestFullscreen(); 
-      else document.exitFullscreen(); 
-    }
-
-    // Build table header dynamically
     document.getElementById('theadRow').innerHTML = `
       <th class="p-3">#</th>
       <th class="p-3">ADM</th>

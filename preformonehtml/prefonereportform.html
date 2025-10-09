@@ -1,43 +1,548 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>SoMAp — Preform One Report Forms</title>
-  <!-- Same -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoMAp � Preform One Report Forms</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+  <style>
+    body {
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(99,102,241,.2), transparent 50%),
+        radial-gradient(circle at bottom right, rgba(56,189,248,.15), transparent 50%),
+        linear-gradient(135deg, #0f172a, #1d4ed8);
+      color: #e2e8f0;
+    }
+    .glass {
+      background: rgba(15,23,42,.78);
+      backdrop-filter: blur(20px);
+      border-radius: 20px;
+      border: 1px solid rgba(148,163,184,.2);
+      box-shadow: 0 22px 45px rgba(15,23,42,.45);
+    }
+    .metric {
+      background: rgba(15,23,42,.6);
+      border-radius: 18px;
+      border: 1px solid rgba(148,163,184,.16);
+      padding: 1.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: .35rem;
+    }
+    .metric .label {
+      font-size: .72rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: rgba(148,163,184,.74);
+    }
+    .metric-value { font-size: 1.9rem; font-weight: 700; color: #bae6fd; }
+    .metric-sub { font-size: .75rem; color: rgba(203,213,225,.78); letter-spacing: .04em; }
+    .t-field {
+      background: rgba(255,255,255,.08);
+      border: 1px solid transparent;
+      border-radius: .75rem;
+      color: #f8fafc;
+      padding: .7rem 1rem;
+      transition: all .2s ease;
+      width: 100%;
+    }
+    .t-field:focus {
+      border-color: rgba(59,130,246,.8);
+      outline: none;
+      background: rgba(15,23,42,.66);
+      box-shadow: 0 0 0 3px rgba(59,130,246,.25);
+    }
+    .table-card {
+      background: rgba(15,23,42,.6);
+      border-radius: 18px;
+      border: 1px solid rgba(148,163,184,.18);
+      box-shadow: 0 16px 36px rgba(15,23,42,.35);
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
-  <div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-file-alt"></i> Preform One Report Forms</h1>
-    <a href="prefonedashboard.html" class="bg-gray-500 p-2 rounded mb-4 inline-block">< Back</a>
-    
-    <select id="reportType" class="p-2 rounded mb-4 bg-white/20 text-white"><option>Bulk Reports</option><option>Single Report</option></select>
-    <select id="reportMonth" class="p-2 rounded mb-4 bg-white/20 text-white"><option>Sep</option><option>Oct</option><option>Nov</option><option>Dec</option></select>
-    
-    <button onclick="generateReports()" class="bg-blue-500 p-2 rounded">Generate</button>
-    
-    <div id="reportsPreview"></div>
+<body class="px-4 py-10 lg:py-16">
+  <div class="max-w-7xl mx-auto space-y-8">
+    <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+      <div class="space-y-3">
+        <span class="inline-flex items-center gap-3 text-sm text-slate-200/80">
+          <span class="uppercase tracking-widest px-3 py-1 rounded-full bg-violet-500/30 text-violet-100">Preform One</span>
+          Report dashboard
+        </span>
+        <h1 class="text-4xl font-semibold text-slate-50">Student report forms</h1>
+        <p class="text-slate-200/75 max-w-2xl">
+          Generate Preform One report forms with attendance, fee balance, subject scores, and auto teacher comments.
+        </p>
+      </div>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <a href="prefonedashboard.html" class="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-slate-800/60 border border-slate-500/40 text-slate-100 hover:bg-slate-700/75 transition">
+          <i class="fas fa-arrow-left"></i>
+          <span>Back to Dashboard</span>
+        </a>
+        <div class="glass px-4 py-3 flex items-center gap-4">
+          <div class="flex flex-col gap-1">
+            <label for="yearSelect" class="text-xs uppercase tracking-wide text-slate-300/80">Year</label>
+            <select id="yearSelect" class="t-field text-sm bg-slate-900/40 border-slate-600/40 min-w-[140px]"></select>
+          </div>
+          <button id="refreshBtn" type="button" class="text-sky-300 hover:text-sky-100 text-xl" title="Reload data">
+            <i class="fas fa-rotate-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="metric">
+        <span class="label">Total learners</span>
+        <span class="metric-value" id="metricStudents">0</span>
+        <span class="metric-sub" id="metricGender">M:0 � F:0</span>
+      </div>
+      <div class="metric">
+        <span class="label">Average score</span>
+        <span class="metric-value" id="metricAverage">0%</span>
+        <span class="metric-sub">Class average (selected exam)</span>
+      </div>
+      <div class="metric">
+        <span class="label">Fee balance</span>
+        <span class="metric-value" id="metricBalance">TSh 0</span>
+        <span class="metric-sub">Total outstanding</span>
+      </div>
+      <div class="metric">
+        <span class="label">Attendance rate</span>
+        <span class="metric-value" id="metricAttendance">0%</span>
+        <span class="metric-sub">Selected month</span>
+      </div>
+    </div>
+
+    <div class="glass p-6 space-y-5">
+      <div class="grid gap-4 md:grid-cols-5">
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">Exam type</label>
+          <select id="examType" class="t-field bg-slate-900/40 border-slate-700/40">
+            <option value="Monthly">Monthly</option>
+            <option value="Midterm">Midterm</option>
+            <option value="End Term">End Term</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">Month</label>
+          <select id="monthSelect" class="t-field bg-slate-900/40 border-slate-700/40">
+            <option value="Sep">September</option>
+            <option value="Oct">October</option>
+            <option value="Nov">November</option>
+            <option value="Dec">December</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">Search student</label>
+          <input id="searchInput" type="search" class="t-field" placeholder="Adm no, name, parent contact">
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">Sort by</label>
+          <select id="sortSelect" class="t-field bg-slate-900/40 border-slate-700/40">
+            <option value="name">Name (A-Z)</option>
+            <option value="score">Score (High-Low)</option>
+            <option value="balance">Balance (High-Low)</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-3 justify-end">
+          <button id="applyFilters" class="px-4 py-2 rounded-xl bg-sky-500 text-slate-900 font-semibold hover:bg-sky-400 transition">Apply filters</button>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <button id="downloadBulkPdf" class="px-4 py-2 rounded-xl bg-emerald-500 text-slate-900 font-semibold hover:bg-emerald-400 transition"><i class="fas fa-file-pdf mr-1"></i>Download bulk PDF</button>
+        <button id="downloadBulkCsv" class="px-4 py-2 rounded-xl bg-slate-900/60 border border-slate-600/40 text-slate-100 hover:bg-slate-800/75 transition"><i class="fas fa-file-csv mr-1"></i>Download CSV</button>
+      </div>
+    </div>
+
+    <div class="table-card overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm text-slate-200">
+          <thead class="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-300">
+            <tr>
+              <th class="px-4 py-3 text-left">Adm</th>
+              <th class="px-4 py-3 text-left">Student</th>
+              <th class="px-4 py-3 text-left">Avg % / Grade</th>
+              <th class="px-4 py-3 text-left">Fee (Paid / Bal)</th>
+              <th class="px-4 py-3 text-left">Attendance %</th>
+              <th class="px-4 py-3 text-left">Comment</th>
+              <th class="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="reportTable" class="divide-y divide-slate-800/60 bg-slate-900/40"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
-    function generateReports() {
-      const type = document.getElementById('reportType').value;
-      const month = document.getElementById('reportMonth').value;
-      if (type === 'Bulk') {
-        // All students
-        db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-          Object.entries(snap.val() || {}).forEach(([adm, s]) => {
-            const score = s.scores?.find(sc => sc.month === month);
-            const content = `Report for ${s.firstName} ${s.lastName} - ${month}\nAvg: ${score ? Object.values(score.subjects).reduce((sum, sub) => sum + sub.score, 0) / subjects.length : 0}\nAttendance: ${s.attendance.filter(a => a.present && new Date(a.date).getMonth() +1 === ['Sep','Oct','Nov','Dec'].indexOf(month) + 9 ? 'Present' : 'Absent').length / 30 * 100}%`;
-            generatePDF(content, `${s.firstName}_report_${month}.pdf`);
-          });
-          Swal.fire('Generated!', 'Bulk reports saved.');
-        });
-      } else {
-        // Single - select student, similar to above
-        const adm = prompt('Enter Adm No');
-        // ... fetch and PDF
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt"
+    };
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    const PREFONE_YEAR_KEY = 'prefone_year';
+    const YEAR_START = 2024;
+    const YEAR_END = 2030;
+    const DEFAULT_YEAR = 2025;
+    const subjectsList = Array.isArray(window.subjects) && window.subjects.length
+      ? [...window.subjects]
+      : ['Physics','Chemistry','Biology','Historia ya Tanzania','French','Geography','Basic Mathematics','English Course','English Language','Computer Course','Business Studies'];
+
+    const state = {
+      currentYear: resolveYear(),
+      examType: 'Monthly',
+      month: 'Sep',
+      students: [],
+      filtered: [],
+      teachers: new Map()
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      populateYearOptions();
+      attachListeners();
+      loadTeachers().then(() => loadStudents());
+    });
+
+    function resolveYear() {
+      const stored = parseInt(localStorage.getItem(PREFONE_YEAR_KEY), 10);
+      if (!Number.isNaN(stored) && stored >= YEAR_START && stored <= YEAR_END) return stored;
+      if (typeof window.currentYear === 'number' && window.currentYear >= YEAR_START && window.currentYear <= YEAR_END) return window.currentYear;
+      return DEFAULT_YEAR;
+    }
+
+    function populateYearOptions() {
+      const select = document.getElementById('yearSelect');
+      if (!select) return;
+      select.innerHTML = '';
+      for (let year = YEAR_START; year <= YEAR_END; year++) {
+        const opt = document.createElement('option');
+        opt.value = String(year);
+        opt.textContent = year;
+        if (year === state.currentYear) opt.selected = true;
+        select.appendChild(opt);
       }
+    }
+
+    function attachListeners() {
+      document.getElementById('yearSelect').addEventListener('change', e => {
+        state.currentYear = parseInt(e.target.value, 10);
+        localStorage.setItem(PREFONE_YEAR_KEY, state.currentYear);
+        loadStudents();
+      });
+      document.getElementById('examType').addEventListener('change', e => {
+        state.examType = e.target.value;
+        applyFilters();
+      });
+      document.getElementById('monthSelect').addEventListener('change', e => {
+        state.month = e.target.value;
+        applyFilters();
+      });
+      document.getElementById('searchInput').addEventListener('input', applyFilters);
+      document.getElementById('sortSelect').addEventListener('change', applyFilters);
+      document.getElementById('refreshBtn').addEventListener('click', loadStudents);
+      document.getElementById('applyFilters').addEventListener('click', applyFilters);
+      document.getElementById('downloadBulkPdf').addEventListener('click', downloadBulkPdf);
+      document.getElementById('downloadBulkCsv').addEventListener('click', downloadBulkCsv);
+    }
+
+    async function loadTeachers() {
+      const snap = await db.ref('/schools/Socrates School Preform one/teachers').once('value');
+      const teachers = snap.val() || {};
+      Object.entries(teachers).forEach(([id, value]) => {
+        state.teachers.set(id, {
+          id,
+          name: (value.name || id).toUpperCase(),
+          subject: value.subject || ''
+        });
+      });
+    }
+
+    async function loadStudents() {
+      try {
+        const studentsSnap = await db.ref(`/schools/Socrates School Preform one/${state.currentYear}/students`).once('value');
+        const studentsData = studentsSnap.val() || {};
+        state.students = Object.entries(studentsData).map(([adm, data]) => {
+          const payments = Object.values(data.payments || {});
+          const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+          const attendance = Object.values(data.attendance || {});
+          const monthAttendance = attendance.filter(entry => isMonthMatch(entry.date, state.month));
+          const presents = monthAttendance.filter(entry => entry.present).length;
+          const attendancePercent = monthAttendance.length ? (presents / monthAttendance.length) * 100 : 0;
+          const scoreBundle = findScoreEntry(data.scores || [], state.examType, state.month);
+          const subjectStats = buildSubjectStats(scoreBundle);
+          const totalScore = subjectStats.totalScore;
+          const totalMax = subjectStats.totalMax;
+          const avg = totalMax ? (totalScore / totalMax) * 100 : 0;
+          const grade = deriveGrade(avg);
+          const comment = autoComment(avg);
+          return {
+            adm,
+            ...data,
+            paid,
+            balance: Number(data.totalFee || 0) - paid,
+            attendancePercent,
+            scoreEntry: scoreBundle,
+            totalScore,
+            totalMax,
+            avg,
+            grade,
+            comment,
+            subjectStats
+          };
+        });
+        applyFilters();
+      } catch (error) {
+        console.error('Failed to load students:', error);
+      }
+    }
+
+    function isMonthMatch(date, shortMonth) {
+      if (!date) return false;
+      const months = { Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+      const target = months[shortMonth];
+      if (target === undefined) return false;
+      const parsed = new Date(date);
+      if (Number.isNaN(parsed.getTime())) return false;
+      return parsed.getMonth() === target;
+    }
+
+    function findScoreEntry(entries, examType, month) {
+      if (Array.isArray(entries)) {
+        return entries.find(entry => entry.examType === examType && entry.month === month) || null;
+      }
+      if (entries && typeof entries === 'object') {
+        return Object.values(entries).find(entry => entry?.examType === examType && entry?.month === month) || null;
+      }
+      return null;
+    }
+
+    function buildSubjectStats(scoreEntry) {
+      const stats = { totalScore: 0, totalMax: 0, subjects: [] };
+      const subjectsData = scoreEntry?.subjects || {};
+      subjectsList.forEach(subject => {
+        const subEntry = subjectsData[subject] || {};
+        const score = Number(subEntry.score || 0);
+        const max = Number(subEntry.max || 0) || 100;
+        stats.subjects.push({ subject, score, max });
+        stats.totalScore += score;
+        stats.totalMax += max;
+      });
+      return stats;
+    }
+
+    function deriveGrade(avg) {
+      if (avg >= 80) return 'A';
+      if (avg >= 65) return 'B';
+      if (avg >= 50) return 'C';
+      if (avg >= 35) return 'D';
+      return 'F';
+    }
+
+    function autoComment(avg) {
+      if (avg >= 85) return 'Excellent progress � keep pushing ahead!';
+      if (avg >= 70) return 'Strong performance � stay consistent.';
+      if (avg >= 55) return 'Good effort � focus on weak areas to climb higher.';
+      if (avg >= 40) return 'Needs steady improvement and follow-up practice.';
+      return 'Immediate support required; plan remedial sessions.';
+    }
+
+    function applyFilters() {
+      const search = document.getElementById('searchInput').value.trim().toLowerCase();
+      const sortBy = document.getElementById('sortSelect').value;
+      let filtered = state.students.filter(student => {
+        const haystack = [
+          student.adm,
+          student.firstName,
+          student.middleName,
+          student.lastName,
+          student.parentName,
+          student.parentContact
+        ].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(search);
+      });
+
+      filtered = sortStudents(filtered, sortBy);
+      state.filtered = filtered;
+      updateMetrics();
+      renderTable();
+    }
+
+    function sortStudents(arr, sortBy) {
+      const copy = [...arr];
+      if (sortBy === 'score') {
+        copy.sort((a,b) => b.avg - a.avg || a.adm.localeCompare(b.adm));
+      } else if (sortBy === 'balance') {
+        copy.sort((a,b) => (b.balance || 0) - (a.balance || 0));
+      } else {
+        copy.sort((a,b) => a.lastName?.localeCompare(b.lastName || '') || a.firstName?.localeCompare(b.firstName || '') || a.adm.localeCompare(b.adm));
+      }
+      return copy;
+    }
+
+    function updateMetrics() {
+      const total = state.filtered.length;
+      const male = state.filtered.filter(s => (s.gender || '').toLowerCase().startsWith('m')).length;
+      const female = state.filtered.filter(s => (s.gender || '').toLowerCase().startsWith('f')).length;
+      const avg = total ? (state.filtered.reduce((sum,s) => sum + (s.avg || 0), 0) / total).toFixed(1) : '0.0';
+      const balance = state.filtered.reduce((sum,s) => sum + (s.balance || 0), 0);
+      const attendance = total ? (state.filtered.reduce((sum,s) => sum + (s.attendancePercent || 0), 0) / total).toFixed(1) : '0.0';
+      document.getElementById('metricStudents').textContent = total;
+      document.getElementById('metricGender').textContent = `M:${male} � F:${female}`;
+      document.getElementById('metricAverage').textContent = `${avg}%`;
+      document.getElementById('metricBalance').textContent = `TSh ${balance.toLocaleString()}`;
+      document.getElementById('metricAttendance').textContent = `${attendance}%`;
+    }
+
+    function renderTable() {
+      const table = document.getElementById('reportTable');
+      table.innerHTML = state.filtered.map(student => `
+        <tr class="hover:bg-slate-800/60">
+          <td class="px-4 py-3">${student.adm}</td>
+          <td class="px-4 py-3">
+            <div class="font-semibold">${escapeHtml(`${student.firstName || ''} ${student.lastName || ''}`.trim())}</div>
+            <div class="text-xs text-slate-400">${escapeHtml(student.parentContact || '')}</div>
+          </td>
+          <td class="px-4 py-3">
+            <div class="font-semibold">${student.avg.toFixed(1)}%</div>
+            <div class="text-xs text-slate-400">Grade ${student.grade}</div>
+          </td>
+          <td class="px-4 py-3">
+            <div>TSh ${Number(student.paid).toLocaleString()}</div>
+            <div class="text-xs text-slate-400">Balance: TSh ${Number(student.balance).toLocaleString()}</div>
+          </td>
+          <td class="px-4 py-3">${student.attendancePercent.toFixed(1)}%</td>
+          <td class="px-4 py-3 text-xs">${escapeHtml(student.comment)}</td>
+          <td class="px-4 py-3 text-right">
+            <button class="px-3 py-1 rounded bg-sky-500/80 text-slate-900 text-xs font-semibold hover:bg-sky-400" onclick="generateSinglePdf('${student.adm}')"><i class="fas fa-file-pdf mr-1"></i>PDF</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function generateSinglePdf(adm) {
+      const student = state.filtered.find(s => s.adm === adm);
+      if (!student) {
+        Swal.fire('Not found', 'Student could not be located in the filtered list.', 'info');
+        return;
+      }
+      downloadSingleReport(student);
+    }
+
+    function downloadSingleReport(student) {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      doc.setFontSize(12);
+      const logoPath = '../images/socrates-logo.png';
+      doc.text('Socrates School � Preform One', 14, 18);
+      doc.text(`Academic Year: ${state.currentYear}`, 14, 24);
+      doc.text(`Report Month: ${state.month} � Exam: ${state.examType}`, 14, 30);
+      doc.text(`Student: ${student.firstName || ''} ${student.lastName || ''}`, 14, 38);
+      doc.text(`Adm No: ${student.adm}`, 14, 44);
+      doc.text(`Date of Birth: ${student.dob || '-'}`, 14, 50);
+      doc.text(`Parent: ${student.parentName || '-'} (${student.parentContact || '-'})`, 14, 56);
+      doc.text(`Reporting Date: ${student.reportingDate || '-'}`, 14, 62);
+      doc.text(`Fees: TSh ${Number(student.totalFee || 0).toLocaleString()} | Paid: TSh ${Number(student.paid || 0).toLocaleString()} | Balance: TSh ${Number(student.balance || 0).toLocaleString()}`, 14, 68);
+
+      const subjectRows = student.subjectStats.subjects.map((entry, idx) => {
+        const teacher = Array.from(state.teachers.values()).find(t => t.subject.toUpperCase() === entry.subject.toUpperCase());
+        return [
+          idx + 1,
+          entry.subject,
+          entry.score,
+          entry.max,
+          entry.max ? ((entry.score / entry.max) * 100).toFixed(1) + '%' : '-'
+        ];
+      });
+
+      doc.autoTable({
+        startY: 74,
+        head: [["#","Subject","Score","Max","%"]],
+        body: subjectRows,
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [15,23,42], textColor: 255 },
+        theme: 'grid'
+      });
+
+      let y = doc.lastAutoTable ? doc.lastAutoTable.finalY + 6 : 74;
+      doc.text(`Overall Average: ${student.avg.toFixed(1)}%  |  Grade: ${student.grade}`, 14, y);
+      y += 6;
+      doc.text(`Attendance (${state.month}): ${student.attendancePercent.toFixed(1)}%`, 14, y);
+      y += 6;
+      doc.text(`Teacher Comment: ${student.comment}`, 14, y);
+
+      doc.save(`report_${student.adm}_${state.month}.pdf`);
+    }
+
+    function downloadBulkPdf() {
+      if (!state.filtered.length) {
+        Swal.fire('No data', 'No students in the filtered list to export.', 'info');
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      doc.setFontSize(13);
+      doc.text('Preform One Report Summary', 14, 14);
+      doc.setFontSize(9);
+      doc.text(`Year: ${state.currentYear} | Exam: ${state.examType} (${state.month})`, 14, 20);
+      doc.autoTable({
+        startY: 24,
+        head: [["Adm","Student","Avg %","Grade","Paid","Balance","Attendance %","Comment"]],
+        body: state.filtered.map(student => [
+          student.adm,
+          `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+          student.avg.toFixed(1),
+          student.grade,
+          `TSh ${Number(student.paid).toLocaleString()}`,
+          `TSh ${Number(student.balance).toLocaleString()}`,
+          student.attendancePercent.toFixed(1),
+          student.comment
+        ]),
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [15,23,42], textColor: 255 },
+        theme: 'grid'
+      });
+      doc.save(`prefone_report_summary_${state.currentYear}_${state.month}.pdf`);
+    }
+
+    function downloadBulkCsv() {
+      if (!state.filtered.length) {
+        Swal.fire('No data', 'No students in the filtered list to export.', 'info');
+        return;
+      }
+      const csvRows = state.filtered.map(student => ({
+        Adm: student.adm,
+        Student: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        AvgPercent: student.avg.toFixed(2),
+        Grade: student.grade,
+        FeeDue: student.totalFee || 0,
+        Paid: student.paid || 0,
+        Balance: student.balance || 0,
+        AttendancePercent: student.attendancePercent.toFixed(2),
+        Comment: student.comment
+      }));
+      const csv = Papa.unparse(csvRows);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `prefone_report_${state.currentYear}_${state.month}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
     }
   </script>
 </body>

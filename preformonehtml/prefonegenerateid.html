@@ -68,6 +68,11 @@
       overflow: hidden;
       color: #0f172a;
     }
+    #idCardCanvas {
+      width: min(360px, 100%);
+      aspect-ratio: 86 / 54;
+      margin-inline: auto;
+    }
     .id-card::before,
     .id-card::after {
       content: '';
@@ -141,6 +146,8 @@
       }
       #idCardCanvas {
         box-shadow: none !important;
+        width: 86mm !important;
+        height: 54mm !important;
       }
     }
   </style>
@@ -381,7 +388,9 @@
       { start: '#60a5fa', end: '#2563eb' }
     ];
 
-    const placeholderPhoto = 'https://via.placeholder.com/220x280.png?text=SoMAp+ID';
+    const placeholderPhoto = 'https://res.cloudinary.com/dg7vnrkgd/image/upload/v1723585378/preformone/placeholder_kid_card.png';
+    const cardSizeMm = { width: 86, height: 54 }; // Standard bank/visa size
+    const cardCaptureScale = 3;
 
     const state = {
       students: {},
@@ -583,6 +592,10 @@
       elements.idCardCanvas.style.setProperty('--accent-end', accent.end);
 
       previewFields.photo.src = safeUrl(student.photoUrl) || placeholderPhoto;
+      previewFields.photo.onerror = () => {
+        previewFields.photo.onerror = null;
+        previewFields.photo.src = placeholderPhoto;
+      };
       previewFields.name.textContent = formatName(student);
       previewFields.adm.textContent = adm;
       previewFields.program.textContent = `${currentYear} Cohort`;
@@ -684,27 +697,47 @@
         throw new Error('No student selected');
       }
       return html2canvas(elements.idCardCanvas, {
-        scale: 2,
-        backgroundColor: null,
-        useCORS: true
+        scale: cardCaptureScale,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        allowTaint: true,
+        logging: false
       });
     }
 
     async function downloadPdf() {
       try {
         const canvas = await captureCardCanvas();
+        const jsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
+        if (!jsPdfCtor) {
+          throw new Error('jsPDF library missing');
+        }
         const imgData = canvas.toDataURL('image/png');
-        const pdf = new jspdf.jsPDF({
-          orientation: canvas.width >= canvas.height ? 'landscape' : 'portrait',
-          unit: 'px',
-          format: [canvas.width, canvas.height]
+        const pdf = new jsPdfCtor({
+          orientation: 'landscape',
+          unit: 'mm',
+          format: [cardSizeMm.height, cardSizeMm.width]
         });
-        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const canvasRatio = canvas.width / canvas.height;
+        const pageRatio = pageWidth / pageHeight;
+        let renderWidth = pageWidth;
+        let renderHeight = pageHeight;
+        if (canvasRatio > pageRatio) {
+          renderHeight = pageWidth / canvasRatio;
+        } else {
+          renderWidth = pageHeight * canvasRatio;
+        }
+        const offsetX = (pageWidth - renderWidth) / 2;
+        const offsetY = (pageHeight - renderHeight) / 2;
+        pdf.addImage(imgData, 'PNG', offsetX, offsetY, renderWidth, renderHeight);
         const student = state.students[state.selectedAdm];
         const filename = `${formatName(student).replace(/[^a-z0-9]+/gi, '_') || 'student'}_${state.selectedAdm}_ID.pdf`;
         pdf.save(filename);
       } catch (error) {
         console.error('PDF export failed', error);
+        Swal.fire('PDF not ready', 'Unable to generate the ID PDF right now. Please re-select the student or reload the page.', 'error');
       }
     }
 
@@ -719,6 +752,7 @@
         link.click();
       } catch (error) {
         console.error('PNG export failed', error);
+        Swal.fire('Save not ready', 'Unable to save the ID image. Please try again after selecting a student.', 'error');
       }
     }
 

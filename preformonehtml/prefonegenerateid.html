@@ -591,11 +591,7 @@
       elements.idCardCanvas.style.setProperty('--accent-start', accent.start);
       elements.idCardCanvas.style.setProperty('--accent-end', accent.end);
 
-      previewFields.photo.src = safeUrl(student.photoUrl) || placeholderPhoto;
-      previewFields.photo.onerror = () => {
-        previewFields.photo.onerror = null;
-        previewFields.photo.src = placeholderPhoto;
-      };
+      setCardPhoto(adm, student);
       previewFields.name.textContent = formatName(student);
       previewFields.adm.textContent = adm;
       previewFields.program.textContent = `${currentYear} Cohort`;
@@ -633,6 +629,53 @@
         elements.previewContent.classList.add('hidden');
         elements.previewStatus.classList.add('hidden');
       }
+    }
+
+    function setCardPhoto(adm, student) {
+      const photoEl = previewFields.photo;
+      const rawUrl = safeUrl(student.photoUrl);
+      photoEl.dataset.adm = adm;
+      photoEl.setAttribute('crossorigin', 'anonymous');
+      photoEl.src = placeholderPhoto;
+      if (!rawUrl) {
+        return;
+      }
+      const cacheSafeUrl = appendCacheBuster(rawUrl, adm);
+      photoEl.onload = null;
+      photoEl.onerror = () => {
+        photoEl.onerror = null;
+        photoEl.src = placeholderPhoto;
+      };
+      photoEl.src = cacheSafeUrl;
+    }
+
+    function appendCacheBuster(url, key) {
+      if (!url) return '';
+      const token = `v=${key}`;
+      return url.includes('?') ? `${url}&${token}` : `${url}?${token}`;
+    }
+
+    function waitForImage(imageEl) {
+      if (!imageEl) return Promise.resolve();
+      if (imageEl.complete && imageEl.naturalWidth > 0) {
+        return Promise.resolve();
+      }
+      return new Promise((resolve, reject) => {
+        const onLoad = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          resolve(); // resolve to allow exports even if placeholder used
+        };
+        const cleanup = () => {
+          imageEl.removeEventListener('load', onLoad);
+          imageEl.removeEventListener('error', onError);
+        };
+        imageEl.addEventListener('load', onLoad);
+        imageEl.addEventListener('error', onError);
+      });
     }
 
     function formatName(student = {}) {
@@ -696,6 +739,7 @@
         Swal.fire('Choose a student', 'Select a child before exporting the ID.', 'info');
         throw new Error('No student selected');
       }
+      await waitForImage(previewFields.photo);
       return html2canvas(elements.idCardCanvas, {
         scale: cardCaptureScale,
         backgroundColor: '#ffffff',

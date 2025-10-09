@@ -1,43 +1,622 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>SoMAp — Preform One Books</title>
-  <!-- Same -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp - Preform One Digital Bookshelf</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+  <style>
+    :root {
+      --bg-start: #0f172a;
+      --bg-mid: #312e81;
+      --bg-end: #5b21b6;
+      --card-glass: rgba(255, 255, 255, 0.14);
+      --card-strong: rgba(255, 255, 255, 0.25);
+      --card-border: rgba(255, 255, 255, 0.22);
+    }
+    body {
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 15% 25%, rgba(251, 191, 36, 0.12), transparent 45%),
+                  radial-gradient(circle at 90% 10%, rgba(14, 165, 233, 0.16), transparent 50%),
+                  linear-gradient(135deg, var(--bg-start), var(--bg-mid) 52%, var(--bg-end));
+    }
+    .glass-card {
+      background: var(--card-glass);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      box-shadow: 0 25px 40px rgba(15, 23, 42, 0.35);
+      backdrop-filter: blur(18px);
+    }
+    .stat-card {
+      background: rgba(255, 255, 255, 0.14);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.20);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+    .shelf-card {
+      border-radius: 22px;
+      color: #0f172a;
+      min-height: 210px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 22px;
+      box-shadow: 0 24px 36px rgba(15, 23, 42, 0.20);
+      transition: transform 180ms ease, box-shadow 180ms ease;
+    }
+    .shelf-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 32px 48px rgba(15, 23, 42, 0.28);
+    }
+    .tag-pill {
+      background: rgba(15, 23, 42, 0.18);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .reader-modal {
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(14px);
+    }
+    .fade-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.4), transparent);
+    }
+    input[type="text"], select, textarea {
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.42);
+      box-shadow: 0 6px 16px rgba(15, 23, 42, 0.10);
+    }
+    input[type="file"] {
+      color: #111827;
+    }
+    .skeleton {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 18px;
+      min-height: 200px;
+      position: relative;
+      overflow: hidden;
+    }
+    .skeleton::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+      transform: translateX(-100%);
+      animation: shimmer 1.8s infinite;
+    }
+    @keyframes shimmer {
+      100% { transform: translateX(100%); }
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
-  <div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-book-open"></i> Preform One Digital Books</h1>
-    <a href="prefonedashboard.html" class="bg-gray-500 p-2 rounded mb-4 inline-block">< Back</a>
-    
-    <input type="file" id="bookUpload" accept="application/pdf,image/*" multiple class="mb-4">
-    <button onclick="uploadBooks()" class="bg-blue-500 p-2 rounded mb-4">Upload Books</button>
-    
-    <div id="booksList" class="grid grid-cols-3 gap-4"></div>
+<body class="min-h-screen text-white pb-16">
+  <div class="max-w-6xl mx-auto px-4 lg:px-0 py-10">
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+      <div>
+        <p class="uppercase tracking-widest text-amber-200 text-xs font-semibold">Socrates School - Preform One</p>
+        <h1 class="text-3xl md:text-4xl font-extrabold mt-1 flex items-center gap-3">
+          <i class="fas fa-book-open-reader text-pink-300"></i> Digital Bookshelf
+        </h1>
+        <p class="text-sm md:text-base text-slate-200/80 mt-2 max-w-2xl">
+          Bright, mobile-friendly shelf for Preform One resources. Uploads land on Cloudinary
+          (<span class="font-semibold">preformone/books</span>) and sync here for read-only viewing.
+        </p>
+      </div>
+      <div class="flex flex-col items-center gap-3 md:flex-row md:items-end">
+        <a href="prefonedashboard.html" class="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-full text-sm font-semibold transition">
+          <i class="fas fa-arrow-left mr-2"></i>Back to Dashboard
+        </a>
+        <div class="glass-card px-3 py-2 flex items-center gap-2">
+          <i class="fas fa-calendar-days text-emerald-300"></i>
+          <select id="yearSelect" class="bg-transparent focus:outline-none text-white font-semibold"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+      <div class="stat-card p-4">
+        <p class="text-xs uppercase tracking-wide text-slate-100/70">Total Books</p>
+        <p id="totalBooksStat" class="text-2xl font-bold mt-2">0</p>
+      </div>
+      <div class="stat-card p-4">
+        <p class="text-xs uppercase tracking-wide text-slate-100/70">Subjects Covered</p>
+        <p id="subjectStat" class="text-2xl font-bold mt-2">0</p>
+      </div>
+      <div class="stat-card p-4">
+        <p class="text-xs uppercase tracking-wide text-slate-100/70">Latest Upload</p>
+        <p id="recentStat" class="text-lg font-semibold mt-2 truncate">-</p>
+      </div>
+      <div class="stat-card p-4">
+        <p class="text-xs uppercase tracking-wide text-slate-100/70">Cloud Folder</p>
+        <p id="folderStat" class="text-xs font-semibold mt-2 uppercase tracking-wide">preformone/books</p>
+      </div>
+    </div>
+
+    <section class="glass-card p-5 md:p-6 mb-6">
+      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div class="flex flex-col">
+          <label for="searchInput" class="text-xs uppercase tracking-wide text-slate-100/70 mb-1">Search Title or Notes</label>
+          <input id="searchInput" type="text" placeholder="Search by book title, topic, or subject" class="px-3 py-2 text-slate-900 focus:outline-none">
+        </div>
+        <div class="flex flex-col">
+          <label for="subjectFilter" class="text-xs uppercase tracking-wide text-slate-100/70 mb-1">Subject Filter</label>
+          <select id="subjectFilter" class="px-3 py-2 text-slate-900 focus:outline-none"></select>
+        </div>
+        <div class="flex flex-col">
+          <label class="text-xs uppercase tracking-wide text-slate-100/70 mb-1">Reader Mode</label>
+          <div class="flex gap-2">
+            <span class="tag-pill bg-white/20 text-xs">Read only - no download links</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="uploadPanel" class="glass-card p-6 mb-6 transition opacity-100">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="bg-emerald-400/20 text-emerald-200 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide">Staff Upload</span>
+        <p id="uploadSubtitle" class="text-sm text-slate-100/80">Upload PDF or image resources directly to the Preform One shelf.</p>
+      </div>
+      <form id="uploadForm" class="space-y-4">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <label for="bookTitle" class="text-xs uppercase tracking-wide text-slate-100/70 mb-1 block">Book Title *</label>
+            <input id="bookTitle" type="text" placeholder="Introductory Physics Notes" class="w-full px-3 py-2 text-slate-900 focus:outline-none" required>
+          </div>
+          <div>
+            <label for="bookSubject" class="text-xs uppercase tracking-wide text-slate-100/70 mb-1 block">Subject *</label>
+            <select id="bookSubject" class="w-full px-3 py-2 text-slate-900 focus:outline-none" required></select>
+          </div>
+        </div>
+        <div>
+          <label for="bookNotes" class="text-xs uppercase tracking-wide text-slate-100/70 mb-1 block">Short Description (optional)</label>
+          <textarea id="bookNotes" rows="3" placeholder="Key focus, competencies, or reading instructions" class="w-full px-3 py-2 text-slate-900 focus:outline-none"></textarea>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2 items-center">
+          <div>
+            <label for="bookFile" class="text-xs uppercase tracking-wide text-slate-100/70 mb-1 block">Choose File *</label>
+            <input id="bookFile" type="file" accept="application/pdf,image/*" class="w-full px-3 py-2 text-slate-900 focus:outline-none bg-white" required>
+            <p class="text-xs mt-2 text-slate-200/70">Target: Cloudinary preset <span class="font-semibold">books_unsigned</span> in folder <span class="font-semibold">preformone/books</span>.</p>
+          </div>
+          <div>
+            <div class="text-xs uppercase tracking-wide text-slate-100/70 mb-2">Upload Progress</div>
+            <div id="uploadProgress" class="h-3 rounded-full bg-white/20 overflow-hidden">
+              <div id="uploadProgressBar" class="h-full bg-emerald-300/90" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <button id="uploadButton" type="submit" class="bg-emerald-400 hover:bg-emerald-300 text-emerald-950 font-semibold px-5 py-2 rounded-full shadow-lg shadow-emerald-900/30 transition">
+            <i class="fas fa-cloud-upload-alt mr-2"></i>Upload Book
+          </button>
+          <div id="uploadGate" class="text-xs text-amber-100/80 flex items-center gap-2 hidden">
+            <i class="fas fa-lock"></i>
+            Read-only mode active. Staff should sign in via dashboard for uploads.
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section>
+      <div id="booksLoader" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"></div>
+      <div id="booksGrid" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"></div>
+      <div id="emptyState" class="glass-card p-6 mt-4 hidden">
+        <div class="flex items-center gap-3">
+          <i class="fas fa-circle-notch animate-spin text-xl text-amber-200"></i>
+          <div>
+            <p class="font-semibold uppercase tracking-wide text-xs text-amber-100">Awaiting uploads</p>
+            <p class="text-sm text-slate-100/80">No books found for the selected filters yet.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="readerModal" class="reader-modal fixed inset-0 hidden z-40 items-center justify-center px-4 py-8">
+    <div class="bg-slate-950/80 border border-white/10 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl shadow-slate-950/60">
+      <div class="flex items-start justify-between gap-4 p-4 md:p-6">
+        <div>
+          <p id="readerSubject" class="uppercase tracking-wide text-xs text-amber-200"></p>
+          <h3 id="readerTitle" class="text-xl font-bold mt-1">Preview</h3>
+          <p id="readerMeta" class="text-sm text-slate-200/70 mt-1"></p>
+        </div>
+        <button id="closeReaderButton" class="text-sm font-semibold uppercase tracking-wide bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-full transition">
+          <i class="fas fa-times mr-1"></i>Close
+        </button>
+      </div>
+      <div class="fade-divider"></div>
+      <div class="flex-1 bg-slate-900/70 overflow-hidden">
+        <iframe id="readerFrame" title="Book viewer" class="w-full h-full hidden border-0" allowfullscreen></iframe>
+        <div id="imageWrapper" class="h-full hidden overflow-auto p-4 flex items-center justify-center">
+          <img id="readerImage" src="" alt="Book preview" class="max-h-[76vh] w-auto rounded-lg shadow-xl">
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
-    function uploadBooks() {
-      const files = document.getElementById('bookUpload').files;
-      Array.from(files).forEach(file => {
-        uploadToCloudinary(file, 'preformone/books').then(url => {
-          db.ref(`/schools/Socrates School Preform one/${currentYear}/books`).push({ name: file.name, url, subject: 'General', uploaded: new Date().toISOString() });
-          loadBooks();
+    (function () {
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+        measurementId: "G-4HKX7KN6Q3"
+      };
+
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      const db = firebase.database();
+
+      const gradientPalette = [
+        "linear-gradient(135deg,#f9a8d4,#c084fc)",
+        "linear-gradient(135deg,#93c5fd,#c7d2fe)",
+        "linear-gradient(135deg,#6ee7b7,#3b82f6)",
+        "linear-gradient(135deg,#fcd34d,#f472b6)",
+        "linear-gradient(135deg,#fda4af,#fdba74)",
+        "linear-gradient(135deg,#bae6fd,#a5b4fc)",
+        "linear-gradient(135deg,#fef3c7,#fca5a5)",
+        "linear-gradient(135deg,#c7d2fe,#f5d0fe)"
+      ];
+
+      const yearsRange = { start: 2024, end: 2030 };
+      const baseSubjects = Array.from(new Set((window.subjects || []).concat([
+        "Historia ya Tanzania",
+        "General Reference",
+        "Library Picks"
+      ])));
+
+      const elements = {
+        yearSelect: document.getElementById("yearSelect"),
+        totalBooks: document.getElementById("totalBooksStat"),
+        subjectStat: document.getElementById("subjectStat"),
+        recentStat: document.getElementById("recentStat"),
+        folderStat: document.getElementById("folderStat"),
+        searchInput: document.getElementById("searchInput"),
+        subjectFilter: document.getElementById("subjectFilter"),
+        booksGrid: document.getElementById("booksGrid"),
+        booksLoader: document.getElementById("booksLoader"),
+        emptyState: document.getElementById("emptyState"),
+        uploadPanel: document.getElementById("uploadPanel"),
+        uploadGate: document.getElementById("uploadGate"),
+        uploadForm: document.getElementById("uploadForm"),
+        uploadButton: document.getElementById("uploadButton"),
+        uploadProgressBar: document.getElementById("uploadProgressBar"),
+        uploadSubtitle: document.getElementById("uploadSubtitle"),
+        bookTitle: document.getElementById("bookTitle"),
+        bookSubject: document.getElementById("bookSubject"),
+        bookNotes: document.getElementById("bookNotes"),
+        bookFile: document.getElementById("bookFile"),
+        readerModal: document.getElementById("readerModal"),
+        readerTitle: document.getElementById("readerTitle"),
+        readerSubject: document.getElementById("readerSubject"),
+        readerMeta: document.getElementById("readerMeta"),
+        readerFrame: document.getElementById("readerFrame"),
+        readerImage: document.getElementById("readerImage"),
+        imageWrapper: document.getElementById("imageWrapper"),
+        closeReaderBtn: document.getElementById("closeReaderButton")
+      };
+
+      const state = {
+        hasUploadAccess: false,
+        uploading: false,
+        books: [],
+        filteredBooks: []
+      };
+
+      let booksRef = null;
+      initialize();
+
+      function initialize() {
+        bootstrapAccess();
+        populateYearOptions();
+        populateSubjectOptions();
+        renderSkeleton();
+        bindEvents();
+        subscribeToBooks();
+      }
+
+      function bootstrapAccess() {
+        const adminFlag = localStorage.getItem("adminAccess") === "true";
+        const staffFlag = localStorage.getItem("preformAccess") === "true";
+        state.hasUploadAccess = adminFlag || staffFlag;
+        if (!state.hasUploadAccess) {
+          elements.uploadPanel.classList.add("opacity-60");
+          elements.uploadButton.disabled = true;
+          elements.uploadGate.classList.remove("hidden");
+          elements.uploadSubtitle.textContent = "Read-only mode: sign in as staff/admin to unlock uploads.";
+        }
+      }
+
+      function populateYearOptions() {
+        let options = "";
+        for (let year = yearsRange.start; year <= yearsRange.end; year++) {
+          const selected = Number(currentYear || new Date().getFullYear()) === year ? "selected" : "";
+          options += `<option value="${year}" ${selected}>${year}</option>`;
+        }
+        elements.yearSelect.innerHTML = options;
+        elements.yearSelect.addEventListener("change", (event) => loadYear(event.target.value));
+      }
+
+      function populateSubjectOptions() {
+        const uniqueSubjects = Array.from(new Set(["All Subjects"].concat(baseSubjects)));
+        elements.subjectFilter.innerHTML = uniqueSubjects.map((subject) =>
+          `<option value="${subject}">${subject}</option>`
+        ).join("");
+        elements.bookSubject.innerHTML = baseSubjects.map((subject) =>
+          `<option value="${subject}">${subject}</option>`
+        ).join("");
+      }
+
+      function bindEvents() {
+        elements.searchInput.addEventListener("input", debounce(updateFilteredBooks, 180));
+        elements.subjectFilter.addEventListener("change", updateFilteredBooks);
+        if (state.hasUploadAccess) {
+          elements.uploadForm.addEventListener("submit", handleUpload);
+        }
+        elements.booksGrid.addEventListener("click", (event) => {
+          const trigger = event.target.closest("[data-open-book]");
+          if (trigger) {
+            openReader(trigger.getAttribute("data-open-book"));
+          }
         });
-      });
-    }
-    
-    function loadBooks() {
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/books`).once('value', snap => {
-        const div = document.getElementById('booksList');
-        div.innerHTML = Object.values(snap.val() || {}).map(b => 
-          `<div class="bg-white/10 p-4 rounded"><a href="${b.url}" target="_blank" class="text-blue-300">${b.name}</a><br>Subject: ${b.subject}</div>`
-        ).join('');
-      });
-    }
-    
-    loadBooks();
+        elements.closeReaderBtn.addEventListener("click", closeReader);
+        elements.readerModal.addEventListener("click", (event) => {
+          if (event.target === elements.readerModal) {
+            closeReader();
+          }
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeReader();
+          }
+        });
+      }
+
+      function subscribeToBooks() {
+        if (booksRef) {
+          booksRef.off();
+        }
+        const path = `/schools/Socrates School Preform one/${currentYear}/books`;
+        booksRef = db.ref(path);
+        booksRef.on("value", (snapshot) => {
+          const data = snapshot.val() || {};
+          state.books = Object.entries(data).map(([id, entry]) => normalizeBook(id, entry));
+          state.books.sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
+          updateStats();
+          updateFilteredBooks();
+        }, (error) => {
+          console.error("Failed to load books:", error);
+          elements.booksGrid.innerHTML = `<div class="glass-card p-4 text-sm text-red-200">Unable to load books. ${error?.message || "Please retry."}</div>`;
+        });
+      }
+
+      function normalizeBook(id, entry) {
+        const fallbackSubject = entry?.subject || entry?.category || "General Reference";
+        const rawUrl = entry?.url || entry?.fileUrl || "";
+        return {
+          id,
+          title: entry?.title || entry?.name || "Untitled Resource",
+          subject: capitalize(fallbackSubject),
+          description: entry?.description || entry?.notes || "",
+          url: rawUrl,
+          folder: entry?.folder || "preformone/books",
+          uploadedAt: entry?.uploadedAt || entry?.uploaded || entry?.timestamp || Date.now(),
+          uploadedBy: entry?.uploadedBy || entry?.addedBy || "Prefone Staff",
+          fileType: entry?.fileType || guessFileType(rawUrl)
+        };
+      }
+
+      function updateStats() {
+        const uniqueSubjects = new Set(state.books.map((book) => book.subject));
+        elements.totalBooks.textContent = state.books.length;
+        elements.subjectStat.textContent = uniqueSubjects.size;
+        const latest = state.books[0];
+        elements.recentStat.textContent = latest ? formatDate(latest.uploadedAt) : "-";
+        elements.folderStat.textContent = latest?.folder || "preformone/books";
+      }
+
+      function updateFilteredBooks() {
+        const query = elements.searchInput.value.trim().toLowerCase();
+        const selectedSubject = elements.subjectFilter.value;
+        state.filteredBooks = state.books.filter((book) => {
+          const matchesSubject = selectedSubject === "All Subjects" || book.subject === selectedSubject;
+          const haystack = `${book.title} ${book.subject} ${book.description}`.toLowerCase();
+          const matchesQuery = !query || haystack.includes(query);
+          return matchesSubject && matchesQuery;
+        });
+        renderBooks();
+      }
+
+      function renderSkeleton() {
+        const placeholders = Array.from({ length: 6 }).map(() => `
+          <div class="skeleton"></div>
+        `).join("");
+        elements.booksLoader.innerHTML = placeholders;
+      }
+
+      function renderBooks() {
+        if (!state.books.length) {
+          elements.booksLoader.innerHTML = "";
+        }
+        if (!state.filteredBooks.length) {
+          elements.booksGrid.innerHTML = "";
+          elements.emptyState.classList.remove("hidden");
+          return;
+        }
+        elements.booksLoader.innerHTML = "";
+        elements.emptyState.classList.add("hidden");
+        elements.booksGrid.innerHTML = state.filteredBooks.map((book, index) => createBookCard(book, index)).join("");
+      }
+
+      function createBookCard(book, index) {
+        const gradient = gradientPalette[index % gradientPalette.length];
+        const description = book.description ? truncate(book.description, 110) : "Ready to read.";
+        const fileBadge = book.fileType?.startsWith("image") ? "Image" : "PDF";
+        return `
+          <article class="shelf-card" style="background:${gradient}">
+            <div class="flex items-center justify-between mb-3">
+              <span class="tag-pill bg-white/25 text-white/90">${escapeHtml(book.subject)}</span>
+              <span class="tag-pill bg-slate-900/30 text-white/90">${fileBadge}</span>
+            </div>
+            <div class="space-y-2">
+              <h3 class="text-lg font-semibold text-slate-900">${escapeHtml(book.title)}</h3>
+              <p class="text-sm text-slate-900/80 leading-relaxed">${escapeHtml(description)}</p>
+            </div>
+            <div class="mt-4 flex items-center justify-between text-xs text-slate-900/80">
+              <span>Updated ${formatDate(book.uploadedAt)}</span>
+              <button class="bg-slate-900/30 hover:bg-slate-900/45 text-white px-3 py-1 rounded-full font-semibold transition" data-open-book="${book.id}">
+                <i class="fas fa-book-reader mr-1"></i>Read
+              </button>
+            </div>
+          </article>
+        `;
+      }
+
+      async function handleUpload(event) {
+        event.preventDefault();
+        if (!state.hasUploadAccess) {
+          return Swal.fire({ icon: "info", title: "Upload locked", text: "Sign in as staff/admin to upload resources." });
+        }
+        const file = elements.bookFile.files[0];
+        const title = elements.bookTitle.value.trim();
+        const subject = elements.bookSubject.value;
+        const description = elements.bookNotes.value.trim();
+
+        if (!file || !title || !subject) {
+          return Swal.fire({ icon: "warning", title: "Missing details", text: "Provide title, subject, and file." });
+        }
+
+        setUploadingState(true);
+        try {
+          let progressTimeout = setTimeout(() => setProgressBar(55), 200);
+          const url = await uploadToCloudinary(file, "preformone/books", "books_unsigned");
+          clearTimeout(progressTimeout);
+          setProgressBar(88);
+          const payload = {
+            title,
+            subject,
+            description,
+            url,
+            folder: "preformone/books",
+            fileType: file.type || guessFileType(file.name),
+            uploadedAt: Date.now(),
+            uploadedBy: localStorage.getItem("displayName") || localStorage.getItem("userEmail") || "Prefone Staff"
+          };
+          await db.ref(`/schools/Socrates School Preform one/${currentYear}/books`).push(payload);
+          setProgressBar(100);
+          Swal.fire({ icon: "success", title: "Book uploaded", text: `${title} is live on the bookshelf.`, timer: 1700, showConfirmButton: false });
+          elements.uploadForm.reset();
+        } catch (error) {
+          console.error("Upload failed:", error);
+          Swal.fire({ icon: "error", title: "Upload failed", text: error?.message || "Please retry." });
+        } finally {
+          setTimeout(() => setProgressBar(0), 800);
+          setUploadingState(false);
+        }
+      }
+
+      function openReader(bookId) {
+        const book = state.books.find((item) => item.id === bookId);
+        if (!book) return;
+        elements.readerTitle.textContent = book.title;
+        elements.readerSubject.textContent = `${book.subject} - ${book.fileType?.startsWith("image") ? "Image" : "PDF"}`;
+        elements.readerMeta.textContent = `Uploaded ${formatDate(book.uploadedAt)} by ${book.uploadedBy || "team"}`;
+        const isPdf = book.fileType === "application/pdf" || book.url.toLowerCase().includes(".pdf");
+        if (isPdf) {
+          elements.readerFrame.src = decoratePdfUrl(book.url);
+          elements.readerFrame.classList.remove("hidden");
+          elements.imageWrapper.classList.add("hidden");
+        } else {
+          elements.readerImage.src = book.url;
+          elements.readerFrame.classList.add("hidden");
+          elements.imageWrapper.classList.remove("hidden");
+        }
+        elements.readerModal.classList.remove("hidden");
+        document.body.classList.add("overflow-hidden");
+      }
+
+      function closeReader() {
+        elements.readerModal.classList.add("hidden");
+        elements.readerFrame.src = "";
+        elements.readerImage.src = "";
+        document.body.classList.remove("overflow-hidden");
+      }
+
+      function decoratePdfUrl(url) {
+        if (!url) return "";
+        const separator = url.includes("?") ? "&" : "?";
+        return `${url}${separator}inline=1#toolbar=0&navpanes=0&scrollbar=0`;
+      }
+
+      function guessFileType(source) {
+        if (!source) return "application/pdf";
+        const lower = source.toLowerCase();
+        if (lower.endsWith(".pdf") || lower.includes("pdf")) return "application/pdf";
+        if (/\.(png|jpg|jpeg|gif|webp|avif)$/.test(lower)) return "image";
+        return "document";
+      }
+
+      function formatDate(timestamp) {
+        if (!timestamp) return "Unknown";
+        const date = new Date(Number(timestamp));
+        if (Number.isNaN(date.getTime())) return "Unknown";
+        return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      }
+
+      function truncate(text, maxLength) {
+        if (!text) return "";
+        return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+      }
+
+      function escapeHtml(value) {
+        return String(value || "").replace(/[&<>"']/g, (match) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        }[match] || match));
+      }
+
+      function capitalize(text) {
+        if (!text) return "General Reference";
+        return text.charAt(0).toUpperCase() + text.slice(1);
+      }
+
+      function setUploadingState(isUploading) {
+        state.uploading = isUploading;
+        elements.uploadButton.disabled = isUploading;
+        elements.uploadButton.innerHTML = isUploading
+          ? `<i class="fas fa-cloud-upload-alt mr-2 animate-pulse"></i>Uploading...`
+          : `<i class="fas fa-cloud-upload-alt mr-2"></i>Upload Book`;
+      }
+
+      function setProgressBar(value) {
+        elements.uploadProgressBar.style.width = `${value}%`;
+      }
+
+      function debounce(callback, delay) {
+        let timeout;
+        return (...args) => {
+          clearTimeout(timeout);
+          timeout = setTimeout(() => callback.apply(null, args), delay);
+        };
+      }
+    })();
   </script>
 </body>
 </html>

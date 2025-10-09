@@ -67,10 +67,7 @@
       position: relative;
       overflow: hidden;
       color: #0f172a;
-    }
-    #idCardCanvas {
-      width: min(360px, 100%);
-      aspect-ratio: 86 / 54;
+      max-width: 420px;
       margin-inline: auto;
     }
     .id-card::before,
@@ -146,9 +143,16 @@
       }
       #idCardCanvas {
         box-shadow: none !important;
+      }
+      #idCardCanvas.card-print-mode {
         width: 86mm !important;
         height: 54mm !important;
       }
+    }
+    #idCardCanvas.card-print-mode {
+      width: 86mm;
+      height: 54mm;
+      border-radius: 18px;
     }
   </style>
 </head>
@@ -740,20 +744,28 @@
         throw new Error('No student selected');
       }
       await waitForImage(previewFields.photo);
-      return html2canvas(elements.idCardCanvas, {
-        scale: cardCaptureScale,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        allowTaint: true,
-        logging: false
-      });
+      const cardEl = elements.idCardCanvas;
+      cardEl.classList.add('card-print-mode');
+      try {
+        const canvas = await html2canvas(cardEl, {
+          scale: cardCaptureScale,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          allowTaint: true,
+          logging: false
+        });
+        return canvas;
+      } finally {
+        cardEl.classList.remove('card-print-mode');
+      }
     }
 
     async function downloadPdf() {
       try {
         const canvas = await captureCardCanvas();
-        const jsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
-        if (!jsPdfCtor) {
+        const jsPdfGlobal = window.jspdf || window.jsPDF || window.JsPDF || window.JSPDF;
+        const jsPdfCtor = jsPdfGlobal?.jsPDF || jsPdfGlobal;
+        if (typeof jsPdfCtor !== 'function') {
           throw new Error('jsPDF library missing');
         }
         const imgData = canvas.toDataURL('image/png');

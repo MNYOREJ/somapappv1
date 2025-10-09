@@ -1,574 +1,1343 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SoMAp - Friday Money Control Center</title>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script> <!-- Added for auth -->
-  <script src="firebase.js"></script>
-  <title>SoMAp - Friday Money</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="../firebase.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
-  <style>
-    body { background: linear-gradient(135deg, #fef3c7, #fde68a, #fbbf24); color: #1f2937; font-family: 'Inter', sans-serif; }
-    .table-header { background: #fef08a; color: #713f12; font-weight: bold; }
-    .table-row:nth-child(even) { background: #fffbeb; }
-    .modal { display:none; position:fixed; inset:0; background: rgba(0,0,0,0.5); z-index:1000; }
-    .modal-content { background:#fffbeb; max-width:800px; margin:4% auto; padding:18px; border-radius:8px; height:80vh; overflow:auto; box-shadow: 0 10px 20px rgba(0,0,0,0.2); }
-    .expander { cursor: pointer; color: #d97706; }
-    .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
-    .status-paid { background:#dcfce7; color:#166534; }
-    .status-partial { background:#fef9c3; color:#854d0e; }
-    .status-overdue { background:#fee2e2; color:#991b1b; }
-    .dashboard-card { background: linear-gradient(135deg, #fde68a, #fbbf24); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 1.5rem; color: #713f12; }
-    .archive-select { background: #fef08a; border: 2px solid #d97706; border-radius: 8px; padding: 0.5rem; }
-    .mandatory { color: #991b1b; font-size: 0.75rem; }
-    .log-entry { font-size: 0.8rem; color: #713f12; }
-  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-bxRhwc8RaOPxYxJrW9pJ4SqqTHknc0aF4Pjk6DQKoNwV41jWzYuo82aDsr1BWqE7dprImC1Q4R0iU9wQ0p4F6w==" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    :root { font-size: 15px; }
+    body {
+      min-height: 100vh;
+      background: linear-gradient(120deg, #fff7ed 0%, #fffbeb 55%, #fef3c7 100%);
+      color: #1f2937;
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(8px);
+      border-radius: 16px;
+      box-shadow: 0 25px 45px rgba(148, 109, 37, 0.12);
+      border: 1px solid rgba(247, 202, 123, 0.4);
+    }
+    .stat-card h4 { font-size: 0.8rem; letter-spacing: 0.04em; text-transform: uppercase; }
+    .stat-value { font-size: 1.85rem; font-weight: 700; color: #92400e; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.68rem;
+      font-weight: 600;
+      border-radius: 999px;
+      text-transform: uppercase;
+    }
+    .badge-green { background: #dcfce7; color: #166534; }
+    .badge-amber { background: #fef3c7; color: #92400e; }
+    .badge-red { background: #fee2e2; color: #b91c1c; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.25rem 0.65rem;
+      font-size: 0.75rem;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .status-ok { background: #dcfce7; color: #166534; }
+    .status-warn { background: #fef9c3; color: #854d0e; }
+    .status-bad { background: #fee2e2; color: #991b1b; }
+    table { border-collapse: collapse; width: 100%; }
+    thead { background: #fef3c7; color: #78350f; }
+    thead th {
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      padding: 0.55rem 0.4rem;
+      text-transform: uppercase;
+    }
+    tbody td {
+      border-bottom: 1px solid #f3e8ff;
+      padding: 0.55rem 0.45rem;
+      font-size: 0.8rem;
+    }
+    tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.72); }
+    tbody tr:hover { background: rgba(253, 230, 138, 0.3); transition: background 0.2s ease; }
+    .table-scroll { overflow-x: auto; }
+    .timeline-line { position: relative; padding-left: 1.35rem; margin-bottom: 0.65rem; }
+    .timeline-line::before {
+      content: "";
+      position: absolute;
+      left: 0.45rem;
+      top: 0.3rem;
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: #f59e0b;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      z-index: 50;
+    }
+    .modal.active { display: flex; }
+    .modal-card {
+      width: 100%;
+      max-width: 600px;
+      max-height: 90vh;
+      overflow-y: auto;
+      background: #fffaf0;
+      border-radius: 18px;
+      box-shadow: 0 30px 60px rgba(120, 53, 15, 0.25);
+      padding: 1.5rem;
+      position: relative;
+    }
+    .close-modal {
+      position: absolute;
+      top: 0.7rem;
+      right: 0.9rem;
+      cursor: pointer;
+      font-size: 1.4rem;
+      color: #92400e;
+    }
+    .floating-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(251, 191, 36, 0.15);
+      border-radius: 999px;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.72rem;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #6b7280;
+    }
+    .shadowed-input {
+      border: 1px solid rgba(249, 115, 22, 0.35);
+      border-radius: 12px;
+      padding: 0.55rem 0.65rem;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.9);
+    }
+    .shadowed-input:focus {
+      outline: 2px solid rgba(249, 115, 22, 0.35);
+      box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.25);
+    }
+    @media (max-width: 960px) {
+      .stat-value { font-size: 1.4rem; }
+      thead { position: sticky; top: 0; z-index: 1; }
+    }
+  </style>
 </head>
-<body class="p-6">
-  <div class="max-w-7xl mx-auto">
-    <header class="flex items-center justify-between mb-6">
-      <h1 class="text-3xl font-bold text-amber-800">SoMAp — Friday Money Management</h1>
-      <div class="space-x-2">
-        <button id="reloadBtn" class="px-3 py-1 bg-amber-600 text-white rounded">Reload</button>
-        <a href="index.html" class="px-3 py-1 border rounded text-sm border-amber-600 text-amber-800">Back to Dashboard</a>
+<body class="pb-16">
+  <div class="mx-auto max-w-7xl px-4 py-6 lg:px-6">
+    <header class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-widest text-amber-700">SoMAp Finance Intelligence</p>
+        <h1 class="text-3xl font-black text-amber-900">Friday Money Control Center</h1>
+        <p class="text-sm text-slate-500">Track weekly contributions, identify gaps instantly, and keep families informed with auditable exports.</p>
+        <div class="mt-2 flex flex-wrap gap-2 text-xs">
+          <span id="lastUpdated" class="floating-indicator"><i class="fa fa-clock"></i> Synced --</span>
+          <span id="activeFridayBadge" class="floating-indicator"><i class="fa fa-calendar-week"></i> Active Fridays 0</span>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button id="fullscreenBtn" class="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white shadow hover:bg-amber-700"><i class="fa fa-expand"></i> Full Screen</button>
+        <button id="reloadBtn" class="rounded-lg border border-amber-500 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"><i class="fa fa-rotate"></i> Reload Data</button>
+        <a href="../index.html" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"><i class="fa fa-arrow-left"></i> Back to Dashboard</a>
       </div>
     </header>
 
-    <!-- Dashboard Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
-      <div class="dashboard-card">
-        <h3 class="text-sm text-amber-900">Total Students</h3>
-        <div id="totalStudents" class="text-2xl font-bold mt-2">--</div>
+    <section class="mt-6 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div class="glass-card stat-card p-4">
+        <h4>Total Students</h4>
+        <div id="totalStudents" class="stat-value">--</div>
+        <span class="badge badge-amber">Registered</span>
       </div>
-      <div class="dashboard-card">
-        <h3 class="text-sm text-amber-900">Present Today</h3>
-        <div id="presentToday" class="text-2xl font-bold mt-2">--</div>
+      <div class="glass-card stat-card p-4">
+        <h4>Present (Selected Friday)</h4>
+        <div id="presentToday" class="stat-value">--</div>
+        <span class="badge badge-green">Attendance</span>
       </div>
-      <div class="dashboard-card">
-        <h3 class="text-sm text-amber-900">Absent Today</h3>
-        <div id="absentToday" class="text-2xl font-bold mt-2">--</div>
+      <div class="glass-card stat-card p-4">
+        <h4>Absent (Selected Friday)</h4>
+        <div id="absentToday" class="stat-value">--</div>
+        <span class="badge badge-red">Attendance</span>
       </div>
-      <div class="dashboard-card">
-        <h3 class="text-sm text-amber-900">Paid Today (1000 TSH)</h3>
-        <div id="paidToday" class="text-2xl font-bold mt-2">--</div>
+      <div class="glass-card stat-card p-4">
+        <h4>Paid 1,000 TSH</h4>
+        <div id="paidToday" class="stat-value">--</div>
+        <span class="badge badge-green">This Friday</span>
       </div>
-      <div class="dashboard-card">
-        <h3 class="text-sm text-amber-900">Collected Today</h3>
-        <div id="collectedToday" class="text-2xl font-bold mt-2">--</div>
+      <div class="glass-card stat-card p-4">
+        <h4>Collected (TSH)</h4>
+        <div id="collectedToday" class="stat-value">--</div>
+        <span class="badge badge-amber">Selected Friday</span>
       </div>
-      <div class="dashboard-card">
-        <h3 class="text-sm text-amber-900">Balance After Expenses</h3>
-        <div id="balanceAfterExpenses" class="text-2xl font-bold mt-2">--</div>
+      <div class="glass-card stat-card p-4">
+        <h4>Balance After Expenses</h4>
+        <div id="balanceAfterExpenses" class="stat-value">--</div>
+        <span class="badge badge-green">Net</span>
       </div>
-    </div>
+    </section>
 
-    <!-- Archive Selector and Filters -->
-    <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-3">
-        <label class="text-sm text-amber-800">Select Friday</label>
-        <select id="fridaySelector" class="archive-select p-2 rounded">
-          <option value="">Current Friday</option>
-          <!-- Options populated by JS -->
-        </select>
-        <select id="classFilter" class="archive-select p-2 rounded">
-          <option value="">All Classes</option>
-          <!-- Classes populated by JS -->
-        </select>
-        <button id="showOnlyUnpaid" class="px-3 py-1 bg-yellow-500 text-white rounded text-sm">Show Unpaid</button>
-      </div>
-      <div class="flex items-center gap-2">
-        <button id="downloadPaymentsCsv" class="px-3 py-1 bg-amber-600 text-white rounded"><i class="fa fa-file-excel mr-1"></i> Payments CSV</button>
-        <button id="downloadPaymentsPdf" class="px-3 py-1 bg-red-600 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Payments PDF</button>
-        <button id="downloadExpensesCsv" class="px-3 py-1 bg-green-600 text-white rounded"><i class="fa fa-file-excel mr-1"></i> Expenses CSV</button>
-        <button id="downloadExpensesPdf" class="px-3 py-1 bg-red-600 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Expenses PDF</button>
-        <button id="downloadAuditLogCsv" class="px-3 py-1 bg-teal-600 text-white rounded"><i class="fa fa-file-excel mr-1"></i> Audit Log CSV</button>
-      </div>
-    </div>
-
-    <!-- Students Table -->
-    <div class="bg-white rounded shadow overflow-x-auto mb-6">
-      <table id="fridayTable" class="min-w-full text-sm">
-        <thead>
-          <tr class="table-header">
-            <th class="p-2 border"></th>
-            <th class="p-2 border">Admission No</th>
-            <th class="p-2 border">Full Name</th>
-            <th class="p-2 border">Class</th>
-            <th class="p-2 border">Attendance</th>
-            <th class="p-2 border">Paid 1000 TSH</th>
-            <th class="p-2 border">Recorded By</th>
-            <th class="p-2 border">Actions</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <!-- Expenses Section -->
-    <div class="bg-white rounded shadow p-4 mb-6">
-      <h2 class="text-lg font-semibold text-amber-700 mb-3">Friday Expenses</h2>
-      <form id="expenseForm" class="grid md:grid-cols-7 gap-3 mb-4">
-        <input id="expenseItem" type="text" placeholder="Item Bought *" required class="p-2 border rounded">
-        <input id="expenseSeller" type="text" placeholder="Seller Name *" required class="p-2 border rounded">
-        <input id="expenseContact" type="text" placeholder="Seller Contact *" required class="p-2 border rounded">
-        <input id="expensePricePer" type="number" min="1" placeholder="Price Per Piece *" required class="p-2 border rounded">
-        <input id="expenseQuantity" type="number" min="1" placeholder="Quantity *" required class="p-2 border rounded">
-        <input id="expenseProof" type="file" accept="image/*,application/pdf" required class="p-2 border rounded">
-        <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded">Add Expense</button>
-      </form>
-      <p class="mandatory mb-3">* All fields mandatory, including proof upload (photo/PDF of receipt). Expenses audited with user logs.</p>
-      <table id="expenseTable" class="min-w-full text-sm border">
-        <thead>
-          <tr class="table-header">
-            <th class="p-2 border">Item</th>
-            <th class="p-2 border">Seller</th>
-            <th class="p-2 border">Contact</th>
-            <th class="p-2 border">Price Per</th>
-            <th class="p-2 border">Quantity</th>
-            <th class="p-2 border">Total</th>
-            <th class="p-2 border">Proof</th>
-            <th class="p-2 border">Recorded By</th>
-            <th class="p-2 border">Date</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <!-- Audit Log Section -->
-    <div class="bg-white rounded shadow p-4">
-      <h2 class="text-lg font-semibold text-amber-700 mb-3">Audit Log for This Friday</h2>
-      <ul id="auditLog" class="events-list"></ul>
-    </div>
-
-    <!-- Modals -->
-    <div id="attendanceModal" class="modal">
-      <div class="modal-content">
-        <span id="closeAttendanceModal" class="float-right cursor-pointer text-2xl">&times;</span>
-        <h2 class="text-lg font-semibold text-amber-700 mb-3">Record Attendance & Payment</h2>
-        <form id="attendanceForm" class="space-y-3">
+    <section class="glass-card mt-8 p-4">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <div>
-            <label class="text-sm text-gray-600">Student</label>
-            <select id="studentSelect" class="w-full p-2 border rounded" required></select>
+            <label class="text-xs font-semibold uppercase tracking-widest text-slate-500">Select Friday</label>
+            <select id="fridaySelector" class="shadowed-input"></select>
           </div>
           <div>
-            <label class="text-sm text-gray-600">Attendance</label>
-            <select id="attendanceStatus" class="w-full p-2 border rounded" required>
+            <label class="text-xs font-semibold uppercase tracking-widest text-slate-500">Filter by Class</label>
+            <select id="classFilter" class="shadowed-input"></select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold uppercase tracking-widest text-slate-500">Search Student / Admission</label>
+            <input id="studentSearch" class="shadowed-input" placeholder="Type name, admission or contact" />
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="showOnlyUnpaid" class="rounded-lg border border-amber-500 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-amber-700 hover:bg-amber-100">Show Only Debtors</button>
+          <button id="clearFilters" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-slate-700 hover:bg-slate-100">Reset Filters</button>
+        </div>
+      </div>
+      <div class="mt-4 flex flex-wrap gap-2 text-xs text-slate-600">
+        <span id="selectedFridayLabel" class="badge badge-amber">Friday</span>
+        <span id="selectedFridayMeta" class="badge badge-green">Records --</span>
+        <span id="unpaidSummary" class="badge badge-red">Debtors --</span>
+      </div>
+    </section>
+    <section class="mt-6 grid gap-6 lg:grid-cols-3">
+      <div class="lg:col-span-2">
+        <div class="glass-card p-4">
+          <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 class="text-xl font-semibold text-amber-900">Student Ledger</h2>
+              <p class="text-xs uppercase tracking-widest text-slate-500">Admission No / Full Name / Class / Attendance / Paid / Recorded By</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button id="downloadFridayExcel" class="rounded bg-amber-600 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-white hover:bg-amber-700"><i class="fa fa-file-excel"></i> Friday Excel</button>
+              <button id="downloadFridayPdf" class="rounded bg-amber-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-white hover:bg-amber-600"><i class="fa fa-file-pdf"></i> Friday PDF</button>
+              <button id="downloadDebtorsExcel" class="rounded bg-slate-800 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-white hover:bg-slate-900"><i class="fa fa-file-export"></i> Debtors Excel</button>
+            </div>
+          </div>
+          <div id="studentTableContainer" class="table-scroll mt-4">
+            <table>
+              <thead>
+                <tr>
+                  <th>Admission No</th>
+                  <th>Full Name</th>
+                  <th>Class</th>
+                  <th>Attendance</th>
+                  <th>Paid 1000 TSH</th>
+                  <th>Recorded By</th>
+                  <th>Total Paid</th>
+                  <th>Fridays Paid</th>
+                  <th>Fridays Due</th>
+                  <th>Outstanding (TSH)</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerBody"></tbody>
+            </table>
+          </div>
+          <div id="studentEmptyState" class="empty-state hidden">
+            <i class="fa fa-face-smile text-amber-500"></i>
+            <p class="mt-2 font-semibold">No matching records</p>
+            <p class="text-sm">Adjust filters to view the list of students for this Friday.</p>
+          </div>
+        </div>
+      </div>
+      <div class="glass-card flex flex-col gap-4 p-4">
+        <div>
+          <h3 class="text-lg font-semibold text-amber-900">Friday Insights</h3>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Auto-updated from firebase</p>
+        </div>
+        <div id="fridayInsights" class="space-y-3 text-sm"></div>
+        <div>
+          <h4 class="text-sm font-semibold uppercase tracking-widest text-slate-600">Top Outstanding Learners</h4>
+          <ul id="topDebtors" class="mt-2 space-y-2 text-sm"></ul>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold uppercase tracking-widest text-slate-600">Export Tools</h4>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button id="downloadLedgerPdf" class="rounded border border-amber-400 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-amber-800 hover:bg-amber-50"><i class="fa fa-file-pdf"></i> Ledger PDF</button>
+            <button id="downloadLedgerExcel" class="rounded border border-amber-400 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-amber-800 hover:bg-amber-50"><i class="fa fa-file-excel"></i> Ledger Excel</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-8 grid gap-6 lg:grid-cols-2">
+      <div class="glass-card p-4">
+        <div class="flex flex-col gap-2">
+          <h3 class="text-lg font-semibold text-amber-900">Record Attendance & Payment</h3>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Quick entry for selected Friday</p>
+        </div>
+        <form id="quickEntryForm" class="mt-3 grid gap-3 md:grid-cols-2">
+          <div class="md:col-span-2">
+            <label class="text-xs font-semibold uppercase tracking-widest">Student</label>
+            <select id="quickStudent" class="shadowed-input" required></select>
+          </div>
+          <div>
+            <label class="text-xs font-semibold uppercase tracking-widest">Attendance</label>
+            <select id="quickAttendance" class="shadowed-input" required>
               <option value="">Select</option>
               <option value="present">Present</option>
               <option value="absent">Absent</option>
             </select>
           </div>
-          <div id="paymentSection" class="hidden">
-            <label class="text-sm text-gray-600">Paid 1000 TSH?</label>
-            <select id="paymentStatus" class="w-full p-2 border rounded" required>
+          <div>
+            <label class="text-xs font-semibold uppercase tracking-widest">Paid 1,000 TSH?</label>
+            <select id="quickPayment" class="shadowed-input" required>
               <option value="">Select</option>
-              <option value="paid">Yes</option>
-              <option value="unpaid">No</option>
+              <option value="paid">Yes - Paid</option>
+              <option value="unpaid">No - Not Paid</option>
             </select>
           </div>
-          <div class="flex space-x-2">
-            <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded">Save</button>
-            <button id="cancelAttendance" type="button" class="px-4 py-2 border rounded">Cancel</button>
+          <div class="md:col-span-2 flex flex-wrap gap-2">
+            <button type="submit" class="rounded bg-amber-600 px-4 py-2 text-sm font-semibold uppercase tracking-widest text-white hover:bg-amber-700">Save Record</button>
+            <button type="button" id="openAttendanceModal" class="rounded border border-amber-500 px-4 py-2 text-sm font-semibold uppercase tracking-widest text-amber-700 hover:bg-amber-100">Open Full Form</button>
           </div>
         </form>
       </div>
-    </div>
-
-    <div id="detailsModal" class="modal">
-      <div class="modal-content">
-        <span id="closeDetailsModal" class="float-right cursor-pointer text-2xl">&times;</span>
-        <h2 class="text-lg font-semibold text-amber-700 mb-3">Student Friday Details</h2>
-        <div id="detailsContent"></div>
+      <div class="glass-card p-4">
+        <div class="flex flex-col gap-2">
+          <h3 class="text-lg font-semibold text-amber-900">Expense Tracker</h3>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Attach proof & keep balances clean</p>
+        </div>
+        <form id="expenseForm" class="mt-3 grid gap-3">
+          <div class="grid gap-3 md:grid-cols-2">
+            <input id="expenseItem" class="shadowed-input" placeholder="Item (e.g. Juices)" required />
+            <input id="expenseSeller" class="shadowed-input" placeholder="Seller / Shop" required />
+          </div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <input id="expenseContact" class="shadowed-input" placeholder="Seller Contact" required />
+            <input id="expenseQuantity" type="number" min="1" class="shadowed-input" placeholder="Quantity" required />
+          </div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <input id="expensePricePer" type="number" min="0" class="shadowed-input" placeholder="Price per item" required />
+            <input id="expenseProof" type="file" accept="image/*,application/pdf" class="shadowed-input" required />
+          </div>
+          <button type="submit" class="rounded bg-slate-900 px-4 py-2 text-sm font-semibold uppercase tracking-widest text-white hover:bg-slate-800"><i class="fa fa-plus"></i> Save Expense</button>
+        </form>
       </div>
+    </section>
+    <section class="glass-card mt-8 p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="text-lg font-semibold text-amber-900">Friday Expenses Ledger</h3>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Proof based spending</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="downloadExpensesExcel" class="rounded border border-amber-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-amber-800 hover:bg-amber-50"><i class="fa fa-file-excel"></i> Expenses Excel</button>
+          <button id="downloadAuditExcel" class="rounded border border-amber-500 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-amber-800 hover:bg-amber-50"><i class="fa fa-clipboard-list"></i> Audit Excel</button>
+        </div>
+      </div>
+      <div class="table-scroll mt-3">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Seller</th>
+              <th>Contact</th>
+              <th>Price (TSH)</th>
+              <th>Qty</th>
+              <th>Total</th>
+              <th>Proof</th>
+              <th>Recorded By</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="expenseTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass-card mt-8 p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="text-lg font-semibold text-amber-900">Audit Log</h3>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Every change is tracked per Friday</p>
+        </div>
+        <button id="downloadAuditCsv" class="rounded border border-slate-400 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-slate-700 hover:bg-slate-100"><i class="fa fa-file-export"></i> Download CSV</button>
+      </div>
+      <ul id="auditLogList" class="mt-3 space-y-2 text-sm"></ul>
+    </section>
+  </div>
+
+  <div id="attendanceModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <span id="closeAttendanceModal" class="close-modal">&times;</span>
+      <h3 class="text-lg font-semibold text-amber-900">Record Friday Attendance & Payment</h3>
+      <form id="attendanceForm" class="mt-4 space-y-3">
+        <div>
+          <label class="text-xs font-semibold uppercase tracking-widest">Student</label>
+          <select id="studentSelect" class="shadowed-input" required></select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase tracking-widest">Attendance</label>
+          <select id="attendanceStatus" class="shadowed-input" required>
+            <option value="">Select status</option>
+            <option value="present">Present</option>
+            <option value="absent">Absent</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase tracking-widest">Paid 1,000 TSH?</label>
+          <select id="paymentStatus" class="shadowed-input" required>
+            <option value="">Select payment</option>
+            <option value="paid">Yes - Paid</option>
+            <option value="unpaid">No - Not paid</option>
+          </select>
+        </div>
+        <button type="submit" class="w-full rounded bg-amber-600 px-4 py-2 text-sm font-semibold uppercase tracking-widest text-white hover:bg-amber-700">Save Record</button>
+      </form>
     </div>
   </div>
-<script>
-(function () {
-  const db = window.db || null;
-  const storage = firebase.storage();
-  const auth = firebase.auth();
-  const tbody = document.querySelector('#fridayTable tbody');
-  const expenseTableBody = document.querySelector('#expenseTable tbody');
-  const auditLogList = document.getElementById('auditLog');
-  const attendanceModal = document.getElementById('attendanceModal');
-  const closeAttendanceModal = document.getElementById('closeAttendanceModal');
-  const attendanceForm = document.getElementById('attendanceForm');
-  const cancelAttendance = document.getElementById('cancelAttendance');
-  const detailsModal = document.getElementById('detailsModal');
-  const closeDetailsModal = document.getElementById('closeDetailsModal');
-  const detailsContent = document.getElementById('detailsContent');
-  const fridaySelector = document.getElementById('fridaySelector');
-  const classFilter = document.getElementById('classFilter');
-  const showOnlyUnpaidBtn = document.getElementById('showOnlyUnpaid');
-  const reloadBtn = document.getElementById('reloadBtn');
-  const studentSelect = document.getElementById('studentSelect');
-  let cachedStudents = {};
-  let currentFridayId = getCurrentFridayId();
-  let selectedFridayId = currentFridayId;
-  let showingUnpaidOnly = false;
-  let selectedStudentId = null;
 
-  if (!db) {
-    console.error('DB not found.');
-    alert('DB not ready. Ensure firebase.js initializes window.db.');
-  }
+  <div id="detailsModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modal-card max-w-3xl">
+      <span id="closeDetailsModal" class="close-modal">&times;</span>
+      <div>
+        <h3 id="detailsTitle" class="text-lg font-semibold text-amber-900">Student Ledger</h3>
+        <p class="text-xs uppercase tracking-widest text-slate-500">Friday-by-Friday breakdown</p>
+      </div>
+      <div id="detailsContent" class="mt-4 space-y-2"></div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const COST_PER_FRIDAY = 1000;
+      const FRIDAY_START = "2024-08-22";
+      const YEARS_AHEAD = 6;
+      const DATE_OPTIONS = { weekday: "short", month: "short", day: "numeric", year: "numeric" };
 
-  function fmt(n) { return (Number(n) || 0).toLocaleString(); }
+      const db = window.db || null;
+      const auth = firebase.auth();
+      const storage = window.storage || (firebase.storage ? firebase.storage() : null);
 
-  // Generate Friday IDs
-  function generateFridayIds(startYear = 2024, yearsAhead = 10) {
-    const fridays = [];
-    for (let y = startYear; y < startYear + yearsAhead; y++) {
-      for (let m = 1; m <= 12; m++) {
-        const daysInMonth = new Date(y, m, 0).getDate();
-        for (let d = 1; d <= daysInMonth; d++) {
-          const date = new Date(y, m - 1, d);
-          if (date.getDay() === 5) {
-            const weekNum = Math.ceil(d / 7);
-            const id = `${y}-${String(m).padStart(2, '0')}-week${weekNum}`;
-            const label = `Friday ${weekNum} of ${date.toLocaleString('default', { month: 'long' })} ${y} (${date.toDateString()})`;
-            fridays.push({ id, label, date: date.getTime() });
+      const state = {
+        fridays: [],
+        selectedFridayId: "",
+        currentFridayId: "",
+        students: {},
+        fridayMoney: {},
+        expenses: {},
+        audit: {},
+        users: {},
+        fridayMeta: {},
+        activeFridaySet: new Set(),
+        studentSummaries: {},
+        filters: { classLevel: "", showOnlyUnpaid: false, search: "" },
+        currentUser: null,
+        loading: false
+      };
+
+      const dom = {
+        totalStudents: document.getElementById("totalStudents"),
+        presentToday: document.getElementById("presentToday"),
+        absentToday: document.getElementById("absentToday"),
+        paidToday: document.getElementById("paidToday"),
+        collectedToday: document.getElementById("collectedToday"),
+        balanceAfterExpenses: document.getElementById("balanceAfterExpenses"),
+        fridaySelector: document.getElementById("fridaySelector"),
+        classFilter: document.getElementById("classFilter"),
+        showOnlyUnpaid: document.getElementById("showOnlyUnpaid"),
+        clearFilters: document.getElementById("clearFilters"),
+        studentSearch: document.getElementById("studentSearch"),
+        ledgerBody: document.getElementById("ledgerBody"),
+        studentEmptyState: document.getElementById("studentEmptyState"),
+        fridayInsights: document.getElementById("fridayInsights"),
+        topDebtors: document.getElementById("topDebtors"),
+        reloadBtn: document.getElementById("reloadBtn"),
+        fullscreenBtn: document.getElementById("fullscreenBtn"),
+        activeFridayBadge: document.getElementById("activeFridayBadge"),
+        selectedFridayLabel: document.getElementById("selectedFridayLabel"),
+        selectedFridayMeta: document.getElementById("selectedFridayMeta"),
+        unpaidSummary: document.getElementById("unpaidSummary"),
+        lastUpdated: document.getElementById("lastUpdated"),
+        quickEntryForm: document.getElementById("quickEntryForm"),
+        quickStudent: document.getElementById("quickStudent"),
+        quickAttendance: document.getElementById("quickAttendance"),
+        quickPayment: document.getElementById("quickPayment"),
+        attendanceModal: document.getElementById("attendanceModal"),
+        closeAttendanceModal: document.getElementById("closeAttendanceModal"),
+        attendanceForm: document.getElementById("attendanceForm"),
+        studentSelect: document.getElementById("studentSelect"),
+        attendanceStatus: document.getElementById("attendanceStatus"),
+        paymentStatus: document.getElementById("paymentStatus"),
+        detailsModal: document.getElementById("detailsModal"),
+        closeDetailsModal: document.getElementById("closeDetailsModal"),
+        detailsContent: document.getElementById("detailsContent"),
+        detailsTitle: document.getElementById("detailsTitle"),
+        expenseForm: document.getElementById("expenseForm"),
+        expenseTableBody: document.getElementById("expenseTableBody"),
+        auditLogList: document.getElementById("auditLogList"),
+        downloadFridayExcel: document.getElementById("downloadFridayExcel"),
+        downloadFridayPdf: document.getElementById("downloadFridayPdf"),
+        downloadDebtorsExcel: document.getElementById("downloadDebtorsExcel"),
+        downloadLedgerPdf: document.getElementById("downloadLedgerPdf"),
+        downloadLedgerExcel: document.getElementById("downloadLedgerExcel"),
+        downloadExpensesExcel: document.getElementById("downloadExpensesExcel"),
+        downloadAuditExcel: document.getElementById("downloadAuditExcel"),
+        downloadAuditCsv: document.getElementById("downloadAuditCsv"),
+        openAttendanceModalBtn: document.getElementById("openAttendanceModal")
+      };
+
+      function init() {
+        if (!db) {
+          alert("Database not detected. Please confirm firebase.js is loaded correctly.");
+          return;
+        }
+        state.fridays = generateFridayList();
+        state.currentFridayId = findCurrentFridayId();
+        state.selectedFridayId = state.currentFridayId;
+        populateFridaySelector();
+        attachEventListeners();
+        auth.onAuthStateChanged((user) => {
+          state.currentUser = user;
+          if (!user) {
+            window.location.href = "../index.html";
           }
+        });
+        loadAllData();
+      }
+
+      function generateFridayList() {
+        const fridays = [];
+        const start = new Date(FRIDAY_START);
+        while (start.getDay() !== 5) {
+          start.setDate(start.getDate() + 1);
+        }
+        const limit = new Date(start);
+        limit.setFullYear(limit.getFullYear() + YEARS_AHEAD);
+        const cursor = new Date(start);
+        while (cursor <= limit) {
+          const id = cursor.toISOString().slice(0, 10);
+          fridays.push({
+            id,
+            label: cursor.toLocaleDateString(undefined, DATE_OPTIONS),
+            timestamp: cursor.getTime()
+          });
+          cursor.setDate(cursor.getDate() + 7);
+        }
+        return fridays;
+      }
+
+      function findCurrentFridayId() {
+        const today = Date.now();
+        let chosen = state.fridays[0]?.id || "";
+        for (const f of state.fridays) {
+          if (f.timestamp <= today) chosen = f.id;
+        }
+        return chosen;
+      }
+
+      async function loadAllData() {
+        setLoading(true);
+        try {
+          const [studentsSnap, moneySnap, expenseSnap, auditSnap, usersSnap] = await Promise.all([
+            db.ref("students").once("value"),
+            db.ref("fridayMoney").once("value"),
+            db.ref("fridayExpenses").once("value"),
+            db.ref("fridayAudit").once("value"),
+            db.ref("users").once("value")
+          ]);
+          state.students = studentsSnap.val() || {};
+          state.fridayMoney = moneySnap.val() || {};
+          state.expenses = expenseSnap.val() || {};
+          state.audit = auditSnap.val() || {};
+          state.users = usersSnap.val() || {};
+          refreshDerivedData();
+          renderAll();
+          updateLastSynced();
+        } catch (err) {
+          console.error("Failed to load Friday money data", err);
+          alert("Unable to load data. Check your internet connection and Firebase permissions.");
+        } finally {
+          setLoading(false);
         }
       }
-    }
-    return fridays;
-  }
+      function refreshDerivedData() {
+        computeFridayMeta();
+        computeStudentSummaries();
+        populateStudentSelects();
+        populateClassFilter();
+      }
 
-  const allFridays = generateFridayIds();
+      function computeFridayMeta() {
+        const activeSet = new Set();
+        const today = Date.now();
+        const meta = {};
+        for (const friday of state.fridays) {
+          const recs = state.fridayMoney[friday.id] || {};
+          let paidCount = 0;
+          let presentCount = 0;
+          let unpaidPresent = 0;
+          Object.values(recs).forEach((entry) => {
+            if (entry.attendance === "present") {
+              presentCount += 1;
+              if (entry.payment !== "paid") {
+                unpaidPresent += 1;
+              }
+            }
+            if (entry.payment === "paid") {
+              paidCount += 1;
+            }
+          });
+          const collected = paidCount * COST_PER_FRIDAY;
+          const hasPaid = paidCount > 0 && friday.timestamp <= today;
+          if (hasPaid) {
+            activeSet.add(friday.id);
+          }
+          meta[friday.id] = {
+            paidCount,
+            presentCount,
+            unpaidPresent,
+            collected,
+            recorded: Object.keys(recs).length,
+            hasPaid,
+            timestamp: friday.timestamp
+          };
+        }
+        state.fridayMeta = meta;
+        state.activeFridaySet = activeSet;
+        dom.activeFridayBadge.textContent = `Active Fridays ${activeSet.size}`;
+      }
 
-  function populateFridaySelector() {
-    fridaySelector.innerHTML = '<option value="">Current Friday</option>';
-    allFridays.forEach(f => {
-      const opt = document.createElement('option');
-      opt.value = f.id;
-      opt.textContent = f.label;
-      fridaySelector.appendChild(opt);
-    });
-  }
+      function computeStudentSummaries() {
+        const summaries = {};
+        const now = Date.now();
+        const fridaysPast = state.fridays.filter((f) => f.timestamp <= now);
+        for (const [id, student] of Object.entries(state.students)) {
+          const summary = {
+            id,
+            fullName: buildFullName(student),
+            admission: student.admissionNumber || "",
+            classLevel: student.classLevel || "",
+            contact: extractContact(student),
+            paidFridays: [],
+            unpaidFridays: [],
+            totalPaidAmount: 0,
+            attendanceRecords: 0,
+            paidCount: 0,
+            unpaidCount: 0,
+            amountDue: 0,
+            lastPaymentTs: 0
+          };
+          let expectedFridays = 0;
+          fridaysPast.forEach((friday) => {
+            const recs = state.fridayMoney[friday.id] || {};
+            const record = recs[id];
+            const isActive = state.activeFridaySet.has(friday.id);
+            if (record) {
+              summary.attendanceRecords += 1;
+              if (record.payment === "paid") {
+                summary.paidFridays.push(friday);
+                summary.totalPaidAmount += COST_PER_FRIDAY;
+                summary.paidCount += 1;
+                if (record.timestamp && record.timestamp > summary.lastPaymentTs) {
+                  summary.lastPaymentTs = record.timestamp;
+                }
+              } else if (isActive) {
+                summary.unpaidFridays.push(friday);
+                summary.unpaidCount += 1;
+              }
+            } else if (isActive) {
+              summary.unpaidFridays.push(friday);
+              summary.unpaidCount += 1;
+            }
+            if (isActive) {
+              expectedFridays += 1;
+            }
+          });
+          summary.expectedFridays = expectedFridays;
+          summary.amountDue = Math.max(0, expectedFridays * COST_PER_FRIDAY - summary.totalPaidAmount);
+          summaries[id] = summary;
+        }
+        state.studentSummaries = summaries;
+      }
 
-  function getCurrentFridayId() {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = (day === 5 ? 0 : (day < 5 ? day - 5 + 7 : day - 5));
-    const friday = new Date(now);
-    friday.setDate(now.getDate() - diff);
-    const y = friday.getFullYear();
-    const m = friday.getMonth() + 1;
-    const d = friday.getDate();
-    const weekNum = Math.ceil(d / 7);
-    return `${y}-${String(m).padStart(2, '0')}-week${weekNum}`;
-  }
+      function populateFridaySelector() {
+        dom.fridaySelector.innerHTML = "";
+        state.fridays.forEach((friday) => {
+          const opt = document.createElement("option");
+          opt.value = friday.id;
+          opt.textContent = friday.label;
+          if (friday.id === state.selectedFridayId) opt.selected = true;
+          dom.fridaySelector.appendChild(opt);
+        });
+      }
 
-  async function processPastUnpaid() {
-    const now = Date.now();
-    const pastFridays = allFridays.filter(f => f.date < now && f.id !== currentFridayId);
-    for (const friday of pastFridays) {
-      const snap = await db.ref(`fridayMoney/${friday.id}`).once('value');
-      const data = snap.val() || {};
-      for (const [sid, rec] of Object.entries(data)) {
-        if (rec.attendance === 'present' && rec.payment === 'unpaid') {
-          const studentRef = db.ref(`students/${sid}`);
-          const studentSnap = await studentRef.once('value');
-          const student = studentSnap.val();
-          const currentDebt = Number(student.debtTill || student.previousDebt || 0) + 1000;
-          await studentRef.update({ debtTill: currentDebt });
-          await db.ref(`fridayMoney/${friday.id}/${sid}`).update({ payment: 'added_to_debt' });
-          await logAction(friday.id, auth.currentUser.uid, `Unpaid Friday added to debt for student ${sid}`);
+      function populateStudentSelects() {
+        const entries = Object.entries(state.students).sort((a, b) => buildFullName(a[1]).localeCompare(buildFullName(b[1])));
+        const targets = [dom.studentSelect, dom.quickStudent];
+        targets.forEach((select) => {
+          select.innerHTML = "<option value=''>Select student</option>";
+        });
+        entries.forEach(([id, student]) => {
+          const label = `${buildFullName(student)} - ${student.classLevel || ""} - ${student.admissionNumber || ""}`;
+          targets.forEach((select) => {
+            const opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = label;
+            select.appendChild(opt);
+          });
+        });
+      }
+
+      function populateClassFilter() {
+        const classes = new Set();
+        Object.values(state.students).forEach((s) => {
+          if (s.classLevel) classes.add(s.classLevel);
+        });
+        dom.classFilter.innerHTML = "<option value=''>All classes</option>";
+        Array.from(classes).sort().forEach((cls) => {
+          const opt = document.createElement("option");
+          opt.value = cls;
+          opt.textContent = cls;
+          dom.classFilter.appendChild(opt);
+        });
+      }
+
+      function renderAll() {
+        renderSummaryCards();
+        renderStudentLedger();
+        renderFridayInsights();
+        renderExpenses();
+        renderAudit();
+      }
+
+      function renderSummaryCards() {
+        const totalStudents = Object.keys(state.students).length;
+        const records = state.fridayMoney[state.selectedFridayId] || {};
+        let present = 0;
+        let paid = 0;
+        Object.values(records).forEach((rec) => {
+          if (rec.attendance === "present") present += 1;
+          if (rec.payment === "paid") paid += 1;
+        });
+        const absent = Math.max(0, totalStudents - present);
+        const collected = paid * COST_PER_FRIDAY;
+        const expenses = computeTotalExpenses(state.selectedFridayId);
+        const balance = collected - expenses;
+        dom.totalStudents.textContent = formatNumber(totalStudents);
+        dom.presentToday.textContent = formatNumber(present);
+        dom.absentToday.textContent = formatNumber(absent);
+        dom.paidToday.textContent = formatNumber(paid);
+        dom.collectedToday.textContent = formatCurrency(collected);
+        dom.balanceAfterExpenses.textContent = formatCurrency(balance);
+        const meta = state.fridayMeta[state.selectedFridayId] || {};
+        dom.selectedFridayLabel.textContent = `Friday ${state.selectedFridayId}`;
+        dom.selectedFridayMeta.textContent = `${meta.presentCount || 0} present / ${meta.paidCount || 0} paid`;
+        dom.unpaidSummary.textContent = `${meta.unpaidPresent || 0} pending payments`;
+      }
+
+      function renderStudentLedger() {
+        const records = state.fridayMoney[state.selectedFridayId] || {};
+        const filtered = Object.values(state.studentSummaries)
+          .filter((summary) => matchFilters(summary))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName));
+        dom.ledgerBody.innerHTML = "";
+        if (!filtered.length) {
+          dom.studentEmptyState.classList.remove("hidden");
+          return;
+        }
+        dom.studentEmptyState.classList.add("hidden");
+        filtered.forEach((summary) => {
+          const record = records[summary.id] || null;
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${summary.admission || ""}</td>
+            <td class="font-semibold">${summary.fullName}</td>
+            <td>${summary.classLevel || ""}</td>
+            <td>${renderAttendancePill(record)}</td>
+            <td>${renderPaymentPill(record)}</td>
+            <td>${record && record.recordedBy ? resolveUserName(record.recordedBy) : "--"}</td>
+            <td>${formatCurrency(summary.totalPaidAmount)}</td>
+            <td>${summary.paidCount}</td>
+            <td>${summary.unpaidCount}</td>
+            <td class="font-semibold ${summary.amountDue > 0 ? "text-red-600" : "text-emerald-600"}">${formatCurrency(summary.amountDue)}</td>
+            <td>
+              <div class="flex flex-col gap-1">
+                <button class="rounded bg-amber-500 px-2 py-1 text-xs font-semibold text-white hover:bg-amber-600" data-action="record" data-id="${summary.id}">Record</button>
+                <button class="rounded border border-amber-400 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100" data-action="details" data-id="${summary.id}">History</button>
+              </div>
+            </td>
+          `;
+          dom.ledgerBody.appendChild(tr);
+        });
+        dom.ledgerBody.querySelectorAll("button[data-action='record']").forEach((btn) => {
+          btn.addEventListener("click", () => openAttendanceModal(btn.dataset.id));
+        });
+        dom.ledgerBody.querySelectorAll("button[data-action='details']").forEach((btn) => {
+          btn.addEventListener("click", () => openDetailsModal(btn.dataset.id));
+        });
+      }
+      function renderAttendancePill(record) {
+        if (!record) return `<span class="status-pill status-warn">unmarked</span>`;
+        const cls = record.attendance === "present" ? "status-ok" : record.attendance === "absent" ? "status-bad" : "status-warn";
+        return `<span class="status-pill ${cls}">${record.attendance}</span>`;
+      }
+
+      function renderPaymentPill(record) {
+        if (!record) return `<span class="status-pill status-bad">No</span>`;
+        const cls = record.payment === "paid" ? "status-ok" : "status-bad";
+        return `<span class="status-pill ${cls}">${record.payment === "paid" ? "Yes" : "No"}</span>`;
+      }
+
+      function renderFridayInsights() {
+        const meta = state.fridayMeta[state.selectedFridayId] || {};
+        const insights = [
+          { label: "Students recorded", value: formatNumber(meta.recorded || 0) },
+          { label: "Active Fridays to date", value: formatNumber(state.activeFridaySet.size) },
+          { label: "Total outstanding", value: formatCurrency(sumOutstanding()) },
+          { label: "Total collected overall", value: formatCurrency(sumCollected()) },
+          { label: "Expenses (selected)", value: formatCurrency(computeTotalExpenses(state.selectedFridayId)) },
+          { label: "Expected this Friday", value: formatCurrency((meta.hasPaid ? Object.keys(state.students).length : 0) * COST_PER_FRIDAY) }
+        ];
+        dom.fridayInsights.innerHTML = insights.map((ins) => `<div class="flex justify-between"><span class="text-slate-600">${ins.label}</span><span class="font-semibold text-amber-900">${ins.value}</span></div>`).join("");
+        renderTopDebtors();
+      }
+
+      function renderTopDebtors() {
+        const top = Object.values(state.studentSummaries)
+          .filter((s) => s.amountDue > 0)
+          .sort((a, b) => b.amountDue - a.amountDue)
+          .slice(0, 6);
+        if (!top.length) {
+          dom.topDebtors.innerHTML = '<li class="text-slate-500">No outstanding balances 🎉</li>';
+          return;
+        }
+        dom.topDebtors.innerHTML = "";
+        top.forEach((s) => {
+          const li = document.createElement("li");
+          li.innerHTML = `<div class="flex flex-col">
+            <span class="font-semibold text-amber-900">${s.fullName}</span>
+            <span class="text-xs text-slate-500">${s.classLevel || ""} | Contact: ${s.contact || "--"}</span>
+            <span class="text-sm font-semibold text-red-600">Outstanding ${formatCurrency(s.amountDue)}</span>
+          </div>`;
+          dom.topDebtors.appendChild(li);
+        });
+      }
+
+      function renderExpenses() {
+        const expenses = state.expenses[state.selectedFridayId] || {};
+        dom.expenseTableBody.innerHTML = "";
+        const entries = Object.entries(expenses);
+        if (!entries.length) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td colspan="9" class="text-center text-sm text-slate-500">No expenses recorded for this Friday.</td>`;
+          dom.expenseTableBody.appendChild(tr);
+          return;
+        }
+        entries.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0)).forEach(([id, exp]) => {
+          const tr = document.createElement("tr");
+          const total = Number(exp.pricePer || 0) * Number(exp.quantity || 0);
+          tr.innerHTML = `
+            <td>${exp.item || ""}</td>
+            <td>${exp.seller || ""}</td>
+            <td>${exp.contact || ""}</td>
+            <td>${formatCurrency(exp.pricePer || 0)}</td>
+            <td>${exp.quantity || 0}</td>
+            <td>${formatCurrency(total)}</td>
+            <td>${exp.proofUrl ? `<a href="${exp.proofUrl}" target="_blank" class="text-amber-700 underline">View proof</a>` : "--"}</td>
+            <td>${exp.recordedBy ? resolveUserName(exp.recordedBy) : "--"}</td>
+            <td>${exp.timestamp ? new Date(exp.timestamp).toLocaleString() : "--"}</td>
+          `;
+          dom.expenseTableBody.appendChild(tr);
+        });
+      }
+
+      function renderAudit() {
+        const logs = state.audit[state.selectedFridayId] || {};
+        const entries = Object.values(logs).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        dom.auditLogList.innerHTML = "";
+        if (!entries.length) {
+          const li = document.createElement("li");
+          li.className = "text-sm text-slate-500";
+          li.textContent = "No audit activity recorded for this Friday yet.";
+          dom.auditLogList.appendChild(li);
+          return;
+        }
+        entries.forEach((log) => {
+          const li = document.createElement("li");
+          li.innerHTML = `<span class="font-semibold text-amber-900">${new Date(log.timestamp).toLocaleString()}</span> — ${log.action} <span class="text-slate-500">by ${resolveUserName(log.userId)}</span>`;
+          dom.auditLogList.appendChild(li);
+        });
+      }
+
+      function matchFilters(summary) {
+        if (state.filters.classLevel && summary.classLevel !== state.filters.classLevel) return false;
+        if (state.filters.showOnlyUnpaid && summary.amountDue <= 0) return false;
+        if (state.filters.search) {
+          const term = state.filters.search.toLowerCase();
+          const hay = `${summary.fullName} ${summary.admission} ${summary.classLevel} ${summary.contact}`.toLowerCase();
+          if (!hay.includes(term)) return false;
+        }
+        return true;
+      }
+
+      function attachEventListeners() {
+        dom.fridaySelector.addEventListener("change", (e) => {
+          state.selectedFridayId = e.target.value || state.currentFridayId;
+          renderAll();
+        });
+        dom.classFilter.addEventListener("change", (e) => {
+          state.filters.classLevel = e.target.value;
+          renderStudentLedger();
+        });
+        dom.showOnlyUnpaid.addEventListener("click", () => {
+          state.filters.showOnlyUnpaid = !state.filters.showOnlyUnpaid;
+          dom.showOnlyUnpaid.textContent = state.filters.showOnlyUnpaid ? "Showing Debtors" : "Show Only Debtors";
+          renderStudentLedger();
+        });
+        dom.clearFilters.addEventListener("click", () => {
+          state.filters = { classLevel: "", showOnlyUnpaid: false, search: "" };
+          dom.classFilter.value = "";
+          dom.studentSearch.value = "";
+          dom.showOnlyUnpaid.textContent = "Show Only Debtors";
+          renderStudentLedger();
+        });
+        dom.studentSearch.addEventListener("input", (e) => {
+          state.filters.search = e.target.value.trim();
+          renderStudentLedger();
+        });
+        dom.reloadBtn.addEventListener("click", loadAllData);
+        dom.fullscreenBtn.addEventListener("click", toggleFullScreen);
+        dom.quickEntryForm.addEventListener("submit", handleQuickEntrySubmit);
+        dom.attendanceForm.addEventListener("submit", handleAttendanceSubmit);
+        dom.expenseForm.addEventListener("submit", handleExpenseSubmit);
+        dom.closeAttendanceModal.addEventListener("click", closeAttendanceModal);
+        dom.closeDetailsModal.addEventListener("click", closeDetailsModal);
+        dom.openAttendanceModalBtn.addEventListener("click", () => openAttendanceModal());
+        window.addEventListener("click", (e) => {
+          if (e.target === dom.attendanceModal) closeAttendanceModal();
+          if (e.target === dom.detailsModal) closeDetailsModal();
+        });
+        dom.downloadFridayExcel.addEventListener("click", downloadSelectedFridayExcel);
+        dom.downloadFridayPdf.addEventListener("click", downloadSelectedFridayPdf);
+        dom.downloadDebtorsExcel.addEventListener("click", downloadDebtorsExcel);
+        dom.downloadLedgerPdf.addEventListener("click", downloadLedgerPdf);
+        dom.downloadLedgerExcel.addEventListener("click", downloadLedgerExcel);
+        dom.downloadExpensesExcel.addEventListener("click", downloadExpensesExcel);
+        dom.downloadAuditExcel.addEventListener("click", downloadAuditExcel);
+        dom.downloadAuditCsv.addEventListener("click", downloadAuditCsvFile);
+        document.addEventListener("fullscreenchange", updateFullscreenButton);
+      }
+
+      function toggleFullScreen() {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else if (document.exitFullscreen) {
+          document.exitFullscreen();
         }
       }
-    }
-  }
 
-  async function loadStudents() {
-    if (!db) return;
-    try {
-      const snap = await db.ref('students').once('value');
-      cachedStudents = snap.val() || {};
-      await processPastUnpaid();
-      populateStudentSelect();
-      populateClassFilter();
-      renderTable();
-      loadTotals();
-      loadExpenses();
-      loadAuditLog();
-    } catch (err) {
-      console.error('Error loading:', err);
-    }
-  }
-
-  function populateStudentSelect() {
-    studentSelect.innerHTML = '<option value="">-- Search Student --</option>';
-    Object.entries(cachedStudents).sort((a, b) => a[1].firstName.localeCompare(b[1].firstName)).forEach(([id, s]) => {
-      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = `${fullName} — ${s.classLevel || ''} — ${s.admissionNumber || ''}`;
-      studentSelect.appendChild(opt);
-    });
-  }
-
-  function populateClassFilter() {
-    const classes = new Set(Object.values(cachedStudents).map(s => s.classLevel).filter(Boolean));
-    classFilter.innerHTML = '<option value="">All Classes</option>';
-    [...classes].sort().forEach(c => {
-      const opt = document.createElement('option');
-      opt.value = c;
-      opt.textContent = c;
-      classFilter.appendChild(opt);
-    });
-  }
-
-  async function renderTable() {
-    tbody.innerHTML = '';
-    const filterClass = classFilter.value;
-    const filterUnpaid = showingUnpaidOnly;
-    const entries = Object.entries(cachedStudents).filter(([id, s]) => !filterClass || s.classLevel === filterClass);
-    for (const [id, student] of entries) {
-      const snap = await db.ref(`fridayMoney/${selectedFridayId}/${id}`).once('value');
-      const rec = snap.val() || { attendance: 'unmarked', payment: 'unpaid', recordedBy: '' };
-      if (filterUnpaid && rec.payment === 'paid') continue;
-      const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-      const recordedByName = rec.recordedBy ? await getUserName(rec.recordedBy) : 'N/A';
-      const tr = document.createElement('tr');
-      tr.className = 'table-row';
-      tr.innerHTML = `
-        <td class="p-2 border text-center"><button class="expander" data-id="${id}"><i class="fa fa-chevron-down"></i></button></td>
-        <td class="p-2 border">${student.admissionNumber || ''}</td>
-        <td class="p-2 border">${fullName}</td>
-        <td class="p-2 border">${student.classLevel || ''}</td>
-        <td class="p-2 border"><span class="status-pill status-${rec.attendance === 'present' ? 'paid' : rec.attendance === 'absent' ? 'overdue' : 'partial'}">${rec.attendance}</span></td>
-        <td class="p-2 border"><span class="status-pill status-${rec.payment === 'paid' ? 'paid' : 'overdue'}">${rec.payment === 'paid' ? 'Yes' : 'No'}</span></td>
-        <td class="p-2 border">${recordedByName}</td>
-        <td class="p-2 border">
-          <button class="recordBtn px-2 py-1 text-xs bg-amber-600 text-white rounded" data-id="${id}">Record</button>
-          <button class="viewBtn px-2 py-1 text-xs border rounded ml-1" data-id="${id}">View History</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    }
-    tbody.querySelectorAll('.recordBtn').forEach(btn => btn.addEventListener('click', e => openAttendanceModal(e.target.dataset.id)));
-    tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
-    tbody.querySelectorAll('.expander').forEach(btn => btn.addEventListener('click', toggleExpander));
-  }
-
-  function toggleExpander(e) {
-    const id = e.target.closest('button').dataset.id;
-    const row = document.getElementById('br-' + id);
-    const icon = e.target.closest('button').querySelector('i');
-    if (!row) return;
-    if (row.classList.contains('hidden')) {
-      row.classList.remove('hidden');
-      icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-    } else {
-      row.classList.add('hidden');
-      icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-    }
-  }
-
-  async function loadTotals() {
-    const snap = await db.ref(`fridayMoney/${selectedFridayId}`).once('value');
-    const data = snap.val() || {};
-    const totalStudents = Object.keys(cachedStudents).length;
-    const present = Object.values(data).filter(r => r.attendance === 'present').length;
-    const absent = totalStudents - present;
-    const paid = Object.values(data).filter(r => r.payment === 'paid').length;
-    const collected = paid * 1000;
-    document.getElementById('totalStudents').textContent = fmt(totalStudents);
-    document.getElementById('presentToday').textContent = fmt(present);
-    document.getElementById('absentToday').textContent = fmt(absent);
-    document.getElementById('paidToday').textContent = fmt(paid);
-    document.getElementById('collectedToday').textContent = fmt(collected);
-    const expSnap = await db.ref(`fridayExpenses/${selectedFridayId}`).once('value');
-    const expenses = expSnap.val() || {};
-    const totalExpenses = Object.values(expenses).reduce((sum, e) => sum + (e.pricePer * e.quantity), 0);
-    document.getElementById('balanceAfterExpenses').textContent = fmt(collected - totalExpenses);
-  }
-
-  async function loadExpenses() {
-    const snap = await db.ref(`fridayExpenses/${selectedFridayId}`).once('value');
-    const expenses = snap.val() || {};
-    expenseTableBody.innerHTML = '';
-    for (const [key, e] of Object.entries(expenses)) {
-      const recordedByName = e.recordedBy ? await getUserName(e.recordedBy) : 'N/A';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="p-2 border">${e.item}</td>
-        <td class="p-2 border">${e.seller}</td>
-        <td class="p-2 border">${e.contact}</td>
-        <td class="p-2 border">${fmt(e.pricePer)}</td>
-        <td class="p-2 border">${fmt(e.quantity)}</td>
-        <td class="p-2 border">${fmt(e.pricePer * e.quantity)}</td>
-        <td class="p-2 border"><a href="${e.proofUrl}" target="_blank">View Proof</a></td>
-        <td class="p-2 border">${recordedByName}</td>
-        <td class="p-2 border">${new Date(e.timestamp).toLocaleString()}</td>
-      `;
-      expenseTableBody.appendChild(tr);
-    }
-  }
-
-  async function loadAuditLog() {
-    const snap = await db.ref(`fridayAudit/${selectedFridayId}`).once('value');
-    const logs = snap.val() || {};
-    auditLogList.innerHTML = '';
-    Object.values(logs).sort((a, b) => b.timestamp - a.timestamp).forEach(log => {
-      const li = document.createElement('li');
-      li.className = 'log-entry';
-      li.textContent = `[${new Date(log.timestamp).toLocaleString()}] ${log.action} by ${log.userId}`;
-      auditLogList.appendChild(li);
-    });
-  }
-
-  async function getUserName(uid) {
-    const snap = await db.ref(`users/${uid.replace('.', '_')}`).once('value');
-    const user = snap.val();
-    return user ? user.name || 'Unknown' : 'Unknown';
-  }
-
-  async function logAction(fridayId, userId, action) {
-    await db.ref(`fridayAudit/${fridayId}`).push({
-      userId,
-      action,
-      timestamp: Date.now()
-    });
-  }
-
-  function openAttendanceModal(id) {
-    selectedStudentId = id;
-    studentSelect.value = id;
-    const paymentSection = document.getElementById('paymentSection');
-    document.getElementById('attendanceStatus').addEventListener('change', (e) => {
-      paymentSection.classList.toggle('hidden', e.target.value !== 'present');
-    }, { once: true });
-    attendanceModal.style.display = 'block';
-  }
-
-  function closeAttendanceModalFn() {
-    attendanceModal.style.display = 'none';
-    attendanceForm.reset();
-    document.getElementById('paymentSection').classList.add('hidden');
-  }
-
-  attendanceForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const studentId = studentSelect.value;
-    const attendance = document.getElementById('attendanceStatus').value;
-    const payment = attendance === 'present' ? document.getElementById('paymentStatus').value : 'unpaid';
-    if (!attendance) return alert('Select attendance');
-    if (attendance === 'present' && !payment) return alert('Select payment status');
-    try {
-      await db.ref(`fridayMoney/${selectedFridayId}/${studentId}`).set({
-        attendance,
-        payment,
-        recordedBy: auth.currentUser.uid,
-        timestamp: Date.now()
-      });
-      await logAction(selectedFridayId, auth.currentUser.uid, `Recorded attendance/payment for student ${studentId}: ${attendance}, ${payment}`);
-      alert('Recorded successfully.');
-      closeAttendanceModalFn();
-      renderTable();
-      loadTotals();
-      loadAuditLog();
-    } catch (err) {
-      alert('Error: ' + err.message);
-    }
-  });
-
-  async function openDetailsModal(id) {
-    let html = '<ul>';
-    for (const f of allFridays) {
-      const snap = await db.ref(`fridayMoney/${f.id}/${id}`).once('value');
-      const rec = snap.val();
-      if (rec) {
-        const recordedByName = rec.recordedBy ? await getUserName(rec.recordedBy) : 'N/A';
-        html += `<li>${f.label}: Attendance - ${rec.attendance}, Paid - ${rec.payment === 'paid' ? 'Yes' : 'No'}, Recorded by ${recordedByName}</li>`;
+      function updateFullscreenButton() {
+        const active = Boolean(document.fullscreenElement);
+        dom.fullscreenBtn.innerHTML = active ? '<i class="fa fa-compress"></i> Exit Full Screen' : '<i class="fa fa-expand"></i> Full Screen';
       }
-    }
-    html += '</ul>';
-    detailsContent.innerHTML = html || '<p>No history.</p>';
-    detailsModal.style.display = 'block';
-  }
+      function handleQuickEntrySubmit(e) {
+        e.preventDefault();
+        const studentId = dom.quickStudent.value;
+        const attendance = dom.quickAttendance.value;
+        const payment = dom.quickPayment.value;
+        if (!studentId || !attendance || !payment) {
+          alert("Fill all quick entry fields.");
+          return;
+        }
+        saveAttendance(studentId, attendance, payment);
+      }
 
-  function closeDetailsModalFn() { detailsModal.style.display = 'none'; }
+      function handleAttendanceSubmit(e) {
+        e.preventDefault();
+        const studentId = dom.studentSelect.value;
+        const attendance = dom.attendanceStatus.value;
+        const payment = dom.paymentStatus.value;
+        if (!studentId || !attendance) {
+          alert("Select student and attendance status.");
+          return;
+        }
+        const paymentValue = attendance === "present" ? (payment || "unpaid") : "unpaid";
+        saveAttendance(studentId, attendance, paymentValue, true);
+      }
 
-  const expenseForm = document.getElementById('expenseForm');
-  expenseForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const item = document.getElementById('expenseItem').value;
-    const seller = document.getElementById('expenseSeller').value;
-    const contact = document.getElementById('expenseContact').value;
-    const pricePer = Number(document.getElementById('expensePricePer').value);
-    const quantity = Number(document.getElementById('expenseQuantity').value);
-    const file = document.getElementById('expenseProof').files[0];
-    if (!item || !seller || !contact || pricePer <= 0 || quantity <= 0 || !file) return alert('All fields mandatory');
-    try {
-      const storageRef = storage.ref(`fridayProofs/${selectedFridayId}/${file.name}`);
-      await storageRef.put(file);
-      const proofUrl = await storageRef.getDownloadURL();
-      const ref = db.ref(`fridayExpenses/${selectedFridayId}`).push();
-      await ref.set({
-        item, seller, contact, pricePer, quantity, proofUrl, recordedBy: auth.currentUser.uid, timestamp: Date.now()
-      });
-      await logAction(selectedFridayId, auth.currentUser.uid, `Added expense: ${item} (Qty: ${quantity})`);
-      alert('Expense added.');
-      expenseForm.reset();
-      loadExpenses();
-      loadTotals();
-      loadAuditLog();
-    } catch (err) {
-      alert('Error: ' + err.message);
-    }
-  });
+      async function saveAttendance(studentId, attendance, payment, closeModal = false) {
+        try {
+          const payload = {
+            attendance,
+            payment,
+            recordedBy: state.currentUser ? state.currentUser.uid : "system",
+            timestamp: Date.now()
+          };
+          await db.ref(`fridayMoney/${state.selectedFridayId}/${studentId}`).set(payload);
+          addAudit(`Recorded ${attendance}/${payment} for ${studentId}`);
+          if (!state.fridayMoney[state.selectedFridayId]) state.fridayMoney[state.selectedFridayId] = {};
+          state.fridayMoney[state.selectedFridayId][studentId] = payload;
+          refreshDerivedData();
+          renderAll();
+          dom.quickEntryForm.reset();
+          if (closeModal) {
+            closeAttendanceModal();
+          }
+          alert("Record saved successfully.");
+        } catch (err) {
+          console.error("Unable to save attendance", err);
+          alert("Failed to save record. Check your internet connection.");
+        }
+      }
 
-  // Download functions (similar to previous, with enhancements for audit)
-  async function downloadPaymentsCsv() {
-    const snap = await db.ref(`fridayMoney/${selectedFridayId}`).once('value');
-    const data = snap.val() || {};
-    const rows = [['Admission No', 'Full Name', 'Class', 'Attendance', 'Paid', 'Recorded By']];
-    for (const [id, rec] of Object.entries(data)) {
-      const s = cachedStudents[id];
-      const recordedByName = rec.recordedBy ? await getUserName(rec.recordedBy) : 'N/A';
-      rows.push([s.admissionNumber, `${s.firstName} ${s.lastName}`, s.classLevel, rec.attendance, rec.payment, recordedByName]);
-    }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Payments');
-    XLSX.writeFile(wb, `friday_payments_${selectedFridayId}.xlsx`);
-  }
+      async function handleExpenseSubmit(e) {
+        e.preventDefault();
+        const item = document.getElementById("expenseItem").value.trim();
+        const seller = document.getElementById("expenseSeller").value.trim();
+        const contact = document.getElementById("expenseContact").value.trim();
+        const quantity = Number(document.getElementById("expenseQuantity").value || 0);
+        const pricePer = Number(document.getElementById("expensePricePer").value || 0);
+        const file = document.getElementById("expenseProof").files[0];
+        if (!item || !seller || !contact || !quantity || !pricePer || !file) {
+          alert("Provide all expense fields including proof.");
+          return;
+        }
+        try {
+          const storagePath = `fridayProofs/${state.selectedFridayId}/${Date.now()}_${file.name}`;
+          let proofUrl = "";
+          if (storage) {
+            const uploadRef = storage.ref(storagePath);
+            await uploadRef.put(file);
+            proofUrl = await uploadRef.getDownloadURL();
+          }
+          const ref = db.ref(`fridayExpenses/${state.selectedFridayId}`).push();
+          const payload = {
+            item,
+            seller,
+            contact,
+            quantity,
+            pricePer,
+            proofUrl,
+            recordedBy: state.currentUser ? state.currentUser.uid : "system",
+            timestamp: Date.now()
+          };
+          await ref.set(payload);
+          addAudit(`Added expense ${item} (${quantity} @ ${pricePer})`);
+          if (!state.expenses[state.selectedFridayId]) state.expenses[state.selectedFridayId] = {};
+          state.expenses[state.selectedFridayId][ref.key] = payload;
+          renderExpenses();
+          renderSummaryCards();
+          dom.expenseForm.reset();
+          alert("Expense saved successfully.");
+        } catch (err) {
+          console.error("Failed to save expense", err);
+          alert("Unable to save expense. Please try again.");
+        }
+      }
 
-  // Similar for PDF, expenses, audit log CSV (add implementations)
+      function openAttendanceModal(studentId = "") {
+        dom.attendanceModal.classList.add("active");
+        dom.studentSelect.value = studentId || "";
+        if (studentId) preloadAttendance(studentId);
+      }
 
-  closeAttendanceModal.addEventListener('click', closeAttendanceModalFn);
-  cancelAttendance.addEventListener('click', closeAttendanceModalFn);
-  closeDetailsModal.addEventListener('click', closeDetailsModalFn);
-  showOnlyUnpaidBtn.addEventListener('click', () => { showingUnpaidOnly = !showingUnpaidOnly; showOnlyUnpaidBtn.textContent = showingUnpaidOnly ? 'Showing Unpaid' : 'Show Unpaid'; renderTable(); });
-  fridaySelector.addEventListener('change', (e) => { selectedFridayId = e.target.value || currentFridayId; renderTable(); loadTotals(); loadExpenses(); loadAuditLog(); });
-  classFilter.addEventListener('change', renderTable);
-  reloadBtn.addEventListener('click', loadStudents);
-  document.getElementById('downloadPaymentsCsv').addEventListener('click', downloadPaymentsCsv);
-  // Add listeners for other downloads
+      function preloadAttendance(studentId) {
+        const record = (state.fridayMoney[state.selectedFridayId] || {})[studentId];
+        dom.attendanceStatus.value = record ? record.attendance : "";
+        dom.paymentStatus.value = record ? record.payment : "";
+      }
 
-  window.addEventListener('click', ev => {
-    if (ev.target === attendanceModal) closeAttendanceModalFn();
-    if (ev.target === detailsModal) closeDetailsModalFn();
-  });
+      function closeAttendanceModal() {
+        dom.attendanceModal.classList.remove("active");
+        dom.attendanceForm.reset();
+      }
 
-  auth.onAuthStateChanged(user => {
-    if (!user) window.location.href = 'index.html';
-  });
+      function openDetailsModal(studentId) {
+        const summary = state.studentSummaries[studentId];
+        if (!summary) return;
+        dom.detailsModal.classList.add("active");
+        dom.detailsTitle.textContent = `${summary.fullName} — ${summary.classLevel || ""}`;
+        const rows = [];
+        state.fridays.forEach((friday) => {
+          const rec = (state.fridayMoney[friday.id] || {})[studentId];
+          const payment = rec ? rec.payment : "unmarked";
+          const attendance = rec ? rec.attendance : "unmarked";
+          if (!rec && !state.activeFridaySet.has(friday.id)) return;
+          rows.push(`<div class="timeline-line">
+            <div class="flex justify-between">
+              <span class="font-semibold text-amber-900">${friday.label}</span>
+              <span class="text-xs text-slate-500">${state.activeFridaySet.has(friday.id) ? "Counted Friday" : "Pending"}</span>
+            </div>
+            <div class="text-sm">Attendance: <strong>${attendance}</strong>, Paid: <strong>${payment}</strong></div>
+          </div>`);
+        });
+        dom.detailsContent.innerHTML = rows.join("") || "<p class='text-sm text-slate-500'>No records yet for this learner.</p>";
+      }
 
-  populateFridaySelector();
-  loadStudents();
-})();
-</script>
+      function closeDetailsModal() {
+        dom.detailsModal.classList.remove("active");
+        dom.detailsContent.innerHTML = "";
+      }
+
+      function addAudit(action) {
+        const entry = {
+          action,
+          userId: state.currentUser ? state.currentUser.uid : "system",
+          timestamp: Date.now()
+        };
+        db.ref(`fridayAudit/${state.selectedFridayId}`).push(entry);
+        if (!state.audit[state.selectedFridayId]) state.audit[state.selectedFridayId] = {};
+        const key = `local-${Date.now()}`;
+        state.audit[state.selectedFridayId][key] = entry;
+        renderAudit();
+      }
+
+      function downloadSelectedFridayExcel() {
+        const headers = ["Admission", "Full Name", "Class", "Parent Contact", "Attendance", "Paid", "Recorded By", "Recorded At"];
+        const rows = [headers];
+        const records = state.fridayMoney[state.selectedFridayId] || {};
+        Object.entries(state.students).forEach(([id, student]) => {
+          const record = records[id];
+          rows.push([
+            student.admissionNumber || "",
+            buildFullName(student),
+            student.classLevel || "",
+            extractContact(student),
+            record ? record.attendance : "unmarked",
+            record && record.payment === "paid" ? "Yes" : "No",
+            record && record.recordedBy ? resolveUserName(record.recordedBy) : "--",
+            record && record.timestamp ? new Date(record.timestamp).toLocaleString() : "--"
+          ]);
+        });
+        exportToExcel(rows, `friday_${state.selectedFridayId}.xlsx`, "Friday");
+      }
+
+      function downloadSelectedFridayPdf() {
+        const records = state.fridayMoney[state.selectedFridayId] || {};
+        const body = Object.entries(state.students).map(([id, student]) => {
+          const record = records[id];
+          return [
+            student.admissionNumber || "",
+            buildFullName(student),
+            student.classLevel || "",
+            record ? record.attendance : "unmarked",
+            record && record.payment === "paid" ? "Yes" : "No",
+            record && record.recordedBy ? resolveUserName(record.recordedBy) : "--",
+            record && record.timestamp ? new Date(record.timestamp).toLocaleDateString() : "--"
+          ];
+        });
+        exportToPdf({
+          filename: `friday_${state.selectedFridayId}.pdf`,
+          head: [["Admission", "Full Name", "Class", "Attendance", "Paid", "Recorded By", "Recorded At"]],
+          body
+        });
+      }
+
+      function downloadDebtorsExcel() {
+        const headers = ["Admission", "Full Name", "Class", "Parent Contact", "Fridays Paid", "Fridays Due", "Amount Paid", "Amount Due", "Unpaid Dates"];
+        const rows = [headers];
+        Object.values(state.studentSummaries)
+          .filter((s) => s.amountDue > 0)
+          .forEach((s) => {
+            rows.push([
+              s.admission,
+              s.fullName,
+              s.classLevel,
+              s.contact,
+              s.paidCount,
+              s.unpaidCount,
+              formatCurrencyPlain(s.totalPaidAmount),
+              formatCurrencyPlain(s.amountDue),
+              s.unpaidFridays.map((f) => f.id).join(", ")
+            ]);
+          });
+        exportToExcel(rows, "friday_debtors.xlsx", "Debtors");
+      }
+
+      function downloadLedgerPdf() {
+        const body = Object.values(state.studentSummaries).map((s) => [
+          s.admission,
+          s.fullName,
+          s.classLevel,
+          s.paidCount,
+          s.unpaidCount,
+          formatCurrencyPlain(s.totalPaidAmount),
+          formatCurrencyPlain(s.amountDue)
+        ]);
+        exportToPdf({
+          filename: "friday_ledger.pdf",
+          head: [["Admission", "Full Name", "Class", "Fridays Paid", "Fridays Due", "Paid", "Outstanding"]],
+          body
+        });
+      }
+      function downloadLedgerExcel() {
+        const headers = ["Admission", "Full Name", "Class", "Contact", "Fridays Paid", "Fridays Due", "Amount Paid", "Outstanding", "Last Payment"];
+        const rows = [headers];
+        Object.values(state.studentSummaries).forEach((s) => {
+          rows.push([
+            s.admission,
+            s.fullName,
+            s.classLevel,
+            s.contact,
+            s.paidCount,
+            s.unpaidCount,
+            formatCurrencyPlain(s.totalPaidAmount),
+            formatCurrencyPlain(s.amountDue),
+            s.lastPaymentTs ? new Date(s.lastPaymentTs).toLocaleDateString() : "--"
+          ]);
+        });
+        exportToExcel(rows, "friday_ledger.xlsx", "Ledger");
+      }
+
+      function downloadExpensesExcel() {
+        const headers = ["Friday", "Item", "Seller", "Contact", "Price", "Quantity", "Total", "Recorded By", "Date", "Proof"];
+        const rows = [headers];
+        const expenses = state.expenses[state.selectedFridayId] || {};
+        Object.values(expenses).forEach((exp) => {
+          const total = Number(exp.pricePer || 0) * Number(exp.quantity || 0);
+          rows.push([
+            state.selectedFridayId,
+            exp.item,
+            exp.seller,
+            exp.contact,
+            formatCurrencyPlain(exp.pricePer || 0),
+            exp.quantity,
+            formatCurrencyPlain(total),
+            resolveUserName(exp.recordedBy),
+            exp.timestamp ? new Date(exp.timestamp).toLocaleString() : "--",
+            exp.proofUrl || ""
+          ]);
+        });
+        exportToExcel(rows, `friday_expenses_${state.selectedFridayId}.xlsx`, "Expenses");
+      }
+
+      function downloadAuditExcel() {
+        const headers = ["Friday", "Action", "User", "Timestamp"];
+        const rows = [headers];
+        const logs = state.audit[state.selectedFridayId] || {};
+        Object.values(logs).forEach((log) => {
+          rows.push([
+            state.selectedFridayId,
+            log.action,
+            resolveUserName(log.userId),
+            log.timestamp ? new Date(log.timestamp).toLocaleString() : "--"
+          ]);
+        });
+        exportToExcel(rows, `friday_audit_${state.selectedFridayId}.xlsx`, "Audit");
+      }
+
+      function downloadAuditCsvFile() {
+        const headers = ["Friday", "Action", "User", "Timestamp"];
+        const rows = [headers];
+        const logs = state.audit[state.selectedFridayId] || {};
+        Object.values(logs).forEach((log) => {
+          rows.push([
+            state.selectedFridayId,
+            log.action,
+            resolveUserName(log.userId),
+            log.timestamp ? new Date(log.timestamp).toLocaleString() : "--"
+          ]);
+        });
+        const worksheet = XLSX.utils.aoa_to_sheet(rows);
+        const csv = XLSX.utils.sheet_to_csv(worksheet);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `friday_audit_${state.selectedFridayId}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      function exportToExcel(rows, filename, sheetName) {
+        const worksheet = XLSX.utils.aoa_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        XLSX.writeFile(workbook, filename);
+      }
+
+      function exportToPdf({ filename, head, body }) {
+        const doc = new window.jspdf.jsPDF("landscape");
+        doc.autoTable({ head, body, styles: { fontSize: 8 } });
+        doc.save(filename);
+      }
+
+      function buildFullName(student) {
+        return [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Unnamed";
+      }
+
+      function extractContact(student) {
+        return student.parentContact || student.guardianPhone || student.contact || student.parentPhone || "";
+      }
+
+      function resolveUserName(uid) {
+        if (!uid) return "Unknown";
+        const safe = uid.replace(/\./g, "_");
+        const user = state.users[safe] || state.users[uid];
+        if (!user) return uid;
+        return user.name || user.displayName || uid;
+      }
+
+      function computeTotalExpenses(fridayId) {
+        const expenses = state.expenses[fridayId] || {};
+        return Object.values(expenses).reduce((sum, exp) => sum + Number(exp.pricePer || 0) * Number(exp.quantity || 0), 0);
+      }
+
+      function sumOutstanding() {
+        return Object.values(state.studentSummaries).reduce((sum, s) => sum + s.amountDue, 0);
+      }
+
+      function sumCollected() {
+        let total = 0;
+        Object.values(state.fridayMeta).forEach((meta) => {
+          total += meta.collected || 0;
+        });
+        return total;
+      }
+
+      function formatNumber(val) {
+        return Number(val || 0).toLocaleString();
+      }
+
+      function formatCurrency(amount) {
+        return `${formatNumber(amount)} TSH`;
+      }
+
+      function formatCurrencyPlain(amount) {
+        return Number(amount || 0);
+      }
+
+      function setLoading(isLoading) {
+        state.loading = isLoading;
+        dom.reloadBtn.disabled = isLoading;
+        dom.reloadBtn.textContent = isLoading ? "Refreshing..." : "Reload Data";
+      }
+
+      function updateLastSynced() {
+        dom.lastUpdated.innerHTML = `<i class="fa fa-clock"></i> Synced ${new Date().toLocaleTimeString()}`;
+      }
+
+      init();
+    })();
+  </script>
 </body>
 </html>

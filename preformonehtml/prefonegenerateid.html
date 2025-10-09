@@ -1,54 +1,755 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>SoMAp — Generate Preform One ID</title>
-  <!-- Same -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp – Preform One ID Studio</title>
+
+  <!-- Firebase Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- UI Libraries -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            somapNavy: '#0d1b45',
+            somapMint: '#7ef0d2',
+            somapRose: '#ffd3e2',
+            somapGold: '#fcd34d',
+            somapSky: '#60a5fa'
+          },
+          fontFamily: {
+            display: ['Poppins', 'Inter', 'sans-serif']
+          },
+          boxShadow: {
+            neon: '0 15px 45px rgba(14, 116, 144, 0.4)'
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <!-- Shared helpers -->
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+
+  <style>
+    body {
+      font-family: 'Nunito', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(ellipse at top, rgba(126, 240, 210, 0.18), transparent 45%),
+                  radial-gradient(ellipse at bottom, rgba(96, 165, 250, 0.18), transparent 35%),
+                  linear-gradient(120deg, #0f172a, #111827 60%, #1f2937 95%);
+      color: #f8fafc;
+      min-height: 100vh;
+    }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 22px;
+      box-shadow: 0 25px 40px rgba(0, 0, 0, 0.25);
+      backdrop-filter: blur(18px);
+    }
+    .id-card {
+      background: linear-gradient(135deg, var(--accent-start, #60a5fa), var(--accent-end, #0ea5e9));
+      border-radius: 28px;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+      position: relative;
+      overflow: hidden;
+      color: #0f172a;
+    }
+    .id-card::before,
+    .id-card::after {
+      content: '';
+      position: absolute;
+      border-radius: 999px;
+      opacity: 0.25;
+    }
+    .id-card::before {
+      width: 240px;
+      height: 240px;
+      background: rgba(255, 255, 255, 0.35);
+      top: -120px;
+      right: -80px;
+    }
+    .id-card::after {
+      width: 320px;
+      height: 320px;
+      background: rgba(255, 255, 255, 0.25);
+      bottom: -140px;
+      left: -110px;
+    }
+    .oval-photo {
+      width: 132px;
+      height: 168px;
+      border-radius: 45% 55% 50% 50% / 53% 47% 53% 47%;
+      overflow: hidden;
+      border: 4px solid rgba(255, 255, 255, 0.8);
+      box-shadow: 0 12px 25px rgba(15, 23, 42, 0.25);
+      background: rgba(255, 255, 255, 0.45);
+    }
+    .oval-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .tag-chip {
+      background: rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      padding: 0.18rem 0.65rem;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .detail-label {
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      opacity: 0.72;
+    }
+    .detail-value {
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+    .status-pill {
+      border-radius: 14px;
+      padding: 0.1rem 0.6rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    @media (max-width: 768px) {
+      .id-card {
+        border-radius: 22px;
+      }
+    }
+    @media print {
+      body {
+        background: #fff;
+      }
+      .no-print {
+        display: none !important;
+      }
+      #idCardCanvas {
+        box-shadow: none !important;
+      }
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
-  <div class="max-w-2xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-id-card"></i> Generate ID</h1>
-    <a href="prefoneadmission.html" class="bg-gray-500 p-2 rounded mb-4 inline-block">< Back</a>
-    
-    <select id="studentSelect" class="p-2 rounded w-full mb-4 bg-white/20 text-white" onchange="generateID()">
-      <!-- Load students -->
-    </select>
-    
-    <div id="idCard" class="bg-white/10 p-6 rounded text-center hidden">
-      <h2>Preform One ID Card</h2>
-      <img id="idPhoto" class="w-32 mx-auto">
-      <p id="idName"></p>
-      <p id="idAdm"></p>
-      <p id="idContact"></p>
-      <button onclick="printID()" class="bg-green-500 p-2 rounded">Print/Save PDF</button>
+<body class="pb-20">
+  <div class="max-w-7xl mx-auto px-4 lg:px-8 py-8 space-y-8">
+    <div class="flex flex-wrap items-center justify-between gap-4 no-print">
+      <div>
+        <p class="uppercase tracking-[0.3em] text-xs text-slate-300">SoMAp V2.1 · Socrates School</p>
+        <h1 class="text-3xl md:text-4xl font-extrabold font-display text-white drop-shadow-lg">Preform One ID Studio</h1>
+        <p class="text-sm text-slate-300 mt-2 max-w-2xl">Celebrate every learner with a vibrant, ready-to-download ID that pairs their photo, colors, and achievements in a single friendly view.</p>
+      </div>
+      <div class="flex flex-wrap gap-3 items-center">
+        <a href="prefonedashboard.html" class="no-print inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/15 hover:bg-white/25 text-sm font-semibold transition">
+          <i class="fas fa-arrow-left"></i>
+          Dashboard
+        </a>
+        <div class="no-print">
+          <label for="yearSelect" class="text-xs uppercase tracking-widest text-slate-400 block mb-1">Program Year</label>
+          <select id="yearSelect" class="px-3 py-2 rounded-full bg-white/10 backdrop-blur text-white focus:outline-none focus:ring-2 focus:ring-somapMint/70">
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 no-print" id="summaryCards">
+      <div class="glass-card p-4 flex flex-col gap-2">
+        <span class="text-xs uppercase tracking-widest text-slate-400">Registered</span>
+        <span class="text-2xl font-bold" id="statTotal">0 students</span>
+        <span class="text-xs text-slate-400">Active in Preform One</span>
+      </div>
+      <div class="glass-card p-4 flex flex-col gap-2">
+        <span class="text-xs uppercase tracking-widest text-slate-400">Ready for IDs</span>
+        <span class="text-2xl font-bold" id="statWithPhotos">0 kids</span>
+        <span class="text-xs text-slate-400">Photo already uploaded</span>
+      </div>
+      <div class="glass-card p-4 flex flex-col gap-2">
+        <span class="text-xs uppercase tracking-widest text-slate-400">Color Spotlight</span>
+        <span class="text-2xl font-bold" id="statBoysGirls">-</span>
+        <span class="text-xs text-slate-400">Male vs Female balance</span>
+      </div>
+      <div class="glass-card p-4 flex flex-col gap-2">
+        <span class="text-xs uppercase tracking-widest text-slate-400">Missing Photos</span>
+        <span class="text-2xl font-bold" id="statWithoutPhotos">0 kids</span>
+        <span class="text-xs text-slate-400">Upload passport to unlock</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <div class="glass-card p-6 lg:col-span-3 space-y-6 no-print">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold flex items-center gap-2"><i class="fas fa-children text-somapMint"></i> Learner Directory</h2>
+            <p class="text-sm text-slate-300">Search any Preform One child and open their dazzling ID instantly.</p>
+          </div>
+          <div class="w-full md:w-64">
+            <div class="relative">
+              <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+              <input id="searchInput" type="text" placeholder="Search by name, ADM, parent..." class="w-full pl-9 pr-3 py-2 rounded-full bg-white/10 focus:outline-none focus:ring-2 focus:ring-somapMint/80 border border-white/10 text-sm">
+            </div>
+          </div>
+        </div>
+
+        <div class="overflow-hidden rounded-2xl border border-white/10">
+          <div class="overflow-auto max-h-[420px]" id="tableScroller">
+            <table class="min-w-full divide-y divide-white/10 text-sm">
+              <thead class="bg-white/10 text-slate-200 uppercase tracking-widest text-xs">
+                <tr>
+                  <th class="px-4 py-3 text-left">Student</th>
+                  <th class="px-4 py-3 text-left">Adm / Reporting</th>
+                  <th class="px-4 py-3 text-left">Fee Snapshot</th>
+                  <th class="px-4 py-3 text-center">ID</th>
+                </tr>
+              </thead>
+              <tbody id="studentTable" class="divide-y divide-white/5 bg-white/5">
+                <tr>
+                  <td colspan="4" class="text-center px-4 py-10 text-slate-400">Loading students...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="directoryHint" class="text-xs text-slate-400 flex items-center gap-2">
+          <i class="fas fa-lightbulb text-somapGold"></i>Click <strong>View ID</strong> to open a student's personalized badge.
+        </div>
+      </div>
+
+      <div class="glass-card p-6 lg:col-span-2 space-y-4">
+        <div class="flex items-center justify-between gap-4">
+          <h2 class="text-xl font-bold flex items-center gap-2"><i class="fas fa-id-card-clip text-somapMint"></i> ID Preview</h2>
+          <span id="previewStatus" class="status-pill bg-somapSky/20 text-somapSky/90 hidden">Ready</span>
+        </div>
+
+        <div id="previewEmpty" class="text-slate-300 text-sm space-y-3">
+          <p>Select a child to preview their ID. You'll see their colors, oval passport, and quick stats.</p>
+          <p class="flex items-center gap-2"><i class="fas fa-mouse-pointer"></i><span>Choose <strong>View ID</strong> on the directory.</span></p>
+        </div>
+
+        <div id="previewContent" class="hidden space-y-4">
+          <div id="idCardCanvas" class="id-card p-5 sm:p-6 text-slate-800">
+            <div class="relative z-10 space-y-4">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-2xl overflow-hidden border-2 border-white/60 bg-white/70 flex items-center justify-center">
+                  <img src="../images/somap-logo.png.jpg" alt="Socrates School Logo" class="w-11 h-11 object-cover" onerror="this.style.display='none'">
+                </div>
+                <div>
+                  <p class="text-xs uppercase tracking-[0.23em] font-semibold text-slate-100">Socrates School</p>
+                  <p class="text-lg font-extrabold text-white drop-shadow">Preform One Identity</p>
+                  <span class="tag-chip bg-white/30 text-white/90 mt-1 inline-flex items-center gap-1">
+                    <i class="fas fa-sparkles"></i> SoMAp V2.1
+                  </span>
+                </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row gap-4 sm:items-center">
+                <div class="oval-photo mx-auto sm:mx-0" id="photoFrame">
+                  <img id="cardPhoto" src="" alt="Student passport" crossorigin="anonymous">
+                </div>
+                <div class="flex-1 space-y-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="tag-chip bg-white/35 text-slate-900 font-semibold" id="cardAdm">PF1-</span>
+                    <span class="status-pill bg-somapGold/60 text-slate-900" id="cardProgram">2025 Cohort</span>
+                  </div>
+                  <p id="cardName" class="text-2xl font-extrabold leading-tight text-white drop-shadow"></p>
+                  <div class="grid grid-cols-2 gap-2 text-xs text-white/90">
+                    <div>
+                      <p class="detail-label text-white/80">Reporting</p>
+                      <p class="detail-value text-sm" id="cardReporting"></p>
+                    </div>
+                    <div>
+                      <p class="detail-label text-white/80">Birth</p>
+                      <p class="detail-value text-sm" id="cardDob"></p>
+                    </div>
+                    <div>
+                      <p class="detail-label text-white/80">Gender</p>
+                      <p class="detail-value text-sm" id="cardGender"></p>
+                    </div>
+                    <div>
+                      <p class="detail-label text-white/80">Former School</p>
+                      <p class="detail-value text-sm" id="cardFormerSchool"></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-900">
+                <div class="bg-white/60 rounded-xl px-3 py-2">
+                  <p class="detail-label text-slate-700">Parent / Guardian</p>
+                  <p id="cardParent" class="detail-value text-slate-900"></p>
+                </div>
+                <div class="bg-white/60 rounded-xl px-3 py-2">
+                  <p class="detail-label text-slate-700">Contact</p>
+                  <p id="cardParentContact" class="detail-value text-slate-900"></p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2 text-center text-xs font-semibold">
+                <div class="bg-black/10 rounded-lg py-2 text-slate-900">
+                  <p class="detail-label text-slate-800">Total Fee</p>
+                  <p id="cardTotalFee" class="detail-value text-base"></p>
+                </div>
+                <div class="bg-black/10 rounded-lg py-2 text-slate-900">
+                  <p class="detail-label text-slate-800">Paid</p>
+                  <p id="cardPaid" class="detail-value text-base"></p>
+                </div>
+                <div class="bg-black/10 rounded-lg py-2 text-slate-900">
+                  <p class="detail-label text-slate-800">Balance</p>
+                  <p id="cardBalance" class="detail-value text-base"></p>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap justify-between items-center text-[0.65rem] uppercase tracking-wider text-slate-900/70">
+                <span><i class="fas fa-phone-volume mr-1"></i>0686 828 732</span>
+                <span><i class="fas fa-envelope-open-text mr-1"></i>socratesschool2020@gmail.com</span>
+                <span><i class="fas fa-globe-africa mr-1"></i>SoMAp v2.1</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 text-xs">
+            <div class="bg-white/10 rounded-xl p-3">
+              <p class="detail-label text-slate-300">Attendance Streak</p>
+              <p id="cardAttendance" class="text-lg font-extrabold text-white"></p>
+            </div>
+            <div class="bg-white/10 rounded-xl p-3">
+              <p class="detail-label text-slate-300">ID Ready</p>
+              <p id="cardIdStatus" class="text-lg font-extrabold text-white"></p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-3 no-print">
+            <button id="downloadPdfBtn" class="flex items-center gap-2 px-4 py-2 rounded-full bg-somapMint/90 hover:bg-somapMint text-slate-900 font-semibold transition">
+              <i class="fas fa-file-pdf"></i> Download PDF
+            </button>
+            <button id="downloadPngBtn" class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/20 hover:bg-white/30 font-semibold">
+              <i class="fas fa-image"></i> Save PNG
+            </button>
+            <button id="printBtn" class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 font-semibold">
+              <i class="fas fa-print"></i> Print
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass-card p-6 space-y-4 no-print">
+      <div class="flex items-center gap-2 text-slate-200 text-sm">
+        <i class="fas fa-sparkles text-somapMint"></i>
+        <span>Tip: Capture IDs together for events using the PNG export. Kids love seeing the oval spotlight update with every new selfie!</span>
+      </div>
+      <div id="latestBadges" class="flex flex-wrap gap-2 text-xs uppercase tracking-wide"></div>
     </div>
   </div>
-
   <script>
-    db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value', snap => {
-      const select = document.getElementById('studentSelect');
-      select.innerHTML = Object.entries(snap.val() || {}).map(([adm, s]) => 
-        `<option value="${adm}">${s.firstName} ${s.lastName}</option>`
-      ).join('');
-    });
-    
-    function generateID() {
-      const adm = document.getElementById('studentSelect').value;
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).once('value', snap => {
-        const s = snap.val();
-        document.getElementById('idPhoto').src = s.photoUrl;
-        document.getElementById('idName').textContent = `${s.firstName} ${s.middleName} ${s.lastName}`;
-        document.getElementById('idAdm').textContent = `ID: ${adm}`;
-        document.getElementById('idContact').textContent = `Contact: ${s.contact}`;
-        document.getElementById('idCard').classList.remove('hidden');
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    const palette = [
+      { start: '#7ef0d2', end: '#22d3ee' },
+      { start: '#a78bfa', end: '#6366f1' },
+      { start: '#f472b6', end: '#ec4899' },
+      { start: '#fcd34d', end: '#fb923c' },
+      { start: '#4ade80', end: '#22c55e' },
+      { start: '#60a5fa', end: '#2563eb' }
+    ];
+
+    const placeholderPhoto = 'https://via.placeholder.com/220x280.png?text=SoMAp+ID';
+
+    const state = {
+      students: {},
+      filteredKeys: [],
+      searchQuery: '',
+      selectedAdm: null,
+      currentRef: null
+    };
+
+    const elements = {
+      yearSelect: document.getElementById('yearSelect'),
+      searchInput: document.getElementById('searchInput'),
+      tableBody: document.getElementById('studentTable'),
+      statTotal: document.getElementById('statTotal'),
+      statWithPhotos: document.getElementById('statWithPhotos'),
+      statWithoutPhotos: document.getElementById('statWithoutPhotos'),
+      statBoysGirls: document.getElementById('statBoysGirls'),
+      previewEmpty: document.getElementById('previewEmpty'),
+      previewContent: document.getElementById('previewContent'),
+      previewStatus: document.getElementById('previewStatus'),
+      idCardCanvas: document.getElementById('idCardCanvas'),
+      downloadPdfBtn: document.getElementById('downloadPdfBtn'),
+      downloadPngBtn: document.getElementById('downloadPngBtn'),
+      printBtn: document.getElementById('printBtn'),
+      latestBadges: document.getElementById('latestBadges')
+    };
+
+    const previewFields = {
+      photo: document.getElementById('cardPhoto'),
+      name: document.getElementById('cardName'),
+      adm: document.getElementById('cardAdm'),
+      program: document.getElementById('cardProgram'),
+      reporting: document.getElementById('cardReporting'),
+      dob: document.getElementById('cardDob'),
+      gender: document.getElementById('cardGender'),
+      formerSchool: document.getElementById('cardFormerSchool'),
+      parent: document.getElementById('cardParent'),
+      parentContact: document.getElementById('cardParentContact'),
+      totalFee: document.getElementById('cardTotalFee'),
+      paid: document.getElementById('cardPaid'),
+      balance: document.getElementById('cardBalance'),
+      attendance: document.getElementById('cardAttendance'),
+      idStatus: document.getElementById('cardIdStatus')
+    };
+
+    function initYearSelect() {
+      const start = 2024;
+      const end = Math.max(start, Number(currentYear) + 4);
+      elements.yearSelect.innerHTML = '';
+      for (let year = start; year <= end; year += 1) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = year;
+        if (year === Number(currentYear)) {
+          option.selected = true;
+        }
+        elements.yearSelect.appendChild(option);
+      }
+      elements.yearSelect.addEventListener('change', (event) => {
+        const year = parseInt(event.target.value, 10);
+        state.selectedAdm = null;
+        subscribeToStudents(year);
       });
     }
-    
-    function printID() {
-      window.print(); // Or PDF via jsPDF
-      generatePDF(document.getElementById('idCard').innerHTML, 'id_card.pdf');
+
+    function subscribeToStudents(year) {
+      if (state.currentRef) {
+        state.currentRef.off();
+      }
+      currentYear = year;
+      const ref = db.ref(`/schools/Socrates School Preform one/${currentYear}/students`);
+      state.currentRef = ref;
+      elements.tableBody.innerHTML = '<tr><td colspan="4" class="text-center px-4 py-10 text-slate-400"><i class="fas fa-spinner fa-spin mr-2"></i>Loading students...</td></tr>';
+      ref.on('value', (snapshot) => {
+        const data = snapshot.val() || {};
+        state.students = data;
+        updateFiltered();
+        renderTable();
+        renderStats();
+        refreshBadges();
+        refreshPreviewAfterDataChange();
+      }, (error) => {
+        console.error('Failed to load students:', error);
+        elements.tableBody.innerHTML = '<tr><td colspan="4" class="text-center px-4 py-6 text-red-300">Unable to load students. Check your internet and Firebase settings.</td></tr>';
+      });
     }
+
+    function updateFiltered() {
+      const query = state.searchQuery.trim().toLowerCase();
+      const entries = Object.entries(state.students);
+      const sorted = entries.sort(([, a], [, b]) => {
+        const nameA = `${a.firstName || ''} ${a.lastName || ''}`.toLowerCase();
+        const nameB = `${b.firstName || ''} ${b.lastName || ''}`.toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      if (!query) {
+        state.filteredKeys = sorted.map(([adm]) => adm);
+        return;
+      }
+      state.filteredKeys = sorted
+        .filter(([adm, student]) => {
+          const haystack = `${adm} ${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''} ${student.parentName || ''} ${student.parentContact || ''}`.toLowerCase();
+          return haystack.includes(query);
+        })
+        .map(([adm]) => adm);
+    }
+
+    function renderTable() {
+      if (!state.filteredKeys.length) {
+        elements.tableBody.innerHTML = '<tr><td colspan="4" class="px-4 py-8 text-center text-slate-400">No students found. Try a different search or add new admissions.</td></tr>';
+        return;
+      }
+
+      const rows = state.filteredKeys.map((adm) => {
+        const student = state.students[adm];
+        const fullName = formatName(student);
+        const reporting = formatDate(student.reportingDate);
+        const payments = sumPayments(student.payments);
+        const totalFee = Number(student.totalFee || 0);
+        const balance = Math.max(totalFee - payments, 0);
+        const hasPhoto = !!(student.photoUrl && student.photoUrl.trim());
+        const highlight = hasPhoto ? 'bg-emerald-500/15 text-emerald-200' : 'bg-red-500/15 text-red-200';
+
+        return `
+          <tr class="hover:bg-slate-900/40 transition">
+            <td class="px-4 py-4">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full overflow-hidden border border-white/20 bg-white/10 flex items-center justify-center">
+                  <img src="${safeUrl(student.photoUrl) || placeholderPhoto}" alt="${fullName}" class="w-full h-full object-cover" onerror="this.src='${placeholderPhoto}'">
+                </div>
+                <div>
+                  <p class="font-semibold text-sm">${fullName}</p>
+                  <p class="text-xs text-slate-400">${student.gender || '—'} · ${student.formerSchool || 'Former school N/A'}</p>
+                </div>
+              </div>
+            </td>
+            <td class="px-4 py-4 text-xs">
+              <p class="font-semibold tracking-wide">${adm}</p>
+              <p class="text-slate-400">${reporting}</p>
+            </td>
+            <td class="px-4 py-4 text-xs">
+              <p class="font-semibold text-slate-100">TSh ${formatCurrency(totalFee)}</p>
+              <p class="text-slate-400">Bal: ${formatCurrency(balance)}</p>
+            </td>
+            <td class="px-4 py-4 text-center">
+              <button class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-white/15 hover:bg-white/25 transition view-id-btn" data-adm="${adm}">
+                <span class="status-pill ${highlight}">${hasPhoto ? 'Photo Ready' : 'Add Photo'}</span>
+                <i class="fas fa-eye text-somapMint"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+      elements.tableBody.innerHTML = rows;
+      elements.tableBody.querySelectorAll('.view-id-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+          const adm = button.dataset.adm;
+          const student = state.students[adm];
+          if (!student) return;
+          state.selectedAdm = adm;
+          populatePreview(adm, student);
+          scrollPreviewIntoView();
+        });
+      });
+    }
+
+    function renderStats() {
+      const students = Object.values(state.students);
+      const total = students.length;
+      const withPhoto = students.filter((student) => student.photoUrl && student.photoUrl.trim()).length;
+      const withoutPhoto = total - withPhoto;
+      const male = students.filter((student) => (student.gender || '').toLowerCase().startsWith('m')).length;
+      const female = students.filter((student) => (student.gender || '').toLowerCase().startsWith('f')).length;
+
+      elements.statTotal.textContent = `${total} ${total === 1 ? 'student' : 'students'}`;
+      elements.statWithPhotos.textContent = `${withPhoto} ready`;
+      elements.statWithoutPhotos.textContent = `${withoutPhoto} waiting`;
+      elements.statBoysGirls.textContent = `${male} boys / ${female} girls`;
+    }
+
+    function refreshPreviewAfterDataChange() {
+      if (!state.selectedAdm) {
+        togglePreview(false);
+        return;
+      }
+      const student = state.students[state.selectedAdm];
+      if (!student) {
+        togglePreview(false);
+        return;
+      }
+      populatePreview(state.selectedAdm, student);
+    }
+
+    function populatePreview(adm, student) {
+      togglePreview(true);
+      const paletteIndex = hashCode(adm) % palette.length;
+      const accent = palette[paletteIndex];
+      elements.idCardCanvas.style.setProperty('--accent-start', accent.start);
+      elements.idCardCanvas.style.setProperty('--accent-end', accent.end);
+
+      previewFields.photo.src = safeUrl(student.photoUrl) || placeholderPhoto;
+      previewFields.name.textContent = formatName(student);
+      previewFields.adm.textContent = adm;
+      previewFields.program.textContent = `${currentYear} Cohort`;
+      previewFields.reporting.textContent = formatDate(student.reportingDate);
+      previewFields.dob.textContent = formatDate(student.dob);
+      previewFields.gender.textContent = student.gender || '—';
+      previewFields.formerSchool.textContent = student.formerSchool || '—';
+      previewFields.parent.textContent = student.parentName || 'Parent not set';
+      previewFields.parentContact.textContent = student.parentContact || '—';
+
+      const totalFee = Number(student.totalFee || 0);
+      const paid = sumPayments(student.payments);
+      const balance = Math.max(totalFee - paid, 0);
+      previewFields.totalFee.textContent = `TSh ${formatCurrency(totalFee)}`;
+      previewFields.paid.textContent = `TSh ${formatCurrency(paid)}`;
+      previewFields.balance.textContent = `TSh ${formatCurrency(balance)}`;
+
+      const attendanceArray = normalizeArray(student.attendance);
+      const presentDays = attendanceArray.filter((entry) => entry && (entry.present || entry.status === 'Present')).length;
+      const totalDays = attendanceArray.length;
+      previewFields.attendance.textContent = totalDays ? `${presentDays}/${totalDays} days` : 'Not marked yet';
+
+      previewFields.idStatus.textContent = student.photoUrl ? 'Ready to Print' : 'Add photo first';
+
+      elements.previewStatus.classList.remove('hidden');
+      elements.previewStatus.textContent = student.photoUrl ? 'ID Ready' : 'Photo Needed';
+    }
+
+    function togglePreview(show) {
+      if (show) {
+        elements.previewEmpty.classList.add('hidden');
+        elements.previewContent.classList.remove('hidden');
+      } else {
+        elements.previewEmpty.classList.remove('hidden');
+        elements.previewContent.classList.add('hidden');
+        elements.previewStatus.classList.add('hidden');
+      }
+    }
+
+    function formatName(student = {}) {
+      return [student.firstName, student.middleName, student.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim() || 'Unnamed Learner';
+    }
+
+    function formatCurrency(value) {
+      const number = Number(value) || 0;
+      return number.toLocaleString('en-US');
+    }
+
+    function formatDate(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function sumPayments(payments) {
+      if (!payments) return 0;
+      if (Array.isArray(payments)) {
+        return payments.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+      }
+      if (typeof payments === 'object') {
+        return Object.values(payments).reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+      }
+      return 0;
+    }
+
+    function normalizeArray(value) {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'object') return Object.values(value);
+      return [];
+    }
+
+    function safeUrl(url) {
+      if (!url || typeof url !== 'string') return '';
+      return url.replace('http://', 'https://');
+    }
+
+    function hashCode(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i += 1) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+      }
+      return Math.abs(hash);
+    }
+
+    function scrollPreviewIntoView() {
+      elements.idCardCanvas.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function captureCardCanvas() {
+      if (!state.selectedAdm) {
+        Swal.fire('Choose a student', 'Select a child before exporting the ID.', 'info');
+        throw new Error('No student selected');
+      }
+      return html2canvas(elements.idCardCanvas, {
+        scale: 2,
+        backgroundColor: null,
+        useCORS: true
+      });
+    }
+
+    async function downloadPdf() {
+      try {
+        const canvas = await captureCardCanvas();
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jspdf.jsPDF({
+          orientation: canvas.width >= canvas.height ? 'landscape' : 'portrait',
+          unit: 'px',
+          format: [canvas.width, canvas.height]
+        });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        const student = state.students[state.selectedAdm];
+        const filename = `${formatName(student).replace(/[^a-z0-9]+/gi, '_') || 'student'}_${state.selectedAdm}_ID.pdf`;
+        pdf.save(filename);
+      } catch (error) {
+        console.error('PDF export failed', error);
+      }
+    }
+
+    async function downloadPng() {
+      try {
+        const canvas = await captureCardCanvas();
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        const student = state.students[state.selectedAdm] || {};
+        link.href = dataUrl;
+        link.download = `${formatName(student).replace(/[^a-z0-9]+/gi, '_') || 'student'}_${state.selectedAdm}_ID.png`;
+        link.click();
+      } catch (error) {
+        console.error('PNG export failed', error);
+      }
+    }
+
+    function printCard() {
+      if (!state.selectedAdm) {
+        Swal.fire('Choose a student', 'Select a child before printing the ID.', 'info');
+        return;
+      }
+      window.print();
+    }
+
+    function refreshBadges() {
+      const latest = state.filteredKeys.slice(0, 12);
+      elements.latestBadges.innerHTML = latest.map((adm) => {
+        const student = state.students[adm];
+        return `<span class="px-3 py-1 rounded-full bg-white/10">${formatName(student)}</span>`;
+      }).join('');
+    }
+
+    elements.searchInput.addEventListener('input', (event) => {
+      state.searchQuery = event.target.value;
+      updateFiltered();
+      renderTable();
+    });
+
+    elements.downloadPdfBtn.addEventListener('click', downloadPdf);
+    elements.downloadPngBtn.addEventListener('click', downloadPng);
+    elements.printBtn.addEventListener('click', printCard);
+
+    initYearSelect();
+    subscribeToStudents(Number(currentYear));
   </script>
 </body>
 </html>

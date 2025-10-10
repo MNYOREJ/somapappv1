@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp &mdash; Receipt Vault</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <!-- Shared helpers -->
+  <script src="prefonecommon.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            receipt: ['Cambria', 'Georgia', 'Times New Roman', 'serif']
+          },
+          colors: {
+            socrates: {
+              blue: '#1e3a8a'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at top, rgba(30, 64, 175, 0.35), rgba(15, 23, 42, 0.95) 60%);
+      min-height: 100vh;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .receipt-paper {
+      background: #fff;
+      color: #111827;
+      width: 890px;
+      min-height: 630px;
+      margin: 0 auto;
+      padding: 48px;
+      border-radius: 16px;
+      border: 3px double #1e3a8a;
+      box-shadow: 0 25px 60px -40px rgba(30, 64, 175, 0.6);
+      font-family: 'Cambria', 'Georgia', serif;
+    }
+    .receipt-header {
+      border-bottom: 2px solid #1e3a8a;
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+    }
+    .receipt-watermark {
+      position: absolute;
+      inset: 0;
+      opacity: 0.06;
+      background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat;
+      pointer-events: none;
+    }
+    @media print {
+      body {
+        background: #fff;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .receipt-paper {
+        box-shadow: none;
+        border: 3px double #1e3a8a;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-6xl mx-auto px-4 py-10 lg:py-14">
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10 no-print">
+      <div>
+        <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School &mdash; Preform One</p>
+        <h1 class="text-3xl lg:text-4xl font-bold font-display text-white">Receipt Vault</h1>
+        <p class="text-sm text-slate-300 mt-2 max-w-2xl">Select a payment to reproduce an official receipt on demand. Each receipt matches the format issued by the finance office.</p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="window.location.href='prefonechildfinance.html'" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+          <i class="fas fa-wallet mr-2"></i>Back to Finance
+        </button>
+        <button onclick="logout()" class="px-4 py-2 rounded-xl bg-red-500/80 hover:bg-red-500 text-sm text-white transition">
+          <i class="fas fa-sign-out-alt mr-2"></i>Logout
+        </button>
+      </div>
+    </header>
+
+    <section class="glass-panel p-6 lg:p-8 mb-8 no-print">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-semibold text-white">Receipt Controls</h2>
+          <p class="text-sm text-slate-300">Choose a receipt number to display the official slip.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+          <div>
+            <label class="text-xs uppercase tracking-[0.35em] text-slate-400 mb-1 block">Receipt Number</label>
+            <select id="receiptSelector" class="bg-white/10 border border-white/15 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none"></select>
+          </div>
+          <button onclick="refreshReceipt()" class="px-4 py-2 rounded-xl bg-sky-500/80 hover:bg-sky-500 text-sm text-white transition">
+            Load Receipt
+          </button>
+          <button onclick="printReceipt()" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            <i class="fas fa-print mr-2"></i>Print
+          </button>
+          <button onclick="downloadReceipt()" class="px-4 py-2 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 text-sm text-white transition">
+            <i class="fas fa-file-pdf mr-2"></i>Download PDF
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="relative">
+      <div class="receipt-paper relative">
+        <div class="receipt-watermark"></div>
+        <div class="receipt-header flex justify-between items-start">
+          <div>
+            <h2 class="text-2xl font-bold text-socrates-blue uppercase tracking-[0.35em]">Socrates Investment Limited</h2>
+            <p class="uppercase tracking-[0.35em] text-socrates-blue text-sm">Socrates School Preform One</p>
+            <p class="uppercase tracking-[0.35em] text-socrates-blue text-sm mt-1">P.O BOX 14256 ARUSHA</p>
+            <p class="uppercase tracking-[0.35em] text-socrates-blue text-sm mt-1">Mob: 0686 828 732</p>
+          </div>
+          <div class="text-right">
+            <h3 class="text-3xl font-bold text-socrates-blue uppercase">Receipt</h3>
+            <p class="text-sm text-socrates-blue mt-2" id="receiptNumberLabel">Receipt No: ----</p>
+            <p class="text-sm text-socrates-blue" id="receiptDateLabel">Date: --</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+          <div class="lg:col-span-2">
+            <p class="text-base mb-4">Received From: <span id="receivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
+            <p class="text-base mb-4">The Sum of Shillings (In words): <span id="amountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
+            <p class="text-base mb-4">Amount in figures: <span id="amountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
+            <p class="text-base mb-4">Being payment of: <span id="paymentPurpose" class="border-b border-black inline-block min-w-[300px]"></span></p>
+            <p class="text-base mb-4">Payment Method: <span id="paymentMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
+          </div>
+          <div class="flex flex-col items-center">
+            <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-socrates-blue">
+              <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover">
+            </div>
+            <p id="childNameLabel" class="mt-3 text-base font-semibold text-socrates-blue text-center"></p>
+            <p id="childAdmLabel" class="text-sm text-gray-600 text-center"></p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-10">
+          <div>
+            <p class="uppercase tracking-[0.35em] text-sm text-socrates-blue mb-4">Cash / Cheque</p>
+            <p id="paymentInstrument" class="border-b border-black h-8"></p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.35em] text-sm text-socrates-blue mb-4">TSh</p>
+            <p id="paymentCurrency" class="border-b border-black h-8"></p>
+          </div>
+        </div>
+
+        <div class="flex justify-between mt-12">
+          <div>
+            <p class="uppercase tracking-[0.35em] text-sm text-socrates-blue mb-6">Sign for Socrates</p>
+            <p class="border-t border-black w-48 h-0"></p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.35em] text-sm text-socrates-blue mb-6">Stamp</p>
+            <div class="w-40 h-24 border border-dashed border-socrates-blue"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "74814528004",
+      appId: "1:74814528004:web:54abda6ae3c75ed5f0677f"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    const childAdm = localStorage.getItem('currentChildAdm');
+    const parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact');
+    const urlParams = new URLSearchParams(window.location.search);
+    const receiptParam = urlParams.get('receipt');
+
+    let studentRecord = null;
+    let paymentIndex = [];
+
+    if (!childAdm || !parentContact) {
+      Swal.fire('Login required', 'Please sign in again so we can load your child data.', 'warning')
+        .then(() => window.location.href = '../index.html');
+    } else {
+      loadReceiptData();
+    }
+
+    async function loadReceiptData() {
+      try {
+        const snapshot = await db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${childAdm}`).once('value');
+        if (!snapshot.exists()) {
+          Swal.fire('Not found', 'We could not locate data for this child. Contact the school office.', 'error');
+          return;
+        }
+        studentRecord = snapshot.val();
+        paymentIndex = buildPaymentIndex(studentRecord.payments || {});
+        populateReceiptSelector(paymentIndex);
+        const targetReceipt = receiptParam || (paymentIndex.slice().reverse()[0]?.receiptNumber) || '';
+        if (targetReceipt) {
+          document.getElementById('receiptSelector').value = targetReceipt;
+          renderReceipt(targetReceipt);
+        }
+      } catch (error) {
+        console.error('Receipt load error', error);
+        Swal.fire('Error', error.message || 'Unable to load receipts.', 'error');
+      }
+    }
+
+    function buildPaymentIndex(paymentsObj) {
+      const entries = toArray(paymentsObj).map(entry => ({
+        ...entry,
+        amount: Number(entry.amount || 0),
+        date: entry.date || '',
+        method: entry.method || 'Cash',
+        note: entry.note || '',
+        timestamp: parseDate(entry.date, entry.createdAt),
+        key: entry._key
+      })).filter(item => item.amount > 0);
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+      entries.forEach((item, idx) => item.receiptNumber = String(idx + 1).padStart(4, '0'));
+      return entries;
+    }
+
+    function populateReceiptSelector(entries) {
+      const select = document.getElementById('receiptSelector');
+      if (!entries.length) {
+        select.innerHTML = '<option value="">No receipts yet</option>';
+        return;
+      }
+      select.innerHTML = entries.slice().reverse().map(entry => `<option value="${entry.receiptNumber}">Receipt #${entry.receiptNumber} - ${formatDate(entry.date)} (${formatCurrency(entry.amount)})</option>`).join('');
+    }
+
+    function renderReceipt(receiptNumber) {
+      const entry = paymentIndex.find(item => item.receiptNumber === receiptNumber);
+      if (!entry) {
+        Swal.fire('Not found', 'The selected receipt could not be located.', 'warning');
+        return;
+      }
+      document.getElementById('receiptNumberLabel').textContent = `Receipt No: ${receiptNumber}`;
+      document.getElementById('receiptDateLabel').textContent = `Date: ${formatDate(entry.date)}`;
+
+      const student = studentRecord || {};
+      const name = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim();
+
+      document.getElementById('receivedFrom').textContent = name || parentContact || '';
+      document.getElementById('amountWords').textContent = convertNumberToWords(entry.amount) + ' Tanzanian Shillings only';
+      document.getElementById('amountFigures').textContent = formatCurrency(entry.amount);
+      document.getElementById('paymentPurpose').textContent = entry.note || 'Preform One Tuition';
+      document.getElementById('paymentMethod').textContent = entry.method || 'Cash';
+      document.getElementById('paymentInstrument').textContent = entry.method || 'Cash';
+      document.getElementById('paymentCurrency').textContent = formatCurrency(entry.amount);
+
+      document.getElementById('childNameLabel').textContent = name || 'Student';
+      document.getElementById('childAdmLabel').textContent = `ADM: ${student.adm || childAdm}`;
+
+      if (student.photoUrl) {
+        document.getElementById('childPhoto').src = student.photoUrl;
+      }
+    }
+
+    function convertNumberToWords(amount) {
+      if (!amount) return 'Zero';
+      const formatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'TZS', maximumFractionDigits: 0 });
+      const words = formatter.format(amount).replace('TZS', '').trim();
+      return words.replace(/,/g, '').split(' ').map(word => {
+        const number = Number(word);
+        if (Number.isNaN(number)) return word;
+        return numberToEnglish(number);
+      }).join(' ');
+    }
+
+    function numberToEnglish(number) {
+      const small = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+      const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+      if (number < 20) return small[number];
+      if (number < 100) return tens[Math.floor(number / 10)] + (number % 10 ? ` ${small[number % 10]}` : '');
+      if (number < 1000) return `${small[Math.floor(number / 100)]} Hundred${number % 100 ? ` ${numberToEnglish(number % 100)}` : ''}`;
+      if (number < 1000000) return `${numberToEnglish(Math.floor(number / 1000))} Thousand${number % 1000 ? ` ${numberToEnglish(number % 1000)}` : ''}`;
+      if (number < 1000000000) return `${numberToEnglish(Math.floor(number / 1000000))} Million${number % 1000000 ? ` ${numberToEnglish(number % 1000000)}` : ''}`;
+      return `${numberToEnglish(Math.floor(number / 1000000000))} Billion${number % 1000000000 ? ` ${numberToEnglish(number % 1000000000)}` : ''}`;
+    }
+
+    function refreshReceipt() {
+      const receiptNumber = document.getElementById('receiptSelector').value;
+      if (!receiptNumber) {
+        Swal.fire('Select receipt', 'Please choose a receipt number from the list.', 'info');
+        return;
+      }
+      renderReceipt(receiptNumber);
+    }
+
+    function printReceipt() {
+      window.print();
+    }
+
+    function downloadReceipt() {
+      const receiptNumber = document.getElementById('receiptSelector').value;
+      if (!receiptNumber) {
+        Swal.fire('Select receipt', 'Please choose a receipt number first.', 'info');
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape');
+      doc.html(document.querySelector('.receipt-paper'), {
+        callback: pdf => pdf.save(`${childAdm}_receipt_${receiptNumber}.pdf`),
+        margin: [20, 20, 20, 20],
+        autoPaging: 'text',
+        html2canvas: { scale: 0.62 }
+      });
+    }
+
+    function logout() {
+      localStorage.removeItem('prefoneParent');
+      localStorage.removeItem('prefoneParentContact');
+      localStorage.removeItem('prefoneParentName');
+      localStorage.removeItem('prefoneParentIcon');
+      localStorage.removeItem('currentChildAdm');
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

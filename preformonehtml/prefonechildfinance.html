@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp &mdash; My Child Finances</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- UI Libraries -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Shared helpers -->
+  <script src="prefonecommon.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Poppins', 'Inter', 'system-ui', 'sans-serif']
+          },
+          colors: {
+            somap: {
+              midnight: '#0f172a',
+              emerald: '#10b981',
+              sky: '#38bdf8',
+              amber: '#f59e0b'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at top, rgba(16, 185, 129, 0.3), rgba(15, 23, 42, 0.94) 60%);
+      min-height: 100vh;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 1.75rem;
+      box-shadow: 0 28px 60px -30px rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(18px);
+    }
+    .stat-card {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(59, 130, 246, 0.15));
+      border-radius: 1.25rem;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      transition: transform 160ms ease, border-color 200ms ease;
+    }
+    .stat-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(16, 185, 129, 0.6);
+    }
+    table thead th {
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.7rem;
+      color: #bae6fd;
+    }
+    table tbody td {
+      border-top: 1px solid rgba(148, 163, 184, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-6xl mx-auto px-4 py-10 lg:py-14">
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10">
+      <div>
+        <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School &mdash; Preform One</p>
+        <h1 class="text-3xl lg:text-4xl font-bold font-display text-white">Finance Tracker</h1>
+        <p class="text-sm text-slate-300 mt-2 max-w-2xl">Review fee obligations, monitor payments captured by the school, and access official receipts without visiting the office.</p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="window.location.href='prefoneparent.html'" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+          <i class="fas fa-home mr-2"></i>Back to Dashboard
+        </button>
+        <button onclick="logout()" class="px-4 py-2 rounded-xl bg-red-500/80 hover:bg-red-500 text-sm text-white transition">
+          <i class="fas fa-sign-out-alt mr-2"></i>Logout
+        </button>
+      </div>
+    </header>
+
+    <section class="glass-panel p-6 lg:p-8 mb-8">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div class="flex items-center gap-4">
+          <div class="w-24 h-24 rounded-3xl overflow-hidden border-2 border-emerald-400/70 shadow-xl bg-slate-900/60">
+            <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover hidden">
+            <div id="photoPlaceholder" class="w-full h-full flex items-center justify-center text-slate-300 text-2xl bg-slate-800/70">PF1</div>
+          </div>
+          <div>
+            <h2 id="childName" class="text-2xl font-semibold text-white">Loading...</h2>
+            <p id="childMeta" class="text-sm text-slate-300 mt-1">ADM - ...</p>
+            <p id="reportingInfo" class="text-xs uppercase tracking-[0.4em] text-slate-500 mt-2">Reporting: --</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+          <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2">
+            <p class="text-xs uppercase tracking-[0.35em] text-slate-400">Filter payments</p>
+            <select id="yearFilter" class="bg-transparent text-sm text-slate-100 focus:outline-none"></select>
+          </div>
+          <button onclick="exportPayments('pdf')" class="px-4 py-2 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 text-white text-sm transition">
+            <i class="fas fa-file-pdf mr-2"></i>Export PDF
+          </button>
+          <button onclick="exportPayments('csv')" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            <i class="fas fa-file-csv mr-2"></i>Export CSV
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-10">
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-money-bill-wave text-emerald-300 mr-2"></i>Total Fee</p>
+        <p id="statTotalFee" class="text-3xl font-semibold text-white">TSh --</p>
+        <p id="statTotalFeeNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Program cost</p>
+      </article>
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-coins text-sky-300 mr-2"></i>Paid</p>
+        <p id="statPaid" class="text-3xl font-semibold text-white">TSh --</p>
+        <p id="statPaidNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Payments captured</p>
+      </article>
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-scale-balanced text-amber-300 mr-2"></i>Balance</p>
+        <p id="statBalance" class="text-3xl font-semibold text-white">TSh --</p>
+        <p id="statBalanceNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Outstanding amount</p>
+      </article>
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-calendar-day text-rose-300 mr-2"></i>Last Payment</p>
+        <p id="statLastPayment" class="text-3xl font-semibold text-white">--</p>
+        <p id="statLastPaymentNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Amount & method</p>
+      </article>
+    </section>
+
+    <section class="glass-panel p-6 lg:p-8 mb-10">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-semibold text-white">Payment Flow</h3>
+          <p class="text-sm text-slate-300">Visual overview of payment amounts logged over time.</p>
+        </div>
+        <button onclick="downloadChart()" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+          <i class="fas fa-download mr-2"></i>Download Chart
+        </button>
+      </div>
+      <canvas id="paymentsChart" height="240"></canvas>
+    </section>
+
+    <section class="glass-panel p-6 lg:p-8">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+        <div>
+          <h3 class="text-xl font-semibold text-white">Payment History</h3>
+          <p class="text-sm text-slate-300">All payments recorded by the finance office. Generate receipts instantly.</p>
+        </div>
+        <div class="flex gap-3 flex-wrap">
+          <button onclick="openReceiptVault()" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            <i class="fas fa-file-invoice mr-2"></i>Receipt Vault
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-left text-sm text-slate-100">
+          <thead>
+            <tr class="bg-white/5">
+              <th class="px-4 py-3">Date</th>
+              <th class="px-4 py-3">Amount</th>
+              <th class="px-4 py-3">Method</th>
+              <th class="px-4 py-3">Purpose/Note</th>
+              <th class="px-4 py-3">Receipt</th>
+            </tr>
+          </thead>
+          <tbody id="paymentsTable" class="divide-y divide-white/10">
+            <tr>
+              <td colspan="5" class="px-4 py-6 text-center text-slate-400">Payments will appear once the finance office records them.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "74814528004",
+      appId: "1:74814528004:web:54abda6ae3c75ed5f0677f"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    const childAdm = localStorage.getItem('currentChildAdm');
+    const parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact');
+
+    let studentRecord = null;
+    let paymentIndex = [];
+    let chartInstance = null;
+
+    if (!childAdm || !parentContact) {
+      Swal.fire('Login required', 'Please sign in again so we can load your child data.', 'warning')
+        .then(() => window.location.href = '../index.html');
+    } else {
+      loadFinanceData();
+    }
+
+    async function loadFinanceData() {
+      try {
+        const snapshot = await db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${childAdm}`).once('value');
+        if (!snapshot.exists()) {
+          Swal.fire('Not found', 'We could not locate data for this child. Contact the school office.', 'error');
+          return;
+        }
+        studentRecord = snapshot.val();
+        hydrateProfile(studentRecord);
+        paymentIndex = buildPaymentIndex(studentRecord.payments || {});
+        populateYearFilter(paymentIndex);
+        renderFinance(paymentIndex);
+      } catch (error) {
+        console.error('Finance load error', error);
+        Swal.fire('Error', error.message || 'Unable to load finance records.', 'error');
+      }
+    }
+
+    function hydrateProfile(student) {
+      const name = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim() || 'Student';
+      document.getElementById('childName').textContent = name;
+      document.getElementById('childMeta').textContent = `ADM - ${student.adm || childAdm}`;
+      document.getElementById('reportingInfo').textContent = `Reporting: ${formatDate(student.reportingDate)}`;
+
+      if (student.photoUrl) {
+        const img = document.getElementById('childPhoto');
+        img.src = student.photoUrl;
+        img.classList.remove('hidden');
+        document.getElementById('photoPlaceholder').classList.add('hidden');
+      }
+    }
+
+    function buildPaymentIndex(paymentsObj) {
+      const entries = toArray(paymentsObj).map(entry => ({
+        ...entry,
+        amount: Number(entry.amount || 0),
+        date: entry.date || '',
+        method: entry.method || 'Cash',
+        note: entry.note || '',
+        timestamp: parseDate(entry.date, entry.createdAt),
+        key: entry._key
+      })).filter(item => item.amount > 0);
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+      entries.forEach((item, idx) => item.receiptNumber = String(idx + 1).padStart(4, '0'));
+      return entries;
+    }
+
+    function populateYearFilter(entries) {
+      const yearSet = new Set(entries.map(item => new Date(item.timestamp).getFullYear()).filter(year => !Number.isNaN(year)));
+      const select = document.getElementById('yearFilter');
+      const years = Array.from(yearSet).sort((a, b) => b - a);
+      select.innerHTML = `<option value="all">All Years</option>${years.map(year => `<option value="${year}">${year}</option>`).join('')}`;
+      select.addEventListener('change', () => renderFinance(paymentIndex));
+    }
+
+    function renderFinance(entries) {
+      const student = studentRecord || {};
+      const filtered = filterByYear(entries);
+
+      const totalFee = Number(student.totalFee || 0);
+      const paid = filtered.reduce((sum, entry) => sum + entry.amount, 0);
+      const overallPaid = entries.reduce((sum, entry) => sum + entry.amount, 0);
+      const balance = Math.max(totalFee - overallPaid, 0);
+
+      setStat('statTotalFee', formatCurrency(totalFee), 'statTotalFeeNote', `Program fee (${currentYear})`);
+      setStat('statPaid', formatCurrency(overallPaid), 'statPaidNote', `${filtered.length} payments recorded`);
+      setStat('statBalance', formatCurrency(balance), 'statBalanceNote', balance === 0 ? 'Fully settled' : 'Outstanding balance');
+
+      const lastPayment = entries.slice().reverse().find(Boolean);
+      if (lastPayment) {
+        setStat('statLastPayment', formatCurrency(lastPayment.amount), 'statLastPaymentNote', `${formatDate(lastPayment.date)} - ${lastPayment.method}`);
+      } else {
+        setStat('statLastPayment', 'TSh --', 'statLastPaymentNote', 'No payment recorded yet');
+      }
+
+      drawChart(filtered);
+      renderTable(filtered);
+    }
+
+    function filterByYear(entries) {
+      const selected = document.getElementById('yearFilter').value;
+      if (selected === 'all') return entries;
+      return entries.filter(entry => {
+        const year = new Date(entry.timestamp).getFullYear();
+        return String(year) === selected;
+      });
+    }
+
+    function drawChart(entries) {
+      const grouped = {};
+      entries.forEach(entry => {
+        const date = new Date(entry.timestamp);
+        if (Number.isNaN(date.getTime())) return;
+        const label = date.toLocaleDateString('en-GB', { month: 'short', day: '2-digit' });
+        grouped[label] = (grouped[label] || 0) + entry.amount;
+      });
+
+      const labels = Object.keys(grouped);
+      const data = labels.map(label => grouped[label]);
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(document.getElementById('paymentsChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Amount (TSh)',
+            data,
+            backgroundColor: 'rgba(16, 185, 129, 0.35)',
+            borderColor: 'rgba(16, 185, 129, 0.9)',
+            borderWidth: 1.5,
+            borderRadius: 8
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true, ticks: { color: '#bbf7d0' } },
+            x: { ticks: { color: '#bbf7d0' } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: context => ` ${formatCurrency(context.parsed.y)}`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function renderTable(entries) {
+      const tbody = document.getElementById('paymentsTable');
+      if (!entries.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No payments recorded for the selected period yet.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = entries.slice().reverse().map(entry => `
+        <tr class="hover:bg-white/5 transition">
+          <td class="px-4 py-3">${formatDate(entry.date)}</td>
+          <td class="px-4 py-3">${formatCurrency(entry.amount)}</td>
+          <td class="px-4 py-3">${entry.method}</td>
+          <td class="px-4 py-3">${entry.note || 'Tuition payment'}</td>
+          <td class="px-4 py-3">
+            <button class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs text-slate-100 transition"
+              onclick="openReceipt('${entry.receiptNumber}')">
+              Receipt #${entry.receiptNumber}
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function exportPayments(format) {
+      if (!paymentIndex.length) {
+        Swal.fire('No data', 'No payments have been recorded yet.', 'info');
+        return;
+      }
+      const data = paymentIndex.map(entry => ({
+        Date: formatDate(entry.date),
+        Amount: entry.amount,
+        Method: entry.method,
+        Purpose: entry.note || '',
+        Receipt: entry.receiptNumber
+      }));
+
+      if (format === 'csv') {
+        const csv = Papa.unparse(data);
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${childAdm}_payments.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(14);
+        doc.text('Payment History', 14, 18);
+        doc.autoTable({
+          startY: 26,
+          head: [['Date', 'Amount', 'Method', 'Purpose', 'Receipt']],
+          body: data.map(item => [item.Date, formatCurrency(item.Amount), item.Method, item.Purpose, item.Receipt]),
+          styles: { fontSize: 10 }
+        });
+        doc.save(`${childAdm}_payments.pdf`);
+      }
+    }
+
+    function downloadChart() {
+      if (!chartInstance) return;
+      const link = document.createElement('a');
+      link.href = chartInstance.toBase64Image();
+      link.download = `${childAdm}_payments_chart.png`;
+      link.click();
+    }
+
+    function openReceipt(receiptNumber) {
+      if (!receiptNumber) {
+        Swal.fire('Receipt not found', 'Payment has not been assigned a receipt number yet.', 'info');
+        return;
+      }
+      window.open(`prefonechildreceipt.html?receipt=${receiptNumber}`, '_blank');
+    }
+
+    function openReceiptVault() {
+      window.open('prefonechildreceipt.html', '_blank');
+    }
+
+    function setStat(id, value, noteId, note) {
+      document.getElementById(id).textContent = value;
+      document.getElementById(noteId).textContent = note;
+    }
+
+    function logout() {
+      localStorage.removeItem('prefoneParent');
+      localStorage.removeItem('prefoneParentContact');
+      localStorage.removeItem('prefoneParentName');
+      localStorage.removeItem('prefoneParentIcon');
+      localStorage.removeItem('currentChildAdm');
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

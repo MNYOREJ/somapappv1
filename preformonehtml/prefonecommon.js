@@ -67,3 +67,31 @@ function exportCSV(data, filename) {
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
 }
+
+// Helpers shared across dashboards
+function toArray(obj) {
+  if (!obj) return [];
+  if (Array.isArray(obj)) return obj.filter(Boolean);
+  return Object.entries(obj).map(([key, value]) => ({ ...value, _key: key }));
+}
+
+function parseDate(...candidates) {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const parsed = new Date(candidate);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+  }
+  return Date.now();
+}
+
+function formatCurrency(value) {
+  const amount = Number(value || 0);
+  return `TSh ${amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+}
+
+function formatDate(value) {
+  if (!value) return 'Not set';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}

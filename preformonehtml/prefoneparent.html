@@ -1,62 +1,1110 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>SoMAp — Preform One Parent Dashboard</title>
-  <!-- Same -->
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp &mdash; Preform One Parent</title>
+
+  <!-- Firebase Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- UI Libraries -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Shared helpers -->
   <script src="prefonecommon.js"></script>
-  <style> body { background: linear-gradient(to right, #667eea, #764ba2); } </style>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Poppins', 'Inter', 'system-ui', 'sans-serif']
+          },
+          colors: {
+            somap: {
+              midnight: '#020617',
+              ocean: '#0ea5e9',
+              orchid: '#8b5cf6',
+              sunrise: '#f97316'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at top, rgba(14, 165, 233, 0.45), rgba(2, 6, 23, 0.95) 60%);
+      min-height: 100vh;
+      color: #e2e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      box-shadow: 0 30px 80px -40px rgba(15, 23, 42, 0.9);
+      border-radius: 1.75rem;
+      backdrop-filter: blur(16px);
+    }
+    .stat-card {
+      background: linear-gradient(140deg, rgba(14, 165, 233, 0.2), rgba(99, 102, 241, 0.18));
+      border-radius: 1.2rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      transition: transform 160ms ease, border-color 200ms ease, box-shadow 200ms ease;
+    }
+    .stat-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(14, 165, 233, 0.45);
+      box-shadow: 0 22px 35px -25px rgba(14, 165, 233, 0.55);
+    }
+    .chip {
+      border-radius: 999px;
+      padding: 0.45rem 1rem;
+      border: 1px solid transparent;
+      background: rgba(148, 163, 184, 0.12);
+      color: rgba(226, 232, 240, 0.9);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 140ms ease;
+    }
+    .chip img {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      object-fit: cover;
+      border: 2px solid rgba(148, 163, 184, 0.35);
+    }
+    .chip.active {
+      background: linear-gradient(120deg, rgba(59, 130, 246, 0.32), rgba(147, 51, 234, 0.4));
+      border-color: rgba(59, 130, 246, 0.6);
+      color: #fff;
+      box-shadow: 0 18px 30px -25px rgba(59, 130, 246, 0.6);
+    }
+    .menu-popover {
+      position: fixed;
+      top: 88px;
+      left: 32px;
+      width: 320px;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 1.5rem;
+      padding: 1.25rem;
+      box-shadow: 0 25px 55px -30px rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(18px);
+      z-index: 90;
+    }
+    .menu-grid a {
+      border-radius: 1rem;
+      padding: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: rgba(226, 232, 240, 0.92);
+      background: rgba(148, 163, 184, 0.08);
+      border: 1px solid transparent;
+      transition: transform 160ms ease, border-color 200ms ease, background 200ms ease;
+    }
+    .menu-grid a:hover {
+      transform: translateY(-4px);
+      border-color: rgba(59, 130, 246, 0.45);
+      background: linear-gradient(120deg, rgba(59, 130, 246, 0.25), rgba(147, 51, 234, 0.22));
+    }
+    .menu-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.45);
+      backdrop-filter: blur(2px);
+      z-index: 80;
+    }
+    .resource-grid::-webkit-scrollbar {
+      height: 10px;
+    }
+    .resource-grid::-webkit-scrollbar-track {
+      background: rgba(148, 163, 184, 0.16);
+      border-radius: 999px;
+    }
+    .resource-grid::-webkit-scrollbar-thumb {
+      background: rgba(71, 85, 105, 0.65);
+      border-radius: 999px;
+    }
+    .receipt-card {
+      background: rgba(15, 23, 42, 0.82);
+      border-radius: 1rem;
+      border: 1px dashed rgba(148, 163, 184, 0.45);
+      padding: 1rem;
+    }
+    .badge-soft {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      background: rgba(148, 163, 184, 0.16);
+      color: rgba(226, 232, 240, 0.9);
+      padding: 0.25rem 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-600 text-white p-4">
-  <div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold mb-6"><i class="fas fa-home"></i> Preform One Parent Dashboard</h1>
-    <button onclick="logout()" class="bg-red-500 p-2 rounded mb-4">Logout</button>
-    
-    <!-- Child Selector (if multiple) -->
-    <select id="childSelect" onchange="loadParentData()" class="p-2 rounded bg-white/20 text-white mb-4">
-      <!-- Populated dynamically -->
-    </select>
-    
-    <!-- Cards -->
-    <div class="grid grid-cols-2 gap-4 mb-4">
-      <a href="prefonechildattendance.html" class="bg-blue-500 p-4 rounded text-center"><i class="fas fa-calendar"></i><br>Attendance</a>
-      <a href="prefoneacademic.html?view=parent" class="bg-green-500 p-4 rounded text-center"><i class="fas fa-chart-bar"></i><br>Scores</a>
-      <a href="prefonebooks.html" class="bg-yellow-500 p-4 rounded text-center"><i class="fas fa-book"></i><br>Books</a>
-      <a href="prefoneclassjournal.html?view=parent" class="bg-purple-500 p-4 rounded text-center"><i class="fas fa-comments"></i><br>Class Journal (Confirm)</a>
-    </div>
-    
-    <!-- Summary -->
-    <div id="parentSummary" class="bg-white/10 p-4 rounded"></div>
+<body>
+  <div class="max-w-6xl mx-auto px-4 py-10 lg:py-14">
+    <header class="flex items-center justify-between mb-10">
+      <div class="flex items-center gap-4">
+        <button id="menuToggle" class="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-white hover:bg-white/15 transition">
+          <i class="fas fa-ellipsis-v text-xl"></i>
+        </button>
+        <div>
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School &mdash; Preform One</p>
+          <h1 class="text-3xl lg:text-4xl font-bold font-display">Parent Experience Hub</h1>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="parentName" class="hidden sm:inline-flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full text-sm text-slate-200">
+          <i class="fas fa-user-shield text-sky-300"></i>
+          <span class="truncate max-w-[12rem]"></span>
+        </span>
+        <button id="logoutBtn" class="bg-red-500/80 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-semibold transition flex items-center gap-2">
+          <i class="fas fa-sign-out-alt"></i>
+          Logout
+        </button>
+      </div>
+    </header>
+
+    <section id="childSwitcher" class="mb-8 hidden">
+      <div class="flex flex-wrap gap-3" id="childChipContainer"></div>
+    </section>
+
+    <section class="glass-panel p-6 lg:p-8">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
+        <div>
+          <h3 class="text-xl font-semibold">Class Life & Communications</h3>
+          <p class="text-sm text-slate-300">Keep tabs on class journals, homework, and announcements teachers share.</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <button class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-slate-100 transition" onclick="navigateTo('prefoneclassjournal.html?view=parent')">
+            <i class="fas fa-book-open-reader mr-2"></i> View Journal
+          </button>
+          <button class="px-4 py-2 rounded-xl bg-slate-900/70 hover:bg-slate-900 text-slate-100 transition" onclick="navigateTo('prefoneclassattendance.html')">
+            <i class="fas fa-clipboard-check mr-2"></i> Attendance Hub
+          </button>
+        </div>
+      </div>
+      <div id="journalHighlights" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 text-sm">
+        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Latest Teacher Note</p>
+          <p>Teachers will post updates here each week. Stay tuned for academic highlights and quick reminders.</p>
+        </div>
+        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Upcoming</p>
+          <p>Expect calendar invites for parent clinics, key assessments, and field experiences once schedules are published.</p>
+        </div>
+        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Feedback</p>
+          <p>Share feedback via school office or class teacher so we continue perfecting SoMAp for guardians.</p>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script>
-    // From auth: Assume localStorage has parentContact, load children
-    const parentContact = localStorage.getItem('parentContact') || '';
-    db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).orderByChild('parentContact').equalTo(parentContact).once('value', snap => {
-      const children = Object.entries(snap.val() || {});
-      const select = document.getElementById('childSelect');
-      select.innerHTML = children.map(([adm, s]) => `<option value="${adm}">${s.firstName} ${s.lastName}</option>`).join('');
-      if (children.length) loadParentData();
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "74814528004",
+      appId: "1:74814528004:web:54abda6ae3c75ed5f0677f"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    const parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact') || '';
+    const parentFullName = localStorage.getItem('prefoneParentName') || localStorage.getItem('parentName') || '';
+
+    const state = {
+      children: [],
+      activeAdm: localStorage.getItem('currentChildAdm') || '',
+      attendanceChart: null,
+      allPaymentsIndex: [],
+      books: []
+    };
+
+    const dom = {
+      parentName: document.querySelector('#parentName span'),
+      childChipContainer: document.getElementById('childChipContainer'),
+      childSwitcherSection: document.getElementById('childSwitcher'),
+      childName: document.getElementById('childName'),
+      childAdm: document.getElementById('childAdm'),
+      childPhoto: document.getElementById('childPhoto'),
+      photoFallback: document.getElementById('photoFallback'),
+      reportingDate: document.getElementById('reportingDate'),
+      formerSchool: document.getElementById('formerSchool'),
+      gender: document.getElementById('gender'),
+      parentDisplayName: document.getElementById('parentDisplayName'),
+      parentPhone: document.getElementById('parentPhone'),
+      parentEmail: document.getElementById('parentEmail'),
+      statAttendancePct: document.getElementById('statAttendancePct'),
+      statAttendanceNote: document.getElementById('statAttendanceNote'),
+      statBalance: document.getElementById('statBalance'),
+      statFinanceNote: document.getElementById('statFinanceNote'),
+      statLastPayment: document.getElementById('statLastPayment'),
+      statReceiptNote: document.getElementById('statReceiptNote'),
+      statExam: document.getElementById('statExam'),
+      statExamNote: document.getElementById('statExamNote'),
+      attendanceTrendChart: document.getElementById('attendanceTrendChart'),
+      recentAttendance: document.getElementById('recentAttendance'),
+      recentNotes: document.getElementById('recentNotes'),
+      paymentTimeline: document.getElementById('paymentTimeline'),
+      latestReceiptNumber: document.getElementById('latestReceiptNumber'),
+      latestReceiptDate: document.getElementById('latestReceiptDate'),
+      latestReceiptAmount: document.getElementById('latestReceiptAmount'),
+      latestReceiptPurpose: document.getElementById('latestReceiptPurpose'),
+      academicExamLabel: document.getElementById('academicExamLabel'),
+      academicOverall: document.getElementById('academicOverall'),
+      academicBestSubject: document.getElementById('academicBestSubject'),
+      academicTeacherComment: document.getElementById('academicTeacherComment'),
+      academicTable: document.getElementById('academicTable'),
+      booksContainer: document.getElementById('booksContainer'),
+      journalHighlights: document.getElementById('journalHighlights'),
+      quickIdCard: document.getElementById('quickIdCard'),
+      quickReport: document.getElementById('quickReport'),
+      openReceiptBtn: document.getElementById('openReceiptBtn'),
+      openReceiptHistoryBtn: document.getElementById('openReceiptHistoryBtn'),
+      menuBackdrop: document.getElementById('menuBackdrop'),
+      menuPopover: document.getElementById('menuPopover'),
+      menuToggle: document.getElementById('menuToggle'),
+      logoutBtn: document.getElementById('logoutBtn'),
+      parentNameChip: document.getElementById('parentName')
+    };
+
+    if (parentFullName && dom.parentName) {
+      dom.parentName.textContent = parentFullName;
+      dom.parentNameChip?.classList.remove('hidden');
+    }
+
+    dom.logoutBtn?.addEventListener('click', () => {
+      localStorage.removeItem('prefoneParent');
+      localStorage.removeItem('prefoneParentContact');
+      localStorage.removeItem('prefoneParentName');
+      localStorage.removeItem('prefoneParentIcon');
+      localStorage.removeItem('currentChildAdm');
+      window.location.href = '../index.html';
     });
-    
-    function loadParentData() {
-      const adm = document.getElementById('childSelect').value;
-      if (!adm) return;
-      localStorage.setItem('currentChildAdm', adm);
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${adm}`).once('value', snap => {
-        const s = snap.val();
-        const summary = document.getElementById('parentSummary');
-        const paid = s.payments.reduce((sum, p) => sum + p.amount, 0);
-        summary.innerHTML = `
-          <h2>${s.firstName} ${s.lastName}</h2>
-          <p>Reporting Date: ${s.reportingDate}</p>
-          <p>Total Fee: ${s.totalFee} TSh | Paid: ${paid} TSh | Balance: ${s.totalFee - paid} TSh</p>
-          <p>Contact: ${s.contact}</p>
-          <img src="${s.photoUrl}" alt="Photo" class="w-32 h-32 rounded">
+
+    dom.menuToggle?.addEventListener('click', () => toggleMenu(true));
+    dom.menuBackdrop?.addEventListener('click', () => toggleMenu(false));
+
+    function toggleMenu(show) {
+      dom.menuBackdrop.classList.toggle('hidden', !show);
+      dom.menuPopover.classList.toggle('hidden', !show);
+    }
+
+    if (!parentContact) {
+      Swal.fire('Sign In Required', 'Please sign in again so we can load your child records.', 'warning')
+        .then(() => window.location.href = '../index.html');
+    } else {
+      loadParentDashboard();
+    }
+
+    async function loadParentDashboard() {
+      try {
+        const snapshot = await db
+          .ref(`/schools/Socrates School Preform one/${currentYear}/students`)
+          .orderByChild('parentContact')
+          .equalTo(parentContact)
+          .once('value');
+
+        const childrenObj = snapshot.val() || {};
+        const children = Object.entries(childrenObj).map(([adm, data]) => ({
+          adm,
+          ...data
+        }));
+
+        if (!children.length) {
+          dom.childSwitcherSection?.classList.add('hidden');
+          Swal.fire('No Student Linked', 'We could not find a Preform One student registered with your phone. Contact the school office for assistance.', 'info');
+          return;
+        }
+
+        state.children = children.sort((a, b) => {
+          const nameA = `${a.firstName || ''} ${a.lastName || ''}`.trim().toLowerCase();
+          const nameB = `${b.firstName || ''} ${b.lastName || ''}`.trim().toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+
+        if (!state.activeAdm || !state.children.find(child => child.adm === state.activeAdm)) {
+          state.activeAdm = state.children[0].adm;
+        }
+        localStorage.setItem('currentChildAdm', state.activeAdm);
+
+        renderChildSwitcher();
+        await buildPaymentIndex(state.children);
+        await loadBooks();
+        renderActiveChild();
+      } catch (error) {
+        console.error('Error loading parent view:', error);
+        Swal.fire('Error', error.message || 'Unable to load dashboard. Please try again shortly.', 'error');
+      }
+    }
+
+    function renderChildSwitcher() {
+      if (!dom.childChipContainer) return;
+      dom.childChipContainer.innerHTML = '';
+      state.children.forEach(child => {
+        const chip = document.createElement('button');
+        chip.className = `chip${child.adm === state.activeAdm ? ' active' : ''}`;
+        chip.dataset.adm = child.adm;
+        chip.innerHTML = `
+          ${child.photoUrl ? `<img src="${child.photoUrl}" alt="${safeName(child)}">` : '<div class="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-sm font-semibold">PF1</div>'}
+          <span class="text-sm font-medium">${safeName(child)}</span>
         `;
+        chip.addEventListener('click', () => {
+          if (state.activeAdm === child.adm) return;
+          state.activeAdm = child.adm;
+          localStorage.setItem('currentChildAdm', child.adm);
+          renderChildSwitcher();
+          renderActiveChild();
+        });
+        dom.childChipContainer.appendChild(chip);
+      });
+
+      dom.childSwitcherSection?.classList.toggle('hidden', state.children.length <= 1);
+    }
+
+    function renderActiveChild() {
+      const child = state.children.find(c => c.adm === state.activeAdm);
+      if (!child) return;
+      localStorage.setItem('currentChildName', safeName(child));
+
+      dom.childName.textContent = safeName(child);
+      dom.childAdm.textContent = `ADM - ${child.adm}`;
+
+      if (child.photoUrl) {
+        dom.childPhoto.src = child.photoUrl;
+        dom.childPhoto.classList.remove('hidden');
+        dom.photoFallback.classList.add('hidden');
+      } else {
+        dom.childPhoto.classList.add('hidden');
+        dom.photoFallback.classList.remove('hidden');
+      }
+
+      dom.reportingDate.textContent = formatDate(child.reportingDate);
+      dom.formerSchool.textContent = child.formerSchool || 'Not provided';
+      dom.gender.textContent = child.gender || 'Not provided';
+      dom.parentDisplayName.textContent = child.parentName || parentFullName || 'Parent/Guardian';
+      dom.parentPhone.textContent = child.parentContact || parentContact;
+      dom.parentEmail.textContent = child.parentEmail || 'Not captured';
+
+      renderAttendance(child);
+      renderFinance(child);
+      renderAcademics(child);
+      renderJournalHighlights(child);
+      renderBooks();
+
+      dom.quickIdCard.onclick = () => openChildIdCard(child);
+      dom.quickReport.onclick = () => openChildReport(child);
+      dom.openReceiptBtn.onclick = () => openLatestReceipt(child);
+      dom.openReceiptHistoryBtn.onclick = () => navigateTo('prefonechildreceipt.html');
+    }
+
+    function renderAttendance(child) {
+      const records = toArray(child.attendance).filter(Boolean);
+      if (!records.length) {
+        dom.statAttendancePct.textContent = '--%';
+        dom.statAttendanceNote.textContent = 'Teachers will start logging attendance on the first school day.';
+        dom.recentAttendance.textContent = 'Attendance records not yet captured.';
+        dom.recentNotes.textContent = '-';
+        drawAttendanceChart([]);
+        return;
+      }
+
+      const currentMonthKey = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const monthlyRecords = records.filter(r => {
+        if (!r.date) return false;
+        try {
+          const label = new Date(r.date).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+          return label === currentMonthKey;
+        } catch {
+          return false;
+        }
+      });
+
+      const presentCount = monthlyRecords.filter(r => isPresent(r)).length;
+      const totalCount = monthlyRecords.length || records.length;
+      const pct = totalCount ? Math.round((presentCount / totalCount) * 100) : 0;
+
+      dom.statAttendancePct.textContent = `${pct}%`;
+      dom.statAttendanceNote.textContent = `${presentCount} of ${totalCount} days marked ${monthlyRecords.length ? 'this month' : 'so far'}.`;
+
+      const recent = records.slice(-1)[0];
+      if (recent) {
+        const statusLabel = recent.present ? 'Present' : (recent.status || 'Absent');
+        dom.recentAttendance.textContent = `${formatDate(recent.date)} - ${statusLabel}`;
+        dom.recentNotes.textContent = recent.notes || 'No note from teacher.';
+      }
+
+      drawAttendanceChart(records);
+    }
+
+    function drawAttendanceChart(records) {
+      const grouped = {};
+      records.forEach(rec => {
+        if (!rec?.date) return;
+        const date = new Date(rec.date);
+        if (Number.isNaN(date.getTime())) return;
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        if (!grouped[key]) {
+          grouped[key] = { present: 0, total: 0, label: date.toLocaleString('en-US', { month: 'short', year: 'numeric' }) };
+        }
+        grouped[key].total += 1;
+        if (isPresent(rec)) grouped[key].present += 1;
+      });
+
+      const sortedKeys = Object.keys(grouped).sort();
+      const recentKeys = sortedKeys.slice(-6);
+      const labels = recentKeys.map(k => grouped[k].label);
+      const data = recentKeys.map(k => grouped[k].total ? Math.round((grouped[k].present / grouped[k].total) * 100) : 0);
+
+      if (state.attendanceChart) {
+        state.attendanceChart.destroy();
+      }
+      state.attendanceChart = new Chart(dom.attendanceTrendChart.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Attendance %',
+            data,
+            tension: 0.35,
+            fill: true,
+            borderColor: 'rgba(56, 189, 248, 0.85)',
+            backgroundColor: 'rgba(14, 165, 233, 0.25)',
+            pointBackgroundColor: '#38bdf8',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: true, ticks: { color: '#cbd5f5', callback: value => `${value}%` }, max: 100 },
+            x: { ticks: { color: '#cbd5f5' } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: context => ` ${context.parsed.y}% present`
+              }
+            }
+          }
+        }
       });
     }
-    
-    function logout() { localStorage.clear(); window.location.href = '../index.html'; }
+
+    function renderFinance(child) {
+      const paymentsArray = toArray(child.payments).map(entry => ({
+        ...entry,
+        amount: Number(entry.amount || 0),
+        date: entry.date || '',
+        method: entry.method || 'Cash',
+        note: entry.note || ''
+      })).filter(entry => entry.amount > 0);
+
+      const paid = paymentsArray.reduce((sum, p) => sum + p.amount, 0);
+      const totalFee = Number(child.totalFee || 0);
+      const balance = Math.max(totalFee - paid, 0);
+
+      dom.statBalance.textContent = formatCurrency(balance);
+      dom.statFinanceNote.textContent = `Paid ${formatCurrency(paid)} of ${formatCurrency(totalFee)} expected.`;
+
+      const lastPayment = paymentsArray.sort((a, b) => parseDate(b.date, b.createdAt) - parseDate(a.date, a.createdAt))[0];
+
+      if (lastPayment) {
+        dom.statLastPayment.textContent = formatCurrency(lastPayment.amount);
+        dom.statReceiptNote.textContent = `${formatDate(lastPayment.date)} - ${lastPayment.method}`;
+
+        const receipt = state.allPaymentsIndex.find(item => item.adm === child.adm && item.key === lastPayment._key);
+        if (receipt) {
+          dom.latestReceiptNumber.textContent = `Receipt # ${receipt.receiptNumber}`;
+          dom.latestReceiptDate.textContent = `Date: ${formatDate(lastPayment.date)}`;
+          dom.latestReceiptAmount.textContent = formatCurrency(lastPayment.amount);
+          dom.latestReceiptPurpose.textContent = lastPayment.note || 'Tuition payment';
+          dom.openReceiptBtn.dataset.receipt = receipt.receiptNumber;
+          dom.openReceiptBtn.onclick = () => navigateTo(`prefonechildreceipt.html?receipt=${receipt.receiptNumber}`);
+        } else {
+          dom.latestReceiptNumber.textContent = 'Receipt # ----';
+          dom.latestReceiptDate.textContent = 'Date: --';
+          dom.latestReceiptAmount.textContent = formatCurrency(lastPayment.amount);
+          dom.latestReceiptPurpose.textContent = lastPayment.note || 'Tuition payment';
+          dom.openReceiptBtn.onclick = () => navigateTo('prefonechildreceipt.html');
+        }
+      } else {
+        dom.statLastPayment.textContent = 'Awaiting first';
+        dom.statReceiptNote.textContent = 'No payment on record yet.';
+        dom.latestReceiptNumber.textContent = 'Receipt # ----';
+        dom.latestReceiptDate.textContent = 'Date: --';
+        dom.latestReceiptAmount.textContent = 'TSh --';
+        dom.latestReceiptPurpose.textContent = 'No payment recorded';
+        dom.openReceiptBtn.onclick = () => Swal.fire('No payment yet', 'Receipts appear once a payment is captured by finance office.', 'info');
+      }
+
+      renderPaymentTimeline(paymentsArray, child);
+    }
+
+    function renderPaymentTimeline(payments, child) {
+      if (!dom.paymentTimeline) return;
+      if (!payments.length) {
+        dom.paymentTimeline.innerHTML = `<div class="py-4 text-slate-400">Finance office has not captured any payment yet.</div>`;
+        return;
+      }
+      const sorted = payments
+        .map(p => ({
+          ...p,
+          _timestamp: parseDate(p.date, p.createdAt),
+          _key: p._key
+        }))
+        .sort((a, b) => b._timestamp - a._timestamp);
+
+      dom.paymentTimeline.innerHTML = sorted.map(payment => {
+        const receipt = state.allPaymentsIndex.find(item => item.adm === child.adm && item.key === payment._key);
+        return `
+          <div class="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p class="font-semibold text-white">${formatCurrency(payment.amount)}</p>
+              <p class="text-xs text-slate-400 uppercase tracking-[0.4em]">${formatDate(payment.date)} - ${payment.method}</p>
+              ${payment.note ? `<p class="text-sm text-slate-300 mt-1">Purpose: ${payment.note}</p>` : ''}
+            </div>
+            <button class="text-sm px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition"
+              onclick="navigateTo('prefonechildreceipt.html${receipt ? `?receipt=${receipt.receiptNumber}` : ''}')">
+              ${receipt ? `Receipt #${receipt.receiptNumber}` : 'Generate Receipt'}
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderAcademics(child) {
+      const scoresArray = toArray(child.scores).map(entry => ({
+        ...entry,
+        _timestamp: parseDate(entry.recordedAt, entry.updatedAt, entry.createdAt),
+        month: entry.month || '',
+        examType: entry.examType || ''
+      }));
+
+      if (!scoresArray.length) {
+        dom.statExam.textContent = '--%';
+        dom.statExamNote.textContent = 'Awaiting first assessment.';
+        dom.academicExamLabel.textContent = 'No assessment yet';
+        dom.academicOverall.textContent = '--%';
+        dom.academicBestSubject.textContent = 'Awaiting scores';
+        dom.academicTeacherComment.textContent = 'Teacher comment will appear alongside published report.';
+        dom.academicTable.innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">No assessments have been captured for this learner yet.</td></tr>`;
+        return;
+      }
+
+      const latest = scoresArray.sort((a, b) => (b._timestamp || 0) - (a._timestamp || 0))[0];
+      const subjects = latest.subjects || {};
+      const subjectEntries = Object.entries(subjects).map(([subject, data]) => {
+        const score = Number(data?.score || 0);
+        const max = Number(data?.max || 100) || 100;
+        const percentage = max ? (score / max) * 100 : 0;
+        return {
+          subject,
+          score,
+          max,
+          percentage,
+          grade: gradeFromPercent(percentage)
+        };
+      }).sort((a, b) => b.percentage - a.percentage);
+
+      const overall = subjectEntries.length
+        ? (subjectEntries.reduce((sum, row) => sum + row.percentage, 0) / subjectEntries.length)
+        : 0;
+
+      dom.statExam.textContent = `${overall.toFixed(1)}%`;
+      dom.statExamNote.textContent = `${latest.examType || 'Assessment'} - ${latest.month || ''}`.trim() || 'Latest assessment';
+
+      dom.academicExamLabel.textContent = `${latest.examType || 'Assessment'} (${latest.month || 'Month not set'})`;
+      dom.academicOverall.textContent = `${overall.toFixed(1)}%`;
+
+      if (subjectEntries.length) {
+        dom.academicBestSubject.textContent = `${subjectEntries[0].subject} - ${subjectEntries[0].percentage.toFixed(1)}%`;
+      } else {
+        dom.academicBestSubject.textContent = 'Scores pending';
+      }
+
+      dom.academicTeacherComment.textContent = latest.teacherComment || 'Teacher comment coming soon.';
+
+      dom.academicTable.innerHTML = subjectEntries.length
+        ? subjectEntries.map(row => `
+            <tr class="hover:bg-white/5 transition">
+              <td class="px-4 py-3">${row.subject}</td>
+              <td class="px-4 py-3">${row.score} / ${row.max}</td>
+              <td class="px-4 py-3">${row.percentage.toFixed(1)}%</td>
+              <td class="px-4 py-3">${row.grade}</td>
+            </tr>
+          `).join('')
+        : `<tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">Subject entries pending.</td></tr>`;
+    }
+
+    function renderBooks() {
+      if (!dom.booksContainer) return;
+      if (!state.books.length) {
+        dom.booksContainer.innerHTML = `
+          <div class="flex-1 min-w-[220px] bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+            <p>No books uploaded yet for Preform One. Once teachers add resources they will appear here to read online.</p>
+          </div>
+        `;
+        return;
+      }
+
+      dom.booksContainer.innerHTML = state.books.map(book => `
+        <div class="min-w-[240px] max-w-[260px] bg-slate-900/60 border border-white/10 rounded-2xl p-5 flex flex-col gap-3">
+          <div>
+            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-1">${book.subject || 'General'}</p>
+            <h4 class="text-lg font-semibold text-white line-clamp-2">${book.title}</h4>
+          </div>
+          <p class="text-xs text-slate-400 flex-1">Uploaded ${formatDate(book.uploadedAt)} - ${book.uploader || 'SoMAp Team'}</p>
+          <button class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-slate-100 transition"
+            onclick="openBookModal('${encodeURIComponent(book.title)}', '${encodeURIComponent(book.subject || 'General')}', '${encodeURIComponent(book.url)}')">
+            Read Now
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function renderJournalHighlights(child) {
+      dom.journalHighlights.innerHTML = `
+        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Student voice</p>
+          <p>We will surface personalised highlights for ${safeName(child)} here - attendance commendations, homework reminders, and class journal acknowledgements.</p>
+        </div>
+        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Upcoming</p>
+          <p>Expect calendar invites for parent clinics, key assessments, and field experiences once schedules are published.</p>
+        </div>
+        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Feedback</p>
+          <p>Share feedback via school office or class teacher so we continue perfecting SoMAp for guardians.</p>
+        </div>
+      `;
+    }
+
+    async function buildPaymentIndex(children) {
+      const index = [];
+      children.forEach(child => {
+        const paymentsObj = child.payments || {};
+        Object.entries(paymentsObj).forEach(([key, payment]) => {
+          index.push({
+            adm: child.adm,
+            name: safeName(child),
+            key,
+            amount: Number(payment.amount || 0),
+            date: payment.date || '',
+            method: payment.method || 'Cash',
+            note: payment.note || '',
+            timestamp: parseDate(payment.date, payment.createdAt)
+          });
+        });
+      });
+      index.sort((a, b) => a.timestamp - b.timestamp);
+      index.forEach((entry, idx) => entry.receiptNumber = String(idx + 1).padStart(4, '0'));
+      state.allPaymentsIndex = index;
+    }
+
+    async function loadBooks() {
+      try {
+        const snapshot = await db.ref(`/schools/Socrates School Preform one/${currentYear}/books`).once('value');
+        const booksObj = snapshot.val() || {};
+        const books = Object.values(booksObj).map(book => ({
+          title: book.title || book.name || 'Preform Resource',
+          subject: book.subject || 'General',
+          url: book.url || '#',
+          uploadedAt: book.uploadedAt || book.dateUploaded || '',
+          uploader: book.uploadedBy || 'Preform Office'
+        }));
+        state.books = books.sort((a, b) => parseDate(b.uploadedAt) - parseDate(a.uploadedAt));
+      } catch (error) {
+        console.warn('Unable to load books', error);
+        state.books = [];
+      }
+    }
+
+    function openChildIdCard(child) {
+      const params = new URLSearchParams({
+        adm: child.adm,
+        name: safeName(child),
+        phone: child.parentContact || parentContact
+      });
+      window.open(`prefonegenerateid.html?${params.toString()}`, '_blank');
+    }
+
+    function openChildReport(child) {
+      const params = new URLSearchParams({
+        adm: child.adm,
+        name: safeName(child),
+        phone: child.parentContact || parentContact
+      });
+      window.open(`prefonereportform.html?${params.toString()}`, '_blank');
+    }
+
+    function openLatestReceipt(child) {
+      const receipt = state.allPaymentsIndex.slice().reverse().find(item => item.adm === child.adm);
+      if (!receipt) {
+        Swal.fire('No receipt yet', 'Receipts appear once a payment is captured by finance office.', 'info');
+        return;
+      }
+      navigateTo(`prefonechildreceipt.html?receipt=${receipt.receiptNumber}`);
+    }
+
+    function openBookModal(titleEncoded, subjectEncoded, urlEncoded) {
+      const title = decodeURIComponent(titleEncoded);
+      const subject = decodeURIComponent(subjectEncoded);
+      const url = decodeURIComponent(urlEncoded);
+      document.getElementById('bookModalTitle').textContent = title;
+      document.getElementById('bookModalSubject').textContent = subject;
+      document.getElementById('bookModalFrame').src = url;
+      document.getElementById('bookModal').classList.remove('hidden');
+    }
+
+    function closeBookModal() {
+      document.getElementById('bookModalFrame').src = '';
+      document.getElementById('bookModal').classList.add('hidden');
+    }
+
+    function navigateTo(path) {
+      localStorage.setItem('currentChildAdm', state.activeAdm);
+      window.location.href = path;
+    }
+
+    function toArray(obj) {
+      if (!obj) return [];
+      if (Array.isArray(obj)) return obj.filter(Boolean);
+      return Object.entries(obj).map(([key, value]) => ({ ...value, _key: key }));
+    }
+
+    function safeName(child) {
+      const first = child.firstName || '';
+      const middle = child.middleName ? ` ${child.middleName}` : '';
+      const last = child.lastName ? ` ${child.lastName}` : '';
+      return `${first}${middle}${last}`.trim() || child.adm || 'Student';
+    }
+
+    function isPresent(record) {
+      if (record.present === true) return true;
+      const code = String(record.status || record.am || record.pm || '').toUpperCase();
+      return code === 'P';
+    }
+
+    function formatDate(value) {
+      if (!value) return 'Not set';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return value;
+      return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function parseDate(...candidates) {
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+        const parsed = new Date(candidate);
+        if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+      }
+      return Date.now();
+    }
+
+    function formatCurrency(amount) {
+      const value = Number(amount || 0);
+      return `TSh ${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+    }
+
+    function gradeFromPercent(percent) {
+      if (percent >= 80) return 'A';
+      if (percent >= 70) return 'B';
+      if (percent >= 60) return 'C';
+      if (percent >= 50) return 'D';
+      if (percent > 0) return 'E';
+      return '-';
+    }
+
+    window.navigateTo = navigateTo;
+    window.openBookModal = openBookModal;
+    window.closeBookModal = closeBookModal;
   </script>
 </body>
 </html>
+  <nav id="menuPopover" class="menu-popover hidden">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <p class="uppercase tracking-[0.4em] text-xs text-slate-400">Quick Access</p>
+        <h4 class="text-lg font-semibold text-white">Explore your child's world</h4>
+      </div>
+      <button class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center" onclick="toggleMenu(false)">
+        <i class="fas fa-xmark text-white text-lg"></i>
+      </button>
+    </div>
+    <div class="grid grid-cols-1 gap-3 menu-grid">
+      <a href="prefonechildattendance.html">
+        <i class="fas fa-calendar-days w-10 h-10 flex items-center justify-center rounded-xl bg-sky-500/30 text-sky-200"></i>
+        <div>
+          <p class="font-semibold text-white">Daily Attendance</p>
+          <p class="text-xs text-slate-300">Absence reasons, teacher remarks, calendar filters</p>
+        </div>
+      </a>
+      <a href="prefonechildacademic.html">
+        <i class="fas fa-chart-line w-10 h-10 flex items-center justify-center rounded-xl bg-purple-500/30 text-purple-200"></i>
+        <div>
+          <p class="font-semibold text-white">Academic Tracker</p>
+          <p class="text-xs text-slate-300">Assessment summaries, subject mastery, growth charts</p>
+        </div>
+      </a>
+      <a href="prefonechildfinance.html">
+        <i class="fas fa-coins w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-500/30 text-emerald-200"></i>
+        <div>
+          <p class="font-semibold text-white">Finance Dashboard</p>
+          <p class="text-xs text-slate-300">Invoices, payments timeline, receipt downloads</p>
+        </div>
+      </a>
+      <a href="prefonechildreceipt.html">
+        <i class="fas fa-file-invoice w-10 h-10 flex items-center justify-center rounded-xl bg-amber-500/30 text-amber-200"></i>
+        <div>
+          <p class="font-semibold text-white">Receipt Vault</p>
+          <p class="text-xs text-slate-300">Generate official SoMAp receipts by payment date</p>
+        </div>
+      </a>
+      <a href="prefonebooks.html">
+        <i class="fas fa-book-open w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-500/30 text-indigo-200"></i>
+        <div>
+          <p class="font-semibold text-white">Full Book Library</p>
+          <p class="text-xs text-slate-300">Complete Preform One catalogue curated by teachers</p>
+        </div>
+      </a>
+    </div>
+  </nav>
+
+  <div id="bookModal" class="menu-backdrop hidden">
+    <div class="max-w-5xl mx-auto bg-slate-900/95 border border-white/10 rounded-3xl mt-12 mb-8 overflow-hidden shadow-2xl text-slate-100">
+      <div class="flex items-center justify-between px-6 py-4 bg-white/5">
+        <div>
+          <h5 id="bookModalTitle" class="text-lg font-semibold text-white">Book Viewer</h5>
+          <p id="bookModalSubject" class="text-sm text-slate-300"></p>
+        </div>
+        <button class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center" onclick="closeBookModal()">
+          <i class="fas fa-xmark text-white text-lg"></i>
+        </button>
+      </div>
+      <div class="aspect-[4/3] bg-slate-950">
+        <iframe id="bookModalFrame" src="" class="w-full h-full" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+      </div>
+    </div>
+  </div>
+
+    <section class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10">
+      <article class="glass-panel p-6 lg:p-8">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold">Academic Highlights</h3>
+            <p class="text-sm text-slate-300">Latest assessments, subject strengths, and growth targets.</p>
+          </div>
+          <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildacademic.html')">
+            Deep Dive <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+          </button>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 text-sm">
+          <div class="bg-slate-900/60 p-4 rounded-2xl">
+            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Exam Window</p>
+            <p id="academicExamLabel" class="text-slate-200">---</p>
+            <p id="academicOverall" class="text-2xl font-semibold text-white mt-2">--%</p>
+          </div>
+          <div class="bg-slate-900/60 p-4 rounded-2xl">
+            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Top Strength</p>
+            <p id="academicBestSubject" class="text-slate-200">---</p>
+            <p id="academicTeacherComment" class="text-xs text-slate-400 mt-2">Awaiting teacher comment</p>
+          </div>
+        </div>
+        <div class="overflow-x-auto rounded-2xl border border-white/10">
+          <table class="min-w-full text-sm text-left">
+            <thead class="bg-white/5 text-slate-300 uppercase tracking-[0.2em] text-xs">
+              <tr>
+                <th class="px-4 py-3">Subject</th>
+                <th class="px-4 py-3">Score</th>
+                <th class="px-4 py-3">% Achieved</th>
+                <th class="px-4 py-3">Grade</th>
+              </tr>
+            </thead>
+            <tbody id="academicTable" class="divide-y divide-white/5 text-slate-100">
+              <tr>
+                <td colspan="4" class="px-4 py-6 text-center text-slate-400">Scores will appear once teachers publish results.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="glass-panel p-6 lg:p-8">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold">SoMAp Library</h3>
+            <p class="text-sm text-slate-300">Curated Preform One books. Read online together &mdash; downloads disabled.</p>
+          </div>
+        </div>
+        <div id="booksContainer" class="resource-grid overflow-x-auto flex gap-4 pb-2"></div>
+      </article>
+    </section>
+
+    <section class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10">
+      <article class="glass-panel p-6 lg:p-8">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold">Attendance Window</h3>
+            <p class="text-sm text-slate-300">Track daily presence and reasons shared by teachers.</p>
+          </div>
+          <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildattendance.html')">
+            View Full Log <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+          </button>
+        </div>
+        <canvas id="attendanceTrendChart" height="220"></canvas>
+        <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div class="bg-slate-900/60 rounded-2xl p-4">
+            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Recent Status</p>
+            <p id="recentAttendance" class="text-slate-200">Loading...</p>
+          </div>
+          <div class="bg-slate-900/60 rounded-2xl p-4">
+            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Teacher Notes</p>
+            <p id="recentNotes" class="text-slate-200">---</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="glass-panel p-6 lg:p-8">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <h3 class="text-xl font-semibold">Finance Journey</h3>
+            <p class="text-sm text-slate-300">Monitor payments, outstanding balances, and download receipts.</p>
+          </div>
+          <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildfinance.html')">
+            Manage Fees <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+          </button>
+        </div>
+        <div class="receipt-card mb-5">
+          <div class="flex items-center justify-between mb-3 text-xs uppercase tracking-[0.4em] text-slate-400">
+            <span id="latestReceiptNumber">Receipt # ----</span>
+            <span id="latestReceiptDate">Date: --</span>
+          </div>
+          <p class="text-lg font-semibold text-white mb-1" id="latestReceiptAmount">TSh --</p>
+          <p class="text-sm text-slate-300">Being payment of <span id="latestReceiptPurpose">---</span></p>
+          <div class="mt-4 flex flex-wrap gap-3">
+            <button id="openReceiptBtn" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-slate-100 transition">
+              Download Receipt
+            </button>
+            <button id="openReceiptHistoryBtn" class="px-3 py-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/70 text-sm text-slate-200 transition">
+              View History
+            </button>
+          </div>
+        </div>
+        <div class="divide-y divide-white/5 text-sm" id="paymentTimeline"></div>
+      </article>
+    </section>
+
+    <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-10" id="summaryStats">
+      <article class="stat-card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <span class="badge-soft"><i class="fas fa-calendar-check text-sky-300"></i> Attendance</span>
+          <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildattendance.html')">More</button>
+        </div>
+        <h3 class="text-sm text-slate-300 mb-2">This Month</h3>
+        <p id="statAttendancePct" class="text-3xl font-semibold text-white">--%</p>
+        <p id="statAttendanceNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Loading trend...</p>
+      </article>
+
+      <article class="stat-card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <span class="badge-soft"><i class="fas fa-wallet text-emerald-300"></i> Finance</span>
+          <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildfinance.html')">More</button>
+        </div>
+        <h3 class="text-sm text-slate-300 mb-2">Balance</h3>
+        <p id="statBalance" class="text-3xl font-semibold text-emerald-300">TSh --</p>
+        <p id="statFinanceNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Awaiting payments...</p>
+      </article>
+
+      <article class="stat-card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <span class="badge-soft"><i class="fas fa-file-invoice-dollar text-sky-200"></i> Receipt</span>
+        </div>
+        <h3 class="text-sm text-slate-300 mb-2">Last Payment</h3>
+        <p id="statLastPayment" class="text-3xl font-semibold text-white">--</p>
+        <p id="statReceiptNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Receipt ready for download</p>
+      </article>
+
+      <article class="stat-card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <span class="badge-soft"><i class="fas fa-graduation-cap text-purple-200"></i> Academics</span>
+          <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildacademic.html')">More</button>
+        </div>
+        <h3 class="text-sm text-slate-300 mb-2">Latest Exam</h3>
+        <p id="statExam" class="text-3xl font-semibold text-white">--%</p>
+        <p id="statExamNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Awaiting scores...</p>
+      </article>
+    </section>
+
+    <section id="profileCard" class="glass-panel p-6 lg:p-8 mb-8">
+      <div class="flex flex-col lg:flex-row gap-8">
+        <div class="flex-shrink-0">
+          <div class="relative w-40 h-40 rounded-3xl overflow-hidden border-2 border-sky-300/60 shadow-2xl bg-slate-900/60">
+            <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover hidden">
+            <div id="photoFallback" class="absolute inset-0 flex flex-col items-center justify-center text-slate-200 gap-2 text-center px-4">
+              <i class="fas fa-user-graduate text-5xl text-white/60"></i>
+              <p class="text-xs uppercase tracking-widest text-slate-400">Photo not uploaded</p>
+            </div>
+          </div>
+        </div>
+        <div class="flex-1">
+          <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+            <div>
+              <h2 id="childName" class="text-3xl font-display font-semibold text-white">Loading...</h2>
+              <p id="childAdm" class="text-slate-300 mt-1 uppercase tracking-[0.4em] text-xs">ADM - ...</p>
+            </div>
+            <div class="flex gap-3 flex-wrap">
+              <button id="quickIdCard" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 flex items-center gap-2 text-slate-100 transition">
+                <i class="fas fa-id-card-clip text-sky-300"></i>
+                View ID Card
+              </button>
+              <button id="quickReport" class="px-4 py-2 rounded-xl bg-sky-500/80 hover:bg-sky-500 text-white flex items-center gap-2 transition">
+                <i class="fas fa-file-pdf"></i>
+                Download Report
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-200">
+            <div class="bg-slate-900/50 rounded-2xl p-4">
+              <p class="uppercase tracking-widest text-xs text-slate-400 mb-2">Program</p>
+              <p><strong>Reporting Date:</strong> <span id="reportingDate">-</span></p>
+              <p><strong>Former School:</strong> <span id="formerSchool">-</span></p>
+              <p><strong>Gender:</strong> <span id="gender">-</span></p>
+            </div>
+            <div class="bg-slate-900/50 rounded-2xl p-4">
+              <p class="uppercase tracking-widest text-xs text-slate-400 mb-2">Parent</p>
+              <p><strong>Name:</strong> <span id="parentDisplayName">-</span></p>
+              <p><strong>Phone:</strong> <span id="parentPhone">-</span></p>
+              <p><strong>Email:</strong> <span id="parentEmail">-</span></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>

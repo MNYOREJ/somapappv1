@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp &mdash; Receipts Ledger</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Shared helpers -->
+  <script src="prefonecommon.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Poppins', 'Inter', 'system-ui', 'sans-serif']
+          },
+          colors: {
+            socrates: {
+              navy: '#1e3a8a',
+              teal: '#0f766e'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at top, rgba(30, 58, 138, 0.3), rgba(15, 23, 42, 0.95) 60%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 1.75rem;
+      box-shadow: 0 30px 70px -35px rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(18px);
+    }
+    table thead th {
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.68rem;
+      color: #c7d2fe;
+    }
+    table tbody td {
+      border-top: 1px solid rgba(148, 163, 184, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-7xl mx-auto px-4 py-10 lg:py-14">
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10">
+      <div>
+        <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School &mdash; Preform One</p>
+        <h1 class="text-3xl lg:text-4xl font-bold font-display text-white">Receipts Ledger</h1>
+        <p class="text-sm text-slate-300 mt-2 max-w-3xl">Centralised dashboard listing every receipt generated for Preform One. Filter by year or student, export ledger, and open individual receipts instantly.</p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="window.location.href='prefonedashboard.html'" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+          <i class="fas fa-chart-pie mr-2"></i>Main Dashboard
+        </button>
+      </div>
+    </header>
+
+    <section class="glass-panel p-6 lg:p-8 mb-8">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <label class="text-xs uppercase tracking-[0.35em] text-slate-400 mb-1 block">Search student</label>
+          <input id="searchInput" type="text" placeholder="Name, ADM, phone..." class="w-full bg-white/10 border border-white/15 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none">
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-[0.35em] text-slate-400 mb-1 block">Filter year</label>
+          <select id="yearFilter" class="w-full bg-white/10 border border-white/15 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none"></select>
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-[0.35em] text-slate-400 mb-1 block">Min amount (TSh)</label>
+          <input id="minAmount" type="number" class="w-full bg-white/10 border border-white/15 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none">
+        </div>
+        <div class="flex items-end gap-3">
+          <button onclick="applyFilters()" class="px-4 py-2 rounded-xl bg-socrates-teal/80 hover:bg-socrates-teal text-sm text-white transition w-full">
+            Apply Filters
+          </button>
+          <button onclick="resetFilters()" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            Reset
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="glass-panel p-6 lg:p-8">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+        <div>
+          <h2 class="text-xl font-semibold text-white">Receipts List</h2>
+          <p class="text-sm text-slate-300">Showing <span id="totalCount">0</span> receipts</p>
+        </div>
+        <div class="flex gap-3 flex-wrap">
+          <button onclick="exportLedger('pdf')" class="px-4 py-2 rounded-xl bg-socrates-navy/80 hover:bg-socrates-navy text-sm text-white transition">
+            <i class="fas fa-file-pdf mr-2"></i>Export PDF
+          </button>
+          <button onclick="exportLedger('csv')" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            <i class="fas fa-file-csv mr-2"></i>Export CSV
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-left text-sm text-slate-100">
+          <thead>
+            <tr class="bg-white/5">
+              <th class="px-4 py-3">Receipt #</th>
+              <th class="px-4 py-3">Date</th>
+              <th class="px-4 py-3">Student</th>
+              <th class="px-4 py-3">ADM</th>
+              <th class="px-4 py-3">Amount</th>
+              <th class="px-4 py-3">Method</th>
+              <th class="px-4 py-3">Note</th>
+              <th class="px-4 py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="receiptsTable" class="divide-y divide-white/10">
+            <tr>
+              <td colspan="8" class="px-4 py-6 text-center text-slate-400">Receipts will appear once loaded.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "74814528004",
+      appId: "1:74814528004:web:54abda6ae3c75ed5f0677f"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    let receipts = [];
+    let filteredReceipts = [];
+
+    loadReceipts();
+
+    async function loadReceipts() {
+      try {
+        const snapshot = await db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value');
+        const studentsObj = snapshot.val() || {};
+        receipts = buildReceiptIndex(studentsObj);
+        filteredReceipts = receipts.slice();
+        populateYearFilter(receipts);
+        renderTable(filteredReceipts);
+      } catch (error) {
+        console.error('Receipts load error', error);
+        Swal.fire('Error', error.message || 'Unable to load receipts.', 'error');
+      }
+    }
+
+    function buildReceiptIndex(studentsObj) {
+      const entries = [];
+      Object.entries(studentsObj).forEach(([adm, student]) => {
+        const payments = toArray(student.payments).map(entry => ({
+          ...entry,
+          adm,
+          studentName: `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim(),
+          parentContact: student.parentContact || '',
+          amount: Number(entry.amount || 0),
+          date: entry.date || '',
+          method: entry.method || 'Cash',
+          note: entry.note || '',
+          timestamp: parseDate(entry.date, entry.createdAt),
+          key: entry._key
+        })).filter(payment => payment.amount > 0);
+        entries.push(...payments);
+      });
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+      entries.forEach((entry, idx) => entry.receiptNumber = String(idx + 1).padStart(4, '0'));
+      return entries;
+    }
+
+    function populateYearFilter(entries) {
+      const years = Array.from(new Set(entries.map(entry => new Date(entry.timestamp).getFullYear()).filter(year => !Number.isNaN(year)))).sort((a, b) => b - a);
+      const select = document.getElementById('yearFilter');
+      select.innerHTML = `<option value="all">All Years</option>${years.map(year => `<option value="${year}">${year}</option>`).join('')}`;
+    }
+
+    function applyFilters() {
+      const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
+      const yearValue = document.getElementById('yearFilter').value;
+      const minAmount = Number(document.getElementById('minAmount').value || 0);
+
+      filteredReceipts = receipts.filter(entry => {
+        const matchesYear = yearValue === 'all' ? true : new Date(entry.timestamp).getFullYear() === Number(yearValue);
+        const matchesSearch = searchTerm
+          ? (entry.studentName.toLowerCase().includes(searchTerm) ||
+             String(entry.adm).toLowerCase().includes(searchTerm) ||
+             String(entry.receiptNumber).includes(searchTerm))
+          : true;
+        const matchesAmount = entry.amount >= minAmount;
+        return matchesYear && matchesSearch && matchesAmount;
+      });
+
+      renderTable(filteredReceipts);
+    }
+
+    function resetFilters() {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('yearFilter').value = 'all';
+      document.getElementById('minAmount').value = '';
+      filteredReceipts = receipts.slice();
+      renderTable(filteredReceipts);
+    }
+
+    function renderTable(entries) {
+      const tbody = document.getElementById('receiptsTable');
+      document.getElementById('totalCount').textContent = entries.length;
+      if (!entries.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="px-4 py-6 text-center text-slate-400">No receipts match the current filters.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = entries.slice().reverse().map(entry => `
+        <tr class="hover:bg-white/5 transition">
+          <td class="px-4 py-3 font-semibold text-sky-300">#${entry.receiptNumber}</td>
+          <td class="px-4 py-3">${formatDate(entry.date)}</td>
+          <td class="px-4 py-3">${entry.studentName || 'Student'}</td>
+          <td class="px-4 py-3">${entry.adm}</td>
+          <td class="px-4 py-3">${formatCurrency(entry.amount)}</td>
+          <td class="px-4 py-3">${entry.method}</td>
+          <td class="px-4 py-3">${entry.note || 'Tuition payment'}</td>
+          <td class="px-4 py-3">
+            <button class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs text-slate-100 transition"
+              onclick="openReceipt('${entry.adm}', '${entry.receiptNumber}')">
+              View Receipt
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openReceipt(adm, receiptNumber) {
+      localStorage.setItem('currentChildAdm', adm);
+      window.open(`prefonechildreceipt.html?receipt=${receiptNumber}`, '_blank');
+    }
+
+    function exportLedger(format) {
+      if (!filteredReceipts.length) {
+        Swal.fire('No data', 'No receipts to export for the current filters.', 'info');
+        return;
+      }
+      const data = filteredReceipts.map(entry => ({
+        Receipt: `#${entry.receiptNumber}`,
+        Date: formatDate(entry.date),
+        Student: entry.studentName || '',
+        ADM: entry.adm,
+        Amount: entry.amount,
+        Method: entry.method,
+        Purpose: entry.note || ''
+      }));
+
+      if (format === 'csv') {
+        const csv = Papa.unparse(data);
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `prefone_receipts_${currentYear}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('landscape');
+        doc.setFontSize(14);
+        doc.text('Socrates Preform One Receipts Ledger', 14, 18);
+        doc.autoTable({
+          startY: 26,
+          head: [['Receipt', 'Date', 'Student', 'ADM', 'Amount', 'Method', 'Purpose']],
+          body: data.map(item => [item.Receipt, item.Date, item.Student, item.ADM, formatCurrency(item.Amount), item.Method, item.Purpose]),
+          styles: { fontSize: 9 }
+        });
+        doc.save(`prefone_receipts_${currentYear}.pdf`);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp &mdash; My Child Academics</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- UI Libraries -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Shared helpers -->
+  <script src="prefonecommon.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Poppins', 'Inter', 'system-ui', 'sans-serif']
+          },
+          colors: {
+            somap: {
+              midnight: '#0f172a',
+              violet: '#8b5cf6',
+              teal: '#0d9488',
+              gold: '#fbbf24'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    body {
+      background: radial-gradient(circle at top, rgba(139, 92, 246, 0.35), rgba(15, 23, 42, 0.95) 60%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      border-radius: 1.75rem;
+      box-shadow: 0 30px 70px -35px rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(18px);
+    }
+    .stat-card {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.28), rgba(14, 165, 233, 0.12));
+      border-radius: 1.25rem;
+      border: 1px solid rgba(139, 92, 246, 0.35);
+      transition: transform 160ms ease, border-color 200ms ease;
+    }
+    .stat-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(139, 92, 246, 0.6);
+    }
+    table thead th {
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.72rem;
+      color: #cbd5f5;
+    }
+    table tbody td {
+      border-top: 1px solid rgba(148, 163, 184, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="max-w-6xl mx-auto px-4 py-10 lg:py-14">
+    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10">
+      <div>
+        <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School &mdash; Preform One</p>
+        <h1 class="text-3xl lg:text-4xl font-bold font-display text-white">Academic Progress</h1>
+        <p class="text-sm text-slate-300 mt-2 max-w-2xl">Explore published results, compare subject mastery, and download official report summaries for your child.</p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="window.location.href='prefoneparent.html'" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+          <i class="fas fa-home mr-2"></i>Back to Dashboard
+        </button>
+        <button onclick="logout()" class="px-4 py-2 rounded-xl bg-red-500/80 hover:bg-red-500 text-sm text-white transition">
+          <i class="fas fa-sign-out-alt mr-2"></i>Logout
+        </button>
+      </div>
+    </header>
+
+    <section class="glass-panel p-6 lg:p-8 mb-8">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div class="flex items-center gap-4">
+          <div class="w-24 h-24 rounded-3xl overflow-hidden border-2 border-violet-400/70 shadow-xl bg-slate-900/60">
+            <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover hidden">
+            <div id="photoPlaceholder" class="w-full h-full flex items-center justify-center text-slate-300 text-2xl bg-slate-800/70">PF1</div>
+          </div>
+          <div>
+            <h2 id="childName" class="text-2xl font-semibold text-white">Loading...</h2>
+            <p id="childMeta" class="text-sm text-slate-300 mt-1">ADM - ...</p>
+            <p id="reportingInfo" class="text-xs uppercase tracking-[0.4em] text-slate-500 mt-2">Reporting: --</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+          <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2">
+            <p class="text-xs uppercase tracking-[0.35em] text-slate-400">Exam Type</p>
+            <select id="examType" class="bg-transparent text-sm text-slate-100 focus:outline-none">
+              <option value="Monthly">Monthly</option>
+              <option value="Midterm">Midterm</option>
+              <option value="End Term">End Term</option>
+            </select>
+          </div>
+          <div class="bg-white/10 border border-white/15 rounded-xl px-3 py-2">
+            <p class="text-xs uppercase tracking-[0.35em] text-slate-400">Month</p>
+            <select id="examMonth" class="bg-transparent text-sm text-slate-100 focus:outline-none">
+              <option value="September">September</option>
+              <option value="October">October</option>
+              <option value="November">November</option>
+              <option value="December">December</option>
+            </select>
+          </div>
+          <button onclick="applyFilters()" class="px-4 py-2 rounded-xl bg-violet-500/80 hover:bg-violet-500 text-white text-sm transition">
+            Apply Filters
+          </button>
+          <button onclick="openReport()" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            <i class="fas fa-file-download mr-2"></i>Download Report
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-10">
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-chart-line text-violet-300 mr-2"></i>Average Score</p>
+        <p id="statAverage" class="text-3xl font-semibold text-white">--%</p>
+        <p id="statAverageNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Across selected assessment</p>
+      </article>
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-trophy text-amber-300 mr-2"></i>Best Subject</p>
+        <p id="statBestSubject" class="text-3xl font-semibold text-white">--</p>
+        <p id="statBestNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Highest mastery</p>
+      </article>
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-flag-checkered text-teal-300 mr-2"></i>Lowest Subject</p>
+        <p id="statLowestSubject" class="text-3xl font-semibold text-white">--</p>
+        <p id="statLowestNote" class="text-xs text-slate-400 mt-3 uppercase tracking-[0.35em]">Focus area</p>
+      </article>
+      <article class="stat-card p-5">
+        <p class="text-xs uppercase tracking-[0.35em] text-slate-300 mb-2"><i class="fas fa-user-graduate text-emerald-300 mr-2"></i>Teacher Comment</p>
+        <p id="statTeacherComment" class="text-sm text-slate-200">Awaiting comment</p>
+      </article>
+    </section>
+
+    <section class="glass-panel p-6 lg:p-8 mb-10">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-semibold text-white">Subject Mastery</h3>
+          <p class="text-sm text-slate-300">Percentage performance per subject for the selected exam window.</p>
+        </div>
+        <div class="flex gap-3 flex-wrap">
+          <button onclick="exportPerformance('pdf')" class="px-4 py-2 rounded-xl bg-violet-500/80 hover:bg-violet-500 text-sm text-white transition">
+            <i class="fas fa-file-pdf mr-2"></i>Export PDF
+          </button>
+          <button onclick="exportPerformance('csv')" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
+            <i class="fas fa-file-csv mr-2"></i>Export CSV
+          </button>
+        </div>
+      </div>
+      <canvas id="subjectChart" height="260"></canvas>
+    </section>
+
+    <section class="glass-panel p-6 lg:p-8">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-xl font-semibold text-white">Detailed Scores</h3>
+        <span id="assessmentLabel" class="text-sm uppercase tracking-[0.35em] text-slate-400">Assessment Summary</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-left text-sm text-slate-100">
+          <thead>
+            <tr class="bg-white/5">
+              <th class="px-4 py-3">Subject</th>
+              <th class="px-4 py-3">Score</th>
+              <th class="px-4 py-3">Max</th>
+              <th class="px-4 py-3">%</th>
+              <th class="px-4 py-3">Grade</th>
+            </tr>
+          </thead>
+          <tbody id="scoresTable" class="divide-y divide-white/10">
+            <tr>
+              <td colspan="5" class="px-4 py-6 text-center text-slate-400">Results will appear once you select an exam window.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "74814528004",
+      appId: "1:74814528004:web:54abda6ae3c75ed5f0677f"
+    };
+
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    const childAdm = localStorage.getItem('currentChildAdm');
+    const parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact');
+
+    let studentRecord = null;
+    let chartInstance = null;
+
+    if (!childAdm || !parentContact) {
+      Swal.fire('Login required', 'Please sign in again so we can load your child data.', 'warning')
+        .then(() => window.location.href = '../index.html');
+    } else {
+      loadAcademicData();
+    }
+
+    async function loadAcademicData() {
+      try {
+        const snapshot = await db.ref(`/schools/Socrates School Preform one/${currentYear}/students/${childAdm}`).once('value');
+        if (!snapshot.exists()) {
+          Swal.fire('Not found', 'We could not locate data for this child. Contact the school office.', 'error');
+          return;
+        }
+        studentRecord = snapshot.val();
+        hydrateProfile(studentRecord);
+        applyFilters();
+      } catch (error) {
+        console.error('Academic load error', error);
+        Swal.fire('Error', error.message || 'Unable to load academic records.', 'error');
+      }
+    }
+
+    function hydrateProfile(student) {
+      const name = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim() || 'Student';
+      document.getElementById('childName').textContent = name;
+      document.getElementById('childMeta').textContent = `ADM - ${student.adm || childAdm}`;
+      document.getElementById('reportingInfo').textContent = `Reporting: ${formatDate(student.reportingDate)}`;
+
+      if (student.photoUrl) {
+        const img = document.getElementById('childPhoto');
+        img.src = student.photoUrl;
+        img.classList.remove('hidden');
+        document.getElementById('photoPlaceholder').classList.add('hidden');
+      }
+    }
+
+    function applyFilters() {
+      if (!studentRecord) return;
+      const examType = document.getElementById('examType').value;
+      const month = document.getElementById('examMonth').value;
+      const assessmentLabel = `${examType} - ${month}`;
+      document.getElementById('assessmentLabel').textContent = assessmentLabel;
+
+      const scoresArray = toArray(studentRecord.scores).filter(entry => entry && entry.examType === examType && (entry.month === month || entry.month === month.slice(0, 3)));
+      if (!scoresArray.length) {
+        resetStats();
+        drawChart([]);
+        renderTable([]);
+        return;
+      }
+      const latest = scoresArray.sort((a, b) => parseDate(b.recordedAt, b.updatedAt, b.createdAt) - parseDate(a.recordedAt, a.updatedAt, a.createdAt))[0];
+      updateStats(latest);
+      drawChart(latest.subjects || {});
+      renderTable(latest.subjects || {});
+    }
+
+    function updateStats(assessment) {
+      const subjects = assessment.subjects || {};
+      const entries = Object.entries(subjects).map(([subject, data]) => {
+        const score = Number(data?.score || 0);
+        const max = Number(data?.max || 100) || 100;
+        const percent = max ? (score / max) * 100 : 0;
+        return { subject, score, max, percent };
+      }).sort((a, b) => b.percent - a.percent);
+
+      if (!entries.length) {
+        resetStats();
+        return;
+      }
+
+      const average = entries.reduce((sum, item) => sum + item.percent, 0) / entries.length;
+      setStat('statAverage', `${average.toFixed(1)}%`, 'statAverageNote', `${entries.length} subjects assessed`);
+
+      const best = entries[0];
+      setStat('statBestSubject', `${best.subject}`, 'statBestNote', `${best.percent.toFixed(1)}%`);
+
+      const lowest = entries[entries.length - 1];
+      setStat('statLowestSubject', `${lowest.subject}`, 'statLowestNote', `${lowest.percent.toFixed(1)}%`);
+
+      document.getElementById('statTeacherComment').textContent = assessment.teacherComment || 'Teacher comment not added yet.';
+    }
+
+    function resetStats() {
+      setStat('statAverage', '--%', 'statAverageNote', 'Awaiting scores');
+      setStat('statBestSubject', '--', 'statBestNote', 'Highest mastery');
+      setStat('statLowestSubject', '--', 'statLowestNote', 'Focus area');
+      document.getElementById('statTeacherComment').textContent = 'Teacher comment will appear once results are published.';
+    }
+
+    function drawChart(subjects) {
+      const entries = Object.entries(subjects || {}).map(([subject, data]) => {
+        const score = Number(data?.score || 0);
+        const max = Number(data?.max || 100) || 100;
+        return { subject, percent: max ? Math.round((score / max) * 100) : 0 };
+      });
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(document.getElementById('subjectChart').getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: entries.map(e => e.subject),
+          datasets: [{
+            label: 'Score %',
+            data: entries.map(e => e.percent),
+            backgroundColor: entries.map(() => 'rgba(139, 92, 246, 0.35)'),
+            borderColor: entries.map(() => 'rgba(139, 92, 246, 0.9)'),
+            borderWidth: 1.5,
+            borderRadius: 8
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true, max: 100, ticks: { color: '#cbd5f5', callback: value => `${value}%` } },
+            x: { ticks: { color: '#cbd5f5' } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: context => ` ${context.parsed.y}%`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function renderTable(subjects) {
+      const tbody = document.getElementById('scoresTable');
+      const entries = Object.entries(subjects || {}).map(([subject, data]) => {
+        const score = Number(data?.score || 0);
+        const max = Number(data?.max || 100) || 100;
+        const percent = max ? (score / max) * 100 : 0;
+        return { subject, score, max, percent, grade: gradeFromPercent(percent) };
+      });
+
+      if (!entries.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No scores recorded for this assessment yet.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = entries.map(row => `
+        <tr class="hover:bg-white/5 transition">
+          <td class="px-4 py-3">${row.subject}</td>
+          <td class="px-4 py-3">${row.score}</td>
+          <td class="px-4 py-3">${row.max}</td>
+          <td class="px-4 py-3">${row.percent.toFixed(1)}%</td>
+          <td class="px-4 py-3">${row.grade}</td>
+        </tr>
+      `).join('');
+    }
+
+    function exportPerformance(format) {
+      if (!studentRecord) return;
+      const examType = document.getElementById('examType').value;
+      const month = document.getElementById('examMonth').value;
+      const scoresArray = toArray(studentRecord.scores).filter(entry => entry && entry.examType === examType && (entry.month === month || entry.month === month.slice(0, 3)));
+      if (!scoresArray.length) {
+        Swal.fire('No data', 'No results found for the selected filters.', 'info');
+        return;
+      }
+      const latest = scoresArray.sort((a, b) => parseDate(b.recordedAt, b.updatedAt, b.createdAt) - parseDate(a.recordedAt, a.updatedAt, a.createdAt))[0];
+      const subjects = latest.subjects || {};
+      const entries = Object.entries(subjects).map(([subject, data]) => {
+        const score = Number(data?.score || 0);
+        const max = Number(data?.max || 100) || 100;
+        const percent = max ? (score / max) * 100 : 0;
+        return { Subject: subject, Score: score, Max: max, Percent: percent.toFixed(1), Grade: gradeFromPercent(percent) };
+      });
+
+      if (format === 'csv') {
+        const csv = Papa.unparse(entries);
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${childAdm}_performance.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(14);
+        doc.text(`Academic Report - ${examType} ${month}`, 14, 18);
+        doc.autoTable({
+          startY: 26,
+          head: [['Subject', 'Score', 'Max', '%', 'Grade']],
+          body: entries.map(item => [item.Subject, item.Score, item.Max, item.Percent, item.Grade]),
+          styles: { fontSize: 10 }
+        });
+        doc.save(`${childAdm}_performance.pdf`);
+      }
+    }
+
+    function openReport() {
+      if (!studentRecord) return;
+      const params = new URLSearchParams({
+        adm: studentRecord.adm || childAdm,
+        name: `${studentRecord.firstName || ''} ${studentRecord.lastName || ''}`.trim(),
+        phone: studentRecord.parentContact || parentContact
+      });
+      window.open(`prefonereportform.html?${params.toString()}`, '_blank');
+    }
+
+    function setStat(id, value, noteId, note) {
+      document.getElementById(id).textContent = value;
+      document.getElementById(noteId).textContent = note;
+    }
+
+    function logout() {
+      localStorage.removeItem('prefoneParent');
+      localStorage.removeItem('prefoneParentContact');
+      localStorage.removeItem('prefoneParentName');
+      localStorage.removeItem('prefoneParentIcon');
+      localStorage.removeItem('currentChildAdm');
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

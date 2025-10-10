@@ -320,23 +320,21 @@
         const db = firebase.database();
         // Helper function for Preform One: Match at least 2 names (case-insensitive) in student data
 function namesMatch(studentData, inputNames) {
-  if (!studentData || !inputNames) return false;
-  const inputs = inputNames.toLowerCase().split(/\s+/).filter(word => word.length >= 2); // Split into words >=2 letters
-  if (inputs.length < 2) return false;
-  let totalMatches = 0;
-  for (const student of Object.values(studentData)) {
-    const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.toLowerCase();
-    let studentMatches = 0;
-    for (const inputWord of inputs) {
-      if (fullName.includes(inputWord)) studentMatches++;
+    if (!studentData || !inputNames) return null;
+    const inputs = inputNames.toLowerCase().split(/\s+/).filter(word => word.length >= 2); // Split into words >=2 letters
+    if (inputs.length < 2) return null;
+    for (const [key, student] of Object.entries(studentData)) {
+      const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.toLowerCase();
+      let studentMatches = 0;
+      for (const inputWord of inputs) {
+        if (fullName.includes(inputWord)) studentMatches++;
+      }
+      if (studentMatches >= 2) {
+        return { key, student };
+      }
     }
-    if (studentMatches >= 2) {
-      totalMatches += studentMatches; // Found a match
-      break; // Stop on first full match
-    }
+    return null;
   }
-  return totalMatches >= 2;
-}
         function normalizePhone(phone) {
             if (!phone) return "";
             phone = phone.trim().replace(/[\s-()]/g, "");
@@ -501,16 +499,26 @@ const inputNamesFull = rawName; // Full input for matching
 const preformSnap = await db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).orderByChild('parentContact').equalTo(phoneNorm).once('value');
 if (preformSnap.exists()) {
   const preformData = preformSnap.val();
-  if (namesMatch(preformData, inputNamesFull)) {
+  const preformMatch = namesMatch(preformData, inputNamesFull);
+  if (preformMatch) {
+    const { key: matchedKey, student: matchedStudent } = preformMatch;
+    const parentDisplayName = (matchedStudent.parentName || rawName || '').trim();
+    const childFullName = `${matchedStudent.firstName || ''} ${matchedStudent.middleName || ''} ${matchedStudent.lastName || ''}`.replace(/\s+/g, ' ').trim();
+    const contactValue = matchedStudent.parentContact || phoneNorm;
     // Direct to Preform One parent dashboard
     localStorage.setItem('role', 'parent');
     localStorage.setItem('preformParent', 'true');
-    // Also set studentKey for consistency (use first match key)
-    const preformKeys = Object.keys(preformData);
-    localStorage.setItem('studentKey', preformKeys[0]); // First matching student
+    localStorage.setItem('prefoneParent', 'true');
+    localStorage.setItem('prefoneParentContact', contactValue || '');
+    localStorage.setItem('prefoneParentName', parentDisplayName || 'Parent');
+    if (childFullName) localStorage.setItem('prefoneCurrentChildName', childFullName);
+    else localStorage.removeItem('prefoneCurrentChildName');
+    localStorage.setItem('currentChildAdm', matchedKey);
+    localStorage.setItem('studentKey', matchedKey); // keep compatibility with legacy parent.html
+    localStorage.setItem('prefoneParentIcon', 'true');
     Swal.fire({
-      title: 'Welcome to Preform One',
-      text: `Access granted for Preform One student`,
+      title: childFullName ? `Welcome, ${childFullName}` : 'Welcome to Preform One',
+      text: childFullName ? `${childFullName}'s dashboard is ready.` : 'Access granted for a Preform One student.',
       icon: 'success',
       timer: 1100,
       showConfirmButton: false

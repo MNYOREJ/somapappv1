@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SoMAp — Receipts Manager</title>
+
+  <!-- Tailwind + Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <!-- PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    body{
+      background:
+        radial-gradient(1200px 800px at -10% -10%, rgba(14,165,233,.35), transparent 40%),
+        radial-gradient(900px 700px at 110% -10%, rgba(139,92,246,.30), transparent 35%),
+        linear-gradient(180deg, #020617 0%, #0b1220 100%);
+      min-height:100vh; color:#e2e8f0; font-family:Inter,system-ui,sans-serif;
+    }
+    .sidebar{
+      width:86px; position:fixed; inset:0 auto 0 0; z-index:30;
+      background:linear-gradient(180deg, rgba(2,6,23,.88), rgba(2,6,23,.6));
+      border-right:1px solid rgba(148,163,184,.22); backdrop-filter: blur(12px);
+      padding:12px 10px; display:flex; flex-direction:column; align-items:center; gap:12px;
+    }
+    .icon{ width:58px; height:58px; border-radius:14px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+      background:rgba(148,163,184,.10); border:1px solid rgba(148,163,184,.25); color:#fff; transition:transform .15s ease, filter .2s ease; }
+    .icon:hover{ transform: translateY(-3px); }
+    .icon.receipts{ background:linear-gradient(120deg, rgba(250,204,21,.35), rgba(14,165,233,.40)); border-color:rgba(250,204,21,.55); box-shadow:0 18px 45px -25px rgba(250,204,21,.45); }
+    .main{ margin-left:106px; padding:18px; }
+    .card{ background:rgba(15,23,42,.82); border:1px solid rgba(148,163,184,.22); border-radius:18px; backdrop-filter: blur(14px); box-shadow:0 25px 60px -40px rgba(0,0,0,.6); }
+    .muted{ color:rgba(226,232,240,.8); }
+    .table thead th{ text-align:left; padding:10px 8px; font-size:.75rem; letter-spacing:.16em; text-transform:uppercase; color:rgba(226,232,240,.85);}
+    .table tbody td{ padding:10px 8px; border-top:1px solid rgba(148,163,184,.18); }
+    .drawer{ position:fixed; right:0; top:0; bottom:0; width:480px; transform:translateX(100%); transition: transform .28s ease; z-index:40; }
+    .drawer.open{ transform:translateX(0%); }
+    .receipt-paper{
+      background:#fff; color:#111827; width:840px; min-height:600px; margin:0 auto; padding:40px;
+      border-radius:16px; border:3px double #1e3a8a; font-family: Cambria, Georgia, "Times New Roman", serif;
+    }
+    .receipt-header{ border-bottom:2px solid #1e3a8a; padding-bottom:16px; margin-bottom:20px; }
+    .receipt-watermark{ position:absolute; inset:0; opacity:.06; background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat; pointer-events:none; }
+    @media (max-width:1024px){ .main{ margin-left:0; padding:12px; } .sidebar{ position:sticky; top:0; width:100%; height:auto; flex-direction:row; justify-content:center; } }
+  </style>
+</head>
+<body>
+  <!-- Sidebar (attach this style to mhasibudashboard left nav if you embed) -->
+  <aside class="sidebar">
+    <img src="../images/somap-logo.png.jpg" alt="SoMAp" class="w-12 h-12 rounded-xl object-cover"/>
+    <div class="icon receipts" title="Receipts"><i class="fas fa-file-invoice-dollar text-yellow-300"></i></div>
+    <div class="icon" title="Finance"><i class="fas fa-wallet"></i></div>
+    <div class="icon" title="Dashboard"><i class="fas fa-grid-2"></i></div>
+    <div class="icon" title="Back" onclick="history.back()"><i class="fas fa-arrow-left"></i></div>
+  </aside>
+
+  <main class="main">
+    <section class="card p-5 lg:p-7 mb-4">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-xs muted">Socrates School</p>
+          <h1 class="text-3xl md:text-4xl font-extrabold">Receipts Manager</h1>
+          <p class="muted text-sm">Search a student, view all payments, and generate official PDF receipts.</p>
+        </div>
+        <div class="flex gap-2">
+          <input id="searchBox" placeholder="Search name / ADM / phone" class="px-3 py-2 rounded-lg bg-white/10 border border-white/15 focus:outline-none w-[260px]"/>
+          <button id="refreshBtn" class="px-4 py-2 rounded-lg bg-sky-500/80 hover:bg-sky-500 text-white"><i class="fas fa-rotate mr-2"></i>Refresh</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card p-4">
+      <div class="overflow-auto">
+        <table class="table min-w-full" id="studentsTable">
+          <thead class="bg-white/5">
+            <tr>
+              <th>Student</th>
+              <th>ADM</th>
+              <th>Class</th>
+              <th>Last Payment</th>
+              <th>Receipts</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="studentsTbody">
+            <tr><td colspan="6" class="py-6 text-center muted">Loading students…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Drawer: child payments -->
+  <aside id="drawer" class="drawer card p-0">
+    <div class="p-4 border-b border-white/10 flex items-center justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.35em] muted">Receipts</p>
+        <h3 id="drawerTitle" class="text-xl font-bold">Student</h3>
+      </div>
+      <button class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20" onclick="closeDrawer()"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="p-4 space-y-3 overflow-y-auto" id="drawerContent" style="max-height: calc(100vh - 60px);">
+      <!-- payment rows injected -->
+    </div>
+  </aside>
+
+  <!-- Hidden receipt template to capture as PDF -->
+  <div id="pdfStage" class="hidden">
+    <div class="receipt-paper relative" id="pdfPaper">
+      <div class="receipt-watermark"></div>
+      <div class="receipt-header flex justify-between items-start">
+        <div>
+          <h2 class="text-2xl font-bold text-blue-900 uppercase tracking-[0.35em]">Socrates Investment Limited</h2>
+          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm">Socrates School</p>
+          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">P.O BOX 14256 ARUSHA</p>
+          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">Mob: 0686 828 732</p>
+        </div>
+        <div class="text-right">
+          <h3 class="text-3xl font-bold text-blue-900 uppercase">Receipt</h3>
+          <p class="text-sm text-blue-900 mt-2" id="pdfReceiptNo">Receipt No: ----</p>
+          <p class="text-sm text-blue-900" id="pdfReceiptDate">Date: --</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        <div class="lg:col-span-2">
+          <p class="text-base mb-4">Received From: <span id="pdfReceivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
+          <p class="text-base mb-4">The Sum of Shillings (In words): <span id="pdfAmountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
+          <p class="text-base mb-4">Amount in figures: <span id="pdfAmountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
+          <p class="text-base mb-4">Being payment of: <span id="pdfPurpose" class="border-b border-black inline-block min-w-[300px]"></span></p>
+          <p class="text-base mb-4">Payment Method: <span id="pdfMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
+        </div>
+        <div class="flex flex-col items-center">
+          <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-blue-900 bg-gray-100">
+            <img id="pdfPhoto" src="" class="w-full h-full object-cover" alt="Child passport"/>
+          </div>
+          <p id="pdfChildName" class="mt-3 text-base font-semibold text-blue-900 text-center"></p>
+          <p id="pdfChildAdm" class="text-sm text-gray-600 text-center"></p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-10">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">Cash / Cheque</p>
+          <p id="pdfInstrument" class="border-b border-black h-8"></p>
+        </div>
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">TSh</p>
+          <p id="pdfCurrency" class="border-b border-black h-8"></p>
+        </div>
+      </div>
+      <div class="flex justify-between mt-12">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Sign for Socrates</p>
+          <p class="border-t border-black w-48 h-0"></p>
+        </div>
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Stamp</p>
+          <div class="w-40 h-24 border border-dashed border-blue-900"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ===== Firebase ===== */
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Helpers
+    const q = s => document.querySelector(s);
+    const qa = s => Array.from(document.querySelectorAll(s));
+    const safe = s => (s==null?'':String(s));
+    const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:0});
+    const parseDate = (...c) => { for(const x of c){ if(!x) continue; const d=new Date(x); if(!isNaN(d)) return d.getTime(); } return Date.now(); };
+    const formatDate = v => { const d=new Date(v); return isNaN(d)?'--':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+    function numberToEnglish(n){
+      const s=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+      const t=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+      if(n<20) return s[n]; if(n<100) return t[Math.floor(n/10)]+(n%10?` ${s[n%10]}`:'');
+      if(n<1000) return `${s[Math.floor(n/100)]} Hundred${n%100?` ${numberToEnglish(n%100)}`:''}`;
+      if(n<1e6) return `${numberToEnglish(Math.floor(n/1000))} Thousand${n%1000?` ${numberToEnglish(n%1000)}`:''}`;
+      if(n<1e9) return `${numberToEnglish(Math.floor(n/1e6))} Million${n%1e6?` ${numberToEnglish(n%1e6)}`:''}`;
+      return `${numberToEnglish(Math.floor(n/1e9))} Billion${n%1e9?` ${numberToEnglish(n%1e9)}`:''}`;
+    }
+    const amountToWords = a => `${numberToEnglish(Number(a)||0)} Tanzanian Shillings only`;
+
+    async function tryPath(path){ try{ const s=await db.ref(path).once('value'); return s.val()||null; }catch{ return null; } }
+    function normalizePayment(p, src){
+      const amt = Number(p?.amount||0);
+      let ts = Number(p?.timestamp||0);
+      if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts=t; }
+      if(!ts) ts=Date.now();
+      return { amount:amt, timestamp:ts, method:p?.method||p?.mode||'Cash', note:p?.note||p?.remarks||'Tuition', _src:src };
+    }
+    function dedupe(arr){
+      const seen=new Set();
+      return arr.filter(p=>{ const k=`${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}`; if(seen.has(k)) return false; seen.add(k); return true; });
+    }
+
+    let allStudents = []; // {key, firstName, lastName, admissionNumber, classLevel, primaryParentContact, photoUrl, ...}
+
+    init();
+
+    async function init(){
+      await loadStudents();
+      renderStudents(allStudents);
+      q('#refreshBtn').onclick = async ()=>{ await loadStudents(true); renderStudents(filter(q('#searchBox').value)); };
+      q('#searchBox').addEventListener('input', (e)=> renderStudents(filter(e.target.value)));
+    }
+
+    async function loadStudents(force){
+      if (allStudents.length && !force) return;
+      const s = await db.ref('students').once('value');
+      const obj = s.val()||{};
+      allStudents = Object.entries(obj).map(([key,val])=>({ key, ...(val||{}) }));
+      // light sort by name
+      allStudents.sort((a,b)=> (safe(a.firstName)+safe(a.lastName)).localeCompare(safe(b.firstName)+safe(b.lastName)));
+      // prefetch basic last-payment/receipt count for table
+      for (const st of allStudents){
+        const adm = st.admissionNumber || st.pupilId || '';
+        const cls = st.classLevel || '';
+        const year = new Date().getFullYear();
+        const sources = [
+          `students/${st.key}/payments`,
+          `finance/${year}/${cls}/${adm}/payments`,
+          `fees/${year}/${adm}/payments`,
+          `payments/${adm}`,
+          `feesPayments/${adm}`
+        ];
+        let merged = [];
+        const results = await Promise.all(sources.map(p=>tryPath(p)));
+        results.forEach((obj,idx)=>{ if(!obj) return; Object.values(obj).forEach(v=> merged.push(normalizePayment(v, sources[idx]))); });
+        merged = dedupe(merged).sort((a,b)=> a.timestamp-b.timestamp);
+        st.__payments = merged;
+        st.__receiptCount = merged.length;
+        st.__lastPayment = merged.slice(-1)[0] || null;
+      }
+    }
+
+    function filter(term){
+      const t = String(term||'').toLowerCase().trim();
+      if(!t) return allStudents;
+      return allStudents.filter(s=>{
+        const name = `${safe(s.firstName)} ${safe(s.middleName||'')} ${safe(s.lastName)}`.toLowerCase();
+        return name.includes(t) || String(s.admissionNumber||'').toLowerCase().includes(t) || String(s.primaryParentContact||'').toLowerCase().includes(t);
+      });
+    }
+
+    function renderStudents(rows){
+      const tb = q('#studentsTbody');
+      if (!rows.length){ tb.innerHTML = `<tr><td colspan="6" class="py-8 text-center muted">No students found.</td></tr>`; return; }
+      tb.innerHTML = rows.map(st=>{
+        const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
+        const adm  = safe(st.admissionNumber || st.pupilId || '--');
+        const cls  = safe(st.classLevel || '--');
+        const last = st.__lastPayment ? `${formatDate(st.__lastPayment.timestamp)} — ${formatCurrency(st.__lastPayment.amount)}` : '—';
+        return `
+          <tr>
+            <td class="whitespace-nowrap"><div class="flex items-center gap-2">
+              <img src="${st.photoUrl||'../images/somap-logo.png.jpg'}" class="w-8 h-8 rounded-lg object-cover"/>
+              <span>${name}</span></div></td>
+            <td>${adm}</td>
+            <td>${cls}</td>
+            <td>${last}</td>
+            <td>${st.__receiptCount||0}</td>
+            <td>
+              <button class="px-3 py-1.5 rounded-md bg-white/10 hover:bg-white/20" title="View receipts"
+                onclick='openDrawer(${JSON.stringify({key:st.key,adm,cls}).replace(/"/g,"&quot;")})'>
+                <i class="fas fa-eye"></i>
+              </button>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    async function openDrawer(meta){
+      const drawer = q('#drawer');
+      const content = q('#drawerContent');
+      const title = q('#drawerTitle');
+      // locate full student
+      const st = allStudents.find(s=>s.key===meta.key);
+      const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim();
+      title.textContent = `${name} — ${meta.adm}`;
+      // build per-child sequential receipts
+      const payments = (st.__payments||[]).slice().sort((a,b)=> a.timestamp-b.timestamp)
+        .map((p,i)=> ({...p, receiptNumber:String(i+1).padStart(4,'0')}));
+      if (!payments.length){
+        content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">No payments captured for this child yet.</div>`;
+      } else {
+        content.innerHTML = payments.slice().reverse().map(p=>`
+          <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="font-semibold text-white">${formatCurrency(p.amount)}</p>
+                <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} • ${safe(p.method)}</p>
+                ${p.note ? `<p class="text-sm mt-1">${p.note}</p>`:``}
+              </div>
+              <div class="text-right">
+                <p class="text-xs muted">Receipt #${p.receiptNumber}</p>
+                <button class="mt-2 px-3 py-1.5 rounded-md bg-emerald-500/80 hover:bg-emerald-500 text-white text-sm"
+                    onclick='generatePDF(${JSON.stringify({adm:meta.adm, key:st.key}).replace(/"/g,"&quot;")}, ${JSON.stringify(p).replace(/"/g,"&quot;")})'>
+                  <i class="fas fa-file-pdf mr-1"></i> PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }
+      drawer.classList.add('open');
+    }
+    function closeDrawer(){ q('#drawer').classList.remove('open'); }
+
+    async function generatePDF(meta, payment){
+      // prep student
+      const st = allStudents.find(s=>s.key===meta.key) || {};
+      const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
+
+      // Fill template
+      q('#pdfReceiptNo').textContent   = `Receipt No: ${payment.receiptNumber}`;
+      q('#pdfReceiptDate').textContent = `Date: ${formatDate(payment.timestamp)}`;
+      q('#pdfReceivedFrom').textContent= name;
+      q('#pdfAmountWords').textContent = amountToWords(payment.amount);
+      q('#pdfAmountFigures').textContent = formatCurrency(payment.amount);
+      q('#pdfPurpose').textContent     = payment.note || 'Tuition payment';
+      q('#pdfMethod').textContent      = payment.method || 'Cash';
+      q('#pdfInstrument').textContent  = payment.method || 'Cash';
+      q('#pdfCurrency').textContent    = formatCurrency(payment.amount);
+      q('#pdfChildName').textContent   = name;
+      q('#pdfChildAdm').textContent    = `ADM: ${meta.adm || '--'}`;
+      q('#pdfPhoto').src               = st.photoUrl || '../images/somap-logo.png.jpg';
+
+      // Render
+      const stage = q('#pdfPaper');
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF('landscape','pt','a4');
+      const canvas = await html2canvas(stage, { scale: 0.9, useCORS:true });
+      const img = canvas.toDataURL('image/png');
+      const w = pdf.internal.pageSize.getWidth(), h = pdf.internal.pageSize.getHeight();
+      const iw = w - 40, ih = canvas.height * (iw / canvas.width);
+      pdf.addImage(img, 'PNG', 20, 20, iw, ih);
+      pdf.save(`${meta.adm || 'student'}_receipt_${payment.receiptNumber}.pdf`);
+    }
+  </script>
+</body>
+</html>

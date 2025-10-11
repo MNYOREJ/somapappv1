@@ -18,15 +18,22 @@
     .status-cleared { background:#dcfce7; color:#166534; }
     .status-partial { background:#fef9c3; color:#854d0e; }
     .status-overdue { background:#fee2e2; color:#991b1b; }
-    .table-header { background: #eef2ff; color: #1f2937; }
+    .table-header { background:#eef2ff; color:#1f2937; }
   </style>
 </head>
 <body class="bg-white">
-  <div id="breakdownContent" class="text-sm p-4"></div>
+  <div id="breakdownContent" class="text-sm p-4">
+    <!-- skeleton loader -->
+    <div id="skel" class="animate-pulse">
+      <div class="h-4 bg-slate-200 rounded w-2/3 mb-3"></div>
+      <div class="h-3 bg-slate-200 rounded w-full mb-2"></div>
+      <div class="h-3 bg-slate-200 rounded w-5/6"></div>
+    </div>
+  </div>
 
   <script>
     (function () {
-      // ---- 1) Initialize Firebase HERE (no dependency on ../firebase.js) ----
+      // ---- Firebase init (inline, so the iframe never depends on ../firebase.js) ----
       const firebaseConfig = {
         apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
         authDomain: "somaptestt.firebaseapp.com",
@@ -37,29 +44,30 @@
         appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
         measurementId: "G-4HKX7KN6Q3"
       };
-      try {
-        if (!firebase?.apps?.length) firebase.initializeApp(firebaseConfig);
-      } catch (e) { console.error('Firebase init error', e); }
-      const db = (() => { try { return firebase.database(); } catch (e) { return null; }})();
+      try { if (!firebase?.apps?.length) firebase.initializeApp(firebaseConfig); }
+      catch (e) { console.error('Firebase init error', e); }
+      const db = (() => { try { return firebase.database(); } catch { return null; }})();
 
-      const mount = (html) => { document.getElementById('breakdownContent').innerHTML = html; };
+      const mount = (html) => {
+        const el = document.getElementById('breakdownContent');
+        el.innerHTML = html;
+        // ask parent to resize this iframe
+        const h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+        try { window.parent.postMessage({ type:'resizeIframe', id: window.__STUDENT_ID__, height: h }, '*'); } catch {}
+      };
       const err = (msg) => mount(`<div class="p-3 rounded bg-rose-50 text-rose-700 border border-rose-200">${msg}</div>`);
 
       if (!db) { err('Error: Database not initialized. Please check Firebase credentials or internet connection.'); return; }
 
-      // ---- 2) Helpers ----
+      // ---- helpers ----
       const fmt = (n) => (Number(n) || 0).toLocaleString();
-      const clamp = (n) => Math.max(0, Math.round(Number(n) || 0));
       const nowTS = () => Date.now();
-
       function ymdToTS(academicYear, m, d, endOfDay = false) {
-        // If the month is December (12), it belongs to previous calendar year for the given academic year
         const y = (m === 12) ? (Number(academicYear) - 1) : Number(academicYear);
         return endOfDay
           ? new Date(y, m - 1, d, 23, 59, 59, 999).getTime()
           : new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
       }
-
       function apportion(total, weights) {
         if (!Array.isArray(weights) || !weights.length) return [];
         const sumW = weights.reduce((a, b) => a + b, 0);
@@ -73,93 +81,58 @@
         return amounts;
       }
 
-      // ---- 3) Installment configurations (mirrors finance.html) ----
+      // ---- installment configs (5% off for full-year; 2-instalments = no discount) ----
       const installmentConfigs = {
         lower: {
-          type: '6',
-          weights: [44, 13, 12, 22, 22, 16],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+          type: '6', weights: [44, 13, 12, 22, 22, 16],
+          labels: ['Inst 1','Inst 2','Inst 3','Inst 4','Inst 5','Inst 6'],
           windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-            { from: [7, 1], to: [7, 15] },
-            { from: [9, 1], to: [9, 15] },
+            { from:[12,1], to:[1,10] }, { from:[3,1], to:[3,15] }, { from:[4,1], to:[4,15] },
+            { from:[5,1], to:[5,15] }, { from:[7,1], to:[7,15] }, { from:[9,1], to:[9,15] },
           ]
         },
         class4_7: {
-          type: '4',
-          weights: [328, 180, 176, 132],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4'],
+          type: '4', weights: [328, 180, 176, 132],
+          labels: ['Inst 1','Inst 2','Inst 3','Inst 4'],
           windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
+            { from:[12,1], to:[1,10] }, { from:[3,1], to:[3,15] }, { from:[4,1], to:[4,15] }, { from:[5,1], to:[5,15] }
           ]
         },
         class5: {
-          type: '6',
-          weights: [44, 23, 22, 32, 26, 17],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+          type: '6', weights: [44, 23, 22, 32, 26, 17],
+          labels: ['Inst 1','Inst 2','Inst 3','Inst 4','Inst 5','Inst 6'],
           windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-            { from: [7, 1], to: [7, 15] },
-            { from: [9, 1], to: [9, 15] },
+            { from:[12,1], to:[1,10] }, { from:[3,1], to:[3,15] }, { from:[4,1], to:[4,15] },
+            { from:[5,1], to:[5,15] }, { from:[7,1], to:[7,15] }, { from:[9,1], to:[9,15] },
           ]
         },
         class6: {
-          type: '6',
-          weights: [236, 115, 110, 160, 160, 100],
-          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+          type: '6', weights: [236, 115, 110, 160, 160, 100],
+          labels: ['Inst 1','Inst 2','Inst 3','Inst 4','Inst 5','Inst 6'],
           windows: [
-            { from: [12, 1], to: [1, 10] },
-            { from: [3, 1], to: [3, 15] },
-            { from: [4, 1], to: [4, 15] },
-            { from: [5, 1], to: [5, 15] },
-            { from: [7, 1], to: [7, 15] },
-            { from: [9, 1], to: [9, 15] },
+            { from:[12,1], to:[1,10] }, { from:[3,1], to:[3,15] }, { from:[4,1], to:[4,15] },
+            { from:[5,1], to:[5,15] }, { from:[7,1], to:[7,15] }, { from:[9,1], to:[9,15] },
           ]
         },
         monthly: {
           type: 'monthly',
-          weights: [2, 1, 1, 1, 1, 1, 2, 1, 1, 1],
-          labels: ['Jan (2 months)', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul (2 months)', 'Aug', 'Sep', 'Oct'],
+          weights: [2,1,1,1,1,1,2,1,1,1],
+          labels: ['Jan (2 months)','Feb','Mar','Apr','May','Jun','Jul (2 months)','Aug','Sep','Oct'],
           windows: [
-            { from: [1, 1], to: [1, 31] },
-            { from: [2, 1], to: [2, 28] },
-            { from: [3, 1], to: [3, 31] },
-            { from: [4, 1], to: [4, 30] },
-            { from: [5, 1], to: [5, 31] },
-            { from: [6, 1], to: [6, 30] },
-            { from: [7, 1], to: [7, 31] },
-            { from: [8, 1], to: [8, 31] },
-            { from: [9, 1], to: [9, 30] },
-            { from: [10, 1], to: [10, 31] },
+            { from:[1,1], to:[1,31] }, { from:[2,1], to:[2,28] }, { from:[3,1], to:[3,31] }, { from:[4,1], to:[4,30] },
+            { from:[5,1], to:[5,31] }, { from:[6,1], to:[6,30] }, { from:[7,1], to:[7,31] },
+            { from:[8,1], to:[8,31] }, { from:[9,1], to:[9,30] }, { from:[10,1], to:[10,31] },
           ]
         },
         '2inst': {
-          type: '2',
-          discount: 0.96, // 4% off (confirm policy if you want 0%)
-          weights: [1, 1],
-          labels: ['1st Half (48%)', '2nd Half (48%)'],
-          windows: [
-            { from: [1, 1], to: [1, 10] },
-            { from: [7, 1], to: [7, 5] },
-          ]
+          type: '2', discount: 1, // 0% discount (can change if policy says otherwise)
+          weights: [1,1], labels: ['1st Half','2nd Half'],
+          windows: [ { from:[1,1], to:[1,10] }, { from:[7,1], to:[7,5] } ]
         },
         full: {
-          type: 'full',
-          discount: 0.95, // 5% off for full-year
-          weights: [1],
-          labels: ['Full Year (5% off)'],
-          windows: [
-            { from: [1, 1], to: [1, 10] },
-          ]
+          type: 'full', discount: 0.95, // 5% off for full-year
+          weights: [1], labels: ['Full Year (5% off)'],
+          windows: [ { from:[1,1], to:[1,10] } ]
         }
       };
 
@@ -175,7 +148,6 @@
           if (c === 'class 6') return installmentConfigs.class6;
           if (c === 'class 4' || c === 'class 7') return installmentConfigs.class4_7;
         }
-        // Fallback to 6-instalments style if unknown
         return installmentConfigs.lower;
       }
 
@@ -183,7 +155,6 @@
         const config = getConfig(student);
         const academicYear = Number(student.academicYear || new Date().getFullYear());
         let feeBase = Number(student.feePerYear) || 0;
-        // Apply discount factor if provided by config
         const disc = (typeof config.discount === 'number') ? config.discount : 1;
         feeBase = Math.round(feeBase * disc);
 
@@ -192,12 +163,10 @@
           const [fromM, fromD] = config.windows[idx].from;
           const [toM, toD] = config.windows[idx].to;
           return {
-            label,
-            amount: amounts[idx],
+            label, amount: amounts[idx],
             fromTS: ymdToTS(academicYear, fromM, fromD, false),
             toTS:   ymdToTS(academicYear, toM, toD, true),
-            paidAllocated: 0,
-            status: 'Pending'
+            paidAllocated: 0, status: 'Pending'
           };
         });
         return { items, academicYear, feeBase };
@@ -214,11 +183,10 @@
           it.paidAllocated += use;
           pot -= use;
         }
-        const credit = Math.max(0, pot); // leftover (overpayment)
+        const credit = Math.max(0, pot);
         const now = nowTS();
         for (const it of schedule.items) {
-          const got = it.paidAllocated;
-          const need = it.amount;
+          const got = it.paidAllocated, need = it.amount;
           if (got >= need) it.status = 'Cleared';
           else if (now > it.toTS) it.status = (got > 0) ? 'Partially Paid (Overdue)' : 'Overdue';
           else it.status = (got > 0) ? 'Partially Paid' : 'Pending';
@@ -235,13 +203,14 @@
         const totalsExp = schedule.items.reduce((s, it) => s + it.amount, 0);
         const totalsPaid = schedule.items.reduce((s, it) => s + it.paidAllocated, 0);
         const rem = Math.max(0, totalsExp - totalsPaid);
-
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
 
-        const rows = schedule.items.map((it, idx) => {
+        const rows = schedule.items.map(it => {
           const remaining = Math.max(0, it.amount - it.paidAllocated);
           const win = new Date(it.fromTS).toLocaleDateString() + ' – ' + new Date(it.toTS).toLocaleDateString();
-          const statusClass = it.status === 'Cleared' ? 'status-cleared' : (it.status.includes('Overdue') ? 'status-overdue' : 'status-partial');
+          const statusClass = it.status === 'Cleared'
+            ? 'status-cleared'
+            : (it.status.includes('Overdue') ? 'status-overdue' : 'status-partial');
           return `
             <tr>
               <td class="p-1 border text-center">${it.label}</td>
@@ -253,7 +222,7 @@
             </tr>`;
         }).join('');
 
-        const html = `
+        mount(`
           <div class="mb-2 flex items-center justify-between">
             <h2 class="font-semibold text-indigo-700">Installment Breakdown — ${fullName} (${student.admissionNumber || ''})</h2>
             <div class="text-xs">
@@ -291,22 +260,25 @@
               <tbody>${rows}</tbody>
             </table>
           </div>
-        `;
-        mount(html);
+        `);
       }
 
-      // ---- 4) Load student and render ----
-      const url = new URL(location.href);
-      const studentId = url.searchParams.get('student');
+      // ---- load student and render ----
+      const studentId = new URL(location.href).searchParams.get('student');
+      window.__STUDENT_ID__ = studentId;
       if (!studentId) { err('Error: No student ID provided in URL.'); return; }
+      db.ref(`students/${studentId}`).once('value')
+        .then(snap => {
+          const student = snap.val();
+          if (!student) { err('Student not found.'); return; }
+          render(student);
+        })
+        .catch(e => { console.error(e); err('Error loading student data.'); });
 
-      db.ref(`students/${studentId}`).once('value').then(snap => {
-        const student = snap.val();
-        if (!student) { err('Student not found.'); return; }
-        render(student);
-      }).catch(e => {
-        console.error(e);
-        err('Error loading student data.');
+      // resize again after fonts/images settle
+      window.addEventListener('load', () => {
+        const h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+        try { window.parent.postMessage({ type:'resizeIframe', id: window.__STUDENT_ID__, height: h }, '*'); } catch {}
       });
     })();
   </script>

@@ -132,7 +132,23 @@
     .skeleton::after{ content:""; position:absolute; inset:0; transform:translateX(-100%); background:linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent); animation:shimmer 1.4s infinite; }
     @keyframes shimmer{ 100%{ transform:translateX(100%);} }
 
-    /* ==== Responsive ==== */
+    /* ==== Responsive improvements (ONLY spacing/flow) ==== */
+    /* Replace inline 1fr/360px with a clean class */
+    .two-col { grid-template-columns: 1fr; }
+    @media (min-width: 1280px){
+      .two-col { grid-template-columns: 1fr 360px; }
+    }
+    /* Tighter mobile spacing */
+    @media (max-width:768px){
+      .main{ padding:12px; }
+      .card{ padding:14px; }
+      .stat{ padding:12px; }
+      section.grid.gap-4{ row-gap:12px; }
+    }
+    /* Long phone numbers won’t overflow */
+    #detailParentPhone{ word-break: break-word; }
+
+    /* Keep sidebar usable on small screens */
     @media (max-width:1024px){
       .main{ margin-left:0; padding:14px; }
       .sidebar{ position:sticky; top:0; width:100%; height:auto; flex-direction:row; justify-content:center; gap:10px; }
@@ -173,8 +189,8 @@
       </div>
     </section>
 
-    <!-- STATS -->
-    <section class="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 mb-4">
+    <!-- STATS (xl now fits 5 cards) -->
+    <section class="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 mb-4">
       <article class="stat">
         <p class="stat-label">Total Fee (Year)</p>
         <p id="statFeeDue" class="stat-value">TSh 0</p>
@@ -198,11 +214,25 @@
         <p id="statAttendancePct" class="stat-value">0%</p>
         <p class="muted">Present / Total days</p>
       </article>
+
+      <!-- NEW: RECEIPTS stat (child-only) -->
+      <article class="stat">
+        <p class="stat-label">Receipts</p>
+        <p id="statReceiptCount" class="stat-value">0</p>
+        <p id="statReceiptMeta" class="muted">No receipts yet</p>
+        <div class="mt-2 flex gap-2">
+          <button class="btn" id="openReceiptVaultTop">
+            <i class="fas fa-file-invoice-dollar mr-2"></i>Open
+          </button>
+          <button class="btn-ghost" id="openReceiptNewTabTop">
+            <i class="fas fa-up-right-from-square mr-2"></i>New tab
+          </button>
+        </div>
+      </article>
     </section>
 
-    <!-- GRID -->
-    <section class="grid gap-4" style="grid-template-columns: 1fr 360px;">
-
+    <!-- GRID (responsive two-column) -->
+    <section class="grid gap-4 two-col">
       <!-- LEFT COLUMN -->
       <div class="flex flex-col gap-4">
 
@@ -300,6 +330,20 @@
           <canvas id="attendanceChart" class="mt-3" style="width:100%;height:180px;"></canvas>
         </article>
 
+        <!-- Receipt Vault (opens childreceipt.html) -->
+        <article class="card">
+          <h4 class="title text-lg font-extrabold m-0">Receipt Vault</h4>
+          <p class="muted mt-1 text-sm">View all this child’s payments and download official receipts.</p>
+          <div class="mt-3 flex gap-2">
+            <button class="btn" id="openReceiptVault">
+              <i class="fas fa-file-invoice-dollar mr-2"></i>Open Receipts
+            </button>
+            <button class="btn-ghost" id="openReceiptNewTab">
+              <i class="fas fa-up-right-from-square mr-2"></i>Open in New Tab
+            </button>
+          </div>
+        </article>
+
         <!-- QUICK ACTIONS -->
         <article class="card">
           <h4 class="title text-lg font-extrabold m-0">Quick Actions</h4>
@@ -315,6 +359,17 @@
     </section>
 
     <p class="muted mt-4 text-sm">SoMAp — All monetary values are shown in Tanzanian shillings (TSh).</p>
+
+    <!-- Embedded Receipt Modal -->
+    <div id="receiptModal" class="fixed inset-0 bg-black/80 z-50 hidden items-center justify-center">
+      <div class="relative w-[90vw] h-[90vh] bg-slate-900 border border-white/10 rounded-2xl overflow-hidden">
+        <iframe id="receiptFrame" class="w-full h-full border-0"></iframe>
+        <button id="closeReceiptModal"
+                class="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-red-500 text-white">
+          Close
+        </button>
+      </div>
+    </div>
   </main>
 
   <script>
@@ -369,6 +424,10 @@
   const quickFees = q('#quickFees');
   const openMarketTop = q('#openMarketTop');
   const viewMarketSmall = q('#viewMarketSmall');
+
+  // NEW: Receipt stat refs
+  const statReceiptCount = q('#statReceiptCount');
+  const statReceiptMeta  = q('#statReceiptMeta');
 
   // Sidebar actions
   qa('.icon').forEach(el => el.addEventListener('click', (ev)=>handleAction(ev.currentTarget.dataset.action)));
@@ -523,6 +582,14 @@
     statPaid.textContent = fmtTsh(bestPaid);
     statBalance.textContent = fmtTsh(Math.max(0, feeDue - bestPaid));
     applyFeeBadge(feeDue, bestPaid);
+
+    // ---- Update Receipts stat card
+    const recCount = merged.length;
+    const lastTs   = merged[0]?.timestamp || null; // merged is sorted desc above
+    if (statReceiptCount) statReceiptCount.textContent = String(recCount);
+    if (statReceiptMeta)  statReceiptMeta.textContent  = lastTs
+      ? ('Last: ' + new Date(lastTs).toLocaleDateString())
+      : 'No receipts yet';
   }
 
   // Attendance loader
@@ -748,6 +815,46 @@
   });
 
   function bindUI(){ /* all wired */ }
+
+  // ===== Shared: build child receipt URL (used by stat + vault) =====
+  function buildChildReceiptUrlGlobal(){
+    const adm = currentStudent?.admissionNumber || currentStudent?.pupilId || '';
+    return adm ? `Tofinancehtml/childreceipt.html?adm=${encodeURIComponent(adm)}`
+               : `Tofinancehtml/childreceipt.html`;
+  }
+
+  // === Receipt Vault (Parent) ===
+  (function(){
+    const openBtn = document.getElementById('openReceiptVault');
+    const openNewTabBtn = document.getElementById('openReceiptNewTab');
+    const modal = document.getElementById('receiptModal');
+    const frame = document.getElementById('receiptFrame');
+    const closeBtn = document.getElementById('closeReceiptModal');
+
+    function openModal(url){
+      frame.src = url;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+    function closeModal(){
+      frame.src = '';
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    // Right-side card buttons
+    openBtn?.addEventListener('click', ()=> openModal(buildChildReceiptUrlGlobal()));
+    openNewTabBtn?.addEventListener('click', ()=> window.open(buildChildReceiptUrlGlobal(), '_blank'));
+    closeBtn?.addEventListener('click', closeModal);
+
+    // TOP stat card buttons
+    document.getElementById('openReceiptVaultTop')?.addEventListener('click', ()=>{
+      openModal(buildChildReceiptUrlGlobal());
+    });
+    document.getElementById('openReceiptNewTabTop')?.addEventListener('click', ()=>{
+      window.open(buildChildReceiptUrlGlobal(), '_blank');
+    });
+  })();
   </script>
 </body>
 </html>

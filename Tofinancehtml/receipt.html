@@ -9,12 +9,12 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
 
-  <!-- Firebase (Auth FIX added) -->
+  <!-- Firebase (Auth included so DB reads work under protected rules) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
 
-  <!-- PDF -->
+  <!-- PDF libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
@@ -41,7 +41,7 @@
     .muted{ color:rgba(226,232,240,.8); }
     .table thead th{ text-align:left; padding:10px 8px; font-size:.75rem; letter-spacing:.16em; text-transform:uppercase; color:rgba(226,232,240,.85);}
     .table tbody td{ padding:10px 8px; border-top:1px solid rgba(148,163,184,.18); }
-    .drawer{ position:fixed; right:0; top:0; bottom:0; width:480px; transform:translateX(100%); transition: transform .28s ease; z-index:40; }
+    .drawer{ position:fixed; right:0; top:0; bottom:0; width:510px; transform:translateX(100%); transition: transform .28s ease; z-index:40; }
     .drawer.open{ transform:translateX(0%); }
     .receipt-paper{
       background:#fff; color:#111827; width:840px; min-height:600px; margin:0 auto; padding:40px;
@@ -49,6 +49,7 @@
     }
     .receipt-header{ border-bottom:2px solid #1e3a8a; padding-bottom:16px; margin-bottom:20px; }
     .receipt-watermark{ position:absolute; inset:0; opacity:.06; background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat; pointer-events:none; }
+    .tag{ font-size:.7rem; padding:.15rem .45rem; border:1px solid rgba(148,163,184,.3); border-radius:.5rem; background:rgba(148,163,184,.12); }
     @media (max-width:1024px){ .main{ margin-left:0; padding:12px; } .sidebar{ position:sticky; top:0; width:100%; height:auto; flex-direction:row; justify-content:center; } }
   </style>
 </head>
@@ -68,11 +69,12 @@
         <div>
           <p class="uppercase tracking-[0.35em] text-xs muted">Socrates School</p>
           <h1 class="text-3xl md:text-4xl font-extrabold">Receipts Manager</h1>
-          <p class="muted text-sm">Search a student, view all payments, and generate official PDF receipts.</p>
+          <p class="muted text-sm">Search a student, view all payments (Fees, Friday Money, others), and generate official PDF receipts.</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
           <input id="searchBox" placeholder="Search name / ADM / phone" class="px-3 py-2 rounded-lg bg-white/10 border border-white/15 focus:outline-none w-[260px]"/>
           <button id="refreshBtn" class="px-4 py-2 rounded-lg bg-sky-500/80 hover:bg-sky-500 text-white"><i class="fas fa-rotate mr-2"></i>Refresh</button>
+          <button id="fullBtn" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20"><i class="fas fa-expand"></i> <span class="ml-1 hidden sm:inline">Fullscreen</span></button>
         </div>
       </div>
     </section>
@@ -99,7 +101,7 @@
     </section>
   </main>
 
-  <!-- Drawer: child payments -->
+  <!-- Drawer: per-student payments -->
   <aside id="drawer" class="drawer card p-0">
     <div class="p-4 border-b border-white/10 flex items-center justify-between">
       <div>
@@ -108,12 +110,12 @@
       </div>
       <button class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20" onclick="closeDrawer()"><i class="fas fa-xmark"></i></button>
     </div>
-    <div class="p-4 space-y-3 overflow-y-auto" id="drawerContent" style="max-height: calc(100vh - 60px);">
-      <!-- payment rows injected -->
+    <div id="drawerContent" class="p-4 space-y-3 overflow-y-auto" style="max-height: calc(100vh - 60px);">
+      <!-- dynamic -->
     </div>
   </aside>
 
-  <!-- Hidden receipt template to capture as PDF -->
+  <!-- Hidden PDF template -->
   <div id="pdfStage" class="hidden">
     <div class="receipt-paper relative" id="pdfPaper">
       <div class="receipt-watermark"></div>
@@ -140,7 +142,7 @@
         </div>
         <div class="flex flex-col items-center">
           <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-blue-900 bg-gray-100">
-            <img id="pdfPhoto" src="" class="w-full h-full object-cover" alt="Child passport"/>
+            <img id="pdfPhoto" src="" crossorigin="anonymous" class="w-full h-full object-cover" alt="Child passport"/>
           </div>
           <p id="pdfChildName" class="mt-3 text-base font-semibold text-blue-900 text-center"></p>
           <p id="pdfChildAdm" class="text-sm text-gray-600 text-center"></p>
@@ -185,18 +187,17 @@
     const db = firebase.database();
     const auth = firebase.auth();
 
-    // ===== Helpers =====
+    /* ===== Helpers ===== */
     const q = s => document.querySelector(s);
-    const qa = s => Array.from(document.querySelectorAll(s));
-    const safe = s => (s==null?'':String(s));
+    const safe = s => (s==null ? '' : String(s));
     const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:0});
-    const parseDate = (...c) => { for(const x of c){ if(!x) continue; const d=new Date(x); if(!isNaN(d)) return d.getTime(); } return Date.now(); };
     const formatDate = v => { const d=new Date(v); return isNaN(d)?'--':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
 
     function numberToEnglish(n){
       const s=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
       const t=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-      if(n<20) return s[n]; if(n<100) return t[Math.floor(n/10)]+(n%10?` ${s[n%10]}`:'');
+      if(n<20) return s[n];
+      if(n<100) return t[Math.floor(n/10)]+(n%10?` ${s[n%10]}`:'');
       if(n<1000) return `${s[Math.floor(n/100)]} Hundred${n%100?` ${numberToEnglish(n%100)}`:''}`;
       if(n<1e6) return `${numberToEnglish(Math.floor(n/1000))} Thousand${n%1000?` ${numberToEnglish(n%1000)}`:''}`;
       if(n<1e9) return `${numberToEnglish(Math.floor(n/1e6))} Million${n%1e6?` ${numberToEnglish(n%1e6)}`:''}`;
@@ -204,22 +205,14 @@
     }
     const amountToWords = a => `${numberToEnglish(Number(a)||0)} Tanzanian Shillings only`;
 
-    async function tryPath(path){
-      try{
-        const s = await db.ref(path).once('value');
-        return s.val()||null;
-      }catch(e){
-        console.warn('DB read failed', path, e?.message||e);
-        return null;
-      }
-    }
-
     function normalizePayment(p, src){
-      const amt = Number(p?.amount||0);
-      let ts = Number(p?.timestamp||0);
-      if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts=t; }
-      if(!ts) ts=Date.now();
-      return { amount:amt, timestamp:ts, method:p?.method||p?.mode||'Cash', note:p?.note||p?.remarks||'Tuition', _src:src };
+      const amt = Number(p?.amount ?? p?.amt ?? p?.value ?? 0);
+      let ts = Number(p?.timestamp || p?.time || 0);
+      if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts = t; }
+      if(!ts) ts = Date.now();
+      const method = p?.method || p?.mode || p?.paymode || 'Cash';
+      const note   = p?.note || p?.purpose || p?.desc || p?.remarks || 'Payment';
+      return { amount: amt, timestamp: ts, method, note, _src: src || '' };
     }
     function dedupe(arr){
       const seen=new Set();
@@ -229,7 +222,7 @@
       });
     }
 
-    // ===== Contacts helpers =====
+    /* ===== Contacts ===== */
     function collectContactsFromStudent(s){
       const candidates = [
         s.primaryParentContact, s.prefoneParentContact, s.parentContact, s.parentPhone,
@@ -248,68 +241,64 @@
           Object.values(v).forEach(x=> x && bag.push(String(x)));
         }
       }
-      const clean = [...new Set(bag.map(x=>x.trim()).filter(Boolean))];
-      return clean;
+      return [...new Set(bag.map(x=>x.trim()).filter(Boolean))];
     }
 
     async function fetchContactsFallback(st){
-      // Only called if student object had no obvious contacts
+      // Optional fallback guesses
       const adm = st.admissionNumber || st.pupilId || '';
-      const guessPaths = [
-        `parents/${st.key}`,
-        `parents/${adm}`,
-        `parentsByStudent/${st.key}`,
-        `studentParents/${adm}`
+      const paths = [
+        `parents/${st.key}`, `parents/${adm}`, `parentsByStudent/${st.key}`, `studentParents/${adm}`
       ];
-      for (const p of guessPaths){
-        const obj = await tryPath(p);
-        if (!obj) continue;
-        const bag = [];
-        const vals = (typeof obj === 'object') ? Object.values(obj) : [obj];
-        vals.forEach(rec=>{
-          if (!rec) return;
-          const fields = [rec.phone, rec.mobile, rec.contact, rec.whatsapp, rec.parentPhone, rec.fatherPhone, rec.motherPhone];
-          fields.forEach(x=> x && bag.push(String(x)));
-        });
-        const clean = [...new Set(bag.map(x=>x.trim()).filter(Boolean))];
-        if (clean.length) return clean;
+      for (const p of paths){
+        try{
+          const snap = await db.ref(p).once('value'); const obj = snap.val();
+          if (!obj) continue;
+          const vals = (typeof obj === 'object') ? Object.values(obj) : [obj];
+          const bag=[];
+          vals.forEach(rec=>{
+            if (!rec) return;
+            [rec.phone,rec.mobile,rec.contact,rec.whatsapp,rec.parentPhone,rec.fatherPhone,rec.motherPhone]
+              .forEach(x=> x && bag.push(String(x)));
+          });
+          const clean=[...new Set(bag.map(x=>x.trim()).filter(Boolean))];
+          if (clean.length) return clean;
+        }catch{}
       }
       return [];
     }
 
-    let allStudents = []; // {key, firstName, lastName, admissionNumber, classLevel, photoUrl, __contacts, __payments, ...}
+    /* ===== Global state ===== */
+    let allStudents = []; // minimal records; receipts fetched lazily
 
-    // ===== Entry: wait for Auth so DB reads succeed under secure rules =====
-    auth.onAuthStateChanged(async (user)=>{
+    /* ===== UI actions ===== */
+    q('#fullBtn').addEventListener('click', ()=>{
+      const el = document.documentElement;
+      if (!document.fullscreenElement) { el.requestFullscreen?.(); }
+      else { document.exitFullscreen?.(); }
+    });
+
+    q('#refreshBtn').addEventListener('click', async ()=>{
+      await loadStudents(true);
+      renderStudents(filter(q('#searchBox').value));
+    });
+
+    q('#searchBox').addEventListener('input', (e)=> renderStudents(filter(e.target.value)));
+
+    /* ===== Auth gate ===== */
+    auth.onAuthStateChanged(async user=>{
+      const tb = q('#studentsTbody');
       if (!user){
-        // not signed in, cannot read with secure rules
-        const tb = q('#studentsTbody');
         tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-300">Not signed in. Please sign in (Mhasibu) and reopen Receipts.</td></tr>`;
         return;
       }
-      // signed in: proceed
-      await init();
+      await loadStudents(true);
+      renderStudents(allStudents);
     });
 
-    async function init(){
-      try{
-        await loadStudents(true);
-        renderStudents(allStudents);
-        q('#refreshBtn').onclick = async ()=>{
-          await loadStudents(true);
-          renderStudents(filter(q('#searchBox').value));
-        };
-        q('#searchBox').addEventListener('input', (e)=> renderStudents(filter(e.target.value)));
-      }catch(e){
-        const tb = q('#studentsTbody');
-        tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-300">Error loading students: ${safe(e?.message||e)}</td></tr>`;
-        console.error(e);
-      }
-    }
-
+    /* ===== Load students (fast) — No receipts here ===== */
     async function loadStudents(force){
       if (allStudents.length && !force) return;
-      // main students list
       let snap;
       try{
         snap = await db.ref('students').once('value');
@@ -318,38 +307,18 @@
         tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-300">Permission denied or network error loading "students".</td></tr>`;
         throw e;
       }
-      const obj = snap.val()||{};
+      const obj = snap.val() || {};
       allStudents = Object.entries(obj).map(([key,val])=>({ key, ...(val||{}) }));
-      // sort by name
+      // Sort by name
       allStudents.sort((a,b)=> (safe(a.firstName)+safe(a.lastName)).localeCompare(safe(b.firstName)+safe(b.lastName)));
-
-      // for each student: contacts + payments summary
+      // Pre-compute contacts only (cheap)
       for (const st of allStudents){
-        // contacts
         let contacts = collectContactsFromStudent(st);
-        if (!contacts.length){
-          contacts = await fetchContactsFallback(st);
-        }
+        if (!contacts.length) contacts = await fetchContactsFallback(st);
         st.__contacts = contacts;
-
-        // receipts / payments
-        const adm = st.admissionNumber || st.pupilId || '';
-        const cls = st.classLevel || '';
-        const year = new Date().getFullYear();
-        const sources = [
-          `students/${st.key}/payments`,
-          `finance/${year}/${cls}/${adm}/payments`,
-          `fees/${year}/${adm}/payments`,
-          `payments/${adm}`,
-          `feesPayments/${adm}`
-        ];
-        let merged = [];
-        const results = await Promise.all(sources.map(p=>tryPath(p)));
-        results.forEach((obj,idx)=>{ if(!obj) return; Object.values(obj).forEach(v=> merged.push(normalizePayment(v, sources[idx]))); });
-        merged = dedupe(merged).sort((a,b)=> a.timestamp-b.timestamp);
-        st.__payments = merged;
-        st.__receiptCount = merged.length;
-        st.__lastPayment = merged.slice(-1)[0] || null;
+        st.__lastPayment = null; // will fill lazily when drawer opens
+        st.__receiptCount = null; // will fill lazily when drawer opens
+        st.__payments = null;     // not fetched yet
       }
     }
 
@@ -374,22 +343,28 @@
         const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
         const adm  = safe(st.admissionNumber || st.pupilId || '--');
         const cls  = safe(st.classLevel || '--');
-        const last = st.__lastPayment ? `${formatDate(st.__lastPayment.timestamp)} — ${formatCurrency(st.__lastPayment.amount)}` : '—';
         const contacts = (st.__contacts && st.__contacts.length) ? st.__contacts.join(', ') : '—';
+        // placeholders for lazy summary
+        const last = st.__lastPayment ? `${formatDate(st.__lastPayment.timestamp)} — ${formatCurrency(st.__lastPayment.amount)}` : '<span class="text-slate-400">—</span>';
+        const rcount = (st.__receiptCount!=null) ? st.__receiptCount : '<span class="text-slate-400">—</span>';
+
         const meta = { key: st.key, adm, cls };
         return `
           <tr>
             <td class="whitespace-nowrap">
               <div class="flex items-center gap-2">
-                <img src="${st.photoUrl||'../images/somap-logo.png.jpg'}" class="w-8 h-8 rounded-lg object-cover"/>
-                <span>${name}</span>
+                <img src="${st.photoUrl||'../images/somap-logo.png.jpg'}" class="w-8 h-8 rounded-lg object-cover" crossorigin="anonymous"/>
+                <div class="flex items-center gap-2">
+                  <span>${name}</span>
+                  ${st.gender ? `<span class="tag">${safe(st.gender)}</span>` : ``}
+                </div>
               </div>
             </td>
             <td>${adm}</td>
             <td>${cls}</td>
             <td class="whitespace-nowrap">${contacts}</td>
-            <td>${last}</td>
-            <td>${st.__receiptCount||0}</td>
+            <td class="js-last" data-key="${st.key}">${last}</td>
+            <td class="js-count" data-key="${st.key}">${rcount}</td>
             <td>
               <button class="px-3 py-1.5 rounded-md bg-white/10 hover:bg-white/20" title="View receipts"
                 onclick='openDrawer(${JSON.stringify(meta).replace(/"/g,"&quot;")})'>
@@ -400,6 +375,50 @@
       }).join('');
     }
 
+    /* ===== Lazy payments fetch (when opening a student) ===== */
+    const PAYMENT_SOURCES = [
+      st => `students/${st.key}/payments`,
+      st => `payments/${st.admissionNumber||st.pupilId||''}`,
+      st => `feesPayments/${st.admissionNumber||st.pupilId||''}`,
+      st => `fridayMoney/${st.admissionNumber||st.pupilId||''}`,
+      st => `fridaymoney/${st.admissionNumber||st.pupilId||''}`,
+      st => `fees/${new Date().getFullYear()}/${st.admissionNumber||st.pupilId||''}/payments`,
+      st => `finance/${new Date().getFullYear()}/${st.classLevel||''}/${st.admissionNumber||st.pupilId||''}/payments`
+    ];
+
+    async function fetchPaymentsForStudent(st){
+      const paths = PAYMENT_SOURCES.map(f=>f(st)).filter(Boolean);
+      const results = await Promise.all(paths.map(async p=>{
+        try { const s = await db.ref(p).once('value'); return { path:p, val:s.val() }; }
+        catch(e){ console.warn('read fail', p, e?.message||e); return { path:p, val:null }; }
+      }));
+      let merged = [];
+      for (const r of results){
+        if (!r.val) continue;
+        if (Array.isArray(r.val)) {
+          r.val.forEach(v=> merged.push(normalizePayment(v, r.path)));
+        } else if (typeof r.val === 'object') {
+          Object.values(r.val).forEach(v=> merged.push(normalizePayment(v, r.path)));
+        }
+      }
+
+      // Extra loose scan: If any payment records live directly under the student's node with different keys
+      // (cheap: only one additional read we already did: students/<key>)
+      // Already covered by students/<key>/payments path; skip deep scan for speed.
+
+      merged = dedupe(merged).sort((a,b)=> a.timestamp - b.timestamp);
+      const last = merged.slice(-1)[0] || null;
+      st.__payments = merged;
+      st.__receiptCount = merged.length;
+      st.__lastPayment = last;
+
+      // Update summary cells in table (if present)
+      const lastCell = document.querySelector(`td.js-last[data-key="${st.key}"]`);
+      const countCell = document.querySelector(`td.js-count[data-key="${st.key}"]`);
+      if (lastCell) lastCell.innerHTML = last ? `${formatDate(last.timestamp)} — ${formatCurrency(last.amount)}` : '<span class="text-slate-400">—</span>';
+      if (countCell) countCell.textContent = merged.length;
+    }
+
     async function openDrawer(meta){
       const drawer = q('#drawer');
       const content = q('#drawerContent');
@@ -407,6 +426,11 @@
       const st = allStudents.find(s=>s.key===meta.key) || {};
       const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
       title.textContent = `${name} — ${meta.adm}`;
+
+      content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">Loading receipts…</div>`;
+      if (!st.__payments) {
+        await fetchPaymentsForStudent(st);
+      }
 
       const payments = (st.__payments||[]).slice().sort((a,b)=> a.timestamp-b.timestamp)
         .map((p,i)=> ({...p, receiptNumber:String(i+1).padStart(4,'0')}));
@@ -420,6 +444,7 @@
                 <p class="font-semibold text-white">${formatCurrency(p.amount)}</p>
                 <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} • ${safe(p.method)}</p>
                 ${p.note ? `<p class="text-sm mt-1">${p.note}</p>`:``}
+                ${p._src ? `<p class="text-[10px] text-slate-400 mt-1">src: ${p._src}</p>`:``}
               </div>
               <div class="text-right">
                 <p class="text-xs muted">Receipt #${p.receiptNumber}</p>
@@ -432,10 +457,12 @@
           </div>
         `).join('');
       }
+
       drawer.classList.add('open');
     }
     function closeDrawer(){ q('#drawer').classList.remove('open'); }
 
+    /* ===== PDF generation (fixed) ===== */
     async function generatePDF(meta, payment){
       const st = allStudents.find(s=>s.key===meta.key) || {};
       const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
@@ -445,7 +472,7 @@
       q('#pdfReceivedFrom').textContent= name;
       q('#pdfAmountWords').textContent = amountToWords(payment.amount);
       q('#pdfAmountFigures').textContent = formatCurrency(payment.amount);
-      q('#pdfPurpose').textContent     = payment.note || 'Tuition payment';
+      q('#pdfPurpose').textContent     = payment.note || 'Payment';
       q('#pdfMethod').textContent      = payment.method || 'Cash';
       q('#pdfInstrument').textContent  = payment.method || 'Cash';
       q('#pdfCurrency').textContent    = formatCurrency(payment.amount);
@@ -453,15 +480,30 @@
       q('#pdfChildAdm').textContent    = `ADM: ${meta.adm || '--'}`;
       q('#pdfPhoto').src               = st.photoUrl || '../images/somap-logo.png.jpg';
 
+      // Ensure visible for capture (prevents blank canvas on some browsers)
+      const host = q('#pdfStage');
+      host.classList.remove('hidden');
+      await new Promise(r=>setTimeout(r, 30)); // let layout settle
+
       const stage = q('#pdfPaper');
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF('landscape','pt','a4');
-      const canvas = await html2canvas(stage, { scale: 0.9, useCORS:true });
+      const canvas = await html2canvas(stage, { scale: 1.4, useCORS:true, allowTaint:true, backgroundColor:'#ffffff' });
       const img = canvas.toDataURL('image/png');
-      const w = pdf.internal.pageSize.getWidth(), h = pdf.internal.pageSize.getHeight();
-      const iw = w - 40, ih = canvas.height * (iw / canvas.width);
+      const w = pdf.internal.pageSize.getWidth();
+      const iw = w - 40;
+      const ih = canvas.height * (iw / canvas.width);
       pdf.addImage(img, 'PNG', 20, 20, iw, ih);
-      pdf.save(`${meta.adm || 'student'}_receipt_${payment.receiptNumber}.pdf`);
+
+      try {
+        pdf.save(`${meta.adm || 'student'}_receipt_${payment.receiptNumber}.pdf`);
+      } catch (e) {
+        // Safari / iOS fallback
+        const blobUrl = pdf.output('bloburl');
+        window.open(blobUrl, '_blank');
+      } finally {
+        host.classList.add('hidden');
+      }
     }
   </script>
 </body>

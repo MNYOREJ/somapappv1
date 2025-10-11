@@ -9,7 +9,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
 
-  <!-- Firebase (Auth included so DB reads work under protected rules) -->
+  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
@@ -43,13 +43,18 @@
     .table tbody td{ padding:10px 8px; border-top:1px solid rgba(148,163,184,.18); }
     .drawer{ position:fixed; right:0; top:0; bottom:0; width:510px; transform:translateX(100%); transition: transform .28s ease; z-index:40; }
     .drawer.open{ transform:translateX(0%); }
+    .tag{ font-size:.7rem; padding:.15rem .45rem; border:1px solid rgba(148,163,184,.3); border-radius:.5rem; background:rgba(148,163,184,.12); }
+
+    /* PDF look */
     .receipt-paper{
-      background:#fff; color:#111827; width:840px; min-height:600px; margin:0 auto; padding:40px;
+      background:#fff; color:#111827; width:900px; min-height:640px; margin:0 auto; padding:40px;
       border-radius:16px; border:3px double #1e3a8a; font-family: Cambria, Georgia, "Times New Roman", serif;
     }
     .receipt-header{ border-bottom:2px solid #1e3a8a; padding-bottom:16px; margin-bottom:20px; }
     .receipt-watermark{ position:absolute; inset:0; opacity:.06; background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat; pointer-events:none; }
-    .tag{ font-size:.7rem; padding:.15rem .45rem; border:1px solid rgba(148,163,184,.3); border-radius:.5rem; background:rgba(148,163,184,.12); }
+    .summary-table { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px;}
+    .summary-table th, .summary-table td { border:1px solid #1e3a8a55; padding:6px 8px; }
+    .summary-badge { font-size:12px; padding:2px 6px; border:1px solid #1e3a8a66; border-radius:6px; color:#1e3a8a; }
     @media (max-width:1024px){ .main{ margin-left:0; padding:12px; } .sidebar{ position:sticky; top:0; width:100%; height:auto; flex-direction:row; justify-content:center; } }
   </style>
 </head>
@@ -132,14 +137,26 @@
           <p class="text-sm text-blue-900" id="pdfReceiptDate">Date: --</p>
         </div>
       </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
         <div class="lg:col-span-2">
-          <p class="text-base mb-4">Received From: <span id="pdfReceivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
-          <p class="text-base mb-4">The Sum of Shillings (In words): <span id="pdfAmountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
-          <p class="text-base mb-4">Amount in figures: <span id="pdfAmountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
-          <p class="text-base mb-4">Being payment of: <span id="pdfPurpose" class="border-b border-black inline-block min-w-[300px]"></span></p>
-          <p class="text-base mb-4">Payment Method: <span id="pdfMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
+          <p class="text-base mb-3">Received From: <span id="pdfReceivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
+          <p class="text-base mb-3">The Sum of Shillings (In words): <span id="pdfAmountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
+          <p class="text-base mb-3">Amount in figures: <span id="pdfAmountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
+          <p class="text-base mb-3">Being payment of: <span id="pdfPurpose" class="border-b border-black inline-block min-w-[300px]"></span> <span id="pdfKindBadge" class="summary-badge"></span></p>
+          <p class="text-base mb-3">Payment Method: <span id="pdfMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
+
+          <!-- Fees summary -->
+          <table class="summary-table">
+            <thead><tr><th colspan="4" style="text-align:left;background:#eff6ff;">Fees Summary</th></tr></thead>
+            <tbody>
+              <tr><td>Plan</td><td id="sumPlan">--</td><td>Annual Fee</td><td id="sumAnnual">--</td></tr>
+              <tr><td>Paid this Year</td><td id="sumPaidYear">--</td><td>Debt till <span id="sumTillLabel">--</span></td><td id="sumDebtTill">--</td></tr>
+              <tr><td>Annual Balance</td><td id="sumBalance">--</td><td>Total Fridays Paid</td><td id="sumFridayPaid">--</td></tr>
+            </tbody>
+          </table>
         </div>
+
         <div class="flex flex-col items-center">
           <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-blue-900 bg-gray-100">
             <img id="pdfPhoto" src="" crossorigin="anonymous" class="w-full h-full object-cover" alt="Child passport"/>
@@ -148,7 +165,8 @@
           <p id="pdfChildAdm" class="text-sm text-gray-600 text-center"></p>
         </div>
       </div>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-10">
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
         <div>
           <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">Cash / Cheque</p>
           <p id="pdfInstrument" class="border-b border-black h-8"></p>
@@ -158,7 +176,8 @@
           <p id="pdfCurrency" class="border-b border-black h-8"></p>
         </div>
       </div>
-      <div class="flex justify-between mt-12">
+
+      <div class="flex justify-between mt-10">
         <div>
           <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Sign for Socrates</p>
           <p class="border-t border-black w-48 h-0"></p>
@@ -172,6 +191,11 @@
   </div>
 
   <script>
+    /* ========= CONFIG (tweak here) ========= */
+    const FRIDAY_COST = 1000;                  // amount for Friday money
+    const FRIDAY_LOOKBACK = 120;               // how many most-recent Fridays to scan
+    const ACADEMIC_START_MONTH = 0;            // 0=January, 6=July (change if your school year starts in July)
+
     /* ===== Firebase ===== */
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
@@ -192,6 +216,7 @@
     const safe = s => (s==null ? '' : String(s));
     const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:0});
     const formatDate = v => { const d=new Date(v); return isNaN(d)?'--':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+    const monthName = m => new Date(2000, m, 1).toLocaleString('en-GB',{month:'long'});
 
     function numberToEnglish(n){
       const s=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
@@ -205,19 +230,24 @@
     }
     const amountToWords = a => `${numberToEnglish(Number(a)||0)} Tanzanian Shillings only`;
 
-    function normalizePayment(p, src){
+    function normalizePayment(p, src, kind){
       const amt = Number(p?.amount ?? p?.amt ?? p?.value ?? 0);
       let ts = Number(p?.timestamp || p?.time || 0);
       if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts = t; }
       if(!ts) ts = Date.now();
       const method = p?.method || p?.mode || p?.paymode || 'Cash';
       const note   = p?.note || p?.purpose || p?.desc || p?.remarks || 'Payment';
-      return { amount: amt, timestamp: ts, method, note, _src: src || '' };
+      // infer kind if not passed
+      let k = kind || (
+        /friday/i.test(src) ? 'friday' :
+        /fee|finance/i.test(src) || /fee/i.test(note) ? 'tuition' : 'other'
+      );
+      return { amount: amt, timestamp: ts, method, note, _src: src || '', _kind: k };
     }
     function dedupe(arr){
       const seen=new Set();
       return arr.filter(p=>{
-        const k=`${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}`;
+        const k=`${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}|${p._kind}`;
         if(seen.has(k)) return false; seen.add(k); return true;
       });
     }
@@ -233,23 +263,16 @@
       const bag = [];
       for (const v of candidates){
         if (!v) continue;
-        if (typeof v === 'string' || typeof v === 'number'){
-          bag.push(String(v));
-        } else if (Array.isArray(v)){
-          v.forEach(x=> x && bag.push(String(x)));
-        } else if (typeof v === 'object'){
-          Object.values(v).forEach(x=> x && bag.push(String(x)));
-        }
+        if (typeof v === 'string' || typeof v === 'number'){ bag.push(String(v)); }
+        else if (Array.isArray(v)){ v.forEach(x=> x && bag.push(String(x))); }
+        else if (typeof v === 'object'){ Object.values(v).forEach(x=> x && bag.push(String(x))); }
       }
       return [...new Set(bag.map(x=>x.trim()).filter(Boolean))];
     }
 
     async function fetchContactsFallback(st){
-      // Optional fallback guesses
       const adm = st.admissionNumber || st.pupilId || '';
-      const paths = [
-        `parents/${st.key}`, `parents/${adm}`, `parentsByStudent/${st.key}`, `studentParents/${adm}`
-      ];
+      const paths = [`parents/${st.key}`, `parents/${adm}`, `parentsByStudent/${st.key}`, `studentParents/${adm}`];
       for (const p of paths){
         try{
           const snap = await db.ref(p).once('value'); const obj = snap.val();
@@ -269,7 +292,7 @@
     }
 
     /* ===== Global state ===== */
-    let allStudents = []; // minimal records; receipts fetched lazily
+    let allStudents = [];
 
     /* ===== UI actions ===== */
     q('#fullBtn').addEventListener('click', ()=>{
@@ -282,7 +305,6 @@
       await loadStudents(true);
       renderStudents(filter(q('#searchBox').value));
     });
-
     q('#searchBox').addEventListener('input', (e)=> renderStudents(filter(e.target.value)));
 
     /* ===== Auth gate ===== */
@@ -296,29 +318,28 @@
       renderStudents(allStudents);
     });
 
-    /* ===== Load students (fast) — No receipts here ===== */
+    /* ===== Load students (fast; no receipts yet) ===== */
     async function loadStudents(force){
       if (allStudents.length && !force) return;
       let snap;
-      try{
-        snap = await db.ref('students').once('value');
-      }catch(e){
+      try{ snap = await db.ref('students').once('value'); }
+      catch(e){
         const tb = q('#studentsTbody');
         tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-300">Permission denied or network error loading "students".</td></tr>`;
         throw e;
       }
       const obj = snap.val() || {};
       allStudents = Object.entries(obj).map(([key,val])=>({ key, ...(val||{}) }));
-      // Sort by name
       allStudents.sort((a,b)=> (safe(a.firstName)+safe(a.lastName)).localeCompare(safe(b.firstName)+safe(b.lastName)));
-      // Pre-compute contacts only (cheap)
+
       for (const st of allStudents){
         let contacts = collectContactsFromStudent(st);
         if (!contacts.length) contacts = await fetchContactsFallback(st);
         st.__contacts = contacts;
-        st.__lastPayment = null; // will fill lazily when drawer opens
-        st.__receiptCount = null; // will fill lazily when drawer opens
-        st.__payments = null;     // not fetched yet
+        st.__lastPayment = null;
+        st.__receiptCount = null;
+        st.__payments = null;
+        st.__finance = null; // cache of computed finance summary
       }
     }
 
@@ -344,10 +365,8 @@
         const adm  = safe(st.admissionNumber || st.pupilId || '--');
         const cls  = safe(st.classLevel || '--');
         const contacts = (st.__contacts && st.__contacts.length) ? st.__contacts.join(', ') : '—';
-        // placeholders for lazy summary
         const last = st.__lastPayment ? `${formatDate(st.__lastPayment.timestamp)} — ${formatCurrency(st.__lastPayment.amount)}` : '<span class="text-slate-400">—</span>';
         const rcount = (st.__receiptCount!=null) ? st.__receiptCount : '<span class="text-slate-400">—</span>';
-
         const meta = { key: st.key, adm, cls };
         return `
           <tr>
@@ -375,36 +394,129 @@
       }).join('');
     }
 
-    /* ===== Lazy payments fetch (when opening a student) ===== */
-    const PAYMENT_SOURCES = [
+    /* ===== Friday Money aggregator (NEW) ===== */
+    async function fetchFridayMoneyRecords(student){
+      // We look under fridayMoney/<YYYY-MM-DD>/<student.key> and count paid=FRIDAY_COST
+      // Pull only the most recent Fridays for speed.
+      const out = [];
+      try{
+        const snap = await db.ref('fridayMoney').orderByKey().limitToLast(FRIDAY_LOOKBACK).once('value');
+        const all = snap.val() || {};
+        for (const [fridayId, map] of Object.entries(all)){
+          const rec = map && map[student.key];
+          if (rec && rec.payment === 'paid'){
+            const ts = rec.timestamp || Date.parse(fridayId) || Date.now();
+            out.push(normalizePayment({
+              amount: FRIDAY_COST,
+              timestamp: ts,
+              method: 'Friday',
+              note: `Friday Money (${fridayId})`
+            }, `fridayMoney/${fridayId}/${student.key}`, 'friday'));
+          }
+        }
+      }catch(e){ console.warn('Friday money fetch failed', e?.message||e); }
+      return out;
+    }
+
+    /* ===== Finance summary (plan, debt till, annual) ===== */
+    async function computeFinanceSummary(st, payments){
+      // Try to discover annual fee + plan from finance/fees nodes. Fall back to heuristics.
+      const adm = st.admissionNumber || st.pupilId || '';
+      const cls = st.classLevel || '';
+      const year = new Date().getFullYear();
+      let annualFee = 0, planType='monthly', planCount=12, planLabel='Monthly (12)';
+
+      // Try several likely nodes
+      const tryPaths = [
+        `finance/${year}/${cls}/${adm}/meta`,
+        `finance/${year}/${cls}/${adm}`,
+        `fees/${year}/${adm}/meta`,
+        `fees/${year}/${adm}`
+      ];
+      for (const p of tryPaths){
+        try{
+          const v = (await db.ref(p).once('value')).val();
+          if (!v) continue;
+          annualFee = Number(v.annualFee || v.totalFee || v.feeAmount || v.expected || annualFee) || annualFee;
+          const plan = v.plan || v.paymentPlan || v.planType || v.cycle || '';
+          if (typeof plan === 'string'){
+            const m = plan.match(/(\d+)\s*-\s*inst/i);
+            if (m){ planType='instalments'; planCount=Number(m[1])||planCount; }
+            else if (/month/i.test(plan)){ planType='monthly'; planCount=12; }
+          } else if (typeof plan === 'object'){
+            if (/inst/i.test(plan.type||'')){ planType='instalments'; planCount=Number(plan.count||planCount)||planCount; }
+            if (/month/i.test(plan.type||'')){ planType='monthly'; planCount=12; }
+          }
+        }catch{}
+      }
+      planLabel = planType==='monthly' ? 'Monthly (12)' : `${planCount}-Instalments`;
+
+      // Paid tuition this academic year (exclude Friday & "other")
+      const now = new Date();
+      const start = new Date(now.getFullYear(), ACADEMIC_START_MONTH, 1);
+      const end = now;
+      const inYear = (ts)=> (new Date(ts) >= start && new Date(ts) <= end);
+      const paidTuition = payments
+        .filter(p=> p._kind==='tuition' && inYear(p.timestamp))
+        .reduce((s,p)=> s+Number(p.amount||0), 0);
+
+      // Tuition debt "till" (month or instalment)
+      const monthsElapsed = (now.getFullYear() - start.getFullYear())*12 + (now.getMonth() - start.getMonth()) + 1; // inclusive
+      let cyclesDue = 12;
+      if (planType==='monthly'){
+        cyclesDue = Math.min(12, Math.max(0, monthsElapsed));
+      } else {
+        // map months to instalments proportionally (ceil)
+        cyclesDue = Math.min(planCount, Math.max(0, Math.ceil((monthsElapsed/12)*planCount)));
+      }
+      const perCycle = (annualFee / (planType==='monthly' ? 12 : planCount)) || 0;
+      const dueTillNow = perCycle * cyclesDue;
+      const debtTill = Math.max(0, Math.round(dueTillNow - paidTuition));
+
+      const annualBalance = Math.max(0, Math.round(annualFee - paidTuition));
+
+      // Friday totals (same academic year window)
+      const paidFriday = payments
+        .filter(p=> p._kind==='friday' && inYear(p.timestamp))
+        .reduce((s,p)=> s+Number(p.amount||0), 0);
+
+      const tillLabel = planType==='monthly'
+        ? monthName(now.getMonth())
+        : `Inst ${cyclesDue}`;
+
+      return {
+        planLabel, annualFee, paidTuition, paidFriday, debtTill, annualBalance, tillLabel
+      };
+    }
+
+    /* ===== Lazy payments fetch on open ===== */
+    const SIMPLE_PAYMENT_PATHS = [
       st => `students/${st.key}/payments`,
       st => `payments/${st.admissionNumber||st.pupilId||''}`,
       st => `feesPayments/${st.admissionNumber||st.pupilId||''}`,
-      st => `fridayMoney/${st.admissionNumber||st.pupilId||''}`,
-      st => `fridaymoney/${st.admissionNumber||st.pupilId||''}`,
       st => `fees/${new Date().getFullYear()}/${st.admissionNumber||st.pupilId||''}/payments`,
-      st => `finance/${new Date().getFullYear()}/${st.classLevel||''}/${st.admissionNumber||st.pupilId||''}/payments`
+      st => `finance/${new Date().getFullYear()}/${st.classLevel||''}/${st.admissionNumber||st.pupilId||''}/payments`,
+      // Add more collections keyed by ADM here (e.g. graduationMoney/<ADM>)
+      st => `graduationMoney/${st.admissionNumber||st.pupilId||''}`
     ];
 
     async function fetchPaymentsForStudent(st){
-      const paths = PAYMENT_SOURCES.map(f=>f(st)).filter(Boolean);
+      const paths = SIMPLE_PAYMENT_PATHS.map(f=>f(st)).filter(Boolean);
       const results = await Promise.all(paths.map(async p=>{
         try { const s = await db.ref(p).once('value'); return { path:p, val:s.val() }; }
         catch(e){ console.warn('read fail', p, e?.message||e); return { path:p, val:null }; }
       }));
+
       let merged = [];
       for (const r of results){
         if (!r.val) continue;
-        if (Array.isArray(r.val)) {
-          r.val.forEach(v=> merged.push(normalizePayment(v, r.path)));
-        } else if (typeof r.val === 'object') {
-          Object.values(r.val).forEach(v=> merged.push(normalizePayment(v, r.path)));
-        }
+        if (Array.isArray(r.val)) r.val.forEach(v=> merged.push(normalizePayment(v, r.path)));
+        else if (typeof r.val === 'object') Object.values(r.val).forEach(v=> merged.push(normalizePayment(v, r.path)));
       }
 
-      // Extra loose scan: If any payment records live directly under the student's node with different keys
-      // (cheap: only one additional read we already did: students/<key>)
-      // Already covered by students/<key>/payments path; skip deep scan for speed.
+      // Friday money (NEW)
+      const friday = await fetchFridayMoneyRecords(st);
+      merged.push(...friday);
 
       merged = dedupe(merged).sort((a,b)=> a.timestamp - b.timestamp);
       const last = merged.slice(-1)[0] || null;
@@ -412,7 +524,10 @@
       st.__receiptCount = merged.length;
       st.__lastPayment = last;
 
-      // Update summary cells in table (if present)
+      // Finance summary cache
+      st.__finance = await computeFinanceSummary(st, merged);
+
+      // Update summary cells in table
       const lastCell = document.querySelector(`td.js-last[data-key="${st.key}"]`);
       const countCell = document.querySelector(`td.js-count[data-key="${st.key}"]`);
       if (lastCell) lastCell.innerHTML = last ? `${formatDate(last.timestamp)} — ${formatCurrency(last.amount)}` : '<span class="text-slate-400">—</span>';
@@ -428,9 +543,7 @@
       title.textContent = `${name} — ${meta.adm}`;
 
       content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">Loading receipts…</div>`;
-      if (!st.__payments) {
-        await fetchPaymentsForStudent(st);
-      }
+      if (!st.__payments) await fetchPaymentsForStudent(st);
 
       const payments = (st.__payments||[]).slice().sort((a,b)=> a.timestamp-b.timestamp)
         .map((p,i)=> ({...p, receiptNumber:String(i+1).padStart(4,'0')}));
@@ -441,7 +554,7 @@
           <div class="p-3 rounded-lg bg-white/5 border border-white/10">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <p class="font-semibold text-white">${formatCurrency(p.amount)}</p>
+                <p class="font-semibold text-white">${formatCurrency(p.amount)} <span class="tag">${p._kind||'other'}</span></p>
                 <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} • ${safe(p.method)}</p>
                 ${p.note ? `<p class="text-sm mt-1">${p.note}</p>`:``}
                 ${p._src ? `<p class="text-[10px] text-slate-400 mt-1">src: ${p._src}</p>`:``}
@@ -457,16 +570,16 @@
           </div>
         `).join('');
       }
-
       drawer.classList.add('open');
     }
     function closeDrawer(){ q('#drawer').classList.remove('open'); }
 
-    /* ===== PDF generation (fixed) ===== */
+    /* ===== PDF generation ===== */
     async function generatePDF(meta, payment){
       const st = allStudents.find(s=>s.key===meta.key) || {};
       const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
 
+      // Basic fields
       q('#pdfReceiptNo').textContent   = `Receipt No: ${payment.receiptNumber}`;
       q('#pdfReceiptDate').textContent = `Date: ${formatDate(payment.timestamp)}`;
       q('#pdfReceivedFrom').textContent= name;
@@ -479,31 +592,36 @@
       q('#pdfChildName').textContent   = name;
       q('#pdfChildAdm').textContent    = `ADM: ${meta.adm || '--'}`;
       q('#pdfPhoto').src               = st.photoUrl || '../images/somap-logo.png.jpg';
+      q('#pdfKindBadge').textContent   = payment._kind ? ` ${payment._kind.toUpperCase()} ` : '';
 
-      // Ensure visible for capture (prevents blank canvas on some browsers)
+      // Finance summary for the PDF (uses cached compute)
+      const fin = st.__finance || await computeFinanceSummary(st, st.__payments||[]);
+      q('#sumPlan').textContent      = fin.planLabel;
+      q('#sumAnnual').textContent    = formatCurrency(fin.annualFee);
+      q('#sumPaidYear').textContent  = formatCurrency(fin.paidTuition);
+      q('#sumTillLabel').textContent = fin.tillLabel;
+      q('#sumDebtTill').textContent  = formatCurrency(fin.debtTill);
+      q('#sumBalance').textContent   = formatCurrency(fin.annualBalance);
+      q('#sumFridayPaid').textContent= formatCurrency(fin.paidFriday);
+
+      // Make visible for capture
       const host = q('#pdfStage');
       host.classList.remove('hidden');
-      await new Promise(r=>setTimeout(r, 30)); // let layout settle
+      await new Promise(r=>setTimeout(r, 30));
 
       const stage = q('#pdfPaper');
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF('landscape','pt','a4');
-      const canvas = await html2canvas(stage, { scale: 1.4, useCORS:true, allowTaint:true, backgroundColor:'#ffffff' });
+      const canvas = await html2canvas(stage, { scale: 1.35, useCORS:true, allowTaint:true, backgroundColor:'#ffffff' });
       const img = canvas.toDataURL('image/png');
       const w = pdf.internal.pageSize.getWidth();
       const iw = w - 40;
       const ih = canvas.height * (iw / canvas.width);
       pdf.addImage(img, 'PNG', 20, 20, iw, ih);
 
-      try {
-        pdf.save(`${meta.adm || 'student'}_receipt_${payment.receiptNumber}.pdf`);
-      } catch (e) {
-        // Safari / iOS fallback
-        const blobUrl = pdf.output('bloburl');
-        window.open(blobUrl, '_blank');
-      } finally {
-        host.classList.add('hidden');
-      }
+      try { pdf.save(`${meta.adm || 'student'}_receipt_${payment.receiptNumber}.pdf`); }
+      catch(e){ window.open(pdf.output('bloburl'), '_blank'); }
+      finally { host.classList.add('hidden'); }
     }
   </script>
 </body>

@@ -4,72 +4,127 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Installment Breakdown</title>
+
+  <!-- Firebase (v9 compat) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-  <script>
-    // Fallback if firebase.js fails to load
-    if (!window.firebase) {
-      console.error('Firebase SDK not loaded. Check CDN URLs or internet connection.');
-      document.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Firebase SDK failed to load. Please check your internet connection.</p>';
-      });
-    }
-  </script>
-  <script src="../firebase.js" onerror="console.error('Failed to load ../firebase.js. Check file path or GitHub Pages deployment.');"></script>
+
+  <!-- Tailwind for quick styling -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
   <style>
     .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
-    .status-paid { background:#dcfce7; color:#166534; }
+    .status-cleared { background:#dcfce7; color:#166534; }
     .status-partial { background:#fef9c3; color:#854d0e; }
     .status-overdue { background:#fee2e2; color:#991b1b; }
     .table-header { background: #eef2ff; color: #1f2937; }
   </style>
 </head>
-<body>
+<body class="bg-white">
   <div id="breakdownContent" class="text-sm p-4"></div>
+
   <script>
     (function () {
-      console.log('Checking Firebase initialization...');
-      if (!window.firebase) {
-        console.error('Firebase SDK not available.');
-        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Firebase SDK not loaded. Check internet or CDN URLs.</p>';
-        return;
-      }
-      const db = window.db;
-      if (!db) {
-        console.error('Firebase DB not initialized. Verify ../firebase.js exists in root and initializes window.db.');
-        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Database not initialized. Ensure firebase.js is in the root folder and correctly set up.</p>';
-        return;
-      }
-      console.log('Firebase DB ready:', db);
+      // ---- 1) Initialize Firebase HERE (no dependency on ../firebase.js) ----
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+        measurementId: "G-4HKX7KN6Q3"
+      };
+      try {
+        if (!firebase?.apps?.length) firebase.initializeApp(firebaseConfig);
+      } catch (e) { console.error('Firebase init error', e); }
+      const db = (() => { try { return firebase.database(); } catch (e) { return null; }})();
 
-      // Utility functions
-      function fmt(n) { return (Number(n) || 0).toLocaleString(); }
-      function clamp(n) { return Math.max(0, Math.round(Number(n) || 0)); }
-      function todayYMD() {
-        const d = new Date();
-        return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
+      const mount = (html) => { document.getElementById('breakdownContent').innerHTML = html; };
+      const err = (msg) => mount(`<div class="p-3 rounded bg-rose-50 text-rose-700 border border-rose-200">${msg}</div>`);
+
+      if (!db) { err('Error: Database not initialized. Please check Firebase credentials or internet connection.'); return; }
+
+      // ---- 2) Helpers ----
+      const fmt = (n) => (Number(n) || 0).toLocaleString();
+      const clamp = (n) => Math.max(0, Math.round(Number(n) || 0));
+      const nowTS = () => Date.now();
+
+      function ymdToTS(academicYear, m, d, endOfDay = false) {
+        // If the month is December (12), it belongs to previous calendar year for the given academic year
+        const y = (m === 12) ? (Number(academicYear) - 1) : Number(academicYear);
+        return endOfDay
+          ? new Date(y, m - 1, d, 23, 59, 59, 999).getTime()
+          : new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
       }
-      function dateFromYMD(y, m, d) { return new Date(y, m - 1, d).getTime(); }
-      function isPast(ts) { return Date.now() > ts; }
+
       function apportion(total, weights) {
-        if (!weights.length) return [];
+        if (!Array.isArray(weights) || !weights.length) return [];
         const sumW = weights.reduce((a, b) => a + b, 0);
         let amounts = weights.map(w => Math.floor((w * total) / sumW));
         let sumA = amounts.reduce((a, b) => a + b, 0);
         let rem = total - sumA;
         if (rem > 0) {
           const sortedIdx = [...weights.keys()].sort((a, b) => weights[b] - weights[a]);
-          for (let i = 0; i < rem; i++) {
-            amounts[sortedIdx[i % sortedIdx.length]]++;
-          }
+          for (let i = 0; i < rem; i++) amounts[sortedIdx[i % sortedIdx.length]]++;
         }
         return amounts;
       }
 
-      // Installment configuration (monthly only for Joseph)
+      // ---- 3) Installment configurations (mirrors finance.html) ----
       const installmentConfigs = {
+        lower: {
+          type: '6',
+          weights: [44, 13, 12, 22, 22, 16],
+          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+          windows: [
+            { from: [12, 1], to: [1, 10] },
+            { from: [3, 1], to: [3, 15] },
+            { from: [4, 1], to: [4, 15] },
+            { from: [5, 1], to: [5, 15] },
+            { from: [7, 1], to: [7, 15] },
+            { from: [9, 1], to: [9, 15] },
+          ]
+        },
+        class4_7: {
+          type: '4',
+          weights: [328, 180, 176, 132],
+          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4'],
+          windows: [
+            { from: [12, 1], to: [1, 10] },
+            { from: [3, 1], to: [3, 15] },
+            { from: [4, 1], to: [4, 15] },
+            { from: [5, 1], to: [5, 15] },
+          ]
+        },
+        class5: {
+          type: '6',
+          weights: [44, 23, 22, 32, 26, 17],
+          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+          windows: [
+            { from: [12, 1], to: [1, 10] },
+            { from: [3, 1], to: [3, 15] },
+            { from: [4, 1], to: [4, 15] },
+            { from: [5, 1], to: [5, 15] },
+            { from: [7, 1], to: [7, 15] },
+            { from: [9, 1], to: [9, 15] },
+          ]
+        },
+        class6: {
+          type: '6',
+          weights: [236, 115, 110, 160, 160, 100],
+          labels: ['Inst 1', 'Inst 2', 'Inst 3', 'Inst 4', 'Inst 5', 'Inst 6'],
+          windows: [
+            { from: [12, 1], to: [1, 10] },
+            { from: [3, 1], to: [3, 15] },
+            { from: [4, 1], to: [4, 15] },
+            { from: [5, 1], to: [5, 15] },
+            { from: [7, 1], to: [7, 15] },
+            { from: [9, 1], to: [9, 15] },
+          ]
+        },
         monthly: {
           type: 'monthly',
           weights: [2, 1, 1, 1, 1, 1, 2, 1, 1, 1],
@@ -86,163 +141,142 @@
             { from: [9, 1], to: [9, 30] },
             { from: [10, 1], to: [10, 31] },
           ]
+        },
+        '2inst': {
+          type: '2',
+          discount: 0.96, // 4% off (confirm policy if you want 0%)
+          weights: [1, 1],
+          labels: ['1st Half (48%)', '2nd Half (48%)'],
+          windows: [
+            { from: [1, 1], to: [1, 10] },
+            { from: [7, 1], to: [7, 5] },
+          ]
+        },
+        full: {
+          type: 'full',
+          discount: 0.95, // 5% off for full-year
+          weights: [1],
+          labels: ['Full Year (5% off)'],
+          windows: [
+            { from: [1, 1], to: [1, 10] },
+          ]
         }
       };
 
       function getConfig(student) {
-        const plan = (student.paymentPlan || '').toLowerCase();
-        return plan.includes('monthly') ? installmentConfigs.monthly : installmentConfigs.monthly;
+        const plan = String(student.paymentPlan || '').toLowerCase();
+        const c = String(student.classLevel || '').toLowerCase();
+        if (plan.includes('monthly')) return installmentConfigs.monthly;
+        if (plan.includes('2')) return installmentConfigs['2inst'];
+        if (plan.includes('full') || plan.includes('year')) return installmentConfigs.full;
+        if (plan.includes('inst')) {
+          if (c === 'class 1' || c === 'class 2' || c === 'class 3') return installmentConfigs.lower;
+          if (c === 'class 5') return installmentConfigs.class5;
+          if (c === 'class 6') return installmentConfigs.class6;
+          if (c === 'class 4' || c === 'class 7') return installmentConfigs.class4_7;
+        }
+        // Fallback to 6-instalments style if unknown
+        return installmentConfigs.lower;
       }
 
       function buildSchedule(student) {
         const config = getConfig(student);
-        const { y } = todayYMD();
+        const academicYear = Number(student.academicYear || new Date().getFullYear());
         let feeBase = Number(student.feePerYear) || 0;
-        const discount = Number(config.discount) || 1;
-        feeBase = Math.round(feeBase * discount);
-        const weights = config.weights;
-        const amounts = apportion(feeBase, weights);
-        const sc = [];
-        config.labels.forEach((label, i) => {
-          let fromY = y, toY = y;
-          const fromM = config.windows[i].from[0], fromD = config.windows[i].from[1];
-          const toM = config.windows[i].to[0], toD = config.windows[i].to[1];
-          if (fromM === 12) fromY = y - 1;
-          if (toM === 12) toY = y - 1;
-          const fromTS = dateFromYMD(fromY, fromM, fromD);
-          const toTS = dateFromYMD(toY, toM, toD);
-          sc.push({ key: `inst${i + 1}`, label, fromTS, toTS, amount: amounts[i] });
+        // Apply discount factor if provided by config
+        const disc = (typeof config.discount === 'number') ? config.discount : 1;
+        feeBase = Math.round(feeBase * disc);
+
+        const amounts = apportion(feeBase, config.weights);
+        const items = config.labels.map((label, idx) => {
+          const [fromM, fromD] = config.windows[idx].from;
+          const [toM, toD] = config.windows[idx].to;
+          return {
+            label,
+            amount: amounts[idx],
+            fromTS: ymdToTS(academicYear, fromM, fromD, false),
+            toTS:   ymdToTS(academicYear, toM, toD, true),
+            paidAllocated: 0,
+            status: 'Pending'
+          };
         });
-        const now = Date.now();
-        let lastDueIndex = -1;
-        let periodLabel = '—';
-        let expectedToDate = 0;
-        sc.forEach((it, idx) => {
-          if (it.toTS < now) { lastDueIndex = idx; expectedToDate += it.amount; }
-        });
-        if (lastDueIndex >= 0) periodLabel = sc[lastDueIndex].label;
-        sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
-        return { items: sc, periodLabelNow: periodLabel, expectedToDate };
+        return { items, academicYear, feeBase };
       }
 
-      function allocatePayments(student, schedule) {
-        const payList = [];
-        if (student.payments) {
-          Object.values(student.payments).forEach(p => payList.push({ amount: clamp(p.amount), ts: Number(p.timestamp) || 0 }));
-        }
-        payList.sort((a, b) => a.ts - b.ts);
-        let pot = payList.reduce((s, p) => s + p.amount, 0);
-        const totalPaid = pot;
-        let prevDebt = clamp(student.previousDebt || student.debt);
-        let toPrev = Math.min(prevDebt, pot);
-        prevDebt -= toPrev;
-        pot -= toPrev;
+      function allocatePayments(schedule, student) {
+        const payments = Object.values(student.payments || {}).map(p => Number(p.amount) || 0);
+        const totalPaid = payments.reduce((a,b) => a + b, 0);
+        let pot = totalPaid;
         for (const it of schedule.items) {
-          const need = Math.max(0, it.amount - it.paidAllocated);
-          if (need <= 0) continue;
           if (pot <= 0) break;
+          const need = Math.max(0, it.amount - it.paidAllocated);
           const use = Math.min(need, pot);
           it.paidAllocated += use;
           pot -= use;
         }
-        const credit = Math.max(0, pot);
-        const now = Date.now();
+        const credit = Math.max(0, pot); // leftover (overpayment)
+        const now = nowTS();
         for (const it of schedule.items) {
-          const a = it.paidAllocated;
+          const got = it.paidAllocated;
           const need = it.amount;
-          if (a >= need) {
-            it.status = 'Cleared';
-          } else {
-            if (isPast(it.toTS)) {
-              it.status = a > 0 ? 'Partially Paid (Overdue)' : 'Overdue';
-            } else {
-              it.status = a > 0 ? 'Partially Paid' : 'Pending';
-            }
-          }
+          if (got >= need) it.status = 'Cleared';
+          else if (now > it.toTS) it.status = (got > 0) ? 'Partially Paid (Overdue)' : 'Overdue';
+          else it.status = (got > 0) ? 'Partially Paid' : 'Pending';
         }
         const expectedToDate = schedule.items.filter(it => it.toTS < now).reduce((s, it) => s + it.amount, 0);
         const paidConsumed = totalPaid - credit;
         const debtTillNow = Math.max(0, expectedToDate - paidConsumed);
-        return { scheduleItems: schedule.items, prevDebtAfter: prevDebt, credit, totalPaid, debtTillNow };
+        return { credit, totalPaid, debtTillNow };
       }
 
-      function computeStudentFinancials(student) {
-        const feePerYear = Number(student.feePerYear) || 0;
-        const previousDebt = clamp(student.previousDebt || student.debt);
+      function render(student) {
         const schedule = buildSchedule(student);
-        const alloc = allocatePayments(student, schedule);
-        const paidAfterPrev = Math.max(0, alloc.totalPaid - (previousDebt - alloc.prevDebtAfter));
-        const yearBalance = Math.max(0, feePerYear - paidAfterPrev);
-        return {
-          feePerYear,
-          previousDebt,
-          paidAmount: alloc.totalPaid,
-          balance: yearBalance,
-          periodDebtLabel: schedule.periodLabelNow || '—',
-          periodDebtValue: alloc.debtTillNow,
-          credit: alloc.credit,
-          scheduleItems: alloc.scheduleItems
-        };
-      }
-
-      // Fetch and render
-      const urlParams = new URLSearchParams(window.location.search);
-      const studentId = urlParams.get('student');
-      console.log('Student ID:', studentId);
-      if (!studentId) {
-        document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: No student ID provided in URL.</p>';
-        return;
-      }
-
-      db.ref(`students/${studentId}`).once('value').then(snap => {
-        const student = snap.val();
-        console.log('Student data:', student);
-        if (!student) {
-          console.warn('Student not found for ID:', studentId);
-          document.getElementById('breakdownContent').innerHTML = '<p class="text-red-600">Error: Student not found in Firebase.</p>';
-          return;
-        }
-
-        const fin = computeStudentFinancials(student);
-        let rows = '';
-        let totalsExp = 0, totalsPaid = 0;
-        fin.scheduleItems.forEach(it => {
-          const need = it.amount;
-          const got = it.paidAllocated;
-          const bal = Math.max(0, need - got);
-          let statusClass = 'status-partial';
-          if (it.status === 'Cleared') statusClass = 'status-paid';
-          if (it.status.includes('Overdue')) statusClass = 'status-overdue';
-          rows += `
-            <tr>
-              <td class="p-1 border">${it.label}</td>
-              <td class="p-1 border text-right">${fmt(need)}</td>
-              <td class="p-1 border text-right">${fmt(got)}</td>
-              <td class="p-1 border text-right">${fmt(bal)}</td>
-              <td class="p-1 border"><span class="status-pill ${statusClass}">${it.status}</span></td>
-              <td class="p-1 border text-xs">${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}</td>
-            </tr>
-          `;
-          totalsExp += need;
-          totalsPaid += got;
-        });
+        const { credit, totalPaid, debtTillNow } = allocatePayments(schedule, student);
+        const totalsExp = schedule.items.reduce((s, it) => s + it.amount, 0);
+        const totalsPaid = schedule.items.reduce((s, it) => s + it.paidAllocated, 0);
         const rem = Math.max(0, totalsExp - totalsPaid);
+
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+
+        const rows = schedule.items.map((it, idx) => {
+          const remaining = Math.max(0, it.amount - it.paidAllocated);
+          const win = new Date(it.fromTS).toLocaleDateString() + ' – ' + new Date(it.toTS).toLocaleDateString();
+          const statusClass = it.status === 'Cleared' ? 'status-cleared' : (it.status.includes('Overdue') ? 'status-overdue' : 'status-partial');
+          return `
+            <tr>
+              <td class="p-1 border text-center">${it.label}</td>
+              <td class="p-1 border text-right">${fmt(it.amount)}</td>
+              <td class="p-1 border text-right">${fmt(it.paidAllocated)}</td>
+              <td class="p-1 border text-right">${fmt(remaining)}</td>
+              <td class="p-1 border text-center"><span class="status-pill ${statusClass}">${it.status}</span></td>
+              <td class="p-1 border text-center">${win}</td>
+            </tr>`;
+        }).join('');
+
         const html = `
-          <h2 class="font-semibold text-indigo-700 mb-2">Installment Breakdown for ${fullName}</h2>
-          <div class="flex items-center justify-between mb-2">
-            <div>
-              <span class="mr-3">Admission: ${student.admissionNumber || ''}</span>
-              <span class="mr-3">Class: ${student.classLevel || ''}</span>
-              <span>Plan: ${student.paymentPlan || ''}</span>
-            </div>
-            <div>
-              <span class="mr-3">Expected: <strong>${fmt(totalsExp)}</strong></span>
-              <span class="mr-3">Paid: <strong>${fmt(totalsPaid)}</strong></span>
-              <span>Remaining: <strong>${fmt(rem)}</strong></span>
+          <div class="mb-2 flex items-center justify-between">
+            <h2 class="font-semibold text-indigo-700">Installment Breakdown — ${fullName} (${student.admissionNumber || ''})</h2>
+            <div class="text-xs">
+              <span class="mr-3">Plan: <strong>${student.paymentPlan || ''}</strong></span>
+              <span class="mr-3">Class: <strong>${student.classLevel || ''}</strong></span>
+              <span>Year: <strong>${student.academicYear || ''}</strong></span>
             </div>
           </div>
-          <div class="overflow-auto">
+
+          <div class="mb-3 flex items-center justify-between text-xs">
+            <div>
+              <span class="mr-3">Expected: <strong>${fmt(totalsExp)}</strong></span>
+              <span class="mr-3">Paid (total): <strong>${fmt(totalPaid)}</strong></span>
+              <span class="mr-3">Allocated: <strong>${fmt(totalsPaid)}</strong></span>
+              <span class="mr-3">Remaining: <strong>${fmt(rem)}</strong></span>
+            </div>
+            <div>
+              <span class="mr-3">Debt till now: <strong>${fmt(debtTillNow)}</strong></span>
+              <span>Credit: <strong>${fmt(credit)}</strong></span>
+            </div>
+          </div>
+
+          <div class="overflow-auto border rounded">
             <table class="min-w-full text-xs">
               <thead>
                 <tr class="table-header">
@@ -258,10 +292,21 @@
             </table>
           </div>
         `;
-        document.getElementById('breakdownContent').innerHTML = html;
-      }).catch(err => {
-        console.error('Error fetching student:', err);
-        document.getElementById('breakdownContent').innerHTML = `<p class="text-red-600">Error loading data: ${err.message}</p>`;
+        mount(html);
+      }
+
+      // ---- 4) Load student and render ----
+      const url = new URL(location.href);
+      const studentId = url.searchParams.get('student');
+      if (!studentId) { err('Error: No student ID provided in URL.'); return; }
+
+      db.ref(`students/${studentId}`).once('value').then(snap => {
+        const student = snap.val();
+        if (!student) { err('Student not found.'); return; }
+        render(student);
+      }).catch(e => {
+        console.error(e);
+        err('Error loading student data.');
       });
     })();
   </script>

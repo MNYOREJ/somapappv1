@@ -1,151 +1,180 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SoMAp — Child Receipt Vault</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SoMAp — Child Receipts</title>
+
+  <!-- Tailwind + Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
 
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
 
-  <!-- UI -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-  <!-- PDF -->
+  <!-- PDF libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
   <style>
     body{
-      background: radial-gradient(circle at top, rgba(14,165,233,.35), rgba(2,6,23,.95) 60%);
+      background:
+        radial-gradient(1200px 800px at -10% -10%, rgba(14,165,233,.35), transparent 40%),
+        radial-gradient(900px 700px at 110% -10%, rgba(139,92,246,.30), transparent 35%),
+        linear-gradient(180deg, #020617 0%, #0b1220 100%);
       min-height:100vh; color:#e2e8f0; font-family:Inter,system-ui,sans-serif;
     }
-    .glass-panel{
-      background: rgba(15,23,42,0.82); border:1px solid rgba(148,163,184,0.25);
-      box-shadow: 0 30px 80px -40px rgba(15,23,42,0.9); border-radius: 1.5rem; backdrop-filter: blur(16px);
-    }
+    .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
+    .card{ background:rgba(15,23,42,.82); border:1px solid rgba(148,163,184,.22); border-radius:18px; backdrop-filter: blur(14px); box-shadow:0 25px 60px -40px rgba(0,0,0,.6); }
+
+    .tag{ font-size:.7rem; padding:.15rem .45rem; border:1px solid rgba(148,163,184,.3); border-radius:.5rem; background:rgba(148,163,184,.12); }
+    .muted{ color:rgba(226,232,240,.8); }
+
     .receipt-paper{
-      background:#fff; color:#111827; width:890px; min-height:630px; margin:0 auto; padding:48px;
-      border-radius:16px; border:3px double #1e3a8a; box-shadow:0 25px 60px -40px rgba(30,64,175,.6);
-      font-family: Cambria, Georgia, "Times New Roman", serif;
+      background:#fff; color:#111827; width:900px; min-height:640px; margin:0 auto; padding:40px;
+      border-radius:16px; border:3px double #1e3a8a; font-family: Cambria, Georgia, "Times New Roman", serif;
     }
     .receipt-header{ border-bottom:2px solid #1e3a8a; padding-bottom:16px; margin-bottom:20px; }
-    .receipt-watermark{
-      position:absolute; inset:0; opacity:.06;
-      background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat;
-      pointer-events:none;
-    }
-    .selector{ background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); }
-    @media print { .no-print{ display:none !important; } .receipt-paper{ box-shadow:none; } body{ background:#fff; } }
+    .receipt-watermark{ position:absolute; inset:0; opacity:.06; background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat; pointer-events:none; }
+    .summary-table { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px;}
+    .summary-table th, .summary-table td { border:1px solid #1e3a8a55; padding:6px 8px; }
+    .summary-badge { font-size:12px; padding:2px 6px; border:1px solid #1e3a8a66; border-radius:6px; color:#1e3a8a; }
   </style>
 </head>
 <body>
-  <div class="max-w-6xl mx-auto px-4 py-10 lg:py-14">
-    <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-6 mb-10 no-print">
-      <div>
-        <p class="uppercase tracking-[0.35em] text-xs text-slate-300">Socrates School</p>
-        <h1 class="text-3xl lg:text-4xl font-bold text-white">Receipt Vault</h1>
-        <p class="text-sm text-slate-300 mt-2 max-w-2xl">Select a payment to reproduce an official receipt on demand. Each PDF matches the finance office format.</p>
-      </div>
-      <div class="flex gap-3">
-        <a href="../parent.html" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
-          <i class="fas fa-arrow-left mr-2"></i>Back to Parent
-        </a>
-      </div>
-    </header>
-
-    <!-- Controls -->
-    <section class="glass-panel p-6 lg:p-8 mb-8 no-print">
-      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-        <div>
-          <h2 class="text-xl font-semibold text-white">Receipt Controls</h2>
-          <p class="text-sm text-slate-300">Pick a receipt number to render the official slip with logo and child photo.</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-4">
+  <div class="wrap">
+    <!-- Header -->
+    <section class="card p-4 mb-4">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <img id="avatar" src="../images/somap-logo.png.jpg" class="w-12 h-12 rounded-xl object-cover" crossorigin="anonymous"/>
           <div>
-            <label class="text-xs uppercase tracking-[0.35em] text-slate-400 mb-1 block">Receipt Number</label>
-            <select id="receiptSelector" class="selector rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none min-w-[240px]"></select>
+            <p class="uppercase tracking-[0.35em] text-xs muted">Socrates School</p>
+            <h1 id="pageTitle" class="text-2xl md:text-3xl font-extrabold">Child Receipts</h1>
+            <p id="pageMeta" class="muted text-sm">Loading student…</p>
           </div>
-          <button id="btnLoad" class="px-4 py-2 rounded-xl bg-sky-500/80 hover:bg-sky-500 text-sm text-white transition">
-            Load Receipt
-          </button>
-          <button id="btnPrint" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-sm text-slate-100 transition">
-            <i class="fas fa-print mr-2"></i>Print
-          </button>
-          <button id="btnPDF" class="px-4 py-2 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 text-sm text-white transition">
-            <i class="fas fa-file-pdf mr-2"></i>Download PDF
-          </button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="btnBack" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20"><i class="fas fa-arrow-left"></i> Back</button>
+          <button id="btnFullscreen" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20"><i class="fas fa-expand"></i> Fullscreen</button>
         </div>
       </div>
     </section>
 
-    <!-- Receipt canvas -->
-    <section class="relative">
-      <div class="receipt-paper relative" id="receiptPaper">
-        <div class="receipt-watermark"></div>
-        <div class="receipt-header flex justify-between items-start">
+    <!-- List of receipts -->
+    <section class="grid gap-4 md:grid-cols-2">
+      <article class="card p-4">
+        <div class="flex items-center justify-between">
           <div>
-            <h2 class="text-2xl font-bold text-blue-900 uppercase tracking-[0.35em]">Socrates Investment Limited</h2>
-            <p class="uppercase tracking-[0.35em] text-blue-900 text-sm">Socrates School</p>
-            <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">P.O BOX 14256 ARUSHA</p>
-            <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">Mob: 0686 828 732</p>
+            <h3 class="text-xl font-extrabold">Payments</h3>
+            <p class="muted text-sm">Fees, Friday, others (latest first)</p>
           </div>
           <div class="text-right">
-            <h3 class="text-3xl font-bold text-blue-900 uppercase">Receipt</h3>
-            <p class="text-sm text-blue-900 mt-2" id="receiptNumberLabel">Receipt No: ----</p>
-            <p class="text-sm text-blue-900" id="receiptDateLabel">Date: --</p>
+            <p id="lastCell" class="muted text-xs">Last payment — —</p>
+            <p id="countCell" class="muted text-xs">Receipts —</p>
           </div>
         </div>
+        <div id="list" class="mt-3 space-y-3">
+          <div class="p-3 rounded-lg bg-white/5 border border-white/10">Loading…</div>
+        </div>
+      </article>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-          <div class="lg:col-span-2">
-            <p class="text-base mb-4">Received From: <span id="receivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
-            <p class="text-base mb-4">The Sum of Shillings (In words): <span id="amountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
-            <p class="text-base mb-4">Amount in figures: <span id="amountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
-            <p class="text-base mb-4">Being payment of: <span id="paymentPurpose" class="border-b border-black inline-block min-w-[300px]"></span></p>
-            <p class="text-base mb-4">Payment Method: <span id="paymentMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
-          </div>
-          <div class="flex flex-col items-center">
-            <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-blue-900 bg-gray-100">
-              <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover"/>
-            </div>
-            <p id="childNameLabel" class="mt-3 text-base font-semibold text-blue-900 text-center"></p>
-            <p id="childAdmLabel" class="text-sm text-gray-600 text-center"></p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-10">
-          <div>
-            <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">Cash / Cheque</p>
-            <p id="paymentInstrument" class="border-b border-black h-8"></p>
-          </div>
-          <div>
-            <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">TSh</p>
-            <p id="paymentCurrency" class="border-b border-black h-8"></p>
-          </div>
-        </div>
-
-        <div class="flex justify-between mt-12">
-          <div>
-            <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Sign for Socrates</p>
-            <p class="border-t border-black w-48 h-0"></p>
-          </div>
-          <div>
-            <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Stamp</p>
-            <div class="w-40 h-24 border border-dashed border-blue-900"></div>
-          </div>
-        </div>
-      </div>
+      <!-- Fee summary live (same numbers used in PDF) -->
+      <article class="card p-4">
+        <h3 class="text-xl font-extrabold">Fees Summary</h3>
+        <table class="summary-table mt-3">
+          <tbody>
+            <tr><td>Plan</td><td id="sumPlan">--</td></tr>
+            <tr><td>Annual Fee</td><td id="sumAnnual">--</td></tr>
+            <tr><td>Paid this Year</td><td id="sumPaidYear">--</td></tr>
+            <tr><td>Debt till <span id="sumTillLabel">--</span></td><td id="sumDebtTill">--</td></tr>
+            <tr><td>Annual Balance</td><td id="sumBalance">--</td></tr>
+            <tr><td>Total Fridays Paid</td><td id="sumFridayPaid">--</td></tr>
+          </tbody>
+        </table>
+      </article>
     </section>
   </div>
 
+  <!-- Hidden PDF template (identical style to receipt.html) -->
+  <div id="pdfStage" class="hidden">
+    <div class="receipt-paper relative" id="pdfPaper">
+      <div class="receipt-watermark"></div>
+      <div class="receipt-header flex justify-between items-start">
+        <div>
+          <h2 class="text-2xl font-bold text-blue-900 uppercase tracking-[0.35em]">Socrates Investment Limited</h2>
+          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm">Socrates School</p>
+          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">P.O BOX 14256 ARUSHA</p>
+          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">Mob: 0686 828 732</p>
+        </div>
+        <div class="text-right">
+          <h3 class="text-3xl font-bold text-blue-900 uppercase">Receipt</h3>
+          <p class="text-sm text-blue-900 mt-2" id="pdfReceiptNo">Receipt No: ----</p>
+          <p class="text-sm text-blue-900" id="pdfReceiptDate">Date: --</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        <div class="lg:col-span-2">
+          <p class="text-base mb-3">Received From: <span id="pdfReceivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
+          <p class="text-base mb-3">The Sum of Shillings (In words): <span id="pdfAmountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
+          <p class="text-base mb-3">Amount in figures: <span id="pdfAmountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
+          <p class="text-base mb-3">Being payment of: <span id="pdfPurpose" class="border-b border-black inline-block min-w-[300px]"></span> <span id="pdfKindBadge" class="summary-badge"></span></p>
+          <p class="text-base mb-3">Payment Method: <span id="pdfMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
+
+          <table class="summary-table">
+            <thead><tr><th colspan="4" style="text-align:left;background:#eff6ff;">Fees Summary</th></tr></thead>
+            <tbody>
+              <tr><td>Plan</td><td id="sumPlanPDF">--</td><td>Annual Fee</td><td id="sumAnnualPDF">--</td></tr>
+              <tr><td>Paid this Year</td><td id="sumPaidYearPDF">--</td><td>Debt till <span id="sumTillLabelPDF">--</span></td><td id="sumDebtTillPDF">--</td></tr>
+              <tr><td>Annual Balance</td><td id="sumBalancePDF">--</td><td>Total Fridays Paid</td><td id="sumFridayPaidPDF">--</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex flex-col items-center">
+          <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-blue-900 bg-gray-100">
+            <img id="pdfPhoto" src="" crossorigin="anonymous" class="w-full h-full object-cover" alt="Child passport"/>
+          </div>
+          <p id="pdfChildName" class="mt-3 text-base font-semibold text-blue-900 text-center"></p>
+          <p id="pdfChildAdm" class="text-sm text-gray-600 text-center"></p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">Cash / Cheque</p>
+          <p id="pdfInstrument" class="border-b border-black h-8"></p>
+        </div>
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">TSh</p>
+          <p id="pdfCurrency" class="border-b border-black h-8"></p>
+        </div>
+      </div>
+
+      <div class="flex justify-between mt-10">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Sign for Socrates</p>
+          <p class="border-t border-black w-48 h-0"></p>
+        </div>
+        <div>
+          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Stamp</p>
+          <div class="w-40 h-24 border border-dashed border-blue-900"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
-    /* ===== Firebase Config (same project you used in parent.html) ===== */
+    /* ========= CONFIG ========= */
+    const FRIDAY_COST = 1000;
+    const FRIDAY_LOOKBACK = 120;
+    // 0=Jan, 6=July; set 6 if your school year starts in July
+    const ACADEMIC_START_MONTH = 0;
+
+    /* ===== Firebase ===== */
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
       authDomain: "somaptestt.firebaseapp.com",
@@ -158,162 +187,303 @@
     };
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    const auth = firebase.auth();
 
-    // Helpers
+    /* ===== Helpers ===== */
     const q = s => document.querySelector(s);
-    const safe = s => (s==null?'':String(s));
-    const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US', {maximumFractionDigits:0});
-    const formatDate = v => {
-      if(!v) return '--';
-      const d = new Date(v); return isNaN(d)? v : d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
-    };
-    const parseDate = (...c) => { for (const x of c){ if(!x) continue; const d=new Date(x); if(!isNaN(d)) return d.getTime(); } return Date.now(); };
+    const safe = s => (s==null ? '' : String(s));
+    const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:0});
+    const formatDate = v => { const d=new Date(v); return isNaN(d)?'--':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+    const monthName = m => new Date(2000, m, 1).toLocaleString('en-GB',{month:'long'});
+    function params(){ const u=new URLSearchParams(location.search); const o={}; u.forEach((v,k)=>o[k]=v); return o; }
+
     function numberToEnglish(n){
-      const small=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-      const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-      if(n<20) return small[n]; if(n<100) return tens[Math.floor(n/10)]+(n%10?` ${small[n%10]}`:'');
-      if(n<1000) return `${small[Math.floor(n/100)]} Hundred${n%100?` ${numberToEnglish(n%100)}`:''}`;
+      const s=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+      const t=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+      if(n<20) return s[n];
+      if(n<100) return t[Math.floor(n/10)]+(n%10?` ${s[n%10]}`:'');
+      if(n<1000) return `${s[Math.floor(n/100)]} Hundred${n%100?` ${numberToEnglish(n%100)}`:''}`;
       if(n<1e6) return `${numberToEnglish(Math.floor(n/1000))} Thousand${n%1000?` ${numberToEnglish(n%1000)}`:''}`;
       if(n<1e9) return `${numberToEnglish(Math.floor(n/1e6))} Million${n%1e6?` ${numberToEnglish(n%1e6)}`:''}`;
       return `${numberToEnglish(Math.floor(n/1e9))} Billion${n%1e9?` ${numberToEnglish(n%1e9)}`:''}`;
     }
     const amountToWords = a => `${numberToEnglish(Number(a)||0)} Tanzanian Shillings only`;
 
-    // Aggregator (search common paths so nothing is missed)
-    async function tryPath(path){ try{ const s=await db.ref(path).once('value'); return s.val()||null; }catch{ return null; } }
-    function normalizePayment(p, src){
-      const amt = Number(p?.amount||0);
-      let ts  = Number(p?.timestamp||0);
-      if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts=t; }
-      if(!ts) ts=Date.now();
-      return { amount:amt, timestamp:ts, method:p?.method||p?.mode||'Cash', note:p?.note||p?.remarks||'Tuition', _src:src };
+    function normalizePayment(p, src, kind){
+      const amt = Number(p?.amount ?? p?.amt ?? p?.value ?? 0);
+      let ts = Number(p?.timestamp || p?.time || 0);
+      if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts = t; }
+      if(!ts) ts = Date.now();
+      const method = p?.method || p?.mode || p?.paymode || 'Cash';
+      const note   = p?.note || p?.purpose || p?.desc || p?.remarks || 'Payment';
+      let k = kind || (
+        /friday/i.test(src) ? 'friday' :
+        /fee|finance/i.test(src) || /fee/i.test(note) ? 'tuition' : 'other'
+      );
+      return { amount: amt, timestamp: ts, method, note, _src: src || '', _kind: k };
     }
     function dedupe(arr){
       const seen=new Set();
-      return arr.filter(p=>{ const k=`${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}`; if(seen.has(k)) return false; seen.add(k); return true; });
+      return arr.filter(p=>{
+        const k=`${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}|${p._kind}`;
+        if(seen.has(k)) return false; seen.add(k); return true;
+      });
     }
 
-    let student = null, paymentsIndex = [];
-    const url = new URLSearchParams(location.search);
-    const admParam = url.get('adm');
-    const receiptParam = url.get('receipt'); // NEW: allow preselecting a receipt number
-const childAdmFromLS = localStorage.getItem('currentChildAdm'); // NEW: optional fallback ADM
-const parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact') || ''; // NEW: optional contact if you want to show it
-
-
-    init();
-
-    async function init(){
-      const studentKey = localStorage.getItem('studentKey');
-      let adm = admParam || childAdmFromLS; // NEW: use localStorage fallback if the URL has no ?adm=
-
-
-      if(!adm && studentKey){
-        const snap = await db.ref('students/'+studentKey).once('value');
-        if (snap.exists()){ const st=snap.val(); student = { key: studentKey, ...st }; adm = st.admissionNumber || st.pupilId || null; }
-      }
-
-      if(!adm){
-        Swal.fire('Missing child','No child found. Open this page from Parent Dashboard or include ?adm=ADM_NO in the URL.','warning');
-        return;
-      }
-
-      // Resolve student by ADM
-      if(!student){
-        const all = await db.ref('students').once('value');
-        const obj = all.val()||{};
-        for (const [key,val] of Object.entries(obj)){
-          if (String(val.admissionNumber||val.pupilId||'') === String(adm)){
-            student = { key, ...val }; break;
+    /* ===== Friday Money ===== */
+    async function fetchFridayMoneyRecords(studentKey){
+      const out = [];
+      try{
+        const snap = await db.ref('fridayMoney').orderByKey().limitToLast(FRIDAY_LOOKBACK).once('value');
+        const all = snap.val() || {};
+        for (const [fridayId, map] of Object.entries(all)){
+          const rec = map && map[studentKey];
+          if (rec && rec.payment === 'paid'){
+            const ts = rec.timestamp || Date.parse(fridayId) || Date.now();
+            out.push(normalizePayment({
+              amount: FRIDAY_COST,
+              timestamp: ts,
+              method: 'Friday',
+              note: `Friday Money (${fridayId})`
+            }, `fridayMoney/${fridayId}/${studentKey}`, 'friday'));
           }
         }
+      }catch(e){ console.warn('Friday money fetch failed', e?.message||e); }
+      return out;
+    }
+
+    /* ===== Finance Summary ===== */
+    async function computeFinanceSummary(st, payments){
+      const adm = st.admissionNumber || st.pupilId || '';
+      const cls = st.classLevel || '';
+      const year = new Date().getFullYear();
+      let annualFee = 0, planType='monthly', planCount=12, planLabel='Monthly (12)';
+
+      const tryPaths = [
+        `finance/${year}/${cls}/${adm}/meta`,
+        `finance/${year}/${cls}/${adm}`,
+        `fees/${year}/${adm}/meta`,
+        `fees/${year}/${adm}`
+      ];
+      for (const p of tryPaths){
+        try{
+          const v = (await db.ref(p).once('value')).val();
+          if (!v) continue;
+          annualFee = Number(v.annualFee || v.totalFee || v.feeAmount || v.expected || annualFee) || annualFee;
+          const plan = v.plan || v.paymentPlan || v.planType || v.cycle || '';
+          if (typeof plan === 'string'){
+            const m = plan.match(/(\d+)\s*-\s*inst/i);
+            if (m){ planType='instalments'; planCount=Number(m[1])||planCount; }
+            else if (/month/i.test(plan)){ planType='monthly'; planCount=12; }
+          } else if (typeof plan === 'object'){
+            if (/inst/i.test(plan.type||'')){ planType='instalments'; planCount=Number(plan.count||planCount)||planCount; }
+            if (/month/i.test(plan.type||'')){ planType='monthly'; planCount=12; }
+          }
+        }catch{}
       }
-      if(!student){
-        Swal.fire('Not found','Could not resolve the student record for the given admission number.','error');
+      planLabel = planType==='monthly' ? 'Monthly (12)' : `${planCount}-Instalments`;
+
+      const now = new Date();
+      const start = new Date(now.getFullYear(), ACADEMIC_START_MONTH, 1);
+      const end = now;
+      const inYear = (ts)=> (new Date(ts) >= start && new Date(ts) <= end);
+
+      const paidTuition = payments
+        .filter(p=> p._kind==='tuition' && inYear(p.timestamp))
+        .reduce((s,p)=> s+Number(p.amount||0), 0);
+
+      const monthsElapsed = (now.getFullYear() - start.getFullYear())*12 + (now.getMonth() - start.getMonth()) + 1;
+      let cyclesDue = 12;
+      if (planType==='monthly'){
+        cyclesDue = Math.min(12, Math.max(0, monthsElapsed));
+      } else {
+        cyclesDue = Math.min(planCount, Math.max(0, Math.ceil((monthsElapsed/12)*planCount)));
+      }
+      const perCycle = (annualFee / (planType==='monthly' ? 12 : planCount)) || 0;
+      const dueTillNow = perCycle * cyclesDue;
+      const debtTill = Math.max(0, Math.round(dueTillNow - paidTuition));
+      const annualBalance = Math.max(0, Math.round(annualFee - paidTuition));
+
+      const paidFriday = payments
+        .filter(p=> p._kind==='friday' && inYear(p.timestamp))
+        .reduce((s,p)=> s+Number(p.amount||0), 0);
+
+      const tillLabel = planType==='monthly'
+        ? monthName(now.getMonth())
+        : `Inst ${cyclesDue}`;
+
+      return { planLabel, annualFee, paidTuition, paidFriday, debtTill, annualBalance, tillLabel };
+    }
+
+    /* ===== Load student by key or ADM ===== */
+    async function findStudent({key, adm}){
+      if (key){
+        const s = await db.ref('students/'+key).once('value');
+        if (s.exists()) return { key, ...s.val() };
+      }
+      // fallback by ADM
+      const all = (await db.ref('students').once('value')).val() || {};
+      for (const [k,v] of Object.entries(all)){
+        const vAdm = String(v.admissionNumber||v.pupilId||'');
+        if (vAdm && String(vAdm) === String(adm)) return { key:k, ...v };
+      }
+      return null;
+    }
+
+    /* ===== Collect payments like receipt.html ===== */
+    const SIMPLE_PAYMENT_PATHS = [
+      st => `students/${st.key}/payments`,
+      st => `payments/${st.admissionNumber||st.pupilId||''}`,
+      st => `feesPayments/${st.admissionNumber||st.pupilId||''}`,
+      st => `fees/${new Date().getFullYear()}/${st.admissionNumber||st.pupilId||''}/payments`,
+      st => `finance/${new Date().getFullYear()}/${st.classLevel||''}/${st.admissionNumber||st.pupilId||''}/payments`,
+      st => `graduationMoney/${st.admissionNumber||st.pupilId||''}`
+    ];
+    async function fetchPaymentsForStudent(st){
+      const paths = SIMPLE_PAYMENT_PATHS.map(f=>f(st)).filter(Boolean);
+      const results = await Promise.all(paths.map(async p=>{
+        try { const s = await db.ref(p).once('value'); return { path:p, val:s.val() }; }
+        catch(e){ console.warn('read fail', p, e?.message||e); return { path:p, val:null }; }
+      }));
+
+      let merged = [];
+      for (const r of results){
+        if (!r.val) continue;
+        if (Array.isArray(r.val)) r.val.forEach(v=> merged.push(normalizePayment(v, r.path)));
+        else if (typeof r.val === 'object') Object.values(r.val).forEach(v=> merged.push(normalizePayment(v, r.path)));
+      }
+      // Friday Money (keyed by student key)
+      const friday = await fetchFridayMoneyRecords(st.key);
+      merged.push(...friday);
+
+      merged = dedupe(merged).sort((a,b)=> a.timestamp - b.timestamp);
+      return merged;
+    }
+
+    /* ===== UI fill ===== */
+    function paintSummary(fin){
+      q('#sumPlan').textContent = fin.planLabel;
+      q('#sumAnnual').textContent = formatCurrency(fin.annualFee);
+      q('#sumPaidYear').textContent = formatCurrency(fin.paidTuition);
+      q('#sumTillLabel').textContent = fin.tillLabel;
+      q('#sumDebtTill').textContent = formatCurrency(fin.debtTill);
+      q('#sumBalance').textContent = formatCurrency(fin.annualBalance);
+      q('#sumFridayPaid').textContent = formatCurrency(fin.paidFriday);
+    }
+    function paintSummaryPDF(fin){
+      q('#sumPlanPDF').textContent = fin.planLabel;
+      q('#sumAnnualPDF').textContent = formatCurrency(fin.annualFee);
+      q('#sumPaidYearPDF').textContent = formatCurrency(fin.paidTuition);
+      q('#sumTillLabelPDF').textContent = fin.tillLabel;
+      q('#sumDebtTillPDF').textContent = formatCurrency(fin.debtTill);
+      q('#sumBalancePDF').textContent = formatCurrency(fin.annualBalance);
+      q('#sumFridayPaidPDF').textContent = formatCurrency(fin.paidFriday);
+    }
+
+    async function init(){
+      const p = params();
+      const key = p.key || p.studentKey || '';
+      const adm = p.adm || '';
+      const st = await findStudent({key, adm});
+      if (!st){
+        q('#pageMeta').textContent = 'Student not found.';
+        q('#list').innerHTML = '<div class="p-3 rounded-lg bg-white/5 border border-white/10">Student not found.</div>';
         return;
       }
 
-      await buildPaymentIndex(student, adm, student.classLevel||'', new Date().getFullYear());
-      populateSelector();
-      // Preselect latest
-     // Preselect specific receipt (if ?receipt=...), otherwise latest
-const preferredRN = receiptParam || (paymentsIndex.slice(-1)[0]?.receiptNumber);
-if (preferredRN) {
-  q('#receiptSelector').value = preferredRN;
-  renderReceipt(preferredRN);
-}
+      // Header
+      const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
+      q('#avatar').src = st.photoUrl || '../images/somap-logo.png.jpg';
+      q('#pageTitle').textContent = `${name} — Receipts`;
+      q('#pageMeta').textContent  = `ADM: ${safe(st.admissionNumber||st.pupilId||'--')} • ${safe(st.classLevel||'Class --')}`;
 
-      q('#btnLoad').onclick = ()=>{ const rn=q('#receiptSelector').value; rn?renderReceipt(rn):null; };
-      q('#btnPrint').onclick = ()=> window.print();
-      q('#btnPDF').onclick = downloadPDF;
+      // Payments
+      const payments = await fetchPaymentsForStudent(st);
+      const last = payments.slice(-1)[0] || null;
+      q('#lastCell').textContent = last ? `Last payment — ${formatDate(last.timestamp)} • ${formatCurrency(last.amount)}` : 'Last payment — —';
+      q('#countCell').textContent = `Receipts ${payments.length}`;
+
+      if (!payments.length){
+        q('#list').innerHTML = '<div class="p-3 rounded-lg bg-white/5 border border-white/10">No payments recorded yet.</div>';
+      } else {
+        q('#list').innerHTML = payments.slice().reverse().map((p,i)=>`
+          <div class="p-3 rounded-lg bg-white/5 border border-white/10">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="font-semibold text-white">${formatCurrency(p.amount)} <span class="tag">${p._kind||'other'}</span></p>
+                <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} • ${safe(p.method)}</p>
+                ${p.note ? `<p class="text-sm mt-1">${p.note}</p>`:``}
+                ${p._src ? `<p class="text-[10px] text-slate-400 mt-1">src: ${p._src}</p>`:``}
+              </div>
+              <div class="text-right">
+                <p class="text-xs muted">Receipt #${String(payments.length - i).padStart(4,'0')}</p>
+                <button class="mt-2 px-3 py-1.5 rounded-md bg-emerald-500/80 hover:bg-emerald-500 text-white text-sm"
+                        onclick='generatePDF(${JSON.stringify({adm:st.admissionNumber||st.pupilId||'--', name, key:st.key}).replace(/"/g,"&quot;")}, ${JSON.stringify(p).replace(/"/g,"&quot;")}, ${JSON.stringify(payments.length - i).replace(/"/g,"&quot;")})'>
+                  <i class="fas fa-file-pdf mr-1"></i> PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Finance summary
+      const fin = await computeFinanceSummary(st, payments);
+      paintSummary(fin);
+
+      // Cache for pdf
+      window.__child = { st, name, fin, payments };
     }
 
-    async function buildPaymentIndex(stu, adm, classLevel, year){
-      const sources = [
-        `students/${stu.key}/payments`,
-        `finance/${year}/${classLevel}/${adm}/payments`,
-        `fees/${year}/${adm}/payments`,
-        `payments/${adm}`,
-        `feesPayments/${adm}`
-      ];
-      let merged = [];
-      const results = await Promise.all(sources.map(p=>tryPath(p)));
-      results.forEach((obj,idx)=>{
-        if(!obj) return;
-        Object.values(obj).forEach(v=> merged.push(normalizePayment(v, sources[idx])));
-      });
-      merged = dedupe(merged).sort((a,b)=> a.timestamp-b.timestamp);
-      // Assign sequential receipt numbers for this child
-      paymentsIndex = merged.map((p, i)=> ({ ...p, receiptNumber:String(i+1).padStart(4,'0') }));
-    }
+    async function generatePDF(meta, payment, receiptNo){
+      const { st, name, fin } = window.__child || {};
+      if (!st){ return; }
 
-    function populateSelector(){
-      const sel = q('#receiptSelector');
-      if (!paymentsIndex.length){ sel.innerHTML = '<option value="">No receipts yet</option>'; return; }
-      sel.innerHTML = paymentsIndex.slice().reverse().map(p=>`
-        <option value="${p.receiptNumber}">
-          Receipt #${p.receiptNumber} — ${new Date(p.timestamp).toLocaleDateString()} (${formatCurrency(p.amount)})
-        </option>
-      `).join('');
-    }
+      // Fill PDF fields
+      q('#pdfReceiptNo').textContent   = `Receipt No: ${String(receiptNo).padStart(4,'0')}`;
+      q('#pdfReceiptDate').textContent = `Date: ${formatDate(payment.timestamp)}`;
+      q('#pdfReceivedFrom').textContent= name;
+      q('#pdfAmountWords').textContent = amountToWords(payment.amount);
+      q('#pdfAmountFigures').textContent = formatCurrency(payment.amount);
+      q('#pdfPurpose').textContent     = payment.note || 'Payment';
+      q('#pdfMethod').textContent      = payment.method || 'Cash';
+      q('#pdfInstrument').textContent  = payment.method || 'Cash';
+      q('#pdfCurrency').textContent    = formatCurrency(payment.amount);
+      q('#pdfChildName').textContent   = name;
+      q('#pdfChildAdm').textContent    = `ADM: ${meta.adm || '--'}`;
+      q('#pdfPhoto').src               = st.photoUrl || '../images/somap-logo.png.jpg';
+      q('#pdfKindBadge').textContent   = payment._kind ? ` ${payment._kind.toUpperCase()} ` : '';
 
-    function renderReceipt(receiptNumber){
-      const entry = paymentsIndex.find(p=>p.receiptNumber===receiptNumber);
-      if(!entry){ Swal.fire('Missing','Receipt not found','info'); return; }
+      paintSummaryPDF(fin);
 
-      const name = `${safe(student.firstName)} ${safe(student.middleName||'')} ${safe(student.lastName)}`.replace(/\s+/g,' ').trim();
-
-      q('#receiptNumberLabel').textContent = `Receipt No: ${receiptNumber}`;
-      q('#receiptDateLabel').textContent   = `Date: ${new Date(entry.timestamp).toLocaleDateString()}`;
-      q('#receivedFrom').textContent       = name || safe(student.primaryParentContact) || '';
-      q('#amountWords').textContent        = amountToWords(entry.amount);
-      q('#amountFigures').textContent      = formatCurrency(entry.amount);
-      q('#paymentPurpose').textContent     = entry.note || 'Tuition payment';
-      q('#paymentMethod').textContent      = entry.method || 'Cash';
-      q('#paymentInstrument').textContent  = entry.method || 'Cash';
-      q('#paymentCurrency').textContent    = formatCurrency(entry.amount);
-      q('#childNameLabel').textContent     = name || 'Student';
-      q('#childAdmLabel').textContent      = `ADM: ${student.admissionNumber || student.pupilId || '--'}`;
-
-      const p = student.photoUrl || student.passportUrl || '';
-      if (p) q('#childPhoto').src = p;
-      else   q('#childPhoto').src = 'images/somap-logo.png.jpg'; // fallback
-    }
-
-    async function downloadPDF(){
-      const receiptNumber = q('#receiptSelector').value;
-      if(!receiptNumber){ Swal.fire('Select receipt','Choose a receipt first.','info'); return; }
-      const el = q('#receiptPaper');
+      // Render to PDF
+      const host = q('#pdfStage');
+      host.classList.remove('hidden');
+      await new Promise(r=>setTimeout(r, 30));
+      const stage = q('#pdfPaper');
       const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF('landscape', 'pt', 'a4');
-      const canvas = await html2canvas(el, { scale: 0.9, useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight();
-      const imgW = pageW - 40, imgH = canvas.height * (imgW / canvas.width);
-      pdf.addImage(imgData, 'PNG', 20, 20, imgW, imgH);
-      const adm = student.admissionNumber || student.pupilId || 'student';
-      pdf.save(`${adm}_receipt_${receiptNumber}.pdf`);
+      const pdf = new jsPDF('landscape','pt','a4');
+      const canvas = await html2canvas(stage, { scale: 1.35, useCORS:true, allowTaint:true, backgroundColor:'#ffffff' });
+      const img = canvas.toDataURL('image/png');
+      const w = pdf.internal.pageSize.getWidth();
+      const iw = w - 40;
+      const ih = canvas.height * (iw / canvas.width);
+      pdf.addImage(img, 'PNG', 20, 20, iw, ih);
+      try { pdf.save(`${meta.adm || 'student'}_receipt_${String(receiptNo).padStart(4,'0')}.pdf`); }
+      catch(e){ window.open(pdf.output('bloburl'), '_blank'); }
+      finally { host.classList.add('hidden'); }
     }
+    window.generatePDF = generatePDF;
+
+    // Buttons
+    q('#btnBack').addEventListener('click', ()=> history.back());
+    q('#btnFullscreen').addEventListener('click', ()=>{
+      const el = document.documentElement;
+      if (!document.fullscreenElement) el.requestFullscreen?.(); else document.exitFullscreen?.();
+    });
+
+    // Start
+    init();
   </script>
 </body>
 </html>

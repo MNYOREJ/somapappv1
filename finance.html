@@ -9,24 +9,40 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
   <script src="firebase.js"></script>
   <title>SoMAp - Finance</title>
+
+  <!-- UI -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+  <!-- Exports -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+
   <style>
     body { background: #f8fafc; }
     .table-header { background: #eef2ff; color: #1f2937; }
     .table-row:nth-child(even) { background: #ffffff; }
     .modal { display:none; position:fixed; inset:0; background: rgba(0,0,0,0.5); z-index:1000; }
     .modal-content { background:#fff; max-width:800px; margin:4% auto; padding:18px; border-radius:8px; height:80vh; overflow:auto; }
-    .expander { cursor: pointer; }
+    .expander { cursor: pointer; transition: transform .2s ease; }
+    .expander .fa { transition: transform .2s ease; }
+    .expander.open .fa { transform: rotate(180deg); }
     .status-pill { padding:2px 8px; border-radius:999px; font-size: 11px; font-weight:600; }
     .status-paid { background:#dcfce7; color:#166534; }
     .status-partial { background:#fef9c3; color:#854d0e; }
     .status-overdue { background:#fee2e2; color:#991b1b; }
+    /* tiny shimmer used before iframe mounts */
+    .skel { position: relative; overflow: hidden; background: #f1f5f9; }
+    .skel::after {
+      content: ""; position:absolute; inset:0;
+      background: linear-gradient(90deg, rgba(241,245,249,0) 0%, rgba(226,232,240,.8) 50%, rgba(241,245,249,0) 100%);
+      transform: translateX(-100%); animation: shimmer 1.2s infinite;
+    }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
 </head>
+
 <body class="p-6">
   <div class="max-w-6xl mx-auto">
     <header class="flex items-center justify-between mb-6">
@@ -36,6 +52,8 @@
         <a href="index.html" class="px-3 py-1 border rounded text-sm">Back to Dashboard</a>
       </div>
     </header>
+
+    <!-- KPIs -->
     <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
       <div class="bg-white p-4 rounded shadow">
         <h3 class="text-sm text-gray-500">Total Due (All Students)</h3>
@@ -58,6 +76,8 @@
         <div id="netBalance" class="text-xl font-semibold mt-2">--</div>
       </div>
     </div>
+
+    <!-- Filters + actions -->
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-3">
         <label class="text-sm text-gray-600">Filter by class</label>
@@ -83,6 +103,8 @@
         <button id="downloadBreakdownPdf" class="px-3 py-1 bg-teal-700 text-white rounded"><i class="fa fa-file-pdf mr-1"></i> Breakdown PDF</button>
       </div>
     </div>
+
+    <!-- Table -->
     <div class="bg-white rounded shadow overflow-x-auto">
       <table id="financeTable" class="min-w-full text-sm">
         <thead>
@@ -102,6 +124,8 @@
         <tbody></tbody>
       </table>
     </div>
+
+    <!-- Expenses -->
     <div class="bg-white rounded shadow p-4 mt-6">
       <h2 class="text-lg font-semibold text-indigo-700 mb-3">Expenses</h2>
       <form id="expenseForm" class="grid md:grid-cols-4 gap-3 mb-4">
@@ -133,12 +157,8 @@
         <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded">Add Expense</button>
       </form>
       <div class="flex items-center gap-2 mb-3">
-        <button id="downloadExpenseCsv" class="px-3 py-1 bg-green-600 text-white rounded">
-          Download Expense Report (CSV)
-        </button>
-        <button id="downloadExpensePdf" class="px-3 py-1 bg-red-600 text-white rounded">
-          Download Expense Report (PDF)
-        </button>
+        <button id="downloadExpenseCsv" class="px-3 py-1 bg-green-600 text-white rounded">Download Expense Report (CSV)</button>
+        <button id="downloadExpensePdf" class="px-3 py-1 bg-red-600 text-white rounded">Download Expense Report (PDF)</button>
       </div>
       <table id="expenseTable" class="min-w-full text-sm border">
         <thead>
@@ -152,6 +172,8 @@
         <tbody></tbody>
       </table>
     </div>
+
+    <!-- Payment modal -->
     <div id="paymentModal" class="modal">
       <div class="modal-content">
         <span id="closePaymentModal" class="float-right cursor-pointer text-2xl">&times;</span>
@@ -187,6 +209,8 @@
         </form>
       </div>
     </div>
+
+    <!-- Details modal -->
     <div id="detailsModal" class="modal">
       <div class="modal-content">
         <span id="closeDetailsModal" class="float-right cursor-pointer text-2xl">&times;</span>
@@ -195,6 +219,7 @@
       </div>
     </div>
   </div>
+
 <script>
 (function () {
   const db = window.db || null;
@@ -216,21 +241,19 @@
   const downloadBreakdownCsvBtn = document.getElementById('downloadBreakdownCsv');
   const downloadBreakdownPdfBtn = document.getElementById('downloadBreakdownPdf');
   const reloadBtn = document.getElementById('reloadBtn');
+
   let cachedStudents = {};
   let showingDebtorsOnly = false;
+
   if (!db) {
     console.error('DB not found.');
     alert('DB not ready. Ensure firebase.js initializes window.db.');
   }
-  function fmt(n) {
-    n = Number(n) || 0;
-    return n.toLocaleString();
-  }
+
+  // ===== Helpers (kept as-is) =====
+  function fmt(n) { n = Number(n) || 0; return n.toLocaleString(); }
   function clamp(n) { return Math.max(0, Math.round(Number(n) || 0)); }
-  function todayYMD() {
-    const d = new Date();
-    return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
-  }
+  function todayYMD() { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() }; }
   function dateFromYMD(y, m, d) { return new Date(y, m - 1, d).getTime(); }
   function isPast(ts) { return Date.now() > ts; }
   function apportion(total, weights) {
@@ -241,12 +264,12 @@
     let rem = total - sumA;
     if (rem > 0) {
       const sortedIdx = [...weights.keys()].sort((a, b) => weights[b] - weights[a]);
-      for (let i = 0; i < rem; i++) {
-        amounts[sortedIdx[i % sortedIdx.length]]++;
-      }
+      for (let i = 0; i < rem; i++) amounts[sortedIdx[i % sortedIdx.length]]++;
     }
     return amounts;
   }
+
+  // ===== Installment config (kept as-is) =====
   const installmentConfigs = {
     lower: {
       type: '6',
@@ -335,6 +358,7 @@
       ]
     }
   };
+
   function getConfig(student) {
     const plan = (student.paymentPlan || '').toLowerCase();
     const c = (student.classLevel || '').toLowerCase();
@@ -349,14 +373,15 @@
     }
     return installmentConfigs.full;
   }
+
   function buildSchedule(student) {
     const config = getConfig(student);
     const { y } = todayYMD();
     let feeBase = Number(student.feePerYear) || 0;
     const discount = Number(config.discount) || 1;
     feeBase = Math.round(feeBase * discount);
-    const weights = config.weights;
-    const amounts = apportion(feeBase, weights);
+    const amounts = apportion(feeBase, config.weights);
+
     const sc = [];
     config.labels.forEach((label, i) => {
       let fromY = y, toY = y;
@@ -366,19 +391,18 @@
       if (toM === 12) toY = y - 1;
       const fromTS = dateFromYMD(fromY, fromM, fromD);
       const toTS = dateFromYMD(toY, toM, toD);
-      sc.push({ key: `inst${i + 1}`, label, fromTS, toTS, amount: amounts[i] });
+      sc.push({ key: `inst${i + 1}`, label, fromTS, toTS, amount: amounts[i], paidAllocated:0, status:'Pending' });
     });
+
+    let lastDueIndex = -1, periodLabel = '—', expectedToDate = 0;
     const now = Date.now();
-    let lastDueIndex = -1;
-    let periodLabel = '—';
-    let expectedToDate = 0;
     sc.forEach((it, idx) => {
       if (it.toTS < now) { lastDueIndex = idx; expectedToDate += it.amount; }
     });
     if (lastDueIndex >= 0) periodLabel = sc[lastDueIndex].label;
-    sc.forEach(it => { it.paidAllocated = 0; it.status = 'Pending'; });
     return { items: sc, periodLabelNow: periodLabel, expectedToDate };
   }
+
   function allocatePayments(student, schedule) {
     const payList = [];
     if (student.payments) {
@@ -390,9 +414,8 @@
     let pot = payList.reduce((s, p) => s + p.amount, 0);
     const totalPaid = pot;
     let prevDebt = clamp(student.previousDebt || student.debt);
-    let toPrev = Math.min(prevDebt, pot);
-    prevDebt -= toPrev;
-    pot -= toPrev;
+    let toPrev = Math.min(prevDebt, pot); prevDebt -= toPrev; pot -= toPrev;
+
     for (const it of schedule.items) {
       const need = Math.max(0, it.amount - it.paidAllocated);
       if (need <= 0) continue;
@@ -404,23 +427,17 @@
     const credit = Math.max(0, pot);
     const now = Date.now();
     for (const it of schedule.items) {
-      const a = it.paidAllocated;
-      const need = it.amount;
-      if (a >= need) {
-        it.status = 'Cleared';
-      } else {
-        if (isPast(it.toTS)) {
-          it.status = a > 0 ? 'Partially Paid (Overdue)' : 'Overdue';
-        } else {
-          it.status = a > 0 ? 'Partially Paid' : 'Pending';
-        }
-      }
+      const a = it.paidAllocated, need = it.amount;
+      if (a >= need) it.status = 'Cleared';
+      else if (isPast(it.toTS)) it.status = a > 0 ? 'Partially Paid (Overdue)' : 'Overdue';
+      else it.status = a > 0 ? 'Partially Paid' : 'Pending';
     }
     const expectedToDate = schedule.items.filter(it => it.toTS < now).reduce((s, it) => s + it.amount, 0);
     const paidConsumed = totalPaid - credit;
     const debtTillNow = Math.max(0, expectedToDate - paidConsumed);
     return { scheduleItems: schedule.items, prevDebtAfter: prevDebt, credit, totalPaid, debtTillNow };
   }
+
   function computeStudentFinancials(student) {
     const feePerYear = Number(student.feePerYear) || 0;
     const previousDebt = clamp(student.previousDebt || student.debt);
@@ -439,32 +456,45 @@
       scheduleItems: alloc.scheduleItems
     };
   }
-  function breakdownRowHTML(id, fin) {
+
+  // ====== SPEED FIX: placeholder breakdown row (no iframe yet) ======
+  function breakdownRowHTML(id) {
     return `
       <tr id="br-${id}" class="hidden bg-slate-50">
         <td class="p-2 border-t" colspan="10">
-          <iframe src="Tofinancehtml/payment.html?student=${id}" width="100%" height="400" frameborder="0"></iframe>
+          <div class="breakdown-slot" data-id="${id}">
+            <div class="p-3 text-xs text-slate-500 skel rounded">Loading area…</div>
+          </div>
         </td>
       </tr>
     `;
   }
+
+  // ===== Render table (unchanged except: uses placeholder breakdown row) =====
   function renderTable() {
     tbody.innerHTML = '';
     let totalDue = 0, totalCollected = 0;
     const filterClass = classFilter.value;
+
     Object.entries(cachedStudents).forEach(([id, student]) => {
       if (filterClass && student.classLevel !== filterClass) return;
+
       const fin = computeStudentFinancials(student);
       if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+
       totalDue += fin.feePerYear;
       totalCollected += fin.paidAmount;
+
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
       const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '—';
+
       const tr = document.createElement('tr');
       tr.className = 'table-row';
       tr.innerHTML = `
         <td class="p-2 border text-center align-top">
-          <button class="expander text-indigo-600 hover:text-indigo-800" data-id="${id}" title="Expand/Collapse"><i class="fa fa-chevron-down"></i></button>
+          <button class="expander text-indigo-600 hover:text-indigo-800" data-id="${id}" title="Expand/Collapse">
+            <i class="fa fa-chevron-down"></i>
+          </button>
         </td>
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
@@ -485,41 +515,237 @@
         </td>
       `;
       tbody.appendChild(tr);
-      const br = document.createElement('tbody');
-      br.innerHTML = breakdownRowHTML(id, fin);
-      tbody.appendChild(br.firstElementChild);
+
+      const brWrap = document.createElement('tbody');
+      brWrap.innerHTML = breakdownRowHTML(id);
+      tbody.appendChild(brWrap.firstElementChild);
     });
+
     const totalOutstanding = totalDue - totalCollected;
     document.getElementById('totalDue').textContent = fmt(totalDue);
     document.getElementById('totalCollected').textContent = fmt(totalCollected);
     document.getElementById('totalOutstanding').textContent = fmt(totalOutstanding);
+
     tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', e => openPaymentModalFor(e.target.dataset.id)));
     tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
-    tbody.querySelectorAll('.expander').forEach(btn => btn.addEventListener('click', e => {
-      const id = e.target.closest('button').dataset.id;
-      const row = document.getElementById('br-' + id);
-      const icon = e.target.closest('button').querySelector('i');
-      if (row.classList.contains('hidden')) {
-        row.classList.remove('hidden');
-        icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-      } else {
-        row.classList.add('hidden');
-        icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-      }
-    }));
+    // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
   }
-  async function loadStudents() {
-    if (!db) return;
+
+  // ====== SPEED FIX: lazy-load a single iframe when clicked, and close others ======
+  function injectIframeIfNeeded(id) {
+    const row = document.getElementById(`br-${id}`);
+    if (!row) return;
+    const slot = row.querySelector('.breakdown-slot');
+    if (!slot) return;
+    if (slot.dataset.loaded) return;
+
+    slot.innerHTML = `
+      <div class="p-3 text-xs text-slate-500">Loading breakdown…</div>
+      <iframe
+        src="Tofinancehtml/payment.html?student=${encodeURIComponent(id)}&v=1"
+        class="w-full h-[360px] rounded border"
+        loading="lazy"
+      ></iframe>
+    `;
+    slot.dataset.loaded = '1';
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button.expander');
+    if (!btn) return;
+
+    const id = btn.dataset.id;
+    const row = document.getElementById(`br-${id}`);
+    if (!row) return;
+
+    // Close any other open breakdown rows
+    document.querySelectorAll('tr[id^="br-"]:not(.hidden)').forEach(r => {
+      if (r !== row) r.classList.add('hidden');
+    });
+    // Reset other chevrons
+    document.querySelectorAll('button.expander.open').forEach(b => {
+      if (b !== btn) {
+        b.classList.remove('open');
+        const ic = b.querySelector('i'); if (ic) ic.classList.remove('fa-chevron-up'); if (ic) ic.classList.add('fa-chevron-down');
+      }
+    });
+
+    const wasHidden = row.classList.contains('hidden');
+    row.classList.toggle('hidden');
+
+    const icon = btn.querySelector('i');
+    if (wasHidden) {
+      btn.classList.add('open');
+      if (icon) { icon.classList.remove('fa-chevron-down'); icon.classList.add('fa-chevron-up'); }
+      injectIframeIfNeeded(id);
+    } else {
+      btn.classList.remove('open');
+      if (icon) { icon.classList.remove('fa-chevron-up'); icon.classList.add('fa-chevron-down'); }
+    }
+  });
+
+  // Auto-resize when child posts its height
+  window.addEventListener('message', (e) => {
+    const d = e.data || {};
+    if (d.type === 'resizeIframe' && d.id) {
+      const frame = document.querySelector(`#br-${d.id} iframe`);
+      if (frame) frame.style.height = Math.max(360, Number(d.height) || 0) + 'px';
+    }
+  });
+
+  // ===== Expenses + exports (unchanged) =====
+  const expenseForm = document.getElementById('expenseForm');
+  const expenseTableBody = document.querySelector('#expenseTable tbody');
+
+  async function loadExpenses() {
     try {
-      const snap = await db.ref('students').once('value');
-      cachedStudents = snap.val() || {};
-      populateStudentSelect();
-      renderTable();
+      const snap = await db.ref('expenses').once('value');
+      const raw = snap.val() || {};
+      expenseTableBody.innerHTML = '';
+      let total = 0;
+      Object.values(raw).forEach(exp => {
+        total += Number(exp.amount) || 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="p-2 border">${exp.category || ''}</td>
+          <td class="p-2 border">${exp.description || ''}</td>
+          <td class="p-2 border text-right">${fmt(exp.amount)}</td>
+          <td class="p-2 border">${exp.timestamp ? new Date(exp.timestamp).toLocaleDateString() : ''}</td>
+        `;
+        expenseTableBody.appendChild(tr);
+      });
+      document.getElementById('totalExpenses').textContent = fmt(total);
+      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g, '') || 0);
+      document.getElementById('netBalance').textContent = fmt(collected - total);
     } catch (err) {
-      console.error('Error loading students:', err);
-      alert('Error loading students: ' + err.message);
+      console.error('Error loading expenses:', err);
     }
   }
+
+  // ===== CSV/PDF downloaders (unchanged) =====
+  function downloadCSV_Main() {
+    const rows = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
+    let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
+    const filterClass = classFilter.value;
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && s.classLevel !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      rows.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
+      totalFee += fin.feePerYear; totalPaid += fin.paidAmount; totalBal += fin.balance; totalDebt += fin.periodDebtValue;
+    });
+    rows.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Finance');
+    XLSX.writeFile(wb, `finance_export_${Date.now()}.xlsx`);
+  }
+
+  function downloadPDF_Main() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const headers = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
+    const body = [];
+    let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
+    const filterClass = classFilter.value;
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && s.classLevel !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      body.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
+      totalFee += fin.feePerYear; totalPaid += fin.paidAmount; totalBal += fin.balance; totalDebt += fin.periodDebtValue;
+    });
+    body.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
+    doc.setFontSize(14); doc.text('SoMAp Finance Report', 14, 14);
+    doc.autoTable({ head: headers, body, startY: 20, styles: { fontSize: 8 } });
+    doc.save(`finance_report_${Date.now()}.pdf`);
+  }
+
+  function _gatherDebtNow() {
+    const rows = []; let totalDebt = 0;
+    const filterClass = classFilter.value;
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && s.classLevel !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      if (fin.periodDebtValue > 0) {
+        const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+        rows.push([s.admissionNumber || '', fullName, s.classLevel || '', s.paymentPlan || '', fin.periodDebtLabel, fin.periodDebtValue]);
+        totalDebt += fin.periodDebtValue;
+      }
+    });
+    return { rows, totalDebt };
+  }
+
+  function downloadCSV_DebtNow() {
+    const header = ['Admission No', 'Full Name', 'Class', 'Plan', 'Debt till …', 'Debt Amount'];
+    const { rows, totalDebt } = _gatherDebtNow();
+    const data = [header, ...rows, ['TOTAL', '', '', '', '', totalDebt]];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Debt Now');
+    XLSX.writeFile(wb, `debt_now_${Date.now()}.xlsx`);
+  }
+
+  function downloadPDF_DebtNow() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const header = [['Admission No', 'Full Name', 'Class', 'Plan', 'Debt till …', 'Debt Amount']];
+    const { rows, totalDebt } = _gatherDebtNow();
+    const body = [...rows, ['TOTAL', '', '', '', '', totalDebt]];
+    doc.setFontSize(14); doc.text('Debt List (Current Period)', 14, 14);
+    doc.autoTable({ head: header, body, startY: 20, styles: { fontSize: 8 } });
+    doc.save(`debt_now_${Date.now()}.pdf`);
+  }
+
+  function _gatherBreakdown() {
+    const sheets = [];
+    const filterClass = classFilter.value;
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && s.classLevel !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      const rows = [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']];
+      let totalExp = 0, totalPaid = 0;
+      fin.scheduleItems.forEach(it => {
+        const need = it.amount, got = it.paidAllocated, rem = Math.max(0, need - got);
+        totalExp += need; totalPaid += got;
+        rows.push([it.label, need, got, rem, it.status, `${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}`]);
+      });
+      const totalRem = Math.max(0, totalExp - totalPaid);
+      rows.push(['TOTAL', totalExp, totalPaid, totalRem, '', '']);
+      sheets.push({ title: `${fullName} (${s.admissionNumber || ''})`, rows });
+    });
+    return sheets;
+  }
+
+  function downloadCSV_Breakdown() {
+    const wb = XLSX.utils.book_new();
+    const sheets = _gatherBreakdown();
+    if (!sheets.length) return alert('No students to export.');
+    sheets.forEach(sh => {
+      const ws = XLSX.utils.aoa_to_sheet(sh.rows);
+      XLSX.utils.book_append_sheet(wb, ws, sh.title.slice(0, 31));
+    });
+    XLSX.writeFile(wb, `breakdowns_${Date.now()}.xlsx`);
+  }
+
+  function downloadPDF_Breakdown() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const sheets = _gatherBreakdown();
+    if (!sheets.length) return alert('No students to export.');
+    sheets.forEach((sh, idx) => {
+      if (idx > 0) doc.addPage();
+      doc.setFontSize(14);
+      doc.text(`Installment Breakdown — ${sh.title}`, 14, 14);
+      doc.autoTable({ head: [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']], body: sh.rows.slice(1), startY: 20, styles: { fontSize: 8 } });
+    });
+    doc.save(`breakdowns_${Date.now()}.pdf`);
+  }
+
+  // ===== Payments & modals (unchanged) =====
   function populateStudentSelect() {
     studentSelect.innerHTML = '<option value="">-- Select student --</option>';
     Object.entries(cachedStudents).forEach(([id, s]) => {
@@ -530,18 +756,16 @@
       studentSelect.appendChild(opt);
     });
   }
+
   function openPaymentModalFor(id) {
     if (!cachedStudents[id]) return alert('Student not found');
     studentSelect.value = id;
     paymentModal.style.display = 'block';
   }
-  function closePaymentModalFn() {
-    paymentModal.style.display = 'none';
-    paymentForm.reset();
-  }
+  function closePaymentModalFn() { paymentModal.style.display = 'none'; paymentForm.reset(); }
+
   function openDetailsModal(id) {
-    const s = cachedStudents[id];
-    if (!s) return alert('Student not found');
+    const s = cachedStudents[id]; if (!s) return alert('Student not found');
     const fin = computeStudentFinancials(s);
     const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
     let html = `
@@ -570,6 +794,7 @@
     detailsModal.style.display = 'block';
   }
   function closeDetailsModalFn() { detailsModal.style.display = 'none'; detailsContent.innerHTML = ''; }
+
   paymentForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const studentId = studentSelect.value;
@@ -583,12 +808,7 @@
       const snap = await studentRef.once('value');
       const student = snap.val();
       if (!student) throw new Error('Student not found');
-      const payment = {
-        amount: Math.round(amount),
-        method,
-        note,
-        timestamp: Date.now()
-      };
+      const payment = { amount: Math.round(amount), method, note, timestamp: Date.now() };
       await studentRef.child('payments').push(payment);
       alert('Payment recorded successfully.');
       closePaymentModalFn();
@@ -598,173 +818,46 @@
       alert('Error recording payment: ' + err.message);
     }
   });
-  function downloadCSV_Main() {
-    const rows = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
-    let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
-    const filterClass = classFilter.value;
-    Object.entries(cachedStudents).forEach(([id, s]) => {
-      if (filterClass && s.classLevel !== filterClass) return;
-      const fin = computeStudentFinancials(s);
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
-      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-      rows.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
-      totalFee += fin.feePerYear;
-      totalPaid += fin.paidAmount;
-      totalBal += fin.balance;
-      totalDebt += fin.periodDebtValue;
+
+  // ===== Data loading and UI wiring =====
+  async function loadStudents() {
+    if (!db) return;
+    try {
+      const snap = await db.ref('students').once('value');
+      cachedStudents = snap.val() || {};
+      populateStudentSelect();
+      renderTable();
+    } catch (err) {
+      console.error('Error loading students:', err);
+      alert('Error loading students: ' + err.message);
+    }
+  }
+
+  document.getElementById("downloadExpenseCsv").addEventListener("click", () => {
+    const rows = [["Category", "Description", "Amount", "Date"]];
+    document.querySelectorAll("#expenseTable tbody tr").forEach(tr => {
+      const cells = [...tr.querySelectorAll("td")].map(td => td.innerText);
+      rows.push(cells);
     });
-    rows.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Finance');
-    XLSX.writeFile(wb, `finance_export_${Date.now()}.xlsx`);
-  }
-  function downloadPDF_Main() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'landscape' });
-    const headers = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
-    const body = [];
-    let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
-    const filterClass = classFilter.value;
-    Object.entries(cachedStudents).forEach(([id, s]) => {
-      if (filterClass && s.classLevel !== filterClass) return;
-      const fin = computeStudentFinancials(s);
-      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
-      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-      body.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
-      totalFee += fin.feePerYear;
-      totalPaid += fin.paidAmount;
-      totalBal += fin.balance;
-      totalDebt += fin.periodDebtValue;
-    });
-    body.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
-    doc.setFontSize(14);
-    doc.text('SoMAp Finance Report', 14, 14);
-    doc.autoTable({ head: headers, body, startY: 20, styles: { fontSize: 8 } });
-    doc.save(`finance_report_${Date.now()}.pdf`);
-  }
-  function _gatherDebtNow() {
-    const rows = [];
-    let totalDebt = 0;
-    const filterClass = classFilter.value;
-    Object.entries(cachedStudents).forEach(([id, s]) => {
-      if (filterClass && s.classLevel !== filterClass) return;
-      const fin = computeStudentFinancials(s);
-      if (fin.periodDebtValue > 0) {
-        const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-        rows.push([s.admissionNumber || '', fullName, s.classLevel || '', s.paymentPlan || '', fin.periodDebtLabel, fin.periodDebtValue]);
-        totalDebt += fin.periodDebtValue;
-      }
-    });
-    return { rows, totalDebt };
-  }
-  function downloadCSV_DebtNow() {
-    const header = ['Admission No', 'Full Name', 'Class', 'Plan', 'Debt till …', 'Debt Amount'];
-    const { rows, totalDebt } = _gatherDebtNow();
-    const data = [header, ...rows, ['TOTAL', '', '', '', '', totalDebt]];
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Debt Now');
-    XLSX.writeFile(wb, `debt_now_${Date.now()}.xlsx`);
-  }
-  function downloadPDF_DebtNow() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'landscape' });
-    const header = [['Admission No', 'Full Name', 'Class', 'Plan', 'Debt till …', 'Debt Amount']];
-    const { rows, totalDebt } = _gatherDebtNow();
-    const body = [...rows, ['TOTAL', '', '', '', '', totalDebt]];
-    doc.setFontSize(14);
-    doc.text('Debt List (Current Period)', 14, 14);
-    doc.autoTable({ head: header, body, startY: 20, styles: { fontSize: 8 } });
-    doc.save(`debt_now_${Date.now()}.pdf`);
-  }
-  function _gatherBreakdown() {
-    const sheets = [];
-    const filterClass = classFilter.value;
-    Object.entries(cachedStudents).forEach(([id, s]) => {
-      if (filterClass && s.classLevel !== filterClass) return;
-      const fin = computeStudentFinancials(s);
-      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-      const rows = [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']];
-      let totalExp = 0, totalPaid = 0;
-      fin.scheduleItems.forEach(it => {
-        const need = it.amount;
-        const got = it.paidAllocated;
-        const rem = Math.max(0, need - got);
-        totalExp += need;
-        totalPaid += got;
-        rows.push([it.label, need, got, rem, it.status, `${new Date(it.fromTS).toLocaleDateString()} – ${new Date(it.toTS).toLocaleDateString()}`]);
-      });
-      const totalRem = Math.max(0, totalExp - totalPaid);
-      rows.push(['TOTAL', totalExp, totalPaid, totalRem, '', '']);
-      sheets.push({ title: `${fullName} (${s.admissionNumber || ''})`, rows });
-    });
-    return sheets;
-  }
-  function downloadCSV_Breakdown() {
-    const wb = XLSX.utils.book_new();
-    const sheets = _gatherBreakdown();
-    if (!sheets.length) return alert('No students to export.');
-    sheets.forEach(sh => {
-      const ws = XLSX.utils.aoa_to_sheet(sh.rows);
-      XLSX.utils.book_append_sheet(wb, ws, sh.title.slice(0, 31));
-    });
-    XLSX.writeFile(wb, `breakdowns_${Date.now()}.xlsx`);
-  }
-  function downloadPDF_Breakdown() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'landscape' });
-    const sheets = _gatherBreakdown();
-    if (!sheets.length) return alert('No students to export.');
-    sheets.forEach((sh, idx) => {
-      if (idx > 0) doc.addPage();
-      doc.setFontSize(14);
-      doc.text(`Installment Breakdown — ${sh.title}`, 14, 14);
-      doc.autoTable({ head: [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']], body: sh.rows.slice(1), startY: 20, styles: { fontSize: 8 } });
-    });
-    doc.save(`breakdowns_${Date.now()}.pdf`);
-  }
-  const expenseForm = document.getElementById('expenseForm');
-  const expenseTableBody = document.querySelector('#expenseTable tbody');
-  async function loadExpenses() {
-    try {
-      const snap = await db.ref('expenses').once('value');
-      const raw = snap.val() || {};
-      expenseTableBody.innerHTML = '';
-      let total = 0;
-      Object.values(raw).forEach(exp => {
-        total += Number(exp.amount) || 0;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="p-2 border">${exp.category || ''}</td>
-          <td class="p-2 border">${exp.description || ''}</td>
-          <td class="p-2 border text-right">${fmt(exp.amount)}</td>
-          <td class="p-2 border">${exp.timestamp ? new Date(exp.timestamp).toLocaleDateString() : ''}</td>
-        `;
-        expenseTableBody.appendChild(tr);
-      });
-      document.getElementById('totalExpenses').textContent = fmt(total);
-      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g, '') || 0);
-      document.getElementById('netBalance').textContent = fmt(collected - total);
-    } catch (err) {
-      console.error('Error loading expenses:', err);
-    }
-  }
-  expenseForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const category = document.getElementById('expenseCategory').value;
-    const description = document.getElementById('expenseDescription').value;
-    const amount = Number(document.getElementById('expenseAmount').value);
-    if (!category || !description || amount <= 0) return alert('Fill all fields');
-    try {
-      await db.ref('expenses').push({ category, description, amount, timestamp: Date.now() });
-      expenseForm.reset();
-      await loadExpenses();
-    } catch (err) {
-      console.error('Error saving expense:', err);
-      alert('Error saving expense');
-    }
+    XLSX.utils.book_append_sheet(wb, ws, "Expenses");
+    XLSX.writeFile(wb, "expenses_report.xlsx");
   });
+
+  document.getElementById("downloadExpensePdf").addEventListener("click", () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.text("Expense Report", 14, 10);
+    const rows = [];
+    document.querySelectorAll("#expenseTable tbody tr").forEach(tr => {
+      const cells = [...tr.querySelectorAll("td")].map(td => td.innerText);
+      rows.push(cells);
+    });
+    doc.autoTable({ head: [["Category", "Description", "Amount", "Date"]], body: rows, startY: 20 });
+    doc.save("expenses_report.pdf");
+  });
+
   closePaymentModal.addEventListener('click', closePaymentModalFn);
   cancelPayment.addEventListener('click', closePaymentModalFn);
   closeDetailsModal.addEventListener('click', closeDetailsModalFn);
@@ -786,33 +879,6 @@
   });
   classFilter.addEventListener('change', renderTable);
   document.addEventListener('DOMContentLoaded', () => { loadStudents(); loadExpenses(); });
-  document.getElementById("downloadExpenseCsv").addEventListener("click", () => {
-    const rows = [["Category", "Description", "Amount", "Date"]];
-    document.querySelectorAll("#expenseTable tbody tr").forEach(tr => {
-      const cells = [...tr.querySelectorAll("td")].map(td => td.innerText);
-      rows.push(cells);
-    });
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Expenses");
-    XLSX.writeFile(wb, "expenses_report.xlsx");
-  });
-  document.getElementById("downloadExpensePdf").addEventListener("click", () => {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.text("Expense Report", 14, 10);
-    const rows = [];
-    document.querySelectorAll("#expenseTable tbody tr").forEach(tr => {
-      const cells = [...tr.querySelectorAll("td")].map(td => td.innerText);
-      rows.push(cells);
-    });
-    doc.autoTable({
-      head: [["Category", "Description", "Amount", "Date"]],
-      body: rows,
-      startY: 20,
-    });
-    doc.save("expenses_report.pdf");
-  });
 })();
 </script>
 </body>

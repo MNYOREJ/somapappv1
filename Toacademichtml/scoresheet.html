@@ -8,7 +8,7 @@
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- jsPDF + autotable -->
+  <!-- jsPDF + autotable (kept for scoresheet table exports, NOT for report cards here) -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
 
@@ -31,17 +31,9 @@
     .scroll-shadow { box-shadow: inset 0 10px 8px -10px rgba(2,6,23,0.12); }
     .bg-white.rounded-2xl.p-4 { overflow:hidden; }
     .min-w-table { min-width:1200px; }
-    /* Force button visibility */
-#btnCheckScoresheet {
-  display: inline-block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  min-width: 120px; /* Prevents shrinking */
-}
-.flex.items-center.gap-2 {
-  flex-wrap: nowrap !important; /* Prevents wrapping on small screens */
-  overflow: visible !important;
-}
+    /* Ensure the Generate button is always visible */
+    #btnCheckScoresheet { display: inline-block !important; visibility: visible !important; opacity: 1 !important; min-width: 120px; }
+    .flex.items-center.gap-2 { flex-wrap: nowrap !important; overflow: visible !important; }
   </style>
 </head>
 <body class="bg-gray-50 text-slate-800" style="margin: 0; padding: 0; height: 100%; overflow: hidden;">
@@ -121,6 +113,7 @@
             <span id="lblCount">0</span> students • <span id="lblSubjects">0</span> subjects
           </div>
           <div class="flex gap-2">
+            <!-- This now just opens the standalone dashboard -->
             <button id="btnGenerateReports" class="px-3 py-2 bg-green-600 text-white rounded text-sm">Generate Report Cards (PDF)</button>
             <button id="btnEmailReports" class="px-3 py-2 bg-white border rounded text-sm">Email/SMS Links</button>
           </div>
@@ -226,7 +219,7 @@
       return firebase.database();
     }
 
-    /* ---------- Robust student loader (attendance style) ---------- */
+    /* ---------- Robust student loader ---------- */
     async function fetchStudents(className, stream){
       const db = getDB();
       if(!db) return [];
@@ -258,7 +251,7 @@
               const normalizedSelect = className.toUpperCase().replace(/[\s-]/g, '');
               const classMatches = !className || normalizedClass.includes(normalizedSelect);
               const normalizedStream = String(x.stream || '').toUpperCase().replace(/[\s-]/g, '');
-              const normalizedInputStream = stream.toUpperCase().replace(/[\s-]/g, '');
+              const normalizedInputStream = (stream||'').toUpperCase().replace(/[\s-]/g, '');
               const streamMatches = !stream || normalizedStream.includes(normalizedInputStream);
               return classMatches && streamMatches;
             });
@@ -274,7 +267,7 @@
 
     function normalizeStudentRecord(admKey, s){
       const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
-      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
+      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || '';
       const sStream = s.stream || s.streamName || s.section || '';
       const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
       let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
@@ -282,7 +275,7 @@
         feePaid = Object.values(s.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
       }
       const balance = Number(s.balance || Math.max(0, feeDue - feePaid) || 0);
-      return { adm: admKey, name, class: sClass, stream: sStream, feeDue, feePaid, balance, meta: s };
+      return { adm: String(admKey), name, class: sClass, stream: sStream, feeDue, feePaid, balance, meta: s };
     }
 
     /* ---------- Attendance + fees + scores fetchers ---------- */
@@ -373,10 +366,8 @@
       const scoresTable = document.getElementById('scoresTable');
       const theadRow = scoresTable.querySelector('thead tr');
 
-      let totalIndex = Array.from(theadRow.children).findIndex(th => (th.textContent||'').trim() === 'Total');
-      if(totalIndex < 0) totalIndex = theadRow.children.length;
-
-      while(theadRow.children.length > 6 && Array.from(theadRow.children)[6] && (theadRow.children[6].textContent||'').trim() !== 'Total'){
+      // remove old injected subject headers first
+      while (theadRow.children.length > 6 && (theadRow.children[6].textContent||'').trim() !== 'Total'){
         theadRow.removeChild(theadRow.children[6]);
       }
 
@@ -505,6 +496,7 @@
         row.tdComment.querySelector('textarea').value = comment;
       });
 
+      // Subject positions
       state.subjectList.forEach(subject=>{
         const list = (perSubject[subject] || []).slice().sort((a,b)=> b.pct - a.pct);
         let pos=0, last=null, idx=0;
@@ -516,6 +508,7 @@
         });
       });
 
+      // Overall position (avg desc, then total desc, then attendance desc)
       const arr = Object.keys(state.rowsByAdm).map(adm=>{
         const r = state.rowsByAdm[adm];
         return { adm, avg: r._avgPct || 0, total: r._sumScore || 0, attendance: Number(r.tdPresent.textContent || 0) };
@@ -528,7 +521,7 @@
       arr.forEach((r,i)=> state.rowsByAdm[r.adm].tdPstn.textContent = String(i+1));
     }
 
-    /* ---------- Exports ---------- */
+    /* ---------- Exports (scoresheet table) ---------- */
     function gatherRowsForExport(){
       const rows = [];
       const header = ['Adm','Student', 'Fee Due','Paid','Balance', ...expandSubjectTripletsHeader(), 'Total','Max','% Avg','Overall Pos','Grade','Present','Absent','Comment'];
@@ -575,52 +568,7 @@
       doc.save(title.replace(/[^A-Za-z0-9_\- ]/g,'_') + '.pdf');
     }
 
-    /* ---------- Report cards ---------- */
-    async function bulkGenerateReportCards(){
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4' });
-      const margin = 36;
-      const headerColor = { r:37, g:99, b:235 };
-      const students = state.students || [];
-      for(let i=0; i<students.length; i++){
-        if(i>0) doc.addPage();
-        const s = students[i];
-        const r = state.rowsByAdm[s.adm];
-        doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
-        doc.rect(0,0,595,80,'F');
-        doc.setTextColor(255,255,255); doc.setFontSize(16);
-        const school = s.schoolName || state.schoolBranch || 'School';
-        doc.text(`${school} — Academic Report`, margin, 40);
-        doc.setTextColor(0,0,0); doc.setFontSize(12);
-        doc.text(`Name: ${s.name}`, margin, 110);
-        doc.text(`Admission: ${s.adm}`, margin, 130);
-        const att = state.attendance[s.adm] || { present:0, absent:0, days:0 };
-        const days = att.days || (att.present + att.absent) || 0;
-        const pct = days ? ((att.present/days)*100).toFixed(1) : '0.0';
-        doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
-        const fee = state.fees[s.adm] || { required: s.feeDue||0, paid: s.feePaid||0, balance: s.balance||0 };
-        doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
-
-        const tableHead = ['Subject','Score','Max','%','Pstn','Grade'];
-        const tableBody = state.subjectList.map(sub=> {
-          const c = r.subjectCells[sub];
-          const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value||100));
-          const pctS = (sc/mx)*100; const g = letterGrade(pctS); const pstn = c.pstnSpan.textContent||'';
-          return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
-        });
-        doc.autoTable({ head:[tableHead], body:tableBody, startY:200, styles:{fontSize:9}, headStyles:{fillColor:[headerColor.r,headerColor.g,headerColor.b]} });
-        const after = doc.lastAutoTable.finalY + 20;
-        doc.text(`Overall Average: ${Number(r.tdAvg.textContent||0).toFixed(2)}%`, margin, after);
-        doc.text(`Overall Position: ${r.tdPstn.textContent}`, margin, after+18);
-        doc.text(`Overall Grade: ${r.tdGrade.textContent}`, margin, after+36);
-        const comment = r.tdComment.querySelector('textarea').value || '—';
-        doc.text('Teacher Comment:', margin, after+64);
-        doc.text(comment, margin, after+82, { maxWidth: 595 - margin*2 });
-      }
-      doc.save(`ReportCards_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}.pdf`);
-    }
-
-    /* ---------- Persist summary ---------- */
+    /* ---------- Persist summary (kept) ---------- */
     async function persistComputedSummary(){
       const db = getDB();
       if(!db) return;
@@ -685,16 +633,22 @@
     btnExportPDF.addEventListener('click', exportPDF);
     btnPrint.addEventListener('click', ()=>window.print());
     btnSetAllMax.addEventListener('click', ()=>{ const v = Number(globalMaxInput.value||100); scoresBody.querySelectorAll('input.max-input').forEach(i=>i.value=v); recomputeAll(); });
-    btnGenerateReports.addEventListener('click', bulkGenerateReportCards);
-    btnEmailReports.addEventListener('click', ()=>alert('Integrate your SMS/email gateway here.'));
 
-    /* ---------- Load on page load ---------- */
-    window.addEventListener('load', () => {
-      loadAll();
+    // ✅ NEW: open standalone report-form dashboard instead of generating here
+    btnGenerateReports.addEventListener('click', () => {
+      try {
+        const ss = window.sessionStorage || {};
+        ss.setItem('className', state.className || ss.getItem('className') || '');
+        ss.setItem('stream', state.stream || ss.getItem('stream') || '');
+        ss.setItem('year', state.year || ss.getItem('year') || new Date().getFullYear());
+        ss.setItem('month', state.month || ss.getItem('month') || 'Sep');
+        ss.setItem('examKey', state.examKey || ss.getItem('examKey') || 'monthly');
+        ss.setItem('schoolBranch', state.schoolBranch || ss.getItem('schoolBranch') || 'Socrates School');
+      } catch(e) {}
+      window.location.href = 'generatereportform.html';
     });
 
-    /* ---------- Small helpers ---------- */
-    function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }
+    btnEmailReports.addEventListener('click', ()=>alert('Integrate your SMS/email gateway here.'));
 
     // Full screen toggle
     const btnFullScreen = document.getElementById('btnFullScreen');
@@ -710,10 +664,8 @@
       }
     });
 
-        /* ---------- Load on page load ---------- */
-    window.addEventListener('load', () => {
-      loadAll();
-    });
+    // Load initial data
+    window.addEventListener('load', loadAll);
 
     /* ---------- Small helpers ---------- */
     function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }

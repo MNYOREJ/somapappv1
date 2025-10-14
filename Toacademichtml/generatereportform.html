@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SoMAp — Report Forms Dashboard</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Icons & UI helpers -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <!-- jsPDF + autotable -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Firebase compat (v9 compat libs) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <style>
+    :root { color-scheme: only dark; }
+    body {
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(99,102,241,0.16), transparent 46%),
+        radial-gradient(circle at bottom right, rgba(56,189,248,0.14), transparent 48%),
+        linear-gradient(135deg, #0f172a, #1d4ed8 68%, #0f172a);
+      color: #e2e8f0;
+      padding-bottom: 4rem;
+    }
+    .glass {
+      background: rgba(15,23,42,0.78);
+      border-radius: 20px;
+      border: 1px solid rgba(148,163,184,0.20);
+      box-shadow: 0 22px 45px rgba(15,23,42,0.45);
+      backdrop-filter: blur(24px);
+    }
+    .metric {
+      background: rgba(15,23,42,0.62);
+      border-radius: 18px;
+      border: 1px solid rgba(148,163,184,0.16);
+      padding: 1.0rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .metric .label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(148,163,184,0.74); }
+    .metric-value { font-size: 1.6rem; font-weight: 700; color: #bae6fd; }
+    .metric-sub { font-size: 0.75rem; color: rgba(203,213,225,0.78); }
+    .t-field {
+      background: rgba(255,255,255,0.08); border: 1px solid transparent; border-radius: 0.75rem;
+      color: #f8fafc; padding: 0.55rem 0.9rem; transition: all 0.18s ease; width: 100%;
+    }
+    .t-field:focus {
+      border-color: rgba(59,130,246,0.80); outline: none; background: rgba(15,23,42,0.66); box-shadow: 0 0 0 3px rgba(59,130,246,0.22);
+    }
+    .btn-primary {
+      background: linear-gradient(120deg, #38bdf8, #6366f1); color: #0f172a; padding: 0.55rem 0.95rem; border-radius: 0.75rem;
+      font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; transition: transform 0.18s, box-shadow 0.18s;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 18px 32px rgba(15,23,42,0.35); }
+    .btn-outline {
+      background: rgba(15,23,42,0.55); color: #e2e8f0; border: 1px solid rgba(148,163,184,0.32);
+      padding: 0.5rem 0.95rem; border-radius: 0.75rem; display: inline-flex; align-items: center; gap: 0.35rem;
+    }
+    .report-card {
+      background: linear-gradient(160deg, #ffffff, #f8fafc 55%, #e2e8f0 100%);
+      color: #0f172a; border-radius: 18px; box-shadow: 0 32px 60px rgba(15,23,42,0.20); overflow: hidden; position: relative;
+    }
+    .report-card::before {
+      content: ""; position: absolute; inset: 0; background: linear-gradient(120deg, rgba(14,116,144,0.08), rgba(99,102,241,0.08)); pointer-events: none;
+    }
+    .report-card-inner { position: relative; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.0rem; }
+    .info-chip { background: rgba(226,232,240,0.7); border-radius: 0.75rem; padding: 0.55rem 0.7rem; font-size: 0.85rem; line-height: 1.2rem; color: #0f172a; box-shadow: inset 0 1px 0 rgba(255,255,255,0.4); }
+    .info-chip span { display: block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; margin-bottom: 0.2rem; font-weight: 600; }
+    .preview-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .badge { background: rgba(96,165,250,0.18); color: #1d4ed8; border-radius: 999px; padding: 0.25rem 0.55rem; font-size: 0.72rem; letter-spacing: 0.02em; }
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .preview-table thead { background: rgba(15,23,42,0.08); }
+    .preview-table th, .preview-table td { padding: 0.45rem 0.35rem; border-bottom: 1px solid rgba(148,163,184,0.28); text-align: left; }
+    .preview-table th { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; }
+    .preview-table tbody tr:nth-child(even) { background: rgba(248,250,252,0.6); }
+    .table-card { background: rgba(15,23,42,0.62); border-radius: 18px; border: 1px solid rgba(148,163,184,0.18); box-shadow: 0 16px 36px rgba(15,23,42,0.35); overflow: hidden; }
+    .status-pill { border-radius: 999px; padding: 0.25rem 0.55rem; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+    .status-pill.good { background: rgba(16,185,129,0.20); color: #10b981; }
+    .status-pill.medium { background: rgba(245,158,11,0.22); color: #fbbf24; }
+    .status-pill.low { background: rgba(248,113,113,0.22); color: #f87171; }
+    .report-photo { width: 110px; height: 140px; border-radius: 18px; object-fit: cover; box-shadow: 0 12px 26px rgba(15,23,42,0.32); border: 3px solid rgba(148,163,184,0.35); background: #cbd5f5; }
+    .divider { height: 1px; background: rgba(148,163,184,0.32); margin: 0.6rem 0; }
+    .chips-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.45rem; }
+    .chip { background: rgba(148,163,184,0.22); border-radius: 0.6rem; padding: 0.32rem 0.45rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; color: #1e293b; display: flex; align-items: center; gap: 0.25rem; }
+    .chip i { color: #475569; }
+    .table-action { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.32rem 0.55rem; border-radius: 0.55rem; font-size: 0.72rem; font-weight: 600; }
+    .table-action.primary { background: rgba(56,189,248,0.18); color: #38bdf8; }
+    .table-action.alt { background: rgba(244,114,182,0.18); color: #f472b6; }
+    @media (max-width: 768px) {
+      body { padding: 1.2rem 0.6rem 4rem; }
+      .report-card-inner { padding: 1.0rem; }
+      .report-card { margin: 0 auto; }
+      .report-photo { margin-inline: auto; }
+    }
+  </style>
+</head>
+<body class="px-4 py-8 lg:py-14">
+  <div class="max-w-7xl mx-auto space-y-8">
+    <!-- Header -->
+    <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+      <div class="space-y-3">
+        <span class="inline-flex items-center gap-3 text-sm text-slate-200/80">
+          <span class="uppercase tracking-widest px-3 py-1 rounded-full bg-violet-500/40 text-violet-100">Report Forms</span>
+          Academic report center
+        </span>
+        <h1 class="text-4xl font-semibold text-slate-50">Student report forms</h1>
+        <p class="text-slate-200/80 max-w-2xl">
+          Generate decorated single A4 report cards, download bulk ready-to-print forms, and export analytic summaries for any class, any exam type, any month, any year.
+        </p>
+        <div class="flex flex-wrap gap-2 text-xs text-slate-300/70">
+          <span class="inline-flex items-center gap-1"><i class="fas fa-file-pdf"></i> Single & bulk PDFs</span>
+          <span class="inline-flex items-center gap-1"><i class="fas fa-school"></i> SoMAp branding</span>
+          <span class="inline-flex items-center gap-1"><i class="fas fa-chart-line"></i> Positions & grades</span>
+        </div>
+      </div>
+      <div class="glass px-5 py-4 flex flex-col gap-3 min-w-[260px]">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs uppercase tracking-wide text-slate-300/80">Academic year</p>
+            <p class="text-lg font-semibold" id="previewYear">—</p>
+          </div>
+          <img src="../images/somap-logo.png.jpg" alt="SoMAp" class="w-12 h-12 rounded-xl object-cover shadow-lg border border-slate-500/40" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <select id="yearSelect" class="t-field bg-slate-900/40 border-slate-600/50"></select>
+          <select id="classSelect" class="t-field bg-slate-900/40 border-slate-600/50"></select>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <select id="examType" class="t-field bg-slate-900/40 border-slate-700/40">
+            <option value="Monthly">Monthly</option>
+            <option value="Midterm 1">Midterm 1</option>
+            <option value="Midterm 2">Midterm 2</option>
+            <option value="End Term">End Term</option>
+            <option value="Annual">Annual</option>
+          </select>
+          <select id="monthSelect" class="t-field bg-slate-900/40 border-slate-700/40"></select>
+          <select id="studentSelect" class="t-field bg-slate-900/40 border-slate-700/40"></select>
+        </div>
+        <div class="flex gap-2">
+          <input id="searchInput" type="search" class="t-field" placeholder="Adm no, name, phone" />
+          <button id="applyFilters" class="btn-primary"><i class="fas fa-sliders"></i> Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="metric">
+        <span class="label">Total learners</span>
+        <span class="metric-value" id="metricStudents">0</span>
+        <span class="metric-sub" id="metricGender">M:0 / F:0</span>
+      </div>
+      <div class="metric">
+        <span class="label">Average score</span>
+        <span class="metric-value" id="metricAverage">0%</span>
+        <span class="metric-sub">Selected exam + month</span>
+      </div>
+      <div class="metric">
+        <span class="label">Fee balance</span>
+        <span class="metric-value" id="metricBalance">TSh 0</span>
+        <span class="metric-sub">Outstanding total</span>
+      </div>
+      <div class="metric">
+        <span class="label">Attendance rate</span>
+        <span class="metric-value" id="metricAttendance">0%</span>
+        <span class="metric-sub">Month attendance</span>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="glass p-6 space-y-5">
+      <div class="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">Sort by</label>
+          <select id="sortSelect" class="t-field bg-slate-900/40 border-slate-700/40">
+            <option value="name">Name (A-Z)</option>
+            <option value="score">Score (High-Low)</option>
+            <option value="balance">Balance (High-Low)</option>
+            <option value="position">Overall position</option>
+          </select>
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">Stream (optional)</label>
+          <input id="streamInput" class="t-field bg-slate-900/40 border-slate-700/40" placeholder="e.g., A / B / AB" />
+        </div>
+        <div class="flex flex-col gap-2">
+          <label class="text-xs uppercase tracking-wide text-slate-300/80">School branch</label>
+          <input id="branchInput" class="t-field bg-slate-900/40 border-slate-700/40" placeholder="e.g., Socrates School" />
+        </div>
+        <div class="flex flex-col gap-3 md:justify-end">
+          <button id="refreshBtn" class="btn-outline justify-center"><i class="fas fa-rotate"></i> Reload</button>
+        </div>
+        <div class="flex flex-col gap-3 md:justify-end">
+          <button id="downloadPreviewPdf" class="btn-primary"><i class="fas fa-file-pdf"></i> Selected PDF</button>
+        </div>
+        <div class="flex flex-col gap-3 md:justify-end">
+          <button id="downloadBulkCards" class="btn-outline"><i class="fas fa-clone"></i> Bulk PDFs</button>
+        </div>
+        <div class="flex flex-col gap-3 md:justify-end">
+          <button id="downloadSummaryPdf" class="btn-outline"><i class="fas fa-table"></i> Summary PDF</button>
+        </div>
+        <div class="flex flex-col gap-3 md:justify-end">
+          <button id="downloadBulkCsv" class="btn-outline"><i class="fas fa-file-csv"></i> CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview + Side panel -->
+    <div class="grid gap-6 lg:grid-cols-5">
+      <div class="report-card lg:col-span-3">
+        <div class="report-card-inner" id="reportCardPreview">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div class="flex items-center gap-4">
+              <img id="previewLogo" src="../images/somap-logo.png.jpg" alt="SoMAp" class="w-14 h-14 rounded-xl object-cover border border-slate-300/60 shadow" />
+              <div>
+                <p class="text-xs uppercase tracking-[0.16em] font-semibold text-slate-500" id="previewBranch">School</p>
+                <h2 class="text-xl font-bold text-slate-900">Academic Report</h2>
+                <div class="preview-badges">
+                  <span class="badge" id="previewExam">—</span>
+                  <span class="badge" id="previewMonth">—</span>
+                  <span class="badge" id="previewAdm">ADM -</span>
+                </div>
+              </div>
+            </div>
+            <img id="previewPhoto" src="https://via.placeholder.com/140x180.png?text=Photo" alt="Student" class="report-photo" />
+          </div>
+          <div class="divider"></div>
+          <div class="grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="text-xs uppercase tracking-wide text-slate-500">Student</p>
+              <p class="text-lg font-semibold text-slate-900" id="previewStudentName">Select a student</p>
+              <p class="text-sm text-slate-500" id="previewGender">Gender</p>
+            </div>
+            <div class="info-chip">
+              <span>Date of birth</span>
+              <strong id="previewDob">-</strong>
+              <span class="mt-1">Reporting</span>
+              <strong id="previewReporting">-</strong>
+            </div>
+            <div class="info-chip">
+              <span>Parent contact</span>
+              <strong id="previewParent">-</strong>
+              <span class="mt-1">Phone</span>
+              <strong id="previewPhone">-</strong>
+            </div>
+          </div>
+          <div class="grid gap-3 md:grid-cols-3">
+            <div class="info-chip">
+              <span>Overall average</span>
+              <strong id="previewAverage">0%</strong>
+              <span class="mt-1">Grade</span>
+              <strong id="previewGrade">-</strong>
+            </div>
+            <div class="info-chip">
+              <span>Overall position</span>
+              <strong id="previewPosition">-</strong>
+              <span class="mt-1">Class size</span>
+              <strong id="previewClassSize">-</strong>
+            </div>
+            <div class="info-chip">
+              <span>Attendance</span>
+              <strong id="previewAttendance">0%</strong>
+              <span class="mt-1">Present / Absent</span>
+              <strong id="previewAttendanceRaw">0 / 0</strong>
+            </div>
+          </div>
+          <div class="info-chip">
+            <span>Fee summary</span>
+            <strong id="previewFee">Total: TSh 0</strong>
+            <span class="mt-1">Paid / Balance</span>
+            <strong id="previewFeeBreakdown">TSh 0 / TSh 0</strong>
+          </div>
+          <div class="chips-grid" id="previewHighlights"></div>
+          <div class="overflow-x-auto">
+            <table class="preview-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Subject</th>
+                  <th>Score</th>
+                  <th>Max</th>
+                  <th>%</th>
+                  <th>Pos</th>
+                  <th>Teacher</th>
+                </tr>
+              </thead>
+              <tbody id="previewSubjects"></tbody>
+            </table>
+          </div>
+          <div class="info-chip">
+            <span>Teacher remarks</span>
+            <p id="previewComment" class="text-sm font-medium text-slate-700 leading-relaxed">Select a student to view comments and printable card.</p>
+          </div>
+          <div class="chips-grid">
+            <div class="chip"><i class="fas fa-pen"></i> Class teacher signature __________________</div>
+            <div class="chip"><i class="fas fa-user"></i> Head of school signature __________________</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass p-5 space-y-4 lg:col-span-2">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs uppercase tracking-wide text-slate-300/70">Quick actions</p>
+            <h3 class="text-xl font-semibold">Single report workspace</h3>
+          </div>
+          <span class="status-pill good" id="previewStatus">Ready</span>
+        </div>
+        <div class="grid gap-3">
+          <button id="copyParentContact" class="btn-outline justify-center"><i class="fas fa-phone"></i> Copy parent contact</button>
+          <button id="openScoresheet" class="btn-outline justify-center"><i class="fas fa-table"></i> Open in scoresheet</button>
+        </div>
+        <div class="divider"></div>
+        <div class="space-y-2">
+          <p class="text-xs uppercase tracking-wide text-slate-400">Highlights</p>
+          <ul class="text-sm space-y-1" id="previewSummaryList"><li>No student selected.</li></ul>
+        </div>
+        <div class="divider"></div>
+        <div class="space-y-2">
+          <p class="text-xs uppercase tracking-wide text-slate-400">Bulk queue</p>
+          <p class="text-sm text-slate-300/80">Filtered learners: <span id="bulkCount">0</span></p>
+          <p class="text-xs text-slate-400">Use the bulk button above to generate A4 cards for every filtered learner.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results table -->
+    <div class="table-card">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm text-slate-200">
+          <thead class="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-300">
+            <tr>
+              <th class="px-4 py-3 text-left">Pos</th>
+              <th class="px-4 py-3 text-left">Adm</th>
+              <th class="px-4 py-3 text-left">Student</th>
+              <th class="px-4 py-3 text-left">Class</th>
+              <th class="px-4 py-3 text-left">Avg %</th>
+              <th class="px-4 py-3 text-left">Grade</th>
+              <th class="px-4 py-3 text-left">Fee</th>
+              <th class="px-4 py-3 text-left">Attendance</th>
+              <th class="px-4 py-3 text-left">Comment</th>
+              <th class="px-4 py-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="reportTable" class="divide-y divide-slate-800/60 bg-slate-900/40"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* -------------------------- CONFIG -------------------------- */
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt"
+    };
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    const db = firebase.database();
+    const LOGO_PATH = '../images/somap-logo.png.jpg';
+    const PLACEHOLDER_PHOTO = 'https://via.placeholder.com/160x210.png?text=Passport';
+
+    const EXAM_KEYS = { 'Monthly':'monthly', 'Midterm 1':'midterm1', 'Midterm 2':'midterm2', 'End Term':'endterm', 'Annual':'annual' };
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const MONTH_LABELS = { Jan:'January', Feb:'February', Mar:'March', Apr:'April', May:'May', Jun:'June', Jul:'July', Aug:'August', Sep:'September', Oct:'October', Nov:'November', Dec:'December' };
+
+    // Subject map by class label (customize freely)
+    const SUBJECTS_BY_CLASS = {
+      'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Preunit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Pre-Unit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Class 1': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 2': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
+      'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
+      'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
+      'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
+      'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
+      // Secondary placeholder (customize to your school)
+      'Form 1': ['Basic Mathematics','English Language','Kiswahili','Civics','History','Geography','Biology','Chemistry','Physics'],
+      'Form 2': ['Basic Mathematics','English Language','Kiswahili','Civics','History','Geography','Biology','Chemistry','Physics'],
+      'Form 3': ['Basic Mathematics','English Language','Kiswahili','Civics','History','Geography','Biology','Chemistry','Physics','Bookkeeping','Commerce'],
+      'Form 4': ['Basic Mathematics','English Language','Kiswahili','Civics','History','Geography','Biology','Chemistry','Physics','Bookkeeping','Commerce']
+    };
+
+    const PREFS = {
+      CLASS_KEY: 'somap_class',
+      STREAM_KEY: 'somap_stream',
+      YEAR_KEY: 'somap_year',
+      MONTH_KEY: 'somap_month',
+      EXAM_KEY: 'somap_exam',
+      BRANCH_KEY: 'somap_branch',
+    };
+
+    /* -------------------------- STATE -------------------------- */
+    const state = {
+      className: '', stream: '', year: new Date().getFullYear(), month: 'Sep', examType: 'Monthly', examKey: 'monthly', branch: 'School',
+      rawStudents: {}, students: [], filtered: [], selectedAdm: null, subjects: [], teachers: new Map(),
+      logoDataUrl: null
+    };
+
+    /* -------------------------- INIT -------------------------- */
+    document.addEventListener('DOMContentLoaded', () => {
+      preloadLogo();
+      hydrateFromSession();
+      populateSelectors();
+      attachListeners();
+      loadTeachers().then(loadAllData);
+    });
+
+    function hydrateFromSession(){
+      const ss = window.sessionStorage;
+      state.className = ss.getItem('className') || ss.getItem(PREFS.CLASS_KEY) || 'Class 1';
+      state.stream = ss.getItem('stream') || ss.getItem(PREFS.STREAM_KEY) || '';
+      state.year = ss.getItem('year') || ss.getItem(PREFS.YEAR_KEY) || new Date().getFullYear();
+      state.month = ss.getItem('month') || ss.getItem(PREFS.MONTH_KEY) || 'Sep';
+      state.examKey = ss.getItem('examKey') || ss.getItem(PREFS.EXAM_KEY) || 'monthly';
+      state.examType = Object.keys(EXAM_KEYS).find(k => EXAM_KEYS[k] === state.examKey) || 'Monthly';
+      state.branch = ss.getItem('schoolBranch') || ss.getItem(PREFS.BRANCH_KEY) || 'Socrates School';
+    }
+
+    function persistToSession(){
+      const ss = window.sessionStorage;
+      ss.setItem('className', state.className);
+      ss.setItem('stream', state.stream);
+      ss.setItem('year', String(state.year));
+      ss.setItem('month', state.month);
+      ss.setItem('examKey', state.examKey);
+      ss.setItem('schoolBranch', state.branch);
+    }
+
+    async function preloadLogo(){
+      const dataUrl = await loadImageAsDataURL(LOGO_PATH) || await loadImageAsDataURL('../images/somap-logo.png');
+      if (dataUrl) {
+        state.logoDataUrl = dataUrl;
+        const img = document.getElementById('previewLogo');
+        if (img) img.src = dataUrl;
+      }
+    }
+
+    function populateSelectors(){
+      // Year
+      const yearSel = document.getElementById('yearSelect');
+      yearSel.innerHTML = '';
+      const y0 = 2024, y1 = 2032;
+      for (let y = y0; y <= y1; y++) {
+        const opt = document.createElement('option');
+        opt.value = String(y); opt.textContent = String(y);
+        if (Number(y) === Number(state.year)) opt.selected = true;
+        yearSel.appendChild(opt);
+      }
+      document.getElementById('previewYear').textContent = state.year;
+
+      // Class options from SUBJECTS_BY_CLASS keys
+      const classSel = document.getElementById('classSelect');
+      const keys = Object.keys(SUBJECTS_BY_CLASS);
+      // Put current at top if not in map
+      if (!keys.includes(state.className)) keys.unshift(state.className);
+      classSel.innerHTML = '';
+      keys.forEach(k => {
+        const opt = document.createElement('option');
+        opt.value = k; opt.textContent = k;
+        if (k === state.className) opt.selected = true;
+        classSel.appendChild(opt);
+      });
+
+      // Exam + Month
+      const examSel = document.getElementById('examType'); examSel.value = state.examType;
+      populateMonthOptions();
+      document.getElementById('studentSelect').innerHTML = '<option value="">No records</option>';
+
+      // Other inputs
+      document.getElementById('streamInput').value = state.stream || '';
+      document.getElementById('branchInput').value = state.branch || '';
+    }
+
+    function populateMonthOptions(){
+      const monthSel = document.getElementById('monthSelect');
+      monthSel.innerHTML = '';
+      if (state.examType === 'Annual') {
+        const opt = document.createElement('option'); opt.value = 'All'; opt.textContent = 'All Year';
+        monthSel.appendChild(opt);
+        state.month = 'All';
+      } else {
+        MONTHS.forEach(m => {
+          const opt = document.createElement('option'); opt.value = m; opt.textContent = MONTH_LABELS[m];
+          if (m === state.month) opt.selected = true;
+          monthSel.appendChild(opt);
+        });
+      }
+      document.getElementById('previewExam').textContent = state.examType;
+      document.getElementById('previewMonth').textContent = MONTH_LABELS[state.month] || state.month;
+    }
+
+    function attachListeners(){
+      document.getElementById('yearSelect').addEventListener('change', e => {
+        state.year = Number(e.target.value);
+        document.getElementById('previewYear').textContent = state.year;
+        persistToSession(); loadAllData();
+      });
+      document.getElementById('classSelect').addEventListener('change', e => {
+        state.className = e.target.value;
+        state.subjects = SUBJECTS_BY_CLASS[state.className] || [];
+        persistToSession(); loadAllData();
+      });
+      document.getElementById('examType').addEventListener('change', e => {
+        state.examType = e.target.value; state.examKey = EXAM_KEYS[state.examType]; populateMonthOptions();
+        persistToSession(); loadAllData();
+      });
+      document.getElementById('monthSelect').addEventListener('change', e => {
+        state.month = e.target.value; persistToSession(); loadAllData();
+      });
+      document.getElementById('streamInput').addEventListener('change', e => {
+        state.stream = e.target.value; persistToSession(); loadAllData();
+      });
+      document.getElementById('branchInput').addEventListener('change', e => {
+        state.branch = e.target.value; document.getElementById('previewBranch').textContent = state.branch;
+        persistToSession(); updatePreview();
+      });
+      document.getElementById('applyFilters').addEventListener('click', applyFilters);
+      document.getElementById('refreshBtn').addEventListener('click', loadAllData);
+      document.getElementById('downloadPreviewPdf').addEventListener('click', () => {
+        if (!state.selectedAdm) return Swal.fire('Select student', 'Choose a student first.', 'info');
+        generateSinglePdf(state.selectedAdm);
+      });
+      document.getElementById('downloadBulkCards').addEventListener('click', downloadBulkReportCards);
+      document.getElementById('downloadSummaryPdf').addEventListener('click', downloadSummaryPdf);
+      document.getElementById('downloadBulkCsv').addEventListener('click', downloadBulkCsv);
+      document.getElementById('copyParentContact').addEventListener('click', copyParentContact);
+      document.getElementById('openScoresheet').addEventListener('click', () => window.location.href = 'scoresheet.html');
+    }
+
+    /* -------------------------- LOADERS -------------------------- */
+    async function loadTeachers(){
+      try {
+        // Try a reasonably generic location; fall back silently if absent
+        const snap = await db.ref('/teachers').once('value');
+        const teachers = snap.val() || {};
+        state.teachers = new Map();
+        Object.entries(teachers).forEach(([id, value]) => {
+          const subject = (value.subject || '').trim().toUpperCase();
+          state.teachers.set(subject, { id, name: (value.name || id || '').toString().trim() || 'Teacher' });
+        });
+      } catch (e) {
+        state.teachers = new Map();
+      }
+    }
+
+    async function loadAllData(){
+      try {
+        document.getElementById('bulkCount').textContent = '...';
+        state.subjects = SUBJECTS_BY_CLASS[state.className] || state.subjects || [];
+        const [students, attendance, fees, scores] = await Promise.all([
+          fetchStudents(state.className, state.stream),
+          fetchAttendance(state.year, state.month, state.className),
+          fetchFees(state.year, state.className),
+          fetchScores({year: state.year, className: state.className, examKey: state.examKey, month: state.month})
+        ]);
+        state.rawStudents = {};
+        students.forEach(stu => { state.rawStudents[stu.adm] = stu; });
+        computeStudents(attendance, fees, scores);
+        applyFilters();
+      } catch (e) {
+        console.error(e);
+        Swal.fire('Load error', 'Could not load class data. Check your internet/Firebase paths.', 'error');
+      }
+    }
+
+    async function fetchStudents(className, stream){
+      const tryPaths = ['students','Students','StudentsList','Students_List','studentList','studentlist','schoolerp','attendance'];
+      for (const p of tryPaths){
+        try{
+          const snap = await db.ref(p).get();
+          if (snap && snap.exists && snap.exists()){
+            const data = snap.val();
+            const out = [];
+            if (Array.isArray(data)){
+              data.forEach((item, i) => item && out.push(normalizeStudentRecord(item.adm || item.admissionNumber || item.admNo || ('A'+i), item)));
+            }else{
+              Object.keys(data).forEach(k => {
+                const s = data[k] || {};
+                if (typeof s === 'object') {
+                  const adm = s.adm || s.admissionNumber || s.admNo || s.admission || k;
+                  out.push(normalizeStudentRecord(adm, s));
+                }
+              });
+            }
+            const filtered = out.filter(x => {
+              const cls = String(x.class || '').toUpperCase().replace(/[\s-]/g,'');
+              const want = className.toUpperCase().replace(/[\s-]/g,'');
+              const classMatches = !className || cls.includes(want);
+              const str = String(x.stream || '').toUpperCase().replace(/[\s-]/g,'');
+              const wantStr = (stream||'').toUpperCase().replace(/[\s-]/g,'');
+              const streamMatches = !stream || str.includes(wantStr);
+              return classMatches && streamMatches;
+            }).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+            if (filtered.length) return filtered;
+          }
+        }catch(err){
+          console.warn('fetchStudents trying', p, err && err.message);
+        }
+      }
+      return [];
+    }
+
+    function normalizeStudentRecord(admKey, s){
+      const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
+      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || '';
+      const sStream = s.stream || s.streamName || s.section || '';
+      const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
+      let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
+      if (s.payments && typeof s.payments === 'object') {
+        feePaid = Object.values(s.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      }
+      const balance = Number(s.balance || Math.max(0, feeDue - feePaid) || 0);
+      return {
+        adm: String(admKey), name, firstName: s.firstName||'', middleName: s.middleName||'', lastName: s.lastName||'',
+        class: sClass, stream: sStream, gender: s.gender||'', dob: s.dob||'-',
+        parentName: s.parentName || s.parent || '-', parentContact: s.parentContact || s.parentPhone || s.guardianPhone || '-',
+        totalFee: feeDue, paid: feePaid, balance,
+        reportingDate: s.reportingDate || '-', photoUrl: s.photoUrl || s.passport || ''
+      };
+    }
+
+    async function fetchAttendance(year, month, className){
+      const refPath = month === 'All'
+        ? `/attendance/${year}/${className}` // allow annual aggregation if you store per-month under class
+        : `/attendance/${year}/${month}/${className}`;
+      try{
+        const snap = await db.ref(refPath).get();
+        const out = {};
+        if (snap && snap.exists && snap.exists()){
+          const val = snap.val();
+          if (month === 'All'){
+            // Aggregate over months
+            Object.keys(val || {}).forEach(mon => {
+              const byAdm = val[mon] || {};
+              Object.keys(byAdm).forEach(adm => {
+                const a = byAdm[adm] || {};
+                out[adm] = out[adm] || { present:0, absent:0, days:0 };
+                out[adm].present += Number(a.present || a.daysPresent || 0);
+                out[adm].absent  += Number(a.absent  || a.daysAbsent  || 0);
+                const days = Number(a.days || (Number(a.present||0)+Number(a.absent||0)));
+                out[adm].days += days;
+              });
+            });
+          } else {
+            Object.keys(val || {}).forEach(adm => {
+              const a = val[adm] || {};
+              out[adm] = { present: Number(a.present || a.daysPresent || 0), absent: Number(a.absent || a.daysAbsent || 0), days: Number(a.days || (Number(a.present||0)+Number(a.absent||0))) };
+            });
+          }
+        }
+        return out;
+      }catch(e){ console.warn('fetchAttendance', e && e.message); return {}; }
+    }
+
+    async function fetchFees(year, className){
+      const refPath = `/fees/${year}/${className}`;
+      try{
+        const snap = await db.ref(refPath).get();
+        const out = {};
+        if (snap && snap.exists && snap.exists()){
+          const val = snap.val();
+          Object.keys(val).forEach(adm => {
+            const f = val[adm] || {};
+            const required = Number(f.required || f.expected || f.total || 0);
+            const paid = Number(f.paid || f.paidAmount || 0);
+            out[adm] = { required, paid, balance: Math.max(0, required - paid) };
+          });
+        }
+        return out;
+      }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
+    }
+
+    async function fetchScores({year, className, examKey, month}){
+      const refPath = month === 'All'
+        ? `/scores/${year}/${className}/${examKey}`
+        : `/scores/${year}/${className}/${examKey}/${month}`;
+      try{
+        const snap = await db.ref(refPath).get();
+        const out = {};
+        if (snap && snap.exists && snap.exists()){
+          const val = snap.val();
+          if (month === 'All'){
+            // If annual stored per-month, pick best/latest per subject or sum — here we pick last month entry encountered
+            Object.keys(val || {}).forEach(mon => {
+              const admBlock = val[mon] || {};
+              Object.keys(admBlock).forEach(adm => {
+                out[adm] = out[adm] || {};
+                Object.keys(admBlock[adm] || {}).forEach(sub => {
+                  const o = admBlock[adm][sub] || {};
+                  out[adm][sub] = { score: Number(o.score||0), max: Number(o.max||100) };
+                });
+              });
+            });
+          } else {
+            Object.keys(val || {}).forEach(adm => {
+              out[adm] = {};
+              Object.keys(val[adm] || {}).forEach(sub => {
+                const o = val[adm][sub] || {};
+                out[adm][sub] = { score: Number(o.score||0), max: Number(o.max||100) };
+              });
+            });
+          }
+        }
+        return out;
+      }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
+    }
+
+    /* -------------------------- COMPOSE -------------------------- */
+    function computeStudents(attendance, fees, scores){
+      const subjects = state.subjects && state.subjects.length ? state.subjects.slice() : inferSubjects(scores);
+      state.subjects = subjects;
+      const students = [];
+      Object.entries(state.rawStudents).forEach(([adm, data]) => {
+        const fee = fees[adm] || { required: data.totalFee || 0, paid: data.paid || 0, balance: data.balance || Math.max(0,(data.totalFee||0)-(data.paid||0)) };
+        const att = attendance[adm] || { present:0, absent:0, days:0 };
+        const scoreEntry = scores[adm] || {};
+        const subjectStats = buildSubjectStats(subjects, scoreEntry);
+        const totalScore = subjectStats.totalScore, totalMax = subjectStats.totalMax;
+        const avg = totalMax ? (totalScore/totalMax) * 100 : 0;
+        const grade = deriveGrade(avg);
+        const comment = autoComment(avg);
+        students.push({
+          adm, ...data,
+          totalFee: fee.required, paid: fee.paid, balance: fee.balance,
+          presents: att.present, absents: att.absent, attendanceDays: att.days, attendancePercent: att.days ? (att.present/att.days)*100 : 0,
+          subjectStats, totalScore, totalMax, avg, grade, comment,
+          subjectPositions: {}, overallPosition: 0,
+          monthLabel: MONTH_LABELS[state.month] || state.month, examLabel: state.examType
+        });
+      });
+      assignPositions(students, subjects);
+      state.students = students;
+    }
+
+    function inferSubjects(scoresObj){
+      const set = new Set();
+      Object.values(scoresObj || {}).forEach(subs => Object.keys(subs || {}).forEach(s => set.add(s)));
+      return set.size ? Array.from(set) : ['English','Mathematics','Science'];
+    }
+
+    function buildSubjectStats(subjects, scoreEntry){
+      const stats = { totalScore: 0, totalMax: 0, subjects: [], subjectMap: {} };
+      subjects.forEach(subject => {
+        const subEntry = scoreEntry?.[subject] || {};
+        const score = Number(subEntry.score || 0);
+        const max = Number(subEntry.max || 0) || 100;
+        const percent = max ? (score / max) * 100 : 0;
+        const record = { subject, score, max, percent };
+        stats.subjects.push(record);
+        stats.subjectMap[subject] = record;
+        stats.totalScore += score;
+        stats.totalMax += max;
+      });
+      return stats;
+    }
+
+    function deriveGrade(avg){
+      if (avg >= 80) return 'A';
+      if (avg >= 65) return 'B';
+      if (avg >= 50) return 'C';
+      if (avg >= 35) return 'D';
+      return 'F';
+    }
+
+    function autoComment(avg){
+      if (avg >= 85) return 'Excellent progress. Keep pushing ahead with enrichment tasks.';
+      if (avg >= 70) return 'Strong performance. Maintain steady revision and teamwork.';
+      if (avg >= 55) return 'Good effort. Target core practice for the next milestone.';
+      if (avg >= 40) return 'Showing potential. Add guided revision and parental follow up.';
+      return 'Immediate academic support required. Schedule remedial sessions.';
+    }
+
+    function getTeacherName(subject){
+      const entry = state.teachers.get(String(subject||'').trim().toUpperCase());
+      return (entry && entry.name) || 'Teacher';
+      }
+
+    function assignPositions(students, subjects){
+      // Overall
+      const avgSorted = [...students].sort((a,b) => b.avg - a.avg);
+      let lastScore=null, lastPos=0;
+      avgSorted.forEach((s, idx) => {
+        const rounded = Number(s.avg.toFixed(2));
+        if (rounded === lastScore) s.overallPosition = lastPos;
+        else { s.overallPosition = idx+1; lastScore = rounded; lastPos = s.overallPosition; }
+      });
+      // Per subject
+      subjects.forEach(subject => {
+        const arr = [...students].sort((a,b) => {
+          const as = a.subjectStats.subjectMap[subject]?.score || 0;
+          const bs = b.subjectStats.subjectMap[subject]?.score || 0;
+          return bs - as;
+        });
+        let prev = null, prevPos = 0;
+        arr.forEach((stu, idx) => {
+          const v = Number(stu.subjectStats.subjectMap[subject]?.score || 0);
+          if (prev !== null && v === prev) stu.subjectPositions[subject] = prevPos;
+          else { stu.subjectPositions[subject] = idx+1; prevPos = stu.subjectPositions[subject]; prev = v; }
+          stu.subjectStats.subjectMap[subject].position = stu.subjectPositions[subject];
+          stu.subjectStats.subjectMap[subject].teacher = getTeacherName(subject);
+        });
+      });
+      // Flatten subjects array with new props
+      students.forEach(s => {
+        s.subjectStats.subjects = state.subjects.map(subject => {
+          const r = s.subjectStats.subjectMap[subject];
+          return { subject, score: r.score, max: r.max, percent: r.percent, position: r.position, teacher: r.teacher };
+        });
+      });
+    }
+
+    /* -------------------------- VIEW -------------------------- */
+    function applyFilters(){
+      const search = document.getElementById('searchInput').value.trim().toLowerCase();
+      const sortBy = document.getElementById('sortSelect').value;
+      const filtered = (state.students||[]).filter(s => {
+        const h = [s.adm, s.name, s.parentName, s.parentContact].filter(Boolean).join(' ').toLowerCase();
+        return h.includes(search);
+      });
+      state.filtered = sortStudents(filtered, sortBy);
+      if (!state.selectedAdm || !state.filtered.some(s => s.adm === state.selectedAdm)) {
+        state.selectedAdm = state.filtered.length ? state.filtered[0].adm : null;
+      }
+      renderStudentSelect();
+      updateMetrics();
+      renderTable();
+      updatePreview();
+    }
+
+    function sortStudents(arr, sortBy){
+      const copy = [...arr];
+      if (sortBy === 'score') copy.sort((a,b) => b.avg - a.avg || String(a.adm).localeCompare(String(b.adm)));
+      else if (sortBy === 'balance') copy.sort((a,b) => (b.balance||0) - (a.balance||0));
+      else if (sortBy === 'position') copy.sort((a,b) => a.overallPosition - b.overallPosition);
+      else copy.sort((a,b) => (a.name||'').localeCompare(b.name||''));
+      return copy;
+    }
+
+    function renderStudentSelect(){
+      const sel = document.getElementById('studentSelect');
+      sel.innerHTML = '';
+      if (!state.filtered.length) {
+        sel.innerHTML = '<option value="">No records</option>';
+        document.getElementById('bulkCount').textContent = 0;
+        return;
+      }
+      state.filtered.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.adm; opt.textContent = `${s.adm} - ${s.name}`;
+        if (s.adm === state.selectedAdm) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', e => { state.selectedAdm = e.target.value; updatePreview(); renderTable(); });
+      document.getElementById('bulkCount').textContent = state.filtered.length;
+    }
+
+    function updateMetrics(){
+      const total = state.filtered.length;
+      const male = state.filtered.filter(s => (s.gender||'').toLowerCase().startsWith('m')).length;
+      const female = state.filtered.filter(s => (s.gender||'').toLowerCase().startsWith('f')).length;
+      const avg = total ? (state.filtered.reduce((sum, s) => sum + (s.avg || 0), 0) / total) : 0;
+      const balance = state.filtered.reduce((sum, s) => sum + (s.balance || 0), 0);
+      const attendance = total ? (state.filtered.reduce((sum, s) => sum + (s.attendancePercent || 0), 0) / total) : 0;
+      document.getElementById('metricStudents').textContent = total;
+      document.getElementById('metricGender').textContent = `M:${male} / F:${female}`;
+      document.getElementById('metricAverage').textContent = `${avg.toFixed(1)}%`;
+      document.getElementById('metricBalance').textContent = `TSh ${formatCurrency(balance)}`;
+      document.getElementById('metricAttendance').textContent = `${attendance.toFixed(1)}%`;
+    }
+
+    function renderTable(){
+      const table = document.getElementById('reportTable');
+      if (!state.filtered.length){
+        table.innerHTML = `<tr><td colspan="10" class="px-4 py-6 text-center text-slate-400">No students found for the selected filters.</td></tr>`;
+        return;
+      }
+      table.innerHTML = state.filtered.map(s => {
+        const attendance = `${s.attendancePercent.toFixed(1)}% (${s.presents}/${s.attendanceDays})`;
+        const pillClass = s.avg >= 70 ? 'good' : s.avg >= 50 ? 'medium' : 'low';
+        return `
+          <tr class="${s.adm === state.selectedAdm ? 'bg-slate-800/30' : ''}">
+            <td class="px-4 py-3">${s.overallPosition}</td>
+            <td class="px-4 py-3 font-mono">${s.adm}</td>
+            <td class="px-4 py-3">
+              <div class="font-semibold text-slate-100">${escapeHtml(s.name)}</div>
+              <div class="text-xs text-slate-400">${escapeHtml(s.parentContact || '-')}</div>
+            </td>
+            <td class="px-4 py-3">${escapeHtml(s.class || '')}${s.stream ? ' ('+escapeHtml(s.stream)+')' : ''}</td>
+            <td class="px-4 py-3">${s.avg.toFixed(1)}%</td>
+            <td class="px-4 py-3"><span class="status-pill ${pillClass}">Grade ${s.grade}</span></td>
+            <td class="px-4 py-3">
+              <div>TSh ${formatCurrency(s.paid)}</div>
+              <div class="text-xs text-slate-400">Balance: TSh ${formatCurrency(s.balance)}</div>
+            </td>
+            <td class="px-4 py-3">${attendance}</td>
+            <td class="px-4 py-3 text-xs">${escapeHtml(s.comment)}</td>
+            <td class="px-4 py-3 text-right space-x-1">
+              <button class="table-action primary" onclick="setSelectedStudent('${s.adm}')"><i class="fas fa-eye"></i> View</button>
+              <button class="table-action alt" onclick="generateSinglePdf('${s.adm}')"><i class="fas fa-file-pdf"></i> PDF</button>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    function setSelectedStudent(adm){ state.selectedAdm = adm; updatePreview(); renderTable(); }
+
+    function updatePreview(){
+      const s = state.filtered.find(x => x.adm === state.selectedAdm);
+      const cohortSize = state.students.length || state.filtered.length;
+      document.getElementById('previewBranch').textContent = state.branch || 'School';
+      document.getElementById('previewExam').textContent = state.examType;
+      document.getElementById('previewMonth').textContent = MONTH_LABELS[state.month] || state.month;
+      if (!s){
+        document.getElementById('previewStudentName').textContent = 'Select a student';
+        document.getElementById('previewGender').textContent = '';
+        document.getElementById('previewAdm').textContent = 'ADM -';
+        document.getElementById('previewAverage').textContent = '0%';
+        document.getElementById('previewGrade').textContent = '-';
+        document.getElementById('previewPosition').textContent = '-';
+        document.getElementById('previewClassSize').textContent = cohortSize;
+        document.getElementById('previewAttendance').textContent = '0%';
+        document.getElementById('previewAttendanceRaw').textContent = '0 / 0';
+        document.getElementById('previewFee').textContent = 'Total: TSh 0';
+        document.getElementById('previewFeeBreakdown').textContent = 'TSh 0 / TSh 0';
+        document.getElementById('previewComment').textContent = 'Select a student to view comments and printable card.';
+        document.getElementById('previewHighlights').innerHTML = '';
+        document.getElementById('previewSummaryList').innerHTML = '<li>No student selected.</li>';
+        document.getElementById('previewSubjects').innerHTML = '';
+        document.getElementById('previewPhoto').src = PLACEHOLDER_PHOTO;
+        return;
+      }
+      document.getElementById('previewStudentName').textContent = s.name || s.adm;
+      document.getElementById('previewGender').textContent = s.gender || 'Gender';
+      document.getElementById('previewAdm').textContent = `ADM ${s.adm}`;
+      document.getElementById('previewDob').textContent = formatDate(s.dob);
+      document.getElementById('previewReporting').textContent = formatDate(s.reportingDate);
+      document.getElementById('previewParent').textContent = s.parentName || '-';
+      document.getElementById('previewPhone').textContent = s.parentContact || '-';
+      document.getElementById('previewAverage').textContent = `${s.avg.toFixed(1)}%`;
+      document.getElementById('previewGrade').textContent = s.grade;
+      document.getElementById('previewPosition').textContent = `#${s.overallPosition}`;
+      document.getElementById('previewClassSize').textContent = cohortSize;
+      document.getElementById('previewAttendance').textContent = `${s.attendancePercent.toFixed(1)}%`;
+      document.getElementById('previewAttendanceRaw').textContent = `${s.presents} / ${s.attendanceDays}`;
+      document.getElementById('previewFee').textContent = `Total: TSh ${formatCurrency(s.totalFee)}`;
+      document.getElementById('previewFeeBreakdown').textContent = `TSh ${formatCurrency(s.paid)} / TSh ${formatCurrency(s.balance)}`;
+      document.getElementById('previewComment').textContent = s.comment;
+
+      const highlights = document.getElementById('previewHighlights');
+      highlights.innerHTML = '';
+      [
+        { icon:'fa-trophy', label:`Class position ${s.overallPosition}` },
+        { icon:'fa-percent', label:`${s.avg.toFixed(1)}% overall` },
+        { icon:'fa-money-bill', label:`Balance TSh ${formatCurrency(s.balance)}` },
+        { icon:'fa-calendar-check', label:`${s.attendancePercent.toFixed(0)}% attendance` }
+      ].forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'chip'; div.innerHTML = `<i class="fas ${item.icon}"></i>${item.label}`; highlights.appendChild(div);
+      });
+
+      const summaryList = document.getElementById('previewSummaryList');
+      summaryList.innerHTML = `
+        <li>Subjects recorded: ${state.subjects.length}</li>
+        <li>Best subject: ${bestSubject(s)}</li>
+        <li>Needs support: ${lowestSubject(s)}</li>`;
+
+      document.getElementById('previewSubjects').innerHTML = s.subjectStats.subjects.map((entry, idx) => `
+        <tr>
+          <td>${idx + 1}</td><td>${escapeHtml(entry.subject)}</td>
+          <td>${formatNumber(entry.score)}</td><td>${formatNumber(entry.max)}</td>
+          <td>${entry.percent.toFixed(1)}%</td><td>${entry.position || '-'}</td>
+          <td>${escapeHtml(entry.teacher || 'Teacher')}</td>
+        </tr>`).join('');
+
+      document.getElementById('previewPhoto').src = s.photoUrl ? s.photoUrl : PLACEHOLDER_PHOTO;
+    }
+
+    function bestSubject(s){ const x = [...s.subjectStats.subjects].sort((a,b) => b.percent - a.percent)[0]; return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-'; }
+    function lowestSubject(s){ const x = [...s.subjectStats.subjects].sort((a,b) => a.percent - b.percent)[0]; return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-'; }
+
+    function formatCurrency(v){ return Number(v||0).toLocaleString('en-US'); }
+    function formatNumber(v){ if (Number.isInteger(v)) return v; return Number(v||0).toFixed(1); }
+    function formatDate(input){ if (!input || input === '-') return '-'; const d = new Date(input); return isNaN(d.getTime()) ? input : d.toLocaleDateString('en-GB'); }
+    function escapeHtml(str=''){ return str.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c] || c)); }
+
+    async function loadImageAsDataURL(url){
+      if (!url) return null;
+      try {
+        const r = await fetch(url, { mode:'cors' });
+        if (!r.ok) return null;
+        const blob = await r.blob();
+        return await new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      } catch (e) { return null; }
+    }
+
+    /* -------------------------- EXPORTS -------------------------- */
+    async function generateSinglePdf(adm){
+      const s = state.students.find(x => x.adm === adm);
+      if (!s) return Swal.fire('Not found', 'Student not found.', 'info');
+      const doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      await drawReportCard(doc, s);
+      const monthSlug = (state.month === 'All' ? 'Annual' : state.month);
+      doc.save(`report_${s.adm}_${state.className}_${state.year}_${state.examKey}_${monthSlug}.pdf`);
+    }
+
+    async function downloadBulkReportCards(){
+      if (!state.filtered.length) return Swal.fire('No students', 'Filter first.', 'info');
+      const doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      for (let i = 0; i < state.filtered.length; i++) { if (i>0) doc.addPage(); await drawReportCard(doc, state.filtered[i]); }
+      const monthSlug = (state.month === 'All' ? 'Annual' : state.month);
+      doc.save(`bulk_reports_${state.className}_${state.year}_${state.examKey}_${monthSlug}.pdf`);
+    }
+
+    async function drawReportCard(doc, s){
+      const margin = 14, headerY = 14, contentStartY = 48;
+      doc.setFillColor(15, 23, 42); doc.rect(0, 0, 210, 32, 'F');
+      if (state.logoDataUrl) doc.addImage(state.logoDataUrl, 'PNG', margin, headerY - 2, 20, 20);
+      doc.setTextColor(226, 232, 240);
+      doc.setFontSize(12); doc.text(String(state.branch || 'School'), margin + 25, headerY + 2);
+      doc.setFontSize(16); doc.text('Academic Report Card', margin + 25, headerY + 12);
+      doc.setFontSize(10); doc.text(`Year ${state.year}  |  ${state.examType} (${s.monthLabel})  |  ${state.className}${s.stream? ' ('+s.stream+')':''}`, margin + 25, headerY + 20);
+      const photoData = s.photoUrl ? await loadImageAsDataURL(s.photoUrl) : null;
+      if (photoData) doc.addImage(photoData, 'JPEG', 160, headerY - 2, 30, 40);
+      else { doc.setDrawColor(148, 163, 184); doc.rect(160, headerY - 2, 30, 40); doc.text('Photo', 165, headerY + 18); }
+
+      doc.setTextColor(15, 23, 42); doc.setFontSize(11);
+      doc.text(`Student: ${s.name}`, margin, contentStartY);
+      doc.text(`Admission: ${s.adm}`, margin, contentStartY + 6);
+      doc.text(`Date of birth: ${formatDate(s.dob)}`, margin, contentStartY + 12);
+      doc.text(`Reporting: ${formatDate(s.reportingDate)}`, margin, contentStartY + 18);
+      doc.text(`Parent: ${s.parentName || '-'} (${s.parentContact || '-'})`, margin, contentStartY + 24);
+      doc.text(`Average: ${s.avg.toFixed(1)}%`, 120, contentStartY);
+      doc.text(`Grade: ${s.grade}`, 120, contentStartY + 6);
+      const cohortSize = state.students.length || state.filtered.length || 0;
+      doc.text(`Overall position: ${s.overallPosition} / ${cohortSize}`, 120, contentStartY + 12);
+      doc.text(`Attendance: ${s.attendancePercent.toFixed(1)}% (${s.presents}/${s.attendanceDays})`, 120, contentStartY + 18);
+      doc.text(`Fees: Due TSh ${formatCurrency(s.totalFee)} | Paid TSh ${formatCurrency(s.paid)} | Balance TSh ${formatCurrency(s.balance)}`, 120, contentStartY + 24);
+
+      doc.autoTable({
+        startY: contentStartY + 32,
+        head: [["#","Subject","Score","Max","%","Pos","Teacher"]],
+        body: s.subjectStats.subjects.map((entry, index) => [
+          index + 1, entry.subject, formatNumber(entry.score), formatNumber(entry.max),
+          entry.percent.toFixed(1), entry.position || '-', entry.teacher || 'Teacher'
+        ]),
+        styles: { fontSize: 9, textColor: [15, 23, 42] },
+        headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
+        alternateRowStyles: { fillColor: [241, 245, 249] },
+        theme: 'grid', margin: { left: margin, right: margin }
+      });
+      const afterTable = doc.lastAutoTable.finalY + 6;
+      doc.setFontSize(10);
+      doc.text('Teacher comments:', margin, afterTable);
+      doc.text(doc.splitTextToSize(s.comment || '', 180), margin, afterTable + 6);
+      doc.setDrawColor(148, 163, 184);
+      doc.line(margin, afterTable + 30, 90, afterTable + 30); doc.text('Class teacher signature', margin, afterTable + 35);
+      doc.line(120, afterTable + 30, 200, afterTable + 30); doc.text('Head of school signature', 120, afterTable + 35);
+      return doc;
+    }
+
+    async function downloadSummaryPdf(){
+      if (!state.filtered.length) return Swal.fire('No data', 'No students to export.', 'info');
+      const doc = new window.jspdf.jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+      doc.setFontSize(13); doc.text('Report Summary', 14, 14);
+      doc.setFontSize(9); doc.text(`${state.className} | ${state.examType} (${MONTH_LABELS[state.month] || state.month}) | ${state.year}`, 14, 20);
+      doc.autoTable({
+        startY: 24,
+        head: [["Pos","Adm","Student","Avg %","Grade","Paid","Balance","Attendance","Comment"]],
+        body: state.filtered.map(s => [
+          s.overallPosition, s.adm, s.name, s.avg.toFixed(1), s.grade,
+          `TSh ${formatCurrency(s.paid)}`, `TSh ${formatCurrency(s.balance)}`,
+          `${s.attendancePercent.toFixed(1)}%`, s.comment
+        ]),
+        styles: { fontSize: 8 }, headStyles: { fillColor: [15, 23, 42], textColor: 255 }, theme: 'grid'
+      });
+      const monthSlug = (state.month === 'All' ? 'Annual' : state.month);
+      doc.save(`summary_${state.className}_${state.year}_${state.examKey}_${monthSlug}.pdf`);
+    }
+
+    function downloadBulkCsv(){
+      if (!state.filtered.length) return Swal.fire('No data', 'No students in the list to export.', 'info');
+      const rows = state.filtered.map(s => {
+        const base = {
+          Adm: s.adm, Student: s.name, Class: s.class, Stream: s.stream || '',
+          Exam: s.examLabel, Month: s.monthLabel, AvgPercent: s.avg.toFixed(2), Grade: s.grade,
+          FeeDue: s.totalFee, Paid: s.paid, Balance: s.balance,
+          AttendancePercent: s.attendancePercent.toFixed(2), Presents: s.presents, Absents: s.absents, OverallPosition: s.overallPosition
+        };
+        state.subjects.forEach(sub => {
+          const e = s.subjectStats.subjectMap[sub];
+          base[`${sub} Score`] = e?.score || 0;
+          base[`${sub} Max`] = e?.max || 0;
+          base[`${sub} %`] = e ? Number(e.percent.toFixed(2)) : 0;
+          base[`${sub} Pos`] = s.subjectPositions[sub] || '';
+          base[`${sub} Teacher`] = e?.teacher || 'Teacher';
+        });
+        base.Comment = s.comment;
+        return base;
+      });
+      const csv = Papa.unparse(rows);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const monthSlug = (state.month === 'All' ? 'Annual' : state.month);
+      link.download = `report_${state.className}_${state.year}_${state.examKey}_${monthSlug}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function copyParentContact(){
+      const s = state.filtered.find(x => x.adm === state.selectedAdm);
+      if (!s || !s.parentContact) return Swal.fire('No contact', 'Selected learner has no parent contact recorded.', 'info');
+      navigator.clipboard.writeText(s.parentContact).then(() => Swal.fire('Copied', 'Parent contact copied.', 'success')).catch(() => Swal.fire('Failed', 'Could not copy.', 'error'));
+    }
+  </script>
+</body>
+</html>

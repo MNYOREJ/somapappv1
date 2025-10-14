@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SoMAp — Scoresheet</title>
+  <title>SoMAp — Scoresheet (fixed)</title>
 
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- jsPDF + autotable (kept for table export PDF only) -->
+  <!-- jsPDF + autotable -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
 
@@ -23,7 +23,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
 
-  <!-- Optional wrapper: if present it should export window.db -->
+  <!-- Your Firebase config wrapper (exports window.db, window.storage) -->
   <script src="../firebase.js"></script>
 
   <style>
@@ -31,25 +31,16 @@
     .scroll-shadow { box-shadow: inset 0 10px 8px -10px rgba(2,6,23,0.12); }
     .bg-white.rounded-2xl.p-4 { overflow:hidden; }
     .min-w-table { min-width:1200px; }
-    /* Force button visibility */
-    #btnCheckScoresheet {
-      display: inline-block !important;
-      visibility: visible !important;
-      opacity: 1 !important;
-      min-width: 120px;
-    }
-    .flex.items-center.gap-2 {
-      flex-wrap: nowrap !important;
-      overflow: visible !important;
-    }
+    #btnCheckScoresheet { display:inline-block!important; visibility:visible!important; opacity:1!important; min-width:120px;}
+    .flex.items-center.gap-2 { flex-wrap:nowrap!important; overflow:visible!important; }
   </style>
 </head>
-<body class="bg-gray-50 text-slate-800" style="margin: 0; padding: 0; height: 100%; overflow: hidden;">
+<body class="bg-gray-50 text-slate-800" style="margin:0; padding:0; height:100%; overflow:hidden;">
   <!-- Top bar with Go Back -->
   <header class="bg-white border-b sticky top-0 z-50 w-full">
     <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <a href="#" class="px-3 py-2 rounded-lg bg-red-600 text-white text-sm flex items-center gap-2" onclick="window.parent && window.parent.document && window.parent.document.getElementById('closeModal') ? window.parent.document.getElementById('closeModal').click() : history.back();">
+        <a href="#" class="px-3 py-2 rounded-lg bg-red-600 text-white text-sm flex items-center gap-2" onclick="try{window.parent.document.getElementById('closeModal').click();}catch(e){history.back();}">
           <i class="fas fa-arrow-left"></i> Go Back
         </a>
         <div>
@@ -121,7 +112,6 @@
             <span id="lblCount">0</span> students • <span id="lblSubjects">0</span> subjects
           </div>
           <div class="flex gap-2">
-            <!-- NOTE: Now opens the standalone report dashboard -->
             <button id="btnGenerateReports" class="px-3 py-2 bg-green-600 text-white rounded text-sm">Generate Report Cards (PDF)</button>
             <button id="btnEmailReports" class="px-3 py-2 bg-white border rounded text-sm">Email/SMS Links</button>
           </div>
@@ -144,25 +134,24 @@
   </template>
 
   <script>
-    /* ===========================
-       CONFIG
-    ============================ */
+    /* ---------- CONFIG ---------- */
     const SUBJECTS_BY_CLASS = {
       'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Preunit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Pre-Unit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Class 1': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 2': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
       'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
       'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
       'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
-      'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
+      'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
+      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening']
     };
 
-    const EXAM_KEYS = {
-      'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
-    };
+    const EXAM_KEYS = { 'Monthly':'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual' };
 
     function letterGrade(pct) {
       const p = Number(pct);
@@ -175,27 +164,33 @@
 
     function getTeacherComment(grade, name) {
       switch (grade) {
-        case 'A': return \`Wonderful \${name}, keep this spirit!\`;
-        case 'B': return \`Good trial \${name}, aim higher!\`;
-        case 'C': return \`Now, \${name}, this is completely not what we signed up for at our school. Work harder!\`;
-        case 'D': return \`Dear \${name}, your performance needs significant improvement. Seek help and try harder!\`;
-        case 'F': return \`Oh \${name}, this is a serious concern. Immediate effort is required!\`;
-        case '0': return \`Unfortunately \${name}, no marks recorded. Please address this immediately!\`;
-        default: return \`Feedback for \${name} pending.\`;
+        case 'A': return `Wonderful ${name}, keep this spirit!`;
+        case 'B': return `Good trial ${name}, aim higher!`;
+        case 'C': return `Now, ${name}, this is completely not what we signed up for at our school. Work harder!`;
+        case 'D': return `Dear ${name}, your performance needs significant improvement. Seek help and try harder!`;
+        case 'F': return `Oh ${name}, this is a serious concern. Immediate effort is required!`;
+        case '0': return `Unfortunately ${name}, no marks recorded. Please address this immediately!`;
+        default: return `Feedback for ${name} pending.`;
       }
     }
 
-    /* ===========================
-       STATE
-    ============================ */
+    function subjectsForClass(label){
+      if (!label) return [];
+      if (SUBJECTS_BY_CLASS[label]) return SUBJECTS_BY_CLASS[label];
+      const stripped = label.replace(/\\s+(AB|A|B|C|D)$/i, '').trim();
+      if (SUBJECTS_BY_CLASS[stripped]) return SUBJECTS_BY_CLASS[stripped];
+      const m = label.match(/(Class\\s*\\d+)/i);
+      if (m && SUBJECTS_BY_CLASS[m[1]]) return SUBJECTS_BY_CLASS[m[1]];
+      return [];
+    }
+
+    /* ---------- STATE ---------- */
     const state = {
       students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
       rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:''
     };
 
-    /* ===========================
-       ELEMENTS
-    ============================ */
+    /* ---------- ELEMENTS ---------- */
     const scoresBody = document.getElementById('scoresBody');
     const lblCount = document.getElementById('lblCount');
     const lblSubjects = document.getElementById('lblSubjects');
@@ -211,46 +206,10 @@
     const btnEmailReports = document.getElementById('btnEmailReports');
     const globalMaxInput = document.getElementById('globalMaxInput');
 
-    /* ===========================
-       UTIL: SESSION/LOCAL/QUERY FALLBACKS
-    ============================ */
-    const KEY_ALIASES = {
-      className: ['className','selectedClass','selectedClassName','grade','class'],
-      stream: ['stream','section','streamName'],
-      month: ['month','selectedMonth','examMonth'],
-      year: ['year','selectedYear','academicYear'],
-      examKey: ['examKey','selectedExam','exam','exam_type'],
-      schoolBranch: ['schoolBranch','school','branch','campus','schoolName']
-    };
-
-    function q(name){
-      const params = new URLSearchParams(window.location.search);
-      return params.get(name) || params.get(name.toLowerCase()) || params.get(name.toUpperCase());
-    }
-
-    function pickKey(name){
-      const list = KEY_ALIASES[name] || [name];
-      for(const k of list){
-        const v1 = window.sessionStorage.getItem(k);
-        if(v1 && v1 !== 'undefined') return v1;
-        const v2 = window.localStorage.getItem(k);
-        if(v2 && v2 !== 'undefined') return v2;
-      }
-      // URL query fallbacks
-      const v3 = q(name) || q(list[0]) || q(list[1] || '');
-      if(v3) return v3;
-      return '';
-    }
-
-    /* ===========================
-       FIREBASE DB helper
-    ============================ */
+    /* ---------- Firebase DB helper ---------- */
     function getDB(){
       if(window && window.db) return window.db;
-      if(!window.firebase) {
-        console.error('Firebase not loaded; ensure firebase.js is present and provides window.db');
-        return null;
-      }
+      if(!window.firebase) { console.error('Firebase not loaded'); return null; }
       if (!firebase.apps.length){
         const cfg = {
           apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
@@ -266,105 +225,78 @@
       return firebase.database();
     }
 
-    /* ===========================
-       STUDENT LOADER (more robust + academic.html friendly)
-    ============================ */
+    /* ---------- Robust student loader ---------- */
     async function fetchStudents(className, stream){
       const db = getDB();
       if(!db) return [];
-
-      // Build candidate paths using known patterns + academic.html style
-      const year = state.year || pickKey('year');
-      const branch = (state.schoolBranch || pickKey('schoolBranch') || '').trim();
-
-      const candidates = [
-        // academic-style
-        \`/academics/\${year}/\${className}/students\`,
-        \`/academics/\${className}/students\`,
-        // class/group styles
-        \`/classes/\${className}/students\`,
-        \`/classes/\${year}/\${className}/students\`,
-        \`/studentsByClass/\${className}\`,
-        // school branch styles
-        branch ? \`/schools/\${branch}/\${year}/students\` : '',
-        branch ? \`/schools/\${branch}/students\` : '',
-        // generic roots (fallbacks)
-        '/students','/Students','/StudentsList','/Students_List','/studentList','/studentlist',
-        '/attendance','/school','/schoolerp'
-      ].filter(Boolean);
-
-      // Helper to normalize any structure at a given path
-      async function tryRead(path){
-        try{
-          const snap = await db.ref(path).get();
-          if(!snap || !snap.exists || !snap.exists()) return [];
-          const data = snap.val();
-          const arr = [];
-
-          if(Array.isArray(data)){
-            data.forEach((item, idx)=> {
-              if(item) {
-                const adm = item.adm || item.admissionNumber || item.admNo || ('A'+idx);
-                arr.push(normalizeStudentRecord(adm, item));
-              }
-            });
-          } else if (typeof data === 'object' && data){
-            // If it's a map of students OR a map by class -> students
-            // Case 1: object keyed by class -> students object/array
-            if(data[className]){
-              const maybeStudents = data[className];
-              if(Array.isArray(maybeStudents)){
-                maybeStudents.forEach((s, idx)=>{
-                  if(s){ const adm = s.adm || s.admissionNumber || s.admNo || ('A'+idx); arr.push(normalizeStudentRecord(adm, s)); }
-                });
-              }else if(typeof maybeStudents === 'object'){
-                Object.keys(maybeStudents).forEach(k=>{
-                  const s = maybeStudents[k];
-                  if(typeof s === 'object'){
-                    const adm = s.adm || s.admissionNumber || s.admNo || s.admission || k;
-                    arr.push(normalizeStudentRecord(adm, s));
-                  }
-                });
-              }
-            }
-
-            // Case 2: object is already a map of students
-            Object.keys(data).forEach(k=>{
-              const s = data[k];
-              if(typeof s === 'object' && (s.name || s.fullName || s.firstName || s.adm || s.admissionNumber || s.admissionNo || s.feeDue || s.feePaid)){
-                const adm = s.adm || s.admissionNumber || s.admNo || s.admission || k;
-                arr.push(normalizeStudentRecord(adm, s));
-              }
-            });
+      const classPaths = [
+        `/academics/${state.year}/${className}/students`,
+        `/academics/${state.year}/${(className||'').replace(/\\s+(AB|A|B|C|D)$/i,'').trim()}/students`,
+        `/classes/${className}/students`,
+        `/studentsByClass/${className}`,
+        `/students_by_class/${className}`,
+        `/somap/${state.schoolBranch||'default'}/students/${className}`
+      ];
+      for (const p of classPaths){
+        try {
+          const snap = await db.ref(p).get();
+          if (snap && snap.exists && snap.exists()){
+            const data = snap.val();
+            const arr = normalizeStudentsCollection(data);
+            if (arr.length) return filterSortByClassStream(arr, className, stream);
           }
-          return arr;
-        }catch(err){
-          console.warn('fetchStudents path error', path, err && err.message);
-          return [];
-        }
+        } catch(e){}
       }
-
-      for(const p of candidates){
-        const arr = await tryRead(p);
-        if(arr && arr.length){
-          // Filter by class/stream if records carry those fields.
-          const filtered = arr.filter(x=>{
-            const normalizedClass = String(x.class || '').toUpperCase().replace(/[\\s-]/g, '');
-            const normalizedSelect = className.toUpperCase().replace(/[\\s-]/g, '');
-            const classMatches = !className || normalizedClass.includes(normalizedSelect) || !x.class; // tolerate missing class on path-scoped sets
-            const normalizedStream = String(x.stream || '').toUpperCase().replace(/[\\s-]/g, '');
-            const normalizedInputStream = (stream || '').toUpperCase().replace(/[\\s-]/g, '');
-            const streamMatches = !stream || normalizedStream.includes(normalizedInputStream) || !x.stream;
-            return classMatches && streamMatches;
-          });
-          filtered.sort((a,b)=> (a.name || '').localeCompare(b.name || ''));
-          if(filtered.length){
-            console.log('Students loaded from', p, '=>', filtered.length);
-            return filtered;
+      const tryRoots = ['students','Students','StudentsList','Students_List','studentList','studentlist','schoolerp'];
+      for(const p of tryRoots){
+        try{
+          const snap = await db.ref(p).get();
+          if(snap && snap.exists && snap.exists()){
+            const data = snap.val();
+            const arr = normalizeStudentsCollection(data);
+            const filtered = filterSortByClassStream(arr, className, stream);
+            if(filtered.length) return filtered;
           }
-        }
+        }catch(err){}
       }
       return [];
+    }
+
+    function normalizeStudentsCollection(data){
+      const out = [];
+      if (!data) return out;
+      if (Array.isArray(data)){
+        data.forEach((s, idx) => { if (s) out.push(normalizeStudentRecord(s.adm || s.admissionNumber || s.admNo || ('A'+idx), s)); });
+      } else {
+        Object.keys(data).forEach(k => {
+          const v = data[k];
+          if (v && typeof v === 'object'){
+            const looksLikeClassBucket = Object.values(v).every(x => x && typeof x === 'object' && ('name' in x || 'firstName' in x || 'adm' in x || 'admissionNumber' in x));
+            if (looksLikeClassBucket && !('name' in v) && !('firstName' in v)){
+              Object.keys(v).forEach(innerAdm => {
+                const stu = v[innerAdm];
+                out.push(normalizeStudentRecord(stu.adm || innerAdm, stu));
+              });
+            } else {
+              out.push(normalizeStudentRecord(v.adm || v.admissionNumber || v.admNo || k, v));
+            }
+          }
+        });
+      }
+      return out;
+    }
+
+    function filterSortByClassStream(arr, className, stream){
+      const wantClass = (className||'').toUpperCase().replace(/[\\s-]/g,'');
+      const wantStream = (stream||'').toUpperCase().replace(/[\\s-]/g,'');
+      const filtered = arr.filter(x => {
+        const cls = String(x.class || '').toUpperCase().replace(/[\\s-]/g,'');
+        const str = String(x.stream || '').toUpperCase().replace(/[\\s-]/g,'');
+        const classOk = !wantClass || cls.includes(wantClass);
+        const streamOk = !wantStream || str.includes(wantStream);
+        return classOk && streamOk;
+      }).sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+      return filtered;
     }
 
     function normalizeStudentRecord(admKey, s){
@@ -374,19 +306,16 @@
       const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
       let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
       if (s.payments && typeof s.payments === 'object') {
-        feePaid = Object.values(s.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        try { feePaid = Object.values(s.payments).reduce((sum, p) => sum + Number((p && (p.amount||p.paid)) || 0), 0); } catch(e){}
       }
       const balance = Number(s.balance || Math.max(0, feeDue - feePaid) || 0);
       return { adm: String(admKey), name, class: sClass, stream: sStream, feeDue, feePaid, balance, meta: s };
     }
 
-    /* ===========================
-       Attendance + fees + scores fetchers
-    ============================ */
     async function fetchAttendance(year, month, className){
       const db = getDB();
       if(!db) return {};
-      const refPath = \`/attendance/\${year}/\${month}/\${className}\`;
+      const refPath = `/attendance/${year}/${month}/${className}`;
       try{
         const snap = await db.ref(refPath).get();
         const out = {};
@@ -398,13 +327,13 @@
           });
         }
         return out;
-      }catch(e){ console.warn('fetchAttendance', e && e.message); return {}; }
+      }catch(e){ return {}; }
     }
 
     async function fetchFees(year, className){
       const db = getDB();
       if(!db) return {};
-      const refPath = \`/fees/\${year}/\${className}\`;
+      const refPath = `/fees/${year}/${className}`;
       try{
         const snap = await db.ref(refPath).get();
         const out = {};
@@ -418,13 +347,13 @@
           });
         }
         return out;
-      }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
+      }catch(e){ return {}; }
     }
 
     async function fetchScores({year, className, examKey, month}){
       const db = getDB();
       if(!db) return {};
-      const refPath = \`/scores/\${year}/\${className}/\${examKey}/\${month}\`;
+      const refPath = `/scores/${year}/${className}/${examKey}/${month}`;
       try{
         const snap = await db.ref(refPath).get();
         const out = {};
@@ -440,17 +369,14 @@
           });
         }
         return out;
-      }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
+      }catch(e){ return {}; }
     }
 
-    /* ===========================
-       Save
-    ============================ */
     async function saveAllScores(){
       const db = getDB();
       if(!db){ alert('Firebase not initialized'); return; }
       const { year, className, examKey, month } = state;
-      const baseRef = db.ref(\`/scores/\${year}/\${className}/\${examKey}/\${month}\`);
+      const baseRef = db.ref(`/scores/${year}/${className}/${examKey}/${month}`);
       const payload = {};
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
@@ -467,19 +393,12 @@
       alert('Scores saved.');
     }
 
-    /* ===========================
-       Build table
-    ============================ */
     function buildTable(){
       const scoresTable = document.getElementById('scoresTable');
       const theadRow = scoresTable.querySelector('thead tr');
-
-      // Remove injected subject headers first
-      while(theadRow.children.length > 6 && theadRow.children[6] && (theadRow.children[6].textContent||'').trim() !== 'Total'){
+      while(theadRow.children.length > 6 && (theadRow.children[6].textContent||'').trim() !== 'Total'){
         theadRow.removeChild(theadRow.children[6]);
       }
-
-      // Inject subject header triplets
       const tplHeader = document.getElementById('tplSubjectHeader');
       let insertIndex = Array.from(theadRow.children).findIndex(th => (th.textContent||'').trim() === 'Total');
       if(insertIndex < 0) insertIndex = theadRow.children.length;
@@ -509,7 +428,7 @@
         tr.appendChild(tdAdm);
 
         const tdName = document.createElement('td'); tdName.className='p-2 border';
-        tdName.innerHTML = \`<div class="font-medium">\${escapeHtml(s.name)}</div><div class="text-xs text-slate-500">\${escapeHtml(s.class)} \${s.stream? '('+escapeHtml(s.stream)+')':''}</div>\`;
+        tdName.innerHTML = `<div class="font-medium">${escapeHtml(s.name)}</div><div class="text-xs text-slate-500">${escapeHtml(s.class)} ${s.stream? '('+escapeHtml(s.stream)+')':''}</div>`;
         tr.appendChild(tdName);
 
         const feeObj = state.fees[s.adm] || { required: s.feeDue || 0, paid: s.feePaid || 0, balance: s.balance || 0 };
@@ -554,7 +473,7 @@
         const avg = Number(tdAvg.textContent) || 0;
         const grade = letterGrade(avg);
         const comment = getTeacherComment(grade, s.name);
-        tdComment.innerHTML = \`<textarea class="w-56 h-10 p-2 border rounded text-xs" placeholder="Teacher comment...">\${comment}</textarea>\`;
+        tdComment.innerHTML = `<textarea class="w-56 h-10 p-2 border rounded text-xs" placeholder="Teacher comment...">${comment}</textarea>`;
         tr.appendChild(tdComment);
 
         scoresBody.appendChild(tr);
@@ -573,12 +492,9 @@
       lblSubjects.textContent = String(state.subjectList.length);
     }
 
-    function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }
+    function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function money(n){ n = Number(n||0); return new Intl.NumberFormat('en-KE',{style:'currency',currency:'KES',maximumFractionDigits:0}).format(n); }
 
-    /* ===========================
-       Computation: totals/averages/positions/grades
-    ============================ */
     function recomputeAll(){
       const perSubject = {};
       Object.keys(state.rowsByAdm).forEach(adm=>{
@@ -601,7 +517,6 @@
         row._avgPct = avgPct;
         row._sumScore = sumScore;
 
-        // Auto-update teacher comment based on grade
         const grade = letterGrade(avgPct);
         const comment = getTeacherComment(grade, row.meta.name);
         row.tdComment.querySelector('textarea').value = comment;
@@ -630,9 +545,6 @@
       arr.forEach((r,i)=> state.rowsByAdm[r.adm].tdPstn.textContent = String(i+1));
     }
 
-    /* ===========================
-       Exports
-    ============================ */
     function gatherRowsForExport(){
       const rows = [];
       const header = ['Adm','Student', 'Fee Due','Paid','Balance', ...expandSubjectTripletsHeader(), 'Total','Max','% Avg','Overall Pos','Grade','Present','Absent','Comment'];
@@ -652,13 +564,13 @@
       return rows;
     }
 
-    function expandSubjectTripletsHeader(){ const out=[]; state.subjectList.forEach(s=> out.push(\`\${s} Score\`, \`\${s} Max\`, \`\${s} Pstn\`)); return out; }
+    function expandSubjectTripletsHeader(){ const out=[]; state.subjectList.forEach(s=> out.push(`${s} Score`, `${s} Max`, `${s} Pstn`)); return out; }
 
     function exportCSV(){
       const rows = gatherRowsForExport();
-      const csv = rows.map(r => r.map(v => '\"' + String(v).replace(/\"/g,'\"\"') + '\"').join(',')).join('\\n');
+      const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      saveAs(blob, \`Scoresheet_\${state.className || 'Class'}_\${state.examKey || 'exam'}_\${state.year || 'year'}-\${state.month || 'mm'}.csv\`);
+      saveAs(blob, `Scoresheet_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}-${state.month || 'mm'}.csv`);
     }
 
     function exportXLSX(){
@@ -666,22 +578,63 @@
       const ws = XLSX.utils.aoa_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Scoresheet');
-      XLSX.writeFile(wb, \`Scoresheet_\${state.className || 'Class'}_\${state.examKey || 'exam'}_\${state.year || 'year'}-\${state.month || 'mm'}.xlsx\`);
+      XLSX.writeFile(wb, `Scoresheet_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}-${state.month || 'mm'}.xlsx`);
     }
 
     function exportPDF(){
       const rows = gatherRowsForExport();
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
-      const title = \`Scoresheet \${state.className || ''} \${state.examKey || ''} \${state.year || ''}/\${state.month || ''}\`;
+      const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
       doc.setFontSize(14); doc.text(title, 40, 40);
       doc.autoTable({ startY:60, head:[rows[0]], body:rows.slice(1), styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[37,99,235]} });
       doc.save(title.replace(/[^A-Za-z0-9_\\- ]/g,'_') + '.pdf');
     }
 
-    /* ===========================
-       Persist summary
-    ============================ */
+    async function bulkGenerateReportCards(){
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4' });
+      const margin = 36;
+      const headerColor = { r:37, g:99, b:235 };
+      const students = state.students || [];
+      for(let i=0; i<students.length; i++){
+        if(i>0) doc.addPage();
+        const s = students[i];
+        const r = state.rowsByAdm[s.adm];
+        doc.setFillColor(headerColor.r, headerColor.g, headerColor.b);
+        doc.rect(0,0,595,80,'F');
+        doc.setTextColor(255,255,255); doc.setFontSize(16);
+        const school = s.schoolName || state.schoolBranch || 'School';
+        doc.text(`${school} — Academic Report`, margin, 40);
+        doc.setTextColor(0,0,0); doc.setFontSize(12);
+        doc.text(`Name: ${s.name}`, margin, 110);
+        doc.text(`Admission: ${s.adm}`, margin, 130);
+        const att = state.attendance[s.adm] || { present:0, absent:0, days:0 };
+        const days = att.days || (att.present + att.absent) || 0;
+        const pct = days ? ((att.present/days)*100).toFixed(1) : '0.0';
+        doc.text(`Attendance: ${att.present}/${days} days (${pct}%)`, margin, 150);
+        const fee = state.fees[s.adm] || { required: s.feeDue||0, paid: s.feePaid||0, balance: s.balance||0 };
+        doc.text(`Fees: Required ${money(fee.required)} | Paid ${money(fee.paid)} | Balance ${money(fee.balance)}`, margin, 170);
+
+        const tableHead = ['Subject','Score','Max','%','Pstn','Grade'];
+        const tableBody = state.subjectList.map(sub=> {
+          const c = r.subjectCells[sub];
+          const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value||100));
+          const pctS = (sc/mx)*100; const g = letterGrade(pctS); const pstn = c.pstnSpan.textContent||'';
+          return [sub, sc.toFixed(2), mx.toFixed(0), pctS.toFixed(2), pstn, g];
+        });
+        doc.autoTable({ head:[tableHead], body:tableBody, startY:200, styles:{fontSize:9}, headStyles:{fillColor:[headerColor.r,headerColor.g,headerColor.b]} });
+        const after = doc.lastAutoTable.finalY + 20;
+        doc.text(`Overall Average: ${Number(r.tdAvg.textContent||0).toFixed(2)}%`, margin, after);
+        doc.text(`Overall Position: ${r.tdPstn.textContent}`, margin, after+18);
+        doc.text(`Overall Grade: ${r.tdGrade.textContent}`, margin, after+36);
+        const comment = r.tdComment.querySelector('textarea').value || '—';
+        doc.text('Teacher Comment:', margin, after+64);
+        doc.text(comment, margin, after+82, { maxWidth: 595 - margin*2 });
+      }
+      doc.save(`ReportCards_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}.pdf`);
+    }
+
     async function persistComputedSummary(){
       const db = getDB();
       if(!db) return;
@@ -707,53 +660,36 @@
       });
       summary.attendance = { present: sumP, absent: sumA, days: sumD };
       summary.fees = { required: feeReq, paid: feePaid, balance: feeBal };
-      await db.ref(\`/summaries/\${state.year}/\${state.className}/\${state.examKey}/\${state.month}\`).set(summary);
+      await db.ref(`/summaries/${state.year}/${state.className}/${state.examKey}/${state.month}`).set(summary);
     }
 
-    /* ===========================
-       Load sequence (main entry)
-    ============================ */
     async function loadAll(){
-      // Pull from session/local/query (academic.html compatible)
-      state.className   = pickKey('className');
-      let inputStream   = pickKey('stream');
-      state.month       = pickKey('month');
-      state.year        = pickKey('year');
-      state.examKey     = pickKey('examKey') || 'monthly';
-      state.schoolBranch= pickKey('schoolBranch');
+      state.className = window.sessionStorage.getItem('className') || '';
+      let inputStream = window.sessionStorage.getItem('stream') || '';
+      state.month = window.sessionStorage.getItem('month') || '';
+      state.year = window.sessionStorage.getItem('year') || '';
+      state.examKey = window.sessionStorage.getItem('examKey') || 'monthly';
+      state.schoolBranch = window.sessionStorage.getItem('schoolBranch') || '';
 
-      if(!state.className){
-        alert('Class not selected; please open from Academic page.');
-        return;
-      }
-      if(!state.year){
-        // Tolerate missing year by falling back to current year
-        const now = new Date();
-        state.year = String(now.getFullYear());
-      }
+      if(!state.className){ alert('Class not selected; please select from dashboard'); return; }
+      if(!state.year){ alert('Year not selected; please select from dashboard'); return; }
 
-      // Normalize stream label: strip "class" and digits e.g. "Class 3 A" -> "A"
       const classNumMatch = state.className.match(/\\d+/);
       const classNum = classNumMatch ? classNumMatch[0] : '';
-      const effectiveStream = (inputStream || '').replace(/class/i, '').replace(classNum, '').trim().toUpperCase();
+      const effectiveStream = (inputStream||'').replace(/class/i, '').replace(classNum, '').trim().toUpperCase();
       state.stream = effectiveStream;
 
-      // Subjects for this class
-      state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
+      state.subjectList = subjectsForClass(state.className);
 
-      // Fetch sets
-      state.students   = await fetchStudents(state.className, state.stream);
+      state.students = await fetchStudents(state.className, state.stream);
       state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
-      state.fees       = await fetchFees(state.year, state.className) || {};
-      state.scores     = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
+      state.fees = await fetchFees(state.year, state.className) || {};
+      state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
 
       buildTable();
       recomputeAll();
     }
 
-    /* ===========================
-       Event Listeners
-    ============================ */
     btnRecalc.addEventListener('click', recomputeAll);
     btnSaveAll.addEventListener('click', saveAllScores);
     btnExportCSV.addEventListener('click', exportCSV);
@@ -761,33 +697,9 @@
     btnExportPDF.addEventListener('click', exportPDF);
     btnPrint.addEventListener('click', ()=>window.print());
     btnSetAllMax.addEventListener('click', ()=>{ const v = Number(globalMaxInput.value||100); scoresBody.querySelectorAll('input.max-input').forEach(i=>i.value=v); recomputeAll(); });
-
-    // IMPORTANT: Open the new standalone report dashboard
-    btnGenerateReports.addEventListener('click', ()=>{
-      // Persist current context so generatereportform.html can read it
-      const persist = {
-        className: state.className, stream: state.stream, month: state.month,
-        year: state.year, examKey: state.examKey, schoolBranch: state.schoolBranch
-      };
-      Object.keys(persist).forEach(k=> sessionStorage.setItem(k, persist[k]));
-
-      // Navigate
-      window.location.href = 'generatereportform.html';
-    });
-
+    btnGenerateReports.addEventListener('click', bulkGenerateReportCards);
     btnEmailReports.addEventListener('click', ()=>alert('Integrate your SMS/email gateway here.'));
 
-    /* ===========================
-       Init
-    ============================ */
-    window.addEventListener('load', loadAll);
-
-    /* ===========================
-       Small helpers
-    ============================ */
-    function hexToRgb(hex){ const m = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }
-
-    // Full screen toggle
     const btnFullScreen = document.getElementById('btnFullScreen');
     btnFullScreen.addEventListener('click', () => {
       if (!document.fullscreenElement) {
@@ -800,6 +712,8 @@
         btnFullScreen.classList.replace('bg-red-600', 'bg-green-600');
       }
     });
+
+    window.addEventListener('load', loadAll);
   </script>
 </body>
 </html>

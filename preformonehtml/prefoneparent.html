@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SoMAp &mdash; Preform One Parent</title>
+  <title>SoMAp — Preform One Parent</title>
 
   <!-- Firebase Compat SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
@@ -19,23 +19,16 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-  <!-- Shared helpers -->
+  <!-- Shared helpers (keep as in your project) -->
   <script src="prefonecommon.js"></script>
 
   <script>
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: {
-            display: ['Poppins', 'Inter', 'system-ui', 'sans-serif']
-          },
+          fontFamily: { display: ['Poppins', 'Inter', 'system-ui', 'sans-serif'] },
           colors: {
-            somap: {
-              midnight: '#020617',
-              ocean: '#0ea5e9',
-              orchid: '#8b5cf6',
-              sunrise: '#f97316'
-            }
+            somap: { midnight: '#020617', ocean: '#0ea5e9', orchid: '#8b5cf6', sunrise: '#f97316' }
           }
         }
       }
@@ -127,17 +120,9 @@
       backdrop-filter: blur(2px);
       z-index: 80;
     }
-    .resource-grid::-webkit-scrollbar {
-      height: 10px;
-    }
-    .resource-grid::-webkit-scrollbar-track {
-      background: rgba(148, 163, 184, 0.16);
-      border-radius: 999px;
-    }
-    .resource-grid::-webkit-scrollbar-thumb {
-      background: rgba(71, 85, 105, 0.65);
-      border-radius: 999px;
-    }
+    .resource-grid::-webkit-scrollbar { height: 10px; }
+    .resource-grid::-webkit-scrollbar-track { background: rgba(148, 163, 184, 0.16); border-radius: 999px; }
+    .resource-grid::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.65); border-radius: 999px; }
     .receipt-card {
       background: rgba(15, 23, 42, 0.82);
       border-radius: 1rem;
@@ -166,7 +151,7 @@
           <i class="fas fa-ellipsis-v text-xl"></i>
         </button>
         <div>
-          <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School &mdash; Preform One</p>
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-300">Socrates School — Preform One</p>
           <h1 class="text-3xl lg:text-4xl font-bold font-display">Parent Experience Hub</h1>
         </div>
       </div>
@@ -229,14 +214,13 @@
       appId: "1:74814528004:web:54abda6ae3c75ed5f0677f"
     };
 
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
     const currentYear = new Date().getFullYear();
 
-    const parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact') || '';
-    const parentFullName = localStorage.getItem('prefoneParentName') || localStorage.getItem('parentName') || '';
+    // Make these re-assignable so bootstrap can update them
+    let parentContact = localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact') || '';
+    let parentFullName = localStorage.getItem('prefoneParentName') || localStorage.getItem('parentName') || '';
 
     const state = {
       children: [],
@@ -294,11 +278,7 @@
       parentNameChip: document.getElementById('parentName')
     };
 
-    if (parentFullName && dom.parentName) {
-      dom.parentName.textContent = parentFullName;
-      dom.parentNameChip?.classList.remove('hidden');
-    }
-
+    // Logout
     dom.logoutBtn?.addEventListener('click', () => {
       localStorage.removeItem('prefoneParent');
       localStorage.removeItem('prefoneParentContact');
@@ -309,12 +289,9 @@
       window.location.href = '../index.html';
     });
 
+    // Menu open/close
     dom.menuToggle?.addEventListener('click', () => toggleMenu(true));
-    // Backdrop may be rendered after this script; delegate to document
-    document.addEventListener('click', function(e) {
-      var t = e.target;
-      if (t && t.id === 'menuBackdrop') toggleMenu(false);
-    });
+    document.addEventListener('click', (e) => { if (e.target && e.target.id === 'menuBackdrop') toggleMenu(false); });
 
     function toggleMenu(show) {
       const backdrop = document.getElementById('menuBackdrop');
@@ -322,29 +299,73 @@
       if (backdrop) backdrop.classList.toggle('hidden', !show);
       if (popover) popover.classList.toggle('hidden', !show);
     }
-    // Expose for inline onclick handlers
     window.toggleMenu = toggleMenu;
 
-    if (!parentContact) {
-      Swal.fire('Sign In Required', 'Please sign in again so we can load your child records.', 'warning')
-        .then(() => window.location.href = '../index.html');
-    } else {
-      loadParentDashboard();
+    // Intercept menu "start cards" so we always go through navigateTo()
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.menu-grid a').forEach(a => {
+        a.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const href = a.getAttribute('href');
+          if (href) navigateTo(href);
+        });
+      });
+    });
+
+    // Bootstrap sign-in (recover from studentKey if needed) then load
+    bootstrapSignIn()
+      .then((resolvedContact) => {
+        // Refresh runtime vars from localStorage after bootstrap
+        parentContact = resolvedContact || localStorage.getItem('prefoneParentContact') || localStorage.getItem('parentContact') || '';
+        parentFullName = localStorage.getItem('prefoneParentName') || localStorage.getItem('parentName') || '';
+        if (parentFullName && dom.parentName) {
+          dom.parentName.textContent = parentFullName;
+          dom.parentNameChip?.classList.remove('hidden');
+        }
+        return loadParentDashboard();
+      })
+      .catch(() => {
+        Swal.fire('Sign In Required', 'Please sign in again so we can load your child records.', 'warning')
+          .then(() => window.location.href = '../index.html');
+      });
+
+    async function bootstrapSignIn() {
+      // If we already have a contact, we’re good
+      if (parentContact) return parentContact;
+
+      // Try to recover from a previous flow using studentKey
+      const studentKey = localStorage.getItem('studentKey');
+      if (!studentKey) throw new Error('No contact or studentKey');
+
+      const tryPaths = [
+        `students/${studentKey}`,
+        `/schools/Socrates School Preform one/${currentYear}/students/${studentKey}`
+      ];
+
+      for (const p of tryPaths) {
+        const snap = await db.ref(p).once('value');
+        if (!snap.exists()) continue;
+        const s = snap.val() || {};
+
+        const contact = (s.primaryParentContact || s.parentContact || s.phone || s.parentPhone || '').toString().trim();
+        const name = (s.parentName || s.guardianName || '').toString().trim();
+
+        if (contact) {
+          localStorage.setItem('prefoneParentContact', contact);
+          localStorage.setItem('parentContact', contact);
+          if (name) {
+            localStorage.setItem('prefoneParentName', name);
+            localStorage.setItem('parentName', name);
+          }
+          return contact;
+        }
+      }
+      throw new Error('Could not recover contact');
     }
 
     async function loadParentDashboard() {
       try {
-        const snapshot = await db
-          .ref(`/schools/Socrates School Preform one/${currentYear}/students`)
-          .orderByChild('parentContact')
-          .equalTo(parentContact)
-          .once('value');
-
-        const childrenObj = snapshot.val() || {};
-        const children = Object.entries(childrenObj).map(([adm, data]) => ({
-          adm,
-          ...data
-        }));
+        const children = await getChildrenForContact(parentContact);
 
         if (!children.length) {
           dom.childSwitcherSection?.classList.add('hidden');
@@ -373,6 +394,50 @@
       }
     }
 
+    // ---- phone + lookup helpers (robust across paths and formats)
+    function normalizePhone(p) {
+      if (!p) return '';
+      const digits = p.toString().replace(/\D+/g, '');
+      if (digits.startsWith('255')) return digits;                 // +255...
+      if (digits.startsWith('254')) return digits;                 // +254...
+      if (digits.length === 12 && digits.startsWith('255')) return digits;
+      if (digits.length === 10 && digits.startsWith('0')) return digits.slice(1); // 07XXXXXXXX -> 7XXXXXXXX
+      return digits;
+    }
+
+    async function getChildrenForContact(rawContact) {
+      const contactN = normalizePhone(rawContact);
+
+      const schoolPath = `/schools/Socrates School Preform one/${currentYear}/students`;
+      let children = await fetchByContactFromPath(schoolPath, contactN);
+      if (children.length) return children;
+
+      children = await fetchByContactFromPath(`students`, contactN);
+      return children;
+    }
+
+    async function fetchByContactFromPath(path, contactN) {
+      const snap = await db.ref(path).once('value');
+      const obj = snap.val() || {};
+      const out = [];
+      Object.entries(obj).forEach(([adm, data]) => {
+        const candidates = [
+          data.parentContact,
+          data.primaryParentContact,
+          data.parentPhone,
+          data.phone
+        ].map(normalizePhone).filter(Boolean);
+
+        if (!candidates.length && data?.snap) {
+          candidates.push(normalizePhone(data.snap.parentContact || data.snap.primaryParentContact));
+        }
+        if (candidates.includes(contactN)) {
+          out.push({ adm, ...data });
+        }
+      });
+      return out;
+    }
+
     function renderChildSwitcher() {
       if (!dom.childChipContainer) return;
       dom.childChipContainer.innerHTML = '';
@@ -393,7 +458,6 @@
         });
         dom.childChipContainer.appendChild(chip);
       });
-
       dom.childSwitcherSection?.classList.toggle('hidden', state.children.length <= 1);
     }
 
@@ -401,6 +465,12 @@
       const child = state.children.find(c => c.adm === state.activeAdm);
       if (!child) return;
       localStorage.setItem('currentChildName', safeName(child));
+
+      // Show parent chip
+      if (parentFullName && dom.parentName) {
+        dom.parentName.textContent = parentFullName;
+        dom.parentNameChip?.classList.remove('hidden');
+      }
 
       dom.childName.textContent = safeName(child);
       dom.childAdm.textContent = `ADM - ${child.adm}`;
@@ -450,9 +520,7 @@
         try {
           const label = new Date(r.date).toLocaleString('en-US', { month: 'long', year: 'numeric' });
           return label === currentMonthKey;
-        } catch {
-          return false;
-        }
+        } catch { return false; }
       });
 
       const presentCount = monthlyRecords.filter(r => isPresent(r)).length;
@@ -491,38 +559,23 @@
       const labels = recentKeys.map(k => grouped[k].label);
       const data = recentKeys.map(k => grouped[k].total ? Math.round((grouped[k].present / grouped[k].total) * 100) : 0);
 
-      if (state.attendanceChart) {
-        state.attendanceChart.destroy();
-      }
+      if (state.attendanceChart) state.attendanceChart.destroy();
       state.attendanceChart = new Chart(dom.attendanceTrendChart.getContext('2d'), {
         type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Attendance %',
-            data,
-            tension: 0.35,
-            fill: true,
-            borderColor: 'rgba(56, 189, 248, 0.85)',
-            backgroundColor: 'rgba(14, 165, 233, 0.25)',
-            pointBackgroundColor: '#38bdf8',
-            borderWidth: 2
-          }]
-        },
+        data: { labels, datasets: [{
+          label: 'Attendance %', data, tension: 0.35, fill: true,
+          borderColor: 'rgba(56, 189, 248, 0.85)',
+          backgroundColor: 'rgba(14, 165, 233, 0.25)',
+          pointBackgroundColor: '#38bdf8',
+          borderWidth: 2
+        }]},
         options: {
           responsive: true,
           scales: {
             y: { beginAtZero: true, ticks: { color: '#cbd5f5', callback: value => `${value}%` }, max: 100 },
             x: { ticks: { color: '#cbd5f5' } }
           },
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: context => ` ${context.parsed.y}% present`
-              }
-            }
-          }
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y}% present` } } }
         }
       });
     }
@@ -584,11 +637,7 @@
         return;
       }
       const sorted = payments
-        .map(p => ({
-          ...p,
-          _timestamp: parseDate(p.date, p.createdAt),
-          _key: p._key
-        }))
+        .map(p => ({ ...p, _timestamp: parseDate(p.date, p.createdAt), _key: p._key }))
         .sort((a, b) => b._timestamp - a._timestamp);
 
       dom.paymentTimeline.innerHTML = sorted.map(payment => {
@@ -634,13 +683,7 @@
         const score = Number(data?.score || 0);
         const max = Number(data?.max || 100) || 100;
         const percentage = max ? (score / max) * 100 : 0;
-        return {
-          subject,
-          score,
-          max,
-          percentage,
-          grade: gradeFromPercent(percentage)
-        };
+        return { subject, score, max, percentage, grade: gradeFromPercent(percentage) };
       }).sort((a, b) => b.percentage - a.percentage);
 
       const overall = subjectEntries.length
@@ -652,13 +695,7 @@
 
       dom.academicExamLabel.textContent = `${latest.examType || 'Assessment'} (${latest.month || 'Month not set'})`;
       dom.academicOverall.textContent = `${overall.toFixed(1)}%`;
-
-      if (subjectEntries.length) {
-        dom.academicBestSubject.textContent = `${subjectEntries[0].subject} - ${subjectEntries[0].percentage.toFixed(1)}%`;
-      } else {
-        dom.academicBestSubject.textContent = 'Scores pending';
-      }
-
+      dom.academicBestSubject.textContent = subjectEntries.length ? `${subjectEntries[0].subject} - ${subjectEntries[0].percentage.toFixed(1)}%` : 'Scores pending';
       dom.academicTeacherComment.textContent = latest.teacherComment || 'Teacher comment coming soon.';
 
       dom.academicTable.innerHTML = subjectEntries.length
@@ -683,7 +720,6 @@
         `;
         return;
       }
-
       dom.booksContainer.innerHTML = state.books.map(book => `
         <div class="min-w-[240px] max-w-[260px] bg-slate-900/60 border border-white/10 rounded-2xl p-5 flex flex-col gap-3">
           <div>
@@ -697,23 +733,6 @@
           </button>
         </div>
       `).join('');
-    }
-
-    function renderJournalHighlights(child) {
-      dom.journalHighlights.innerHTML = `
-        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
-          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Student voice</p>
-          <p>We will surface personalised highlights for ${safeName(child)} here - attendance commendations, homework reminders, and class journal acknowledgements.</p>
-        </div>
-        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
-          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Upcoming</p>
-          <p>Expect calendar invites for parent clinics, key assessments, and field experiences once schedules are published.</p>
-        </div>
-        <div class="bg-slate-900/55 rounded-2xl p-5 text-slate-300">
-          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Feedback</p>
-          <p>Share feedback via school office or class teacher so we continue perfecting SoMAp for guardians.</p>
-        </div>
-      `;
     }
 
     async function buildPaymentIndex(children) {
@@ -757,29 +776,18 @@
     }
 
     function openChildIdCard(child) {
-      const params = new URLSearchParams({
-        adm: child.adm,
-        name: safeName(child),
-        phone: child.parentContact || parentContact
-      });
+      const params = new URLSearchParams({ adm: child.adm, name: safeName(child), phone: child.parentContact || parentContact });
       window.open(`prefonegenerateid.html?${params.toString()}`, '_blank');
     }
 
     function openChildReport(child) {
-      const params = new URLSearchParams({
-        adm: child.adm,
-        name: safeName(child),
-        phone: child.parentContact || parentContact
-      });
+      const params = new URLSearchParams({ adm: child.adm, name: safeName(child), phone: child.parentContact || parentContact });
       window.open(`prefonereportform.html?${params.toString()}`, '_blank');
     }
 
     function openLatestReceipt(child) {
       const receipt = state.allPaymentsIndex.slice().reverse().find(item => item.adm === child.adm);
-      if (!receipt) {
-        Swal.fire('No receipt yet', 'Receipts appear once a payment is captured by finance office.', 'info');
-        return;
-      }
+      if (!receipt) return Swal.fire('No receipt yet', 'Receipts appear once a payment is captured by finance office.', 'info');
       navigateTo(`prefonechildreceipt.html?receipt=${receipt.receiptNumber}`);
     }
 
@@ -792,7 +800,6 @@
       document.getElementById('bookModalFrame').src = url;
       document.getElementById('bookModal').classList.remove('hidden');
     }
-
     function closeBookModal() {
       document.getElementById('bookModalFrame').src = '';
       document.getElementById('bookModal').classList.add('hidden');
@@ -828,7 +835,6 @@
       if (Number.isNaN(parsed.getTime())) return value;
       return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     }
-
     function parseDate(...candidates) {
       for (const candidate of candidates) {
         if (!candidate) continue;
@@ -837,12 +843,10 @@
       }
       return Date.now();
     }
-
     function formatCurrency(amount) {
       const value = Number(amount || 0);
       return `TSh ${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
     }
-
     function gradeFromPercent(percent) {
       if (percent >= 80) return 'A';
       if (percent >= 70) return 'B';
@@ -852,11 +856,13 @@
       return '-';
     }
 
+    // Expose for inline
     window.navigateTo = navigateTo;
     window.openBookModal = openBookModal;
     window.closeBookModal = closeBookModal;
   </script>
-  <!-- Menu backdrop required by toggleMenu -->
+
+  <!-- Menu backdrop & popover -->
   <div id="menuBackdrop" class="menu-backdrop hidden"></div>
   <nav id="menuPopover" class="menu-popover hidden">
     <div class="flex items-center justify-between mb-4">
@@ -907,6 +913,7 @@
     </div>
   </nav>
 
+  <!-- Book modal -->
   <div id="bookModal" class="menu-backdrop hidden">
     <div class="max-w-5xl mx-auto bg-slate-900/95 border border-white/10 rounded-3xl mt-12 mb-8 overflow-hidden shadow-2xl text-slate-100">
       <div class="flex items-center justify-between px-6 py-4 bg-white/5">
@@ -924,197 +931,200 @@
     </div>
   </div>
 
-    <section class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10">
-      <article class="glass-panel p-6 lg:p-8">
-        <div class="flex items-start justify-between mb-6">
-          <div>
-            <h3 class="text-xl font-semibold">Academic Highlights</h3>
-            <p class="text-sm text-slate-300">Latest assessments, subject strengths, and growth targets.</p>
-          </div>
-          <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildacademic.html')">
-            Deep Dive <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+  <!-- Lower sections (unchanged UI) -->
+  <section class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10 px-4 max-w-6xl mx-auto">
+    <article class="glass-panel p-6 lg:p-8">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-semibold">Academic Highlights</h3>
+          <p class="text-sm text-slate-300">Latest assessments, subject strengths, and growth targets.</p>
+        </div>
+        <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildacademic.html')">
+          Deep Dive <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+        </button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 text-sm">
+        <div class="bg-slate-900/60 p-4 rounded-2xl">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Exam Window</p>
+          <p id="academicExamLabel" class="text-slate-200">---</p>
+          <p id="academicOverall" class="text-2xl font-semibold text-white mt-2">--%</p>
+        </div>
+        <div class="bg-slate-900/60 p-4 rounded-2xl">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Top Strength</p>
+          <p id="academicBestSubject" class="text-slate-200">---</p>
+          <p id="academicTeacherComment" class="text-xs text-slate-400 mt-2">Awaiting teacher comment</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto rounded-2xl border border-white/10">
+        <table class="min-w-full text-sm text-left">
+          <thead class="bg-white/5 text-slate-300 uppercase tracking-[0.2em] text-xs">
+            <tr>
+              <th class="px-4 py-3">Subject</th>
+              <th class="px-4 py-3">Score</th>
+              <th class="px-4 py-3">% Achieved</th>
+              <th class="px-4 py-3">Grade</th>
+            </tr>
+          </thead>
+          <tbody id="academicTable" class="divide-y divide-white/5 text-slate-100">
+            <tr>
+              <td colspan="4" class="px-4 py-6 text-center text-slate-400">Scores will appear once teachers publish results.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="glass-panel p-6 lg:p-8">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-semibold">SoMAp Library</h3>
+          <p class="text-sm text-slate-300">Curated Preform One books. Read online together — downloads disabled.</p>
+        </div>
+      </div>
+      <div id="booksContainer" class="resource-grid overflow-x-auto flex gap-4 pb-2"></div>
+    </article>
+  </section>
+
+  <section class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10 px-4 max-w-6xl mx-auto">
+    <article class="glass-panel p-6 lg:p-8">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-semibold">Attendance Window</h3>
+          <p class="text-sm text-slate-300">Track daily presence and reasons shared by teachers.</p>
+        </div>
+        <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildattendance.html')">
+          View Full Log <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+        </button>
+      </div>
+      <canvas id="attendanceTrendChart" height="220"></canvas>
+      <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+        <div class="bg-slate-900/60 rounded-2xl p-4">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Recent Status</p>
+          <p id="recentAttendance" class="text-slate-200">Loading...</p>
+        </div>
+        <div class="bg-slate-900/60 rounded-2xl p-4">
+          <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Teacher Notes</p>
+          <p id="recentNotes" class="text-slate-200">---</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="glass-panel p-6 lg:p-8">
+      <div class="flex items-start justify-between mb-6">
+        <div>
+          <h3 class="text-xl font-semibold">Finance Journey</h3>
+          <p class="text-sm text-slate-300">Monitor payments, outstanding balances, and download receipts.</p>
+        </div>
+        <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildfinance.html')">
+          Manage Fees <i class="fas fa-arrow-up-right-from-square ml-1"></i>
+        </button>
+      </div>
+      <div class="receipt-card mb-5">
+        <div class="flex items-center justify-between mb-3 text-xs uppercase tracking-[0.4em] text-slate-400">
+          <span id="latestReceiptNumber">Receipt # ----</span>
+          <span id="latestReceiptDate">Date: --</span>
+        </div>
+        <p class="text-lg font-semibold text-white mb-1" id="latestReceiptAmount">TSh --</p>
+        <p class="text-sm text-slate-300">Being payment of <span id="latestReceiptPurpose">---</span></p>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <button id="openReceiptBtn" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-slate-100 transition">
+            Download Receipt
+          </button>
+          <button id="openReceiptHistoryBtn" class="px-3 py-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/70 text-sm text-slate-200 transition">
+            View History
           </button>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 text-sm">
-          <div class="bg-slate-900/60 p-4 rounded-2xl">
-            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Exam Window</p>
-            <p id="academicExamLabel" class="text-slate-200">---</p>
-            <p id="academicOverall" class="text-2xl font-semibold text-white mt-2">--%</p>
-          </div>
-          <div class="bg-slate-900/60 p-4 rounded-2xl">
-            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Top Strength</p>
-            <p id="academicBestSubject" class="text-slate-200">---</p>
-            <p id="academicTeacherComment" class="text-xs text-slate-400 mt-2">Awaiting teacher comment</p>
-          </div>
-        </div>
-        <div class="overflow-x-auto rounded-2xl border border-white/10">
-          <table class="min-w-full text-sm text-left">
-            <thead class="bg-white/5 text-slate-300 uppercase tracking-[0.2em] text-xs">
-              <tr>
-                <th class="px-4 py-3">Subject</th>
-                <th class="px-4 py-3">Score</th>
-                <th class="px-4 py-3">% Achieved</th>
-                <th class="px-4 py-3">Grade</th>
-              </tr>
-            </thead>
-            <tbody id="academicTable" class="divide-y divide-white/5 text-slate-100">
-              <tr>
-                <td colspan="4" class="px-4 py-6 text-center text-slate-400">Scores will appear once teachers publish results.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
+      </div>
+      <div class="divide-y divide-white/5 text-sm" id="paymentTimeline"></div>
+    </article>
+  </section>
 
-      <article class="glass-panel p-6 lg:p-8">
-        <div class="flex items-start justify-between mb-6">
-          <div>
-            <h3 class="text-xl font-semibold">SoMAp Library</h3>
-            <p class="text-sm text-slate-300">Curated Preform One books. Read online together &mdash; downloads disabled.</p>
-          </div>
-        </div>
-        <div id="booksContainer" class="resource-grid overflow-x-auto flex gap-4 pb-2"></div>
-      </article>
-    </section>
+  <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-10 px-4 max-w-6xl mx-auto" id="summaryStats">
+    <article class="stat-card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <span class="badge-soft"><i class="fas fa-calendar-check text-sky-300"></i> Attendance</span>
+        <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildattendance.html')">More</button>
+      </div>
+      <h3 class="text-sm text-slate-300 mb-2">This Month</h3>
+      <p id="statAttendancePct" class="text-3xl font-semibold text-white">--%</p>
+      <p id="statAttendanceNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Loading trend...</p>
+    </article>
 
-    <section class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10">
-      <article class="glass-panel p-6 lg:p-8">
-        <div class="flex items-start justify-between mb-6">
-          <div>
-            <h3 class="text-xl font-semibold">Attendance Window</h3>
-            <p class="text-sm text-slate-300">Track daily presence and reasons shared by teachers.</p>
-          </div>
-          <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildattendance.html')">
-            View Full Log <i class="fas fa-arrow-up-right-from-square ml-1"></i>
-          </button>
-        </div>
-        <canvas id="attendanceTrendChart" height="220"></canvas>
-        <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <div class="bg-slate-900/60 rounded-2xl p-4">
-            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Recent Status</p>
-            <p id="recentAttendance" class="text-slate-200">Loading...</p>
-          </div>
-          <div class="bg-slate-900/60 rounded-2xl p-4">
-            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-2">Teacher Notes</p>
-            <p id="recentNotes" class="text-slate-200">---</p>
-          </div>
-        </div>
-      </article>
+    <article class="stat-card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <span class="badge-soft"><i class="fas fa-wallet text-emerald-300"></i> Finance</span>
+        <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildfinance.html')">More</button>
+      </div>
+      <h3 class="text-sm text-slate-300 mb-2">Balance</h3>
+      <p id="statBalance" class="text-3xl font-semibold text-emerald-300">TSh --</p>
+      <p id="statFinanceNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Awaiting payments...</p>
+    </article>
 
-      <article class="glass-panel p-6 lg:p-8">
-        <div class="flex items-start justify-between mb-6">
-          <div>
-            <h3 class="text-xl font-semibold">Finance Journey</h3>
-            <p class="text-sm text-slate-300">Monitor payments, outstanding balances, and download receipts.</p>
-          </div>
-          <button class="text-sky-300 hover:text-white transition text-sm" onclick="navigateTo('prefonechildfinance.html')">
-            Manage Fees <i class="fas fa-arrow-up-right-from-square ml-1"></i>
-          </button>
-        </div>
-        <div class="receipt-card mb-5">
-          <div class="flex items-center justify-between mb-3 text-xs uppercase tracking-[0.4em] text-slate-400">
-            <span id="latestReceiptNumber">Receipt # ----</span>
-            <span id="latestReceiptDate">Date: --</span>
-          </div>
-          <p class="text-lg font-semibold text-white mb-1" id="latestReceiptAmount">TSh --</p>
-          <p class="text-sm text-slate-300">Being payment of <span id="latestReceiptPurpose">---</span></p>
-          <div class="mt-4 flex flex-wrap gap-3">
-            <button id="openReceiptBtn" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-slate-100 transition">
-              Download Receipt
-            </button>
-            <button id="openReceiptHistoryBtn" class="px-3 py-2 rounded-lg bg-slate-900/60 hover:bg-slate-800/70 text-sm text-slate-200 transition">
-              View History
-            </button>
-          </div>
-        </div>
-        <div class="divide-y divide-white/5 text-sm" id="paymentTimeline"></div>
-      </article>
-    </section>
+    <article class="stat-card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <span class="badge-soft"><i class="fas fa-file-invoice-dollar text-sky-200"></i> Receipt</span>
+      </div>
+      <h3 class="text-sm text-slate-300 mb-2">Last Payment</h3>
+      <p id="statLastPayment" class="text-3xl font-semibold text-white">--</p>
+      <p id="statReceiptNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Receipt ready for download</p>
+    </article>
 
-    <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-10" id="summaryStats">
-      <article class="stat-card p-5">
-        <div class="flex items-center justify-between mb-4">
-          <span class="badge-soft"><i class="fas fa-calendar-check text-sky-300"></i> Attendance</span>
-          <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildattendance.html')">More</button>
-        </div>
-        <h3 class="text-sm text-slate-300 mb-2">This Month</h3>
-        <p id="statAttendancePct" class="text-3xl font-semibold text-white">--%</p>
-        <p id="statAttendanceNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Loading trend...</p>
-      </article>
+    <article class="stat-card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <span class="badge-soft"><i class="fas fa-graduation-cap text-purple-200"></i> Academics</span>
+        <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildacademic.html')">More</button>
+      </div>
+      <h3 class="text-sm text-slate-300 mb-2">Latest Exam</h3>
+      <p id="statExam" class="text-3xl font-semibold text-white">--%</p>
+      <p id="statExamNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Awaiting scores...</p>
+    </article>
+  </section>
 
-      <article class="stat-card p-5">
-        <div class="flex items-center justify-between mb-4">
-          <span class="badge-soft"><i class="fas fa-wallet text-emerald-300"></i> Finance</span>
-          <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildfinance.html')">More</button>
-        </div>
-        <h3 class="text-sm text-slate-300 mb-2">Balance</h3>
-        <p id="statBalance" class="text-3xl font-semibold text-emerald-300">TSh --</p>
-        <p id="statFinanceNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Awaiting payments...</p>
-      </article>
-
-      <article class="stat-card p-5">
-        <div class="flex items-center justify-between mb-4">
-          <span class="badge-soft"><i class="fas fa-file-invoice-dollar text-sky-200"></i> Receipt</span>
-        </div>
-        <h3 class="text-sm text-slate-300 mb-2">Last Payment</h3>
-        <p id="statLastPayment" class="text-3xl font-semibold text-white">--</p>
-        <p id="statReceiptNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Receipt ready for download</p>
-      </article>
-
-      <article class="stat-card p-5">
-        <div class="flex items-center justify-between mb-4">
-          <span class="badge-soft"><i class="fas fa-graduation-cap text-purple-200"></i> Academics</span>
-          <button class="text-xs uppercase tracking-widest text-slate-300 hover:text-white transition" onclick="navigateTo('prefonechildacademic.html')">More</button>
-        </div>
-        <h3 class="text-sm text-slate-300 mb-2">Latest Exam</h3>
-        <p id="statExam" class="text-3xl font-semibold text-white">--%</p>
-        <p id="statExamNote" class="text-xs uppercase tracking-widest text-slate-400 mt-3">Awaiting scores...</p>
-      </article>
-    </section>
-
-    <section id="profileCard" class="glass-panel p-6 lg:p-8 mb-8">
-      <div class="flex flex-col lg:flex-row gap-8">
-        <div class="flex-shrink-0">
-          <div class="relative w-40 h-40 rounded-3xl overflow-hidden border-2 border-sky-300/60 shadow-2xl bg-slate-900/60">
-            <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover hidden">
-            <div id="photoFallback" class="absolute inset-0 flex flex-col items-center justify-center text-slate-200 gap-2 text-center px-4">
-              <i class="fas fa-user-graduate text-5xl text-white/60"></i>
-              <p class="text-xs uppercase tracking-widest text-slate-400">Photo not uploaded</p>
-            </div>
-          </div>
-        </div>
-        <div class="flex-1">
-          <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-            <div>
-              <h2 id="childName" class="text-3xl font-display font-semibold text-white">Loading...</h2>
-              <p id="childAdm" class="text-slate-300 mt-1 uppercase tracking-[0.4em] text-xs">ADM - ...</p>
-            </div>
-            <div class="flex gap-3 flex-wrap">
-              <button id="quickIdCard" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 flex items-center gap-2 text-slate-100 transition">
-                <i class="fas fa-id-card-clip text-sky-300"></i>
-                View ID Card
-              </button>
-              <button id="quickReport" class="px-4 py-2 rounded-xl bg-sky-500/80 hover:bg-sky-500 text-white flex items-center gap-2 transition">
-                <i class="fas fa-file-pdf"></i>
-                Download Report
-              </button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-200">
-            <div class="bg-slate-900/50 rounded-2xl p-4">
-              <p class="uppercase tracking-widest text-xs text-slate-400 mb-2">Program</p>
-              <p><strong>Reporting Date:</strong> <span id="reportingDate">-</span></p>
-              <p><strong>Former School:</strong> <span id="formerSchool">-</span></p>
-              <p><strong>Gender:</strong> <span id="gender">-</span></p>
-            </div>
-            <div class="bg-slate-900/50 rounded-2xl p-4">
-              <p class="uppercase tracking-widest text-xs text-slate-400 mb-2">Parent</p>
-              <p><strong>Name:</strong> <span id="parentDisplayName">-</span></p>
-              <p><strong>Phone:</strong> <span id="parentPhone">-</span></p>
-              <p><strong>Email:</strong> <span id="parentEmail">-</span></p>
-            </div>
+  <section id="profileCard" class="glass-panel p-6 lg:p-8 mb-8 px-4 max-w-6xl mx-auto">
+    <div class="flex flex-col lg:flex-row gap-8">
+      <div class="flex-shrink-0">
+        <div class="relative w-40 h-40 rounded-3xl overflow-hidden border-2 border-sky-300/60 shadow-2xl bg-slate-900/60">
+          <img id="childPhoto" src="" alt="Child passport" class="w-full h-full object-cover hidden">
+          <div id="photoFallback" class="absolute inset-0 flex flex-col items-center justify-center text-slate-200 gap-2 text-center px-4">
+            <i class="fas fa-user-graduate text-5xl text-white/60"></i>
+            <p class="text-xs uppercase tracking-widest text-slate-400">Photo not uploaded</p>
           </div>
         </div>
       </div>
-    </section>
+      <div class="flex-1">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+          <div>
+            <h2 id="childName" class="text-3xl font-display font-semibold text-white">Loading...</h2>
+            <p id="childAdm" class="text-slate-300 mt-1 uppercase tracking-[0.4em] text-xs">ADM - ...</p>
+          </div>
+          <div class="flex gap-3 flex-wrap">
+            <button id="quickIdCard" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 flex items-center gap-2 text-slate-100 transition">
+              <i class="fas fa-id-card-clip text-sky-300"></i>
+              View ID Card
+            </button>
+            <button id="quickReport" class="px-4 py-2 rounded-xl bg-sky-500/80 hover:bg-sky-500 text-white flex items-center gap-2 transition">
+              <i class="fas fa-file-pdf"></i>
+              Download Report
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-200">
+          <div class="bg-slate-900/50 rounded-2xl p-4">
+            <p class="uppercase tracking-widest text-xs text-slate-400 mb-2">Program</p>
+            <p><strong>Reporting Date:</strong> <span id="reportingDate">-</span></p>
+            <p><strong>Former School:</strong> <span id="formerSchool">-</span></p>
+            <p><strong>Gender:</strong> <span id="gender">-</span></p>
+          </div>
+          <div class="bg-slate-900/50 rounded-2xl p-4">
+            <p class="uppercase tracking-widest text-xs text-slate-400 mb-2">Parent</p>
+            <p><strong>Name:</strong> <span id="parentDisplayName">-</span></p>
+            <p><strong>Phone:</strong> <span id="parentPhone">-</span></p>
+            <p><strong>Email:</strong> <span id="parentEmail">-</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

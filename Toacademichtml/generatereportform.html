@@ -244,7 +244,7 @@
                 </div>
               </div>
             </div>
-            <img id="previewPhoto" src="https://via.placeholder.com/140x180.png?text=Photo" alt="Student" class="report-photo" />
+            <img id="previewPhoto" crossorigin="anonymous" src="https://via.placeholder.com/140x180.png?text=Photo" alt="Student" class="report-photo" />
           </div>
           <div class="divider"></div>
           <div class="grid gap-4 md:grid-cols-3">
@@ -1080,7 +1080,12 @@
           <td>${escapeHtml(entry.teacher || 'Teacher')}</td>
         </tr>`).join('');
 
-      document.getElementById('previewPhoto').src = s.photoUrl ? s.photoUrl : PLACEHOLDER_PHOTO;
+      // Prefer Cloudinary secure URLs; add transformation to ensure JPEG and reasonable size
+      const photoUrl = (s.photoUrl || '').trim();
+      const transformed = transformToJpegIfCloudinary(photoUrl, 140, 180) || photoUrl;
+      const imgEl = document.getElementById('previewPhoto');
+      imgEl.crossOrigin = 'anonymous';
+      imgEl.src = transformed || PLACEHOLDER_PHOTO;
     }
 
     function bestSubject(s){ const x = [...s.subjectStats.subjects].sort((a,b) => b.percent - a.percent)[0]; return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-'; }
@@ -1094,9 +1099,17 @@
     async function loadImageAsDataURL(url){
       if (!url) return null;
       try {
-        const r = await fetch(url, { mode:'cors' });
+        // Ensure CORS-friendly fetch; Cloudinary supports anonymous CORS
+        const r = await fetch(url, { mode:'cors', cache:'no-cache' });
         if (!r.ok) return null;
-        const blob = await r.blob();
+        let blob = await r.blob();
+        // Convert WEBP (or unsupported) to JPEG for jsPDF compatibility
+        if (blob && (blob.type === 'image/webp' || blob.type === 'image/avif' || blob.type === 'image/heic' || blob.type === 'image/heif')){
+          try {
+            const converted = await convertImageBlobToJPEG(blob);
+            if (converted) blob = converted;
+          } catch(e) {}
+        }
         return await new Promise(resolve => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result);
@@ -1104,6 +1117,27 @@
           reader.readAsDataURL(blob);
         });
       } catch (e) { return null; }
+    }
+
+    async function convertImageBlobToJPEG(blob){
+      return await new Promise(resolve => {
+        try{
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          const url = URL.createObjectURL(blob);
+          img.onload = () => {
+            try{
+              const canvas = document.createElement('canvas');
+              canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0);
+              canvas.toBlob(b => { URL.revokeObjectURL(url); resolve(b); }, 'image/jpeg', 0.92);
+            }catch(e){ URL.revokeObjectURL(url); resolve(null); }
+          };
+          img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+          img.src = url;
+        }catch(e){ resolve(null); }
+      });
     }
 
     /* -------------------------- EXPORTS -------------------------- */
@@ -1132,7 +1166,11 @@
       doc.setFontSize(12); doc.text(String(state.branch || 'School'), margin + 25, headerY + 2);
       doc.setFontSize(16); doc.text('Academic Report Card', margin + 25, headerY + 12);
       doc.setFontSize(10); doc.text(`Year ${state.year}  |  ${state.examType} (${s.monthLabel})  |  ${state.className}${s.stream? ' ('+s.stream+')':''}`, margin + 25, headerY + 20);
-      const photoData = s.photoUrl ? await loadImageAsDataURL(s.photoUrl) : null;
+      let photoData = null;
+      if (s.photoUrl){
+        const transformed = transformToJpegIfCloudinary(String(s.photoUrl), 300, 400) || s.photoUrl;
+        photoData = await loadImageAsDataURL(transformed);
+      }
       if (photoData) doc.addImage(photoData, 'JPEG', 160, headerY - 2, 30, 40);
       else { doc.setDrawColor(148, 163, 184); doc.rect(160, headerY - 2, 30, 40); doc.text('Photo', 165, headerY + 18); }
 
@@ -1169,6 +1207,28 @@
       doc.line(margin, afterTable + 30, 90, afterTable + 30); doc.text('Class teacher signature', margin, afterTable + 35);
       doc.line(120, afterTable + 30, 200, afterTable + 30); doc.text('Head of school signature', 120, afterTable + 35);
       return doc;
+    }
+
+    function transformToJpegIfCloudinary(url, w, h){
+      if (!url || typeof url !== 'string') return null;
+      // Match Cloudinary delivery URLs
+      const isCloud = /res\.cloudinary\.com\//.test(url) || /cloudinary\.com\//.test(url) || /image\/upload\//.test(url);
+      if (!isCloud) return null;
+      try{
+        // Insert transformation segment if missing
+        // Example: https://res.cloudinary.com/<cloud>/image/upload/<transform>/v123/xyz.jpg
+        const parts = url.split('/image/upload/');
+        if (parts.length < 2) return url;
+        const left = parts[0];
+        const right = parts.slice(1).join('/image/upload/');
+        // Basic transform: crop fit to WxH, auto format jpeg, quality 85
+        const transform = `c_fit,w_${Math.max(1,Math.floor(w||300))},h_${Math.max(1,Math.floor(h||400))},f_jpg,q_85`;
+        if (right.startsWith('v') || right.startsWith('c_')){
+          // Already has something; ensure our transform is prepended
+          return `${left}/image/upload/${transform}/${right}`;
+        }
+        return `${left}/image/upload/${transform}/${right}`;
+      }catch(e){ return url; }
     }
 
     async function downloadSummaryPdf(){

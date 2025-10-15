@@ -111,6 +111,7 @@
         <div class="px-4 py-3 border-t flex items-center justify-between">
           <div class="text-xs text-slate-500">
             <span id="lblCount">0</span> students • <span id="lblSubjects">0</span> subjects
+            <div id="lblStatus" class="text-xs mt-1"></div>
           </div>
           <div class="flex gap-2">
             <!-- This now just opens the standalone dashboard -->
@@ -139,10 +140,16 @@
     /* ---------- CONFIG ---------- */
     const SUBJECTS_BY_CLASS = {
       'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Baby': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Middle': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Preunit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Preunit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Pre-Unit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Class 1': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 2': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
       'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
       'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
@@ -185,6 +192,7 @@
     const scoresBody = document.getElementById('scoresBody');
     const lblCount = document.getElementById('lblCount');
     const lblSubjects = document.getElementById('lblSubjects');
+    const lblStatus = document.getElementById('lblStatus');
 
     const btnRecalc = document.getElementById('btnRecalc');
     const btnSaveAll = document.getElementById('btnSaveAll');
@@ -222,13 +230,22 @@
     /* ---------- Robust student loader ---------- */
     async function fetchStudents(className, stream){
       const db = getDB();
-      if(!db) return [];
+      if(!db) {
+        console.error('Firebase database not available');
+        return [];
+      }
+      
+      console.log('Fetching students for class:', className, 'stream:', stream);
+      
       const tryPaths = ['students','Students','StudentsList','Students_List','studentList','studentlist','attendance','school','schoolerp'];
       for(const p of tryPaths){
         try{
+          console.log('Trying path:', p);
           const snap = await db.ref(p).get();
           if(snap && snap.exists && snap.exists()){
             const data = snap.val();
+            console.log('Found data at path:', p, 'Type:', typeof data, 'Keys:', Object.keys(data || {}).length);
+            
             const arr = [];
             if(Array.isArray(data)){
               data.forEach((item, idx)=> {
@@ -246,28 +263,67 @@
                 }
               });
             }
+            
+            console.log('Total students found:', arr.length);
+            
             const filtered = arr.filter(x=>{
               const normalizedClass = String(x.class || '').toUpperCase().replace(/[\s-]/g, '');
               const normalizedSelect = className.toUpperCase().replace(/[\s-]/g, '');
-              const classMatches = !className || normalizedClass.includes(normalizedSelect);
+              const classMatches = !className || normalizedClass.includes(normalizedSelect) || normalizedSelect.includes(normalizedClass);
+              
               const normalizedStream = String(x.stream || '').toUpperCase().replace(/[\s-]/g, '');
               const normalizedInputStream = (stream||'').toUpperCase().replace(/[\s-]/g, '');
-              const streamMatches = !stream || normalizedStream.includes(normalizedInputStream);
-              return classMatches && streamMatches;
+              const streamMatches = !stream || normalizedStream.includes(normalizedInputStream) || normalizedInputStream.includes(normalizedStream);
+              
+              const matches = classMatches && streamMatches;
+              if(matches) {
+                console.log('Student matches:', x.name, 'Class:', x.class, 'Stream:', x.stream);
+              }
+              return matches;
             });
+            
             filtered.sort((a,b)=> (a.name || '').localeCompare(b.name || ''));
+            console.log('Filtered students count:', filtered.length);
             if(filtered.length) return filtered;
           }
         }catch(err){
           console.warn('fetchStudents trying', p, err && err.message);
         }
       }
+      console.warn('No students found for class:', className, 'stream:', stream);
       return [];
     }
 
     function normalizeStudentRecord(admKey, s){
       const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
-      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || '';
+      let sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
+      
+      // Normalize class names to match our SUBJECTS_BY_CLASS keys
+      if(sClass) {
+        const normalizedClass = sClass.toUpperCase().replace(/[\s-]/g, '');
+        if(normalizedClass.includes('BABY') && !normalizedClass.includes('CLASS')) {
+          sClass = 'Baby Class';
+        } else if(normalizedClass.includes('MIDDLE') && !normalizedClass.includes('CLASS')) {
+          sClass = 'Middle Class';
+        } else if(normalizedClass.includes('PREUNIT') || normalizedClass.includes('PRE-UNIT')) {
+          sClass = 'Preunit Class';
+        } else if(normalizedClass.includes('CLASS1') || normalizedClass.includes('CLASS 1')) {
+          sClass = 'Class 1';
+        } else if(normalizedClass.includes('CLASS2') || normalizedClass.includes('CLASS 2')) {
+          sClass = 'Class 2';
+        } else if(normalizedClass.includes('CLASS3') || normalizedClass.includes('CLASS 3')) {
+          sClass = 'Class 3';
+        } else if(normalizedClass.includes('CLASS4') || normalizedClass.includes('CLASS 4')) {
+          sClass = 'Class 4';
+        } else if(normalizedClass.includes('CLASS5') || normalizedClass.includes('CLASS 5')) {
+          sClass = 'Class 5';
+        } else if(normalizedClass.includes('CLASS6') || normalizedClass.includes('CLASS 6')) {
+          sClass = 'Class 6';
+        } else if(normalizedClass.includes('CLASS7') || normalizedClass.includes('CLASS 7')) {
+          sClass = 'Class 7';
+        }
+      }
+      
       const sStream = s.stream || s.streamName || s.section || '';
       const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
       let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
@@ -387,6 +443,27 @@
       scoresBody.innerHTML = '';
       state.rowsByAdm = {};
 
+      // If no students found, show a message
+      if(state.students.length === 0) {
+        const tr = document.createElement('tr');
+        tr.className = 'bg-yellow-50';
+        const td = document.createElement('td');
+        td.colSpan = 6 + (state.subjectList.length * 3) + 8; // Total columns
+        td.className = 'p-8 text-center text-slate-500';
+        td.innerHTML = `
+          <div class="text-lg mb-2">⚠️ No students found</div>
+          <div class="text-sm">Please check:</div>
+          <ul class="text-xs mt-2 text-left max-w-md mx-auto">
+            <li>• Class name matches the database</li>
+            <li>• Students are properly assigned to this class</li>
+            <li>• Check browser console for detailed logs</li>
+          </ul>
+        `;
+        tr.appendChild(td);
+        scoresBody.appendChild(tr);
+        return;
+      }
+
       const tplCell = document.getElementById('tplSubjectCell');
 
       state.students.forEach((s, idx)=>{
@@ -462,6 +539,13 @@
 
       lblCount.textContent = String(state.students.length);
       lblSubjects.textContent = String(state.subjectList.length);
+      
+      // Update status message
+      if(state.students.length === 0) {
+        lblStatus.innerHTML = '<span class="text-red-600">⚠️ No students found for this class. Check console for details.</span>';
+      } else {
+        lblStatus.innerHTML = '<span class="text-green-600">✅ Students loaded successfully</span>';
+      }
     }
 
     function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -599,6 +683,8 @@
 
     /* ---------- Load sequence (main entry) ---------- */
     async function loadAll(){
+      console.log('=== Loading scoresheet data ===');
+      
       state.className = window.sessionStorage.getItem('className') || '';
       let inputStream = window.sessionStorage.getItem('stream') || '';
       state.month = window.sessionStorage.getItem('month') || '';
@@ -606,23 +692,97 @@
       state.examKey = window.sessionStorage.getItem('examKey') || 'monthly';
       state.schoolBranch = window.sessionStorage.getItem('schoolBranch') || '';
 
-      if(!state.className){ alert('Class not selected; please select from dashboard'); return; }
-      if(!state.year){ alert('Year not selected; please select from dashboard'); return; }
+      console.log('Session data:', {
+        className: state.className,
+        stream: inputStream,
+        month: state.month,
+        year: state.year,
+        examKey: state.examKey,
+        schoolBranch: state.schoolBranch
+      });
+
+      if(!state.className){ 
+        console.error('No class selected');
+        alert('Class not selected; please select from dashboard'); 
+        return; 
+      }
+      if(!state.year){ 
+        console.error('No year selected');
+        alert('Year not selected; please select from dashboard'); 
+        return; 
+      }
 
       const classNumMatch = state.className.match(/\d+/);
       const classNum = classNumMatch ? classNumMatch[0] : '';
       const effectiveStream = inputStream.replace(/class/i, '').replace(classNum, '').trim().toUpperCase();
       state.stream = effectiveStream;
 
+      console.log('Effective stream:', state.stream);
+
       state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
+      console.log('Subject list for', state.className, ':', state.subjectList);
 
+      if(state.subjectList.length === 0) {
+        console.warn('No subjects found for class:', state.className);
+        console.log('Available classes:', Object.keys(SUBJECTS_BY_CLASS));
+      }
+
+      console.log('Fetching students...');
       state.students = await fetchStudents(state.className, state.stream);
-      state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
-      state.fees = await fetchFees(state.year, state.className) || {};
-      state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
+      console.log('Students fetched:', state.students.length);
+      
+      if(state.students.length === 0) {
+        console.warn('No students found! Trying alternative class name variations...');
+        
+        // Try alternative class name variations
+        const alternatives = [];
+        if(state.className.includes('Class')) {
+          alternatives.push(state.className.replace('Class', '').trim());
+        }
+        if(state.className.includes(' ')) {
+          alternatives.push(state.className.replace(' ', ''));
+        }
+        if(!state.className.includes('Class') && !state.className.includes(' ')) {
+          alternatives.push(state.className + ' Class');
+        }
+        
+        console.log('Trying alternatives:', alternatives);
+        
+        for(const alt of alternatives) {
+          console.log('Trying alternative class name:', alt);
+          const altStudents = await fetchStudents(alt, state.stream);
+          if(altStudents.length > 0) {
+            console.log('Found students with alternative class name:', alt, 'Count:', altStudents.length);
+            state.students = altStudents;
+            state.className = alt; // Update the class name to match
+            break;
+          }
+        }
+        
+        if(state.students.length === 0) {
+          console.error('Still no students found after trying alternatives');
+          const allClasses = Object.keys(SUBJECTS_BY_CLASS);
+          console.log('Available class names in SUBJECTS_BY_CLASS:', allClasses);
+        }
+      }
 
+      console.log('Fetching attendance...');
+      state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
+      console.log('Attendance data:', Object.keys(state.attendance).length, 'students');
+      
+      console.log('Fetching fees...');
+      state.fees = await fetchFees(state.year, state.className) || {};
+      console.log('Fees data:', Object.keys(state.fees).length, 'students');
+      
+      console.log('Fetching scores...');
+      state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
+      console.log('Scores data:', Object.keys(state.scores).length, 'students');
+
+      console.log('Building table...');
       buildTable();
+      console.log('Recomputing all...');
       recomputeAll();
+      console.log('=== Load complete ===');
     }
 
     /* ---------- Event Listeners ---------- */

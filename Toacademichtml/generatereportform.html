@@ -581,14 +581,26 @@
       try {
         document.getElementById('bulkCount').textContent = '...';
         state.subjects = SUBJECTS_BY_CLASS[state.className] || state.subjects || [];
-        const [students, attendance, fees, scores] = await Promise.all([
+        const [students, attendance, fees, scores, detailsMap] = await Promise.all([
           fetchStudents(state.className, state.stream),
           fetchAttendance(state.year, state.month, state.className),
           fetchFees(state.year, state.className),
-          fetchScores({year: state.year, className: state.className, examKey: state.examKey, month: state.month})
+          fetchScores({year: state.year, className: state.className, examKey: state.examKey, month: state.month}),
+          fetchStudentDetailsMap()
         ]);
         state.rawStudents = {};
-        students.forEach(stu => { state.rawStudents[stu.adm] = stu; });
+        students.forEach(stu => {
+          const extra = detailsMap[stu.adm] || {};
+          state.rawStudents[stu.adm] = {
+            ...stu,
+            parentName: extra.parentName || stu.parentName,
+            parentContact: extra.parentContact || stu.parentContact,
+            gender: extra.gender || stu.gender,
+            dob: extra.dob || stu.dob,
+            reportingDate: extra.reportingDate || stu.reportingDate,
+            photoUrl: extra.photoUrl || stu.photoUrl
+          };
+        });
         computeStudents(attendance, fees, scores);
         applyFilters();
       } catch (e) {
@@ -636,7 +648,21 @@
 
     function normalizeStudentRecord(admKey, s){
       const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
-      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || '';
+      let sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
+      // Normalize class names to our SUBJECTS_BY_CLASS keys (align with scoresheet logic)
+      if (sClass) {
+        const normalizedClass = String(sClass).toUpperCase().replace(/\s|-/g, '');
+        if (normalizedClass.includes('BABY') && !normalizedClass.includes('CLASS')) sClass = 'Baby Class';
+        else if (normalizedClass.includes('MIDDLE') && !normalizedClass.includes('CLASS')) sClass = 'Middle Class';
+        else if (normalizedClass.includes('PREUNIT') || normalizedClass.includes('PRE-UNIT')) sClass = 'Preunit Class';
+        else if (normalizedClass.includes('CLASS1') || normalizedClass.includes('CLASS1')) sClass = 'Class 1';
+        else if (normalizedClass.includes('CLASS2')) sClass = 'Class 2';
+        else if (normalizedClass.includes('CLASS3')) sClass = 'Class 3';
+        else if (normalizedClass.includes('CLASS4')) sClass = 'Class 4';
+        else if (normalizedClass.includes('CLASS5')) sClass = 'Class 5';
+        else if (normalizedClass.includes('CLASS6')) sClass = 'Class 6';
+        else if (normalizedClass.includes('CLASS7')) sClass = 'Class 7';
+      }
       const sStream = s.stream || s.streamName || s.section || '';
       const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
       let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
@@ -651,6 +677,41 @@
         totalFee: feeDue, paid: feePaid, balance,
         reportingDate: s.reportingDate || '-', photoUrl: s.photoUrl || s.passport || ''
       };
+    }
+
+    // Merge-in auxiliary student details from several likely RTDB locations
+    async function fetchStudentDetailsMap(){
+      const candidates = [
+        '/studentDetails', '/studentsDetails', '/StudentsDetails', '/profiles', '/studentProfiles', '/StudentsProfiles',
+        '/parents', '/guardians', '/photos', '/passports', '/images/students'
+      ];
+      const map = {};
+      for (const path of candidates){
+        try{
+          const snap = await db.ref(path).get();
+          if (snap && snap.exists && snap.exists()){
+            const val = snap.val() || {};
+            const keys = Object.keys(val);
+            keys.forEach(k => {
+              const entry = val[k];
+              if (entry && typeof entry === 'object'){
+                // Try to find admission key or treat current key as admission
+                const adm = String(entry.adm || entry.admissionNumber || entry.admNo || entry.admission || k);
+                map[adm] = map[adm] || {};
+                const m = map[adm];
+                // Merge common fields
+                if (entry.parentName || entry.guardianName) m.parentName = entry.parentName || entry.guardianName;
+                if (entry.parentContact || entry.parentPhone || entry.guardianPhone || entry.phone) m.parentContact = entry.parentContact || entry.parentPhone || entry.guardianPhone || entry.phone;
+                if (entry.gender) m.gender = entry.gender;
+                if (entry.dob || entry.dateOfBirth) m.dob = entry.dob || entry.dateOfBirth;
+                if (entry.reporting || entry.reportingDate) m.reportingDate = entry.reporting || entry.reportingDate;
+                if (entry.photoUrl || entry.passport || entry.photo || entry.imageUrl) m.photoUrl = entry.photoUrl || entry.passport || entry.photo || entry.imageUrl;
+              }
+            });
+          }
+        }catch(e){ /* continue */ }
+      }
+      return map;
     }
 
     async function fetchAttendance(year, month, className){

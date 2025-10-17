@@ -418,6 +418,38 @@
       rawStudents: {}, students: [], filtered: [], selectedAdm: null, subjects: [], teachers: new Map(),
       logoDataUrl: null
     };
+    const EXAM_KEY_TO_LABEL = { monthly:'Monthly', midterm1:'Midterm 1', midterm2:'Midterm 2', endterm:'End Term', annual:'Annual' };
+
+// Apply URL overrides ONLY if lock=1 (parent mode). Teachers remain untouched.
+if (urlState.lock){
+  if (urlState.className) state.className = urlState.className;
+  if (urlState.year)      state.year = urlState.year;
+  if (urlState.examKey)   state.examKey = urlState.examKey;
+  if (urlState.month)     state.month = urlState.month;
+  if (urlState.branch)    state.branch = urlState.branch;
+  state.examType = EXAM_KEY_TO_LABEL[state.examKey] || state.examType;
+
+  // One-child lock
+  state.onlyAdm = urlState.adm || null;
+} else {
+  state.onlyAdm = null; // teacher mode (multi-student) as today
+}
+
+    function getParams(){
+  const u = new URLSearchParams(location.search);
+  return {
+    lock: u.get('lock') === '1',
+    role: (u.get('role') || '').toLowerCase(),      // 'parent' when coming from parent.html
+    studentKey: u.get('studentKey') || '',
+    adm: u.get('adm') || '',
+    className: u.get('class') || '',
+    year: Number(u.get('year') || '') || new Date().getFullYear(),
+    examKey: (u.get('exam') || '').toLowerCase() || 'monthly',
+    month: u.get('month') || 'Sep',
+    branch: u.get('branch') || 'Socrates School'
+  };
+}
+const urlState = getParams();
 
     /* -------------------------- INIT -------------------------- */
     document.addEventListener('DOMContentLoaded', () => {
@@ -459,36 +491,59 @@
     }
 
     function populateSelectors(){
-      // Year
-      const yearSel = document.getElementById('yearSelect');
-      yearSel.innerHTML = '';
-      const y0 = 2024, y1 = 2032;
-      for (let y = y0; y <= y1; y++) {
-        const opt = document.createElement('option');
-        opt.value = String(y); opt.textContent = String(y);
-        if (Number(y) === Number(state.year)) opt.selected = true;
-        yearSel.appendChild(opt);
-      }
-      document.getElementById('previewYear').textContent = state.year;
+  // Year
+  const yearSel = document.getElementById('yearSelect');
+  yearSel.innerHTML = '';
+  const y0 = 2024, y1 = 2032;
+  for (let y = y0; y <= y1; y++) {
+    const opt = document.createElement('option');
+    opt.value = String(y); opt.textContent = String(y);
+    if (Number(y) === Number(state.year)) opt.selected = true;
+    yearSel.appendChild(opt);
+  }
+  document.getElementById('previewYear').textContent = state.year;
 
-      // Lock class to session value — only show that class and disable switching
-      const classSel = document.getElementById('classSelect');
-      classSel.innerHTML = '';
-      const opt = document.createElement('option');
-      opt.value = state.className; opt.textContent = state.className;
-      opt.selected = true;
-      classSel.appendChild(opt);
-      classSel.disabled = true;
+  // Class (show only current class + disable)
+  const classSel = document.getElementById('classSelect');
+  classSel.innerHTML = '';
+  {
+    const opt = document.createElement('option');
+    opt.value = state.className; opt.textContent = state.className;
+    opt.selected = true;
+    classSel.appendChild(opt);
+  }
+  classSel.disabled = true;
 
-      // Exam + Month
-      const examSel = document.getElementById('examType'); examSel.value = state.examType;
-      populateMonthOptions();
-      document.getElementById('studentSelect').innerHTML = '<option value="">No records</option>';
+  // Exam + Month
+  const examSel = document.getElementById('examType');
+  examSel.value = state.examType;
+  populateMonthOptions();
 
-      // Other inputs
-      document.getElementById('streamInput').value = state.stream || '';
-      document.getElementById('branchInput').value = state.branch || '';
-    }
+  // Student select placeholder
+  document.getElementById('studentSelect').innerHTML = '<option value="">No records</option>';
+
+  // Other inputs
+  document.getElementById('streamInput').value = state.stream || '';
+  document.getElementById('branchInput').value = state.branch || '';
+  document.getElementById('previewBranch').textContent = state.branch || 'School';
+
+  // ===== Parent lock (only runs if state.onlyAdm is set) =====
+  if (state.onlyAdm){
+    // classSel already defined above – just reuse it
+    classSel.innerHTML = `<option value="${state.className}">${state.className}</option>`;
+    classSel.disabled = true;
+
+    document.querySelector('.table-card')?.classList.add('hidden');
+    document.getElementById('downloadBulkCards')?.classList.add('hidden');
+    document.getElementById('downloadBulkCsv')?.classList.add('hidden');
+    document.getElementById('downloadSummaryPdf')?.classList.add('hidden');
+
+    // Optional: lock other selectors for parents
+    // yearSel.disabled = true;
+    // examSel.disabled = true;
+    // document.getElementById('monthSelect').disabled = true;
+  }
+}
 
     function populateMonthOptions(){
       const monthSel = document.getElementById('monthSelect');
@@ -547,7 +602,14 @@
 
       // Header controls
       const btnBack = document.getElementById('btnBack');
-      if (btnBack) btnBack.addEventListener('click', () => window.location.href = 'scoresheet.html');
+if (btnBack) btnBack.addEventListener('click', () => {
+  if (urlState.lock && urlState.role === 'parent' && urlState.studentKey){
+    window.location.href = `../parent.html?studentKey=${encodeURIComponent(urlState.studentKey)}`;
+  } else {
+    history.back(); // teacher mode unchanged
+  }
+});
+
       const btnFullScreen = document.getElementById('btnFullScreen');
       if (btnFullScreen) btnFullScreen.addEventListener('click', () => {
         const docEl = document.documentElement;
@@ -816,32 +878,43 @@
       }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
     }
 
-    /* -------------------------- COMPOSE -------------------------- */
-    function computeStudents(attendance, fees, scores){
-      const subjects = state.subjects && state.subjects.length ? state.subjects.slice() : inferSubjects(scores);
-      state.subjects = subjects;
-      const students = [];
-      Object.entries(state.rawStudents).forEach(([adm, data]) => {
-        const fee = fees[adm] || { required: data.totalFee || 0, paid: data.paid || 0, balance: data.balance || Math.max(0,(data.totalFee||0)-(data.paid||0)) };
-        const att = attendance[adm] || { present:0, absent:0, days:0 };
-        const scoreEntry = scores[adm] || {};
-        const subjectStats = buildSubjectStats(subjects, scoreEntry);
-        const totalScore = subjectStats.totalScore, totalMax = subjectStats.totalMax;
-        const avg = totalMax ? (totalScore/totalMax) * 100 : 0;
-        const grade = deriveGrade(avg);
-        const comment = autoComment(avg);
-        students.push({
-          adm, ...data,
-          totalFee: fee.required, paid: fee.paid, balance: fee.balance,
-          presents: att.present, absents: att.absent, attendanceDays: att.days, attendancePercent: att.days ? (att.present/att.days)*100 : 0,
-          subjectStats, totalScore, totalMax, avg, grade, comment,
-          subjectPositions: {}, overallPosition: 0,
-          monthLabel: MONTH_LABELS[state.month] || state.month, examLabel: state.examType
-        });
-      });
-      assignPositions(students, subjects);
-      state.students = students;
-    }
+   /* -------------------------- COMPOSE -------------------------- */
+function computeStudents(attendance, fees, scores){
+  const subjects = state.subjects && state.subjects.length ? state.subjects.slice() : inferSubjects(scores);
+  state.subjects = subjects;
+
+  const students = [];
+  Object.entries(state.rawStudents).forEach(([adm, data]) => {
+    const fee = fees[adm] || { required: data.totalFee || 0, paid: data.paid || 0, balance: data.balance || Math.max(0,(data.totalFee||0)-(data.paid||0)) };
+    const att = attendance[adm] || { present:0, absent:0, days:0 };
+    const scoreEntry = scores[adm] || {};
+    const subjectStats = buildSubjectStats(subjects, scoreEntry);
+    const totalScore = subjectStats.totalScore, totalMax = subjectStats.totalMax;
+    const avg = totalMax ? (totalScore/totalMax) * 100 : 0;
+    const grade = deriveGrade(avg);
+    const comment = autoComment(avg);
+    students.push({
+      adm, ...data,
+      totalFee: fee.required, paid: fee.paid, balance: fee.balance,
+      presents: att.present, absents: att.absent, attendanceDays: att.days,
+      attendancePercent: att.days ? (att.present/att.days)*100 : 0,
+      subjectStats, totalScore, totalMax, avg, grade, comment,
+      subjectPositions: {}, overallPosition: 0,
+      monthLabel: MONTH_LABELS[state.month] || state.month, examLabel: state.examType
+    });
+  });
+
+  // --- Safety: if in parent mode, keep only that one ADM in the master list
+  let trimmed = students;
+  if (state.onlyAdm){
+    trimmed = students.filter(s => String(s.adm) === String(state.onlyAdm));
+  }
+
+  // Compute positions on the final set (so #1/1 is correct in parent mode)
+  assignPositions(trimmed, subjects);
+  state.students = trimmed;
+}
+
 
     function inferSubjects(scoresObj){
       const set = new Set();
@@ -922,21 +995,41 @@
 
     /* -------------------------- VIEW -------------------------- */
     function applyFilters(){
-      const search = document.getElementById('searchInput').value.trim().toLowerCase();
-      const sortBy = document.getElementById('sortSelect').value;
-      const filtered = (state.students||[]).filter(s => {
-        const h = [s.adm, s.name, s.parentName, s.parentContact].filter(Boolean).join(' ').toLowerCase();
-        return h.includes(search);
-      });
-      state.filtered = sortStudents(filtered, sortBy);
-      if (!state.selectedAdm || !state.filtered.some(s => s.adm === state.selectedAdm)) {
-        state.selectedAdm = state.filtered.length ? state.filtered[0].adm : null;
-      }
-      renderStudentSelect();
-      updateMetrics();
-      renderTable();
-      updatePreview();
+  // Start with all computed students
+  let set = state.students || [];
+
+  // IF PARENT MODE (locked to one child) → ignore search/sort and force the single ADM
+  if (state.onlyAdm){
+    set = set.filter(s => String(s.adm) === String(state.onlyAdm));
+    state.filtered = set;
+    state.selectedAdm = set.length ? set[0].adm : null;
+
+  } else {
+    // TEACHER MODE → normal search + sort
+    const search = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
+    const sortBy = document.getElementById('sortSelect')?.value || 'name';
+
+    const filtered = set.filter(s => {
+      const hay = [s.adm, s.name, s.parentName, s.parentContact]
+        .filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(search);
+    });
+
+    state.filtered = sortStudents(filtered, sortBy);
+
+    // Keep the current selection if it’s still visible; otherwise pick the first
+    if (!state.selectedAdm || !state.filtered.some(s => s.adm === state.selectedAdm)) {
+      state.selectedAdm = state.filtered.length ? state.filtered[0].adm : null;
     }
+  }
+
+  // Render everything
+  renderStudentSelect();
+  updateMetrics();
+  renderTable();
+  updatePreview();
+}
+
 
     function sortStudents(arr, sortBy){
       const copy = [...arr];
@@ -948,22 +1041,41 @@
     }
 
     function renderStudentSelect(){
-      const sel = document.getElementById('studentSelect');
-      sel.innerHTML = '';
-      if (!state.filtered.length) {
-        sel.innerHTML = '<option value="">No records</option>';
-        document.getElementById('bulkCount').textContent = 0;
-        return;
-      }
-      state.filtered.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.adm; opt.textContent = `${s.adm} - ${s.name}`;
-        if (s.adm === state.selectedAdm) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      sel.addEventListener('change', e => { state.selectedAdm = e.target.value; updatePreview(); renderTable(); });
-      document.getElementById('bulkCount').textContent = state.filtered.length;
-    }
+  const sel = document.getElementById('studentSelect');
+  sel.innerHTML = '';
+
+  if (!state.filtered.length){
+    sel.innerHTML = '<option value="">No records</option>';
+    document.getElementById('bulkCount').textContent = 0;
+    return;
+  }
+
+  // Fill options
+  state.filtered.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.adm;
+    opt.textContent = `${s.adm} - ${s.name}`;
+    opt.selected = (s.adm === state.selectedAdm);
+    sel.appendChild(opt);
+  });
+
+  // 🔒 Make the dropdown read-only when parent mode is active
+  sel.disabled = !!state.onlyAdm;
+
+  // Only attach change handler if not locked
+  if (!state.onlyAdm){
+    sel.onchange = (e) => {
+      state.selectedAdm = e.target.value;
+      updatePreview();
+      renderTable();
+    };
+  } else {
+    sel.onchange = null; // ensure no changes in parent mode
+  }
+
+  document.getElementById('bulkCount').textContent = state.filtered.length;
+}
+
 
     function updateMetrics(){
       const total = state.filtered.length;

@@ -416,11 +416,15 @@
     const state = {
       className: '', stream: '', year: new Date().getFullYear(), month: 'Sep', examType: 'Monthly', examKey: 'monthly', branch: 'School',
       rawStudents: {}, students: [], filtered: [], selectedAdm: null, subjects: [], teachers: new Map(),
-      logoDataUrl: null
+      logoDataUrl: null,
+      // Parent mode parameters
+      parentMode: false, parentAdm: null, parentName: '', parentPhone: ''
     };
 
     /* -------------------------- INIT -------------------------- */
     document.addEventListener('DOMContentLoaded', () => {
+      // Check for parent mode URL parameters first
+      checkParentMode();
       preloadLogo();
       hydrateFromSession();
       populateSelectors();
@@ -437,6 +441,68 @@
       state.examKey = ss.getItem('examKey') || ss.getItem(PREFS.EXAM_KEY) || 'monthly';
       state.examType = Object.keys(EXAM_KEYS).find(k => EXAM_KEYS[k] === state.examKey) || 'Monthly';
       state.branch = ss.getItem('schoolBranch') || ss.getItem(PREFS.BRANCH_KEY) || 'Socrates School';
+    }
+
+    function checkParentMode(){
+      const urlParams = new URLSearchParams(window.location.search);
+      const adm = urlParams.get('adm');
+      const name = urlParams.get('name');
+      const phone = urlParams.get('phone');
+      
+      if (adm) {
+        state.parentMode = true;
+        state.parentAdm = adm;
+        state.parentName = decodeURIComponent(name || '');
+        state.parentPhone = decodeURIComponent(phone || '');
+        
+        // Update UI to show parent mode
+        updateUIForParentMode();
+      }
+    }
+
+    function updateUIForParentMode(){
+      // Update header to show parent mode
+      const headerTitle = document.querySelector('h1');
+      if (headerTitle) {
+        headerTitle.textContent = `Report Card - ${state.parentName}`;
+      }
+      
+      // Hide bulk operations in parent mode
+      const bulkButtons = ['downloadBulkCards', 'downloadSummaryPdf', 'downloadBulkCsv'];
+      bulkButtons.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.style.display = 'none';
+      });
+      
+      // Update header description
+      const desc = document.querySelector('.text-slate-200\\/80');
+      if (desc) {
+        desc.textContent = `Generate report card for ${state.parentName} (Admission: ${state.parentAdm})`;
+      }
+      
+      // Hide class selector and other bulk controls
+      const classSelect = document.getElementById('classSelect');
+      if (classSelect) classSelect.style.display = 'none';
+      
+      const streamInput = document.getElementById('streamInput');
+      if (streamInput) streamInput.style.display = 'none';
+      
+      const branchInput = document.getElementById('branchInput');
+      if (branchInput) branchInput.style.display = 'none';
+      
+      // Hide student selector since there's only one student in parent mode
+      const studentSelect = document.getElementById('studentSelect');
+      if (studentSelect) {
+        studentSelect.style.display = 'none';
+        // Also hide its label if it exists
+        const studentLabel = studentSelect.previousElementSibling;
+        if (studentLabel && studentLabel.tagName === 'LABEL') {
+          studentLabel.style.display = 'none';
+        }
+      }
+      
+      // Update page title
+      document.title = `SoMAp — ${state.parentName}'s Report Card`;
     }
 
     function persistToSession(){
@@ -577,9 +643,87 @@
       }
     }
 
+    async function findStudentClass(){
+      try {
+        // Search through common student data paths to find the student's class
+        const searchPaths = ['students', 'Students', 'StudentsList', 'Students_List', 'studentList', 'studentlist', 'attendance', 'school', 'schoolerp'];
+        
+        for (const path of searchPaths) {
+          try {
+            const snap = await db.ref(path).once('value');
+            if (snap && snap.exists && snap.exists()) {
+              const data = snap.val();
+              
+              // Handle both array and object formats
+              let students = [];
+              if (Array.isArray(data)) {
+                students = data.filter(item => item);
+              } else {
+                Object.keys(data).forEach(k => {
+                  const s = data[k];
+                  if (s && typeof s === 'object') {
+                    students.push({ ...s, _key: k });
+                  }
+                });
+              }
+              
+              // Find the student with matching admission number
+              const student = students.find(s => {
+                const adm = s.adm || s.admissionNumber || s.admNo || s.admission || s._key;
+                return String(adm) === String(state.parentAdm);
+              });
+              
+              if (student) {
+                // Found the student, extract class information
+                let studentClass = student.class || student.currentClass || student.level || student.className || student.grade || student.classLevel || '';
+                
+                // Normalize class names to our SUBJECTS_BY_CLASS keys
+                if (studentClass) {
+                  const normalizedClass = String(studentClass).toUpperCase().replace(/\s|-/g, '');
+                  if (normalizedClass.includes('BABY') && !normalizedClass.includes('CLASS')) studentClass = 'Baby Class';
+                  else if (normalizedClass.includes('MIDDLE') && !normalizedClass.includes('CLASS')) studentClass = 'Middle Class';
+                  else if (normalizedClass.includes('PREUNIT') || normalizedClass.includes('PRE-UNIT')) studentClass = 'Preunit Class';
+                  else if (normalizedClass.includes('CLASS1')) studentClass = 'Class 1';
+                  else if (normalizedClass.includes('CLASS2')) studentClass = 'Class 2';
+                  else if (normalizedClass.includes('CLASS3')) studentClass = 'Class 3';
+                  else if (normalizedClass.includes('CLASS4')) studentClass = 'Class 4';
+                  else if (normalizedClass.includes('CLASS5')) studentClass = 'Class 5';
+                  else if (normalizedClass.includes('CLASS6')) studentClass = 'Class 6';
+                  else if (normalizedClass.includes('CLASS7')) studentClass = 'Class 7';
+                }
+                
+                if (studentClass) {
+                  state.className = studentClass;
+                  state.stream = student.stream || student.streamName || student.section || '';
+                  console.log(`[Parent Mode] Found student ${state.parentAdm} in class ${state.className}${state.stream ? ' (' + state.stream + ')' : ''}`);
+                  return;
+                }
+              }
+            }
+          } catch (err) {
+            console.warn(`[Parent Mode] Error searching in ${path}:`, err.message);
+          }
+        }
+        
+        // If not found, default to Class 1
+        console.warn(`[Parent Mode] Could not find class for student ${state.parentAdm}, defaulting to Class 1`);
+        state.className = 'Class 1';
+        
+      } catch (e) {
+        console.error('[Parent Mode] Error finding student class:', e);
+        state.className = 'Class 1';
+      }
+    }
+
     async function loadAllData(){
       try {
         document.getElementById('bulkCount').textContent = '...';
+        
+        // In parent mode, we need to find the student's class first
+        if (state.parentMode && state.parentAdm) {
+          await findStudentClass();
+        }
+        
         state.subjects = SUBJECTS_BY_CLASS[state.className] || state.subjects || [];
         const [students, attendance, fees, scores, detailsMap] = await Promise.all([
           fetchStudents(state.className, state.stream),
@@ -924,14 +1068,28 @@
     function applyFilters(){
       const search = document.getElementById('searchInput').value.trim().toLowerCase();
       const sortBy = document.getElementById('sortSelect').value;
-      const filtered = (state.students||[]).filter(s => {
+      
+      let filtered = (state.students||[]).filter(s => {
         const h = [s.adm, s.name, s.parentName, s.parentContact].filter(Boolean).join(' ').toLowerCase();
         return h.includes(search);
       });
-      state.filtered = sortStudents(filtered, sortBy);
-      if (!state.selectedAdm || !state.filtered.some(s => s.adm === state.selectedAdm)) {
-        state.selectedAdm = state.filtered.length ? state.filtered[0].adm : null;
+      
+      // In parent mode, filter to only the specific student
+      if (state.parentMode && state.parentAdm) {
+        filtered = filtered.filter(s => s.adm === state.parentAdm);
+        
+        // Auto-select the student in parent mode
+        if (filtered.length > 0) {
+          state.selectedAdm = filtered[0].adm;
+        }
+      } else {
+        // Normal teacher mode - auto-select first student if none selected
+        if (!state.selectedAdm || !filtered.some(s => s.adm === state.selectedAdm)) {
+          state.selectedAdm = filtered.length ? filtered[0].adm : null;
+        }
       }
+      
+      state.filtered = sortStudents(filtered, sortBy);
       renderStudentSelect();
       updateMetrics();
       renderTable();
@@ -950,6 +1108,15 @@
     function renderStudentSelect(){
       const sel = document.getElementById('studentSelect');
       sel.innerHTML = '';
+      
+      // In parent mode, hide the student selector since there's only one student
+      if (state.parentMode) {
+        sel.style.display = 'none';
+        document.getElementById('bulkCount').textContent = state.filtered.length;
+        return;
+      }
+      
+      sel.style.display = 'block';
       if (!state.filtered.length) {
         sel.innerHTML = '<option value="">No records</option>';
         document.getElementById('bulkCount').textContent = 0;

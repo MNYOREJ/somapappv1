@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoMAp • Graduation Certificates</title>
+
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase.js"></script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(1100px 740px at 20% -10%, rgba(14,165,233,0.25), transparent 45%),
+        radial-gradient(900px 620px at 80% -10%, rgba(244,114,182,0.25), transparent 40%),
+        linear-gradient(180deg, #1f2937 0%, #0f172a 100%);
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #0f172a;
+    }
+    .auth-gate {
+      min-height: 100vh;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      text-align: center;
+      padding: 30px;
+    }
+    .shell {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px;
+      color: #fff;
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 20px;
+      backdrop-filter: blur(18px);
+      color: #111827;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead {
+      background: rgba(15, 23, 42, 0.08);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.7rem;
+      color: rgba(15, 23, 42, 0.7);
+    }
+    th, td {
+      padding: 12px 10px;
+      border-bottom: 1px solid rgba(30, 41, 59, 0.2);
+      font-size: 0.85rem;
+      text-align: left;
+    }
+    tbody tr:hover {
+      background: rgba(59, 130, 246, 0.08);
+    }
+    .action-btn {
+      padding: 6px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      background: rgba(59, 130, 246, 0.08);
+      color: #1d4ed8;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .action-btn.tertiary {
+      border-color: rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.15);
+      color: #047857;
+    }
+    .year-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0 8px;
+    }
+    .year-chip {
+      padding: 8px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      background: rgba(255, 255, 255, 0.2);
+      color: #0f172a;
+      font-weight: 600;
+    }
+    .year-chip.active {
+      background: linear-gradient(135deg, #ec4899, #6366f1);
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 12px 26px -20px rgba(236, 72, 153, 0.8);
+    }
+  </style>
+</head>
+<body data-page="certificates">
+  <div id="authGate" class="auth-gate">
+    <div>
+      <h1 class="text-3xl font-bold mb-2">Graduation Certificates</h1>
+      <p class="max-w-xl mx-auto text-lg">Only authorised staff can publish certificates. Sign in with an approved account.</p>
+    </div>
+  </div>
+
+  <main id="appShell" class="shell space-y-6">
+    <header class="glass p-6 space-y-4">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-xs text-slate-500">Graduands</p>
+          <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900">Certificate Publishing Studio</h1>
+          <p class="text-sm text-slate-600 max-w-2xl">
+            Render landscape certificates with student portraits, signatures, and official branding. Auto-generate on 18 October or trigger on-demand.
+          </p>
+        </div>
+        <button id="generateAllCertificates" class="px-6 py-3 rounded-lg bg-gradient-to-r from-pink-500 to-indigo-500 text-white font-semibold shadow-lg shadow-pink-500/30">
+          Generate All Pending Certificates
+        </button>
+      </div>
+      <div id="yearTabs" class="year-tabs"></div>
+    </header>
+
+    <section class="glass p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">Graduands & Status</h2>
+        <div class="flex gap-2">
+          <button data-export="students" data-format="csv" class="action-btn">Graduands CSV</button>
+          <button data-export="students" data-format="pdf" class="action-btn">Graduands PDF</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Graduand</th>
+              <th>Status</th>
+              <th>Generated</th>
+              <th>By</th>
+              <th class="text-right">Generate</th>
+              <th class="text-right">Downloads</th>
+            </tr>
+          </thead>
+          <tbody id="certificatesBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <template id="certificateTemplate" class="hidden">
+    <div style="width:1120px;height:794px;padding:48px;background:#f8fafc;border:8px solid #1e3a8a;border-radius:24px;position:relative;font-family:'Georgia',serif;color:#0f172a;">
+      <div style="position:absolute;inset:30px;opacity:0.06;background:url('../images/somap-logo.png.jpg') center/contain no-repeat;"></div>
+      <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:space-between;">
+        <header style="text-align:center;">
+          <h1 style="font-size:48px;font-weight:700;letter-spacing:0.15em;">SOCRATES SCHOOL</h1>
+          <p style="font-size:20px;letter-spacing:0.3em;margin-top:6px;">Certificate of Graduation</p>
+        </header>
+        <main style="text-align:center;padding:20px 80px;">
+          <p style="font-size:18px;margin-bottom:12px;">This certifies that</p>
+          <h2 data-cert="studentName" style="font-size:52px;font-weight:700;margin-bottom:12px;text-transform:uppercase;"></h2>
+          <p style="font-size:20px;margin-bottom:20px;">has successfully completed <span data-cert="classLevel"></span></p>
+          <p style="font-size:16px;color:#475569;">Issued on <span data-cert="issuedDate"></span> - Admission <span data-cert="admission"></span></p>
+        </main>
+        <footer style="display:flex;justify-content:space-between;padding:0 60px 20px;">
+          <div style="text-align:center;">
+            <div style="width:160px;height:1px;background:#1e3a8a;margin-bottom:8px;"></div>
+            <p style="font-size:16px;font-weight:600;">Head Teacher</p>
+          </div>
+          <img data-cert="photo" src="../images/somap-logo.png.jpg" alt="Student" style="width:140px;height:140px;border-radius:999px;border:5px solid #1e3a8a;object-fit:cover;margin-top:-60px;">
+          <div style="text-align:center;">
+            <div style="width:160px;height:1px;background:#1e3a8a;margin-bottom:8px;"></div>
+            <p style="font-size:16px;font-weight:600;">Academic Director</p>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </template>
+
+  <script src="../js/graduation.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.GraduationSuite && typeof window.GraduationSuite.init === 'function') {
+        window.GraduationSuite.init({ page: 'certificates' });
+      }
+    });
+  </script>
+</body>
+</html>

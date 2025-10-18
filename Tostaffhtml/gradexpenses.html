@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoMAp • Graduation Expense Tracker</title>
+
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase.js"></script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(1200px 800px at -10% -10%, rgba(255,255,255,0.28), transparent 45%),
+        radial-gradient(1000px 700px at 120% -10%, rgba(59,130,246,0.25), transparent 40%),
+        linear-gradient(180deg, #022c22 0%, #064e3b 100%);
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #022c22;
+    }
+    .shell {
+      padding: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 18px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 25px 60px -30px rgba(6, 78, 59, 0.45);
+    }
+    .auth-gate {
+      min-height: 100vh;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #f0fdf4;
+      padding: 30px;
+    }
+    table { width:100%; border-collapse: collapse; }
+    thead {
+      background: rgba(22, 101, 52, 0.12);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.7rem;
+      color: rgba(2, 44, 34, 0.7);
+    }
+    th, td {
+      padding: 12px 10px;
+      border-bottom: 1px solid rgba(45, 106, 79, 0.2);
+      font-size: 0.85rem;
+      text-align: left;
+    }
+    tbody tr:hover { background: rgba(22, 101, 52, 0.06); }
+    .summary-box {
+      display: grid;
+      gap: 4px;
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(45, 106, 79, 0.3);
+      background: linear-gradient(130deg, rgba(45, 106, 79, 0.18), rgba(56, 189, 248, 0.12));
+    }
+    .summary-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.28em; color: rgba(2, 44, 34, 0.6); }
+    .summary-value { font-size: 1.8rem; font-weight: 700; color: #022c22; }
+    .export-buttons button {
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(45, 106, 79, 0.4);
+      background: rgba(45, 106, 79, 0.08);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #022c22;
+    }
+    .proof-link {
+      color: #0f766e;
+      text-decoration: underline;
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body data-page="expenses">
+  <div id="authGate" class="auth-gate">
+    <div>
+      <h1 class="text-3xl font-bold mb-2">Graduation Expense Vault</h1>
+      <p class="max-w-xl mx-auto text-lg">
+        Only authorised finance staff can enter expenses. Sign in with an approved account to continue.
+      </p>
+    </div>
+  </div>
+
+  <main id="appShell" class="shell space-y-6">
+    <header class="glass p-6 space-y-4">
+      <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-xs text-emerald-700/70">Graduation 2024+</p>
+          <h1 class="text-3xl md:text-4xl font-extrabold text-emerald-900">Expense Tracker & Audit Trail</h1>
+          <p class="text-sm text-emerald-800/80 max-w-2xl">
+            Lock every expenditure with proof and audit stamps. No deletions, no silent edits. Every shilling stays accountable.
+          </p>
+        </div>
+        <div class="summary-box">
+          <span class="summary-label">Total Recorded</span>
+          <span id="expensesTotal" class="summary-value">TSh 0</span>
+          <span class="text-xs text-emerald-800/70" id="expensesCount">0 entries</span>
+        </div>
+      </div>
+      <div id="yearTabs" class="flex flex-wrap gap-2"></div>
+    </header>
+
+    <section class="glass p-6 space-y-4">
+      <h2 class="text-xl font-semibold text-emerald-900 flex items-center gap-2">
+        <i class="fas fa-receipt"></i> Record New Expense
+      </h2>
+      <form id="expenseForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="space-y-2">
+          <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Item / Description</label>
+          <input name="item" type="text" required class="w-full px-4 py-2 rounded-lg border border-emerald-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div class="space-y-2">
+          <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Seller / Shop</label>
+          <input name="seller" type="text" required class="w-full px-4 py-2 rounded-lg border border-emerald-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div class="space-y-2">
+          <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Seller Contact</label>
+          <input name="sellerPhone" type="text" class="w-full px-4 py-2 rounded-lg border border-emerald-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-2">
+            <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Quantity</label>
+            <input name="quantity" type="number" min="1" required class="w-full px-4 py-2 rounded-lg border border-emerald-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+          </div>
+          <div class="space-y-2">
+            <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Price Each (TZS)</label>
+            <input name="priceEach" type="number" min="0" required class="w-full px-4 py-2 rounded-lg border border-emerald-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+          </div>
+        </div>
+        <div class="space-y-2">
+          <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Notes (optional)</label>
+          <textarea name="note" rows="2" class="w-full px-4 py-2 rounded-lg border border-emerald-100 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-500"></textarea>
+        </div>
+        <div class="space-y-2">
+          <label class="text-xs uppercase tracking-[0.3em] text-emerald-800/70">Attach Proof (image/PDF)</label>
+          <input name="proofFile" type="file" accept=".jpg,.jpeg,.png,.pdf" required class="w-full text-sm text-emerald-800">
+        </div>
+        <div class="md:col-span-2">
+          <button id="expenseSubmit" type="submit" class="w-full py-2.5 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold shadow-lg shadow-emerald-500/20">
+            Save Expense with Proof
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section class="glass p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-emerald-900">Expense Ledger</h2>
+        <div class="export-buttons flex gap-2">
+          <button data-export="expenses" data-format="csv">Export CSV</button>
+          <button data-export="expenses" data-format="pdf">Export PDF</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Seller</th>
+              <th>Qty</th>
+              <th>Price Each</th>
+              <th>Total</th>
+              <th>Recorded</th>
+              <th>Proof</th>
+            </tr>
+          </thead>
+          <tbody id="expensesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-emerald-900">Audit Log</h2>
+        <div class="export-buttons flex gap-2">
+          <button data-export="audit" data-format="csv">Audit CSV</button>
+          <button data-export="audit" data-format="pdf">Audit PDF</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto max-h-64">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>Reference</th>
+              <th>Actor</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="auditBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="../js/graduation.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.GraduationSuite && typeof window.GraduationSuite.init === 'function') {
+        window.GraduationSuite.init({ page: 'expenses' });
+      }
+    });
+  </script>
+</body>
+</html>

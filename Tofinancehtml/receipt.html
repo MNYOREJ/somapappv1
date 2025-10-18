@@ -153,6 +153,7 @@
               <tr><td>Plan</td><td id="sumPlan">--</td><td>Annual Fee</td><td id="sumAnnual">--</td></tr>
               <tr><td>Paid this Year</td><td id="sumPaidYear">--</td><td>Debt till <span id="sumTillLabel">--</span></td><td id="sumDebtTill">--</td></tr>
               <tr><td>Annual Balance</td><td id="sumBalance">--</td><td>Total Fridays Paid</td><td id="sumFridayPaid">--</td></tr>
+              <tr><td>Graduation Paid</td><td id="sumGradPaid">--</td><td>Graduation Balance</td><td id="sumGradBalance">--</td></tr>
             </tbody>
           </table>
         </div>
@@ -214,6 +215,7 @@
     /* ===== Helpers ===== */
     const q = s => document.querySelector(s);
     const safe = s => (s==null ? '' : String(s));
+    const sanitizeKey = s => safe(s).replace(/[.#$/\[\]]/g, '_');
     const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:0});
     const formatDate = v => { const d=new Date(v); return isNaN(d)?'--':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
     const monthName = m => new Date(2000, m, 1).toLocaleString('en-GB',{month:'long'});
@@ -238,10 +240,20 @@
       const method = p?.method || p?.mode || p?.paymode || 'Cash';
       const note   = p?.note || p?.purpose || p?.desc || p?.remarks || 'Payment';
       // infer kind if not passed
-      let k = kind || (
-        /friday/i.test(src) ? 'friday' :
-        /fee|finance/i.test(src) || /fee/i.test(note) ? 'tuition' : 'other'
-      );
+      let k = kind;
+      if (!k) {
+        if (p?.type) {
+          k = String(p.type).toLowerCase();
+        } else if (/friday/i.test(src)) {
+          k = 'friday';
+        } else if (/graduation/i.test(src) || /graduation/i.test(note)) {
+          k = 'graduation';
+        } else if (/fee|finance/i.test(src) || /fee/i.test(note)) {
+          k = 'tuition';
+        } else {
+          k = 'other';
+        }
+      }
       return { amount: amt, timestamp: ts, method, note, _src: src || '', _kind: k };
     }
     function dedupe(arr){
@@ -484,8 +496,37 @@
         ? monthName(now.getMonth())
         : `Inst ${cyclesDue}`;
 
+      // Graduation summary
+      let gradExpected = 0;
+      let gradPaid = 0;
+      const gradKey = sanitizeKey(adm);
+      try {
+        const gradSnap = await db.ref(`graduation/${year}/students/${gradKey}`).once('value');
+        const gradData = gradSnap.val();
+        if (gradData) {
+          gradExpected = Number(gradData.expectedFee || gradData.expected || 0);
+          gradPaid = Number(gradData.paid || 0);
+        }
+      } catch (err) {
+        console.warn('Graduation summary read failed', err?.message || err);
+      }
+      const gradFromPayments = payments
+        .filter(p => p._kind === 'graduation')
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      if (!gradPaid && gradFromPayments) gradPaid = gradFromPayments;
+      const gradBalance = Math.max(0, gradExpected - gradPaid);
+
       return {
-        planLabel, annualFee, paidTuition, paidFriday, debtTill, annualBalance, tillLabel
+        planLabel,
+        annualFee,
+        paidTuition,
+        paidFriday,
+        debtTill,
+        annualBalance,
+        tillLabel,
+        graduationExpected: gradExpected,
+        graduationPaid: gradPaid,
+        graduationBalance: gradBalance
       };
     }
 
@@ -496,6 +537,7 @@
       st => `feesPayments/${st.admissionNumber||st.pupilId||''}`,
       st => `fees/${new Date().getFullYear()}/${st.admissionNumber||st.pupilId||''}/payments`,
       st => `finance/${new Date().getFullYear()}/${st.classLevel||''}/${st.admissionNumber||st.pupilId||''}/payments`,
+      st => `receipts/${st.admissionNumber||st.pupilId||''}/${new Date().getFullYear()}`,
       // Add more collections keyed by ADM here (e.g. graduationMoney/<ADM>)
       st => `graduationMoney/${st.admissionNumber||st.pupilId||''}`
     ];
@@ -603,6 +645,8 @@
       q('#sumDebtTill').textContent  = formatCurrency(fin.debtTill);
       q('#sumBalance').textContent   = formatCurrency(fin.annualBalance);
       q('#sumFridayPaid').textContent= formatCurrency(fin.paidFriday);
+      q('#sumGradPaid').textContent  = formatCurrency(fin.graduationPaid);
+      q('#sumGradBalance').textContent = formatCurrency(fin.graduationBalance);
 
       // Make visible for capture
       const host = q('#pdfStage');

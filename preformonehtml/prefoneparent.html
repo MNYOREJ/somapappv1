@@ -138,6 +138,67 @@
       background: rgba(71, 85, 105, 0.65);
       border-radius: 999px;
     }
+    .book-card {
+      position: relative;
+      border-radius: 1.5rem;
+      padding: 1.25rem;
+      min-width: 240px;
+      max-width: 280px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      background: var(--book-bg, rgba(15, 23, 42, 0.82));
+      border: 1px solid var(--book-border, rgba(148, 163, 184, 0.25));
+      color: var(--book-text, #f8fafc);
+      box-shadow: 0 24px 45px -28px rgba(2, 6, 23, 0.85);
+      transition: transform 160ms ease, box-shadow 180ms ease;
+    }
+    .book-card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 32px 54px -24px rgba(2, 6, 23, 0.9);
+    }
+    .book-card .book-subject {
+      text-transform: uppercase;
+      letter-spacing: 0.35em;
+      font-size: 0.7rem;
+      color: var(--book-accent, rgba(226, 232, 240, 0.8));
+    }
+    .book-card .book-meta {
+      font-size: 0.75rem;
+      color: rgba(226, 232, 240, 0.78);
+    }
+    .book-card button {
+      align-self: flex-start;
+      padding: 0.5rem 1rem;
+      border-radius: 0.85rem;
+      background: rgba(15, 23, 42, 0.22);
+      border: 1px solid transparent;
+      color: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: background 160ms ease, transform 160ms ease, border-color 180ms ease;
+    }
+    .book-card button:hover {
+      background: rgba(255, 255, 255, 0.18);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+    .book-info-banner {
+      min-width: 240px;
+      max-width: 280px;
+      border-radius: 1.5rem;
+      padding: 1.25rem;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px dashed rgba(148, 163, 184, 0.35);
+      color: rgba(226, 232, 240, 0.85);
+    }
+    #bookModalContent {
+      max-height: calc(100vh - 4rem);
+      overflow: hidden;
+    }
+    #bookModalContent.fullscreen-active {
+      max-height: 100vh;
+    }
     .receipt-card {
       background: rgba(15, 23, 42, 0.82);
       border-radius: 1rem;
@@ -242,8 +303,19 @@
       activeAdm: localStorage.getItem('currentChildAdm') || '',
       attendanceChart: null,
       allPaymentsIndex: [],
-      books: []
+      books: [],
+      schoolData: null,
+      activeBookYear: null,
+      childYears: {}
     };
+
+    const BOOK_THEMES = [
+      { bg: 'linear-gradient(145deg, rgba(14,165,233,0.92), rgba(99,102,241,0.82))', border: 'rgba(191,219,254,0.45)', text: '#f8fafc', accent: '#bae6fd' },
+      { bg: 'linear-gradient(150deg, rgba(236,72,153,0.88), rgba(59,130,246,0.78))', border: 'rgba(248,187,208,0.45)', text: '#fff7f9', accent: '#ffe4ed' },
+      { bg: 'linear-gradient(150deg, rgba(20,184,166,0.9), rgba(74,222,128,0.8))', border: 'rgba(134,239,172,0.5)', text: '#eefdf7', accent: '#bbf7d0' },
+      { bg: 'linear-gradient(150deg, rgba(251,191,36,0.92), rgba(249,115,22,0.86))', border: 'rgba(254,215,170,0.55)', text: '#0b1120', accent: '#7c2d12' },
+      { bg: 'linear-gradient(150deg, rgba(129,140,248,0.9), rgba(217,70,239,0.82))', border: 'rgba(196,181,253,0.55)', text: '#f8f5ff', accent: '#ddd6fe' }
+    ];
 
     const dom = {
       parentName: document.querySelector('#parentName span'),
@@ -281,6 +353,14 @@
       academicTeacherComment: document.getElementById('academicTeacherComment'),
       academicTable: document.getElementById('academicTable'),
       booksContainer: document.getElementById('booksContainer'),
+      bookModal: document.getElementById('bookModal'),
+      bookModalContent: document.getElementById('bookModalContent'),
+      bookModalTitle: document.getElementById('bookModalTitle'),
+      bookModalSubject: document.getElementById('bookModalSubject'),
+      bookModalFrame: document.getElementById('bookModalFrame'),
+      bookModalImageWrapper: document.getElementById('bookModalImageWrapper'),
+      bookModalImage: document.getElementById('bookModalImage'),
+      bookModalFullscreen: document.getElementById('bookModalFullscreen'),
       journalHighlights: document.getElementById('journalHighlights'),
       quickIdCard: document.getElementById('quickIdCard'),
       quickReport: document.getElementById('quickReport'),
@@ -298,6 +378,32 @@
       dom.parentNameChip?.classList.remove('hidden');
     }
 
+    function normalizeBookEntry(id, entry, yearKey) {
+      const rawUrl = entry?.url || entry?.fileUrl || entry?.link || '';
+      const resolvedId = id || `${yearKey || 'pf1'}-${parseDate(entry?.uploadedAt, entry?.createdAt, Date.now())}`;
+      return {
+        id: resolvedId,
+        year: yearKey ? Number(yearKey) : Number(state.activeBookYear || currentYear),
+        title: entry?.title || entry?.name || 'Preform Resource',
+        subject: entry?.subject || entry?.category || 'General',
+        description: entry?.description || entry?.notes || '',
+        url: rawUrl,
+        uploadedAt: entry?.uploadedAt || entry?.uploaded || entry?.dateUploaded || entry?.createdAt || '',
+        uploadedBy: entry?.uploadedBy || entry?.addedBy || entry?.uploader || 'Preform Office',
+        createdAt: entry?.createdAt || '',
+        fileType: detectFileType(rawUrl, entry?.fileType)
+      };
+    }
+
+    function detectFileType(source, explicit) {
+      if (explicit) return explicit;
+      const value = String(source || '').toLowerCase();
+      if (!value) return 'document';
+      if (value.includes('pdf') || value.endsWith('.pdf')) return 'application/pdf';
+      if (/\.(png|jpe?g|gif|webp|avif)$/.test(value)) return 'image';
+      return 'document';
+    }
+
     dom.logoutBtn?.addEventListener('click', () => {
       localStorage.removeItem('prefoneParent');
       localStorage.removeItem('prefoneParentContact');
@@ -310,6 +416,16 @@
 
     dom.menuToggle?.addEventListener('click', () => toggleMenu(true));
     dom.menuBackdrop?.addEventListener('click', () => toggleMenu(false));
+    dom.bookModal?.addEventListener('click', event => {
+      if (event.target === dom.bookModal) closeBookModal();
+    });
+    dom.bookModalFullscreen?.addEventListener('click', toggleBookFullscreen);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && dom.bookModal && !dom.bookModal.classList.contains('hidden')) {
+        closeBookModal();
+      }
+    });
 
     function toggleMenu(show) {
       dom.menuBackdrop.classList.toggle('hidden', !show);
@@ -325,17 +441,35 @@
 
     async function loadParentDashboard() {
       try {
-        const snapshot = await db
-          .ref(`/schools/Socrates School Preform one/${currentYear}/students`)
-          .orderByChild('parentContact')
-          .equalTo(parentContact)
-          .once('value');
+        const rawTarget = String(parentContact || '').trim();
+        const normalizedTarget = normalizeContact(rawTarget);
 
-        const childrenObj = snapshot.val() || {};
-        const children = Object.entries(childrenObj).map(([adm, data]) => ({
-          adm,
-          ...data
-        }));
+        if (!state.schoolData) {
+          const schoolSnapshot = await db.ref('/schools/Socrates School Preform one').once('value');
+          state.schoolData = schoolSnapshot.val() || {};
+        }
+
+        const childrenMap = new Map();
+        const yearKeys = Object.keys(state.schoolData || {})
+          .filter(key => /^\d{4}$/.test(key))
+          .sort((a, b) => Number(b) - Number(a));
+
+        yearKeys.forEach(yearKey => {
+          const studentsObj = state.schoolData?.[yearKey]?.students || {};
+          Object.entries(studentsObj).forEach(([adm, record]) => {
+            const hydrated = hydrateStudentRecord(adm, record, yearKey);
+            const contacts = collectContacts(hydrated);
+            if (!contacts.length && !rawTarget) return;
+            if (contacts.some(contact => contactMatches(contact, normalizedTarget, rawTarget))) {
+              const existing = childrenMap.get(adm);
+              if (!existing || Number(yearKey) >= Number(existing._year || 0)) {
+                childrenMap.set(adm, hydrated);
+              }
+            }
+          });
+        });
+
+        const children = Array.from(childrenMap.values());
 
         if (!children.length) {
           dom.childSwitcherSection?.classList.add('hidden');
@@ -343,15 +477,29 @@
           return;
         }
 
-        state.children = children.sort((a, b) => {
+        children.sort((a, b) => {
           const nameA = `${a.firstName || ''} ${a.lastName || ''}`.trim().toLowerCase();
           const nameB = `${b.firstName || ''} ${b.lastName || ''}`.trim().toLowerCase();
           return nameA.localeCompare(nameB);
         });
 
-        if (!state.activeAdm || !state.children.find(child => child.adm === state.activeAdm)) {
+        state.children = children;
+        state.childYears = {};
+        children.forEach(child => {
+          state.childYears[child.adm] = child._year;
+          localStorage.setItem(`prefone_child_year_${child.adm}`, child._year || '');
+        });
+
+        if (!state.activeAdm || !state.childYears[state.activeAdm]) {
           state.activeAdm = state.children[0].adm;
         }
+
+        state.activeBookYear = state.childYears[state.activeAdm] || state.children[0]._year || state.activeBookYear || currentYear;
+        if (state.activeBookYear) {
+          currentYear = Number(state.activeBookYear);
+          localStorage.setItem('prefone_year', currentYear);
+        }
+
         localStorage.setItem('currentChildAdm', state.activeAdm);
 
         renderChildSwitcher();
@@ -364,6 +512,70 @@
       }
     }
 
+    function hydrateStudentRecord(adm, data, yearKey) {
+      const record = {
+        adm,
+        _year: Number(yearKey) || Number(currentYear),
+        ...data
+      };
+
+      record.firstName = record.firstName || record.givenName || record.student?.firstName || record.learner?.firstName || record.child?.firstName || '';
+      record.lastName = record.lastName || record.surname || record.student?.lastName || record.learner?.lastName || record.child?.lastName || '';
+      record.middleName = record.middleName || record.student?.middleName || record.learner?.middleName || record.child?.middleName || record.otherNames || '';
+      record.parentName = record.parentName || record.guardianName || record.parent?.name || record.guardian?.name || record.family?.primaryGuardian || '';
+      record.parentEmail = record.parentEmail || record.guardianEmail || record.parent?.email || record.guardian?.email || record.contacts?.email || '';
+      record.parentContact = record.parentContact || record.parent?.phone || record.guardianContact || record.guardian?.phone || record.contacts?.primary || record.contacts?.main || record.emergencyContact || record.parentPhone || '';
+      record.photoUrl = record.photoUrl || record.photoURL || record.photo || record.profile?.photoUrl || record.profile?.photo || record.avatar || '';
+      record.reportingDate = record.reportingDate || record.reporting || record.enrolmentDate || record.enrollmentDate || record.joinedOn || '';
+      record.formerSchool = record.formerSchool || record.previousSchool || record.schoolHistory?.previous || record.background?.school || '';
+      record.gender = record.gender || record.sex || record.student?.gender || '';
+      record.payments = record.payments || data?.payments || {};
+      record.attendance = record.attendance || data?.attendance || {};
+      record.scores = record.scores || data?.scores || {};
+      return record;
+    }
+
+    function collectContacts(record) {
+      const candidates = [
+        record.parentContact,
+        record.parentPhone,
+        record.guardianContact,
+        record.guardianPhone,
+        record.motherContact,
+        record.fatherContact,
+        record.emergencyContact,
+        record.contacts?.primary,
+        record.contacts?.secondary,
+        record.contacts?.emergency,
+        record.parent?.phone,
+        record.guardian?.phone,
+        record.family?.primaryPhone
+      ];
+      return candidates
+        .map(contact => (contact ? String(contact).trim() : ''))
+        .filter(Boolean);
+    }
+
+    function normalizeContact(value) {
+      if (!value) return '';
+      const digits = String(value).replace(/\D/g, '');
+      return digits.length > 9 ? digits.slice(-9) : digits;
+    }
+
+    function contactMatches(candidate, normalizedTarget, rawTarget) {
+      const value = String(candidate || '').trim();
+      if (!value) return false;
+      if (rawTarget && value === rawTarget) return true;
+      const normalizedCandidate = normalizeContact(value);
+      if (normalizedTarget && normalizedCandidate === normalizedTarget) return true;
+      if (normalizedTarget && normalizedCandidate && normalizedTarget.endsWith(normalizedCandidate)) return true;
+      if (!normalizedTarget && rawTarget) {
+        const rawNormalized = normalizeContact(rawTarget);
+        if (rawNormalized && normalizedCandidate && rawNormalized === normalizedCandidate) return true;
+      }
+      return false;
+    }
+
     function renderChildSwitcher() {
       if (!dom.childChipContainer) return;
       dom.childChipContainer.innerHTML = '';
@@ -371,14 +583,26 @@
         const chip = document.createElement('button');
         chip.className = `chip${child.adm === state.activeAdm ? ' active' : ''}`;
         chip.dataset.adm = child.adm;
+        chip.dataset.year = child._year || '';
+        const yearLabel = child._year ? `<span class="block text-[0.55rem] uppercase tracking-[0.35em] opacity-80">${child._year}</span>` : '';
         chip.innerHTML = `
           ${child.photoUrl ? `<img src="${child.photoUrl}" alt="${safeName(child)}">` : '<div class="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-sm font-semibold">PF1</div>'}
-          <span class="text-sm font-medium">${safeName(child)}</span>
+          <span class="flex flex-col items-start leading-tight">
+            <span class="text-sm font-medium">${safeName(child)}</span>
+            ${yearLabel}
+          </span>
         `;
         chip.addEventListener('click', () => {
           if (state.activeAdm === child.adm) return;
           state.activeAdm = child.adm;
+          state.activeBookYear = child._year || state.activeBookYear;
           localStorage.setItem('currentChildAdm', child.adm);
+          if (state.activeBookYear) {
+            currentYear = Number(state.activeBookYear);
+            localStorage.setItem('prefone_year', currentYear);
+          }
+          localStorage.setItem('prefone_child_year', child._year || '');
+          localStorage.setItem(`prefone_child_year_${child.adm}`, child._year || '');
           renderChildSwitcher();
           renderActiveChild();
         });
@@ -391,10 +615,22 @@
     function renderActiveChild() {
       const child = state.children.find(c => c.adm === state.activeAdm);
       if (!child) return;
+      state.activeBookYear = child._year || state.childYears?.[child.adm] || state.activeBookYear || currentYear;
+      if (state.activeBookYear) {
+        currentYear = Number(state.activeBookYear);
+        localStorage.setItem('prefone_year', currentYear);
+        localStorage.setItem('prefone_child_year', state.activeBookYear);
+        localStorage.setItem(`prefone_child_year_${child.adm}`, state.activeBookYear);
+      }
       localStorage.setItem('currentChildName', safeName(child));
 
       dom.childName.textContent = safeName(child);
-      dom.childAdm.textContent = `ADM - ${child.adm}`;
+      if (child.adm) {
+        const yearSuffix = child._year ? ` • ${child._year}` : '';
+        dom.childAdm.textContent = `ADM - ${child.adm}${yearSuffix}`;
+      } else {
+        dom.childAdm.textContent = 'ADM - ...';
+      }
 
       if (child.photoUrl) {
         dom.childPhoto.src = child.photoUrl;
@@ -409,7 +645,8 @@
       dom.formerSchool.textContent = child.formerSchool || 'Not provided';
       dom.gender.textContent = child.gender || 'Not provided';
       dom.parentDisplayName.textContent = child.parentName || parentFullName || 'Parent/Guardian';
-      dom.parentPhone.textContent = child.parentContact || parentContact;
+      const displayContact = child.parentContact || parentContact || '';
+      dom.parentPhone.textContent = formatGuardianContact(displayContact);
       dom.parentEmail.textContent = child.parentEmail || 'Not captured';
 
       renderAttendance(child);
@@ -668,26 +905,44 @@
       if (!dom.booksContainer) return;
       if (!state.books.length) {
         dom.booksContainer.innerHTML = `
-          <div class="flex-1 min-w-[220px] bg-slate-900/55 rounded-2xl p-5 text-slate-300">
-            <p>No books uploaded yet for Preform One. Once teachers add resources they will appear here to read online.</p>
+          <div class="book-info-banner">
+            <p class="font-semibold mb-1">Library warming up</p>
+            <p class="text-sm">No books have been uploaded yet for this program. Once teachers share resources, they will appear here for online reading.</p>
           </div>
         `;
         return;
       }
 
-      dom.booksContainer.innerHTML = state.books.map(book => `
-        <div class="min-w-[240px] max-w-[260px] bg-slate-900/60 border border-white/10 rounded-2xl p-5 flex flex-col gap-3">
-          <div>
-            <p class="uppercase tracking-[0.4em] text-xs text-slate-400 mb-1">${book.subject || 'General'}</p>
-            <h4 class="text-lg font-semibold text-white line-clamp-2">${book.title}</h4>
+      const activeYear = Number(state.activeBookYear || currentYear || new Date().getFullYear());
+      const yearMatches = state.books.filter(book => Number(book.year) === activeYear);
+      const booksToDisplay = yearMatches.length ? yearMatches : state.books;
+      const cards = [];
+
+      if (!yearMatches.length && state.books.length && state.activeBookYear) {
+        cards.push(`
+          <div class="book-info-banner">
+            <p class="font-semibold mb-1">Showing curated archives</p>
+            <p class="text-sm">No uploads have landed for ${state.activeBookYear} yet. Enjoy ${state.books.length} previous classroom favourites while teachers prepare new collections.</p>
           </div>
-          <p class="text-xs text-slate-400 flex-1">Uploaded ${formatDate(book.uploadedAt)} - ${book.uploader || 'SoMAp Team'}</p>
-          <button class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm text-slate-100 transition"
-            onclick="openBookModal('${encodeURIComponent(book.title)}', '${encodeURIComponent(book.subject || 'General')}', '${encodeURIComponent(book.url)}')">
-            Read Now
-          </button>
-        </div>
-      `).join('');
+        `);
+      }
+
+      booksToDisplay.forEach((book, index) => {
+        const theme = BOOK_THEMES[index % BOOK_THEMES.length];
+        const safeId = encodeURIComponent(book.id);
+        cards.push(`
+          <div class="book-card" style="--book-bg:${theme.bg}; --book-border:${theme.border}; --book-text:${theme.text}; --book-accent:${theme.accent};">
+            <div>
+              <p class="book-subject mb-2">${book.subject || 'General'}</p>
+              <h4 class="text-lg font-semibold" style="color:${theme.text};">${book.title}</h4>
+            </div>
+            <p class="book-meta flex-1">${formatDate(book.uploadedAt)} • ${book.uploadedBy || 'SoMAp Team'}${book.year ? ` • ${book.year}` : ''}</p>
+            <button type="button" onclick="openBookModal('${safeId}')">Read Now</button>
+          </div>
+        `);
+      });
+
+      dom.booksContainer.innerHTML = cards.join('');
     }
 
     function renderJournalHighlights(child) {
@@ -731,20 +986,44 @@
 
     async function loadBooks() {
       try {
-        const snapshot = await db.ref(`/schools/Socrates School Preform one/${currentYear}/books`).once('value');
-        const booksObj = snapshot.val() || {};
-        const books = Object.values(booksObj).map(book => ({
-          title: book.title || book.name || 'Preform Resource',
-          subject: book.subject || 'General',
-          url: book.url || '#',
-          uploadedAt: book.uploadedAt || book.dateUploaded || '',
-          uploader: book.uploadedBy || 'Preform Office'
-        }));
-        state.books = books.sort((a, b) => parseDate(b.uploadedAt) - parseDate(a.uploadedAt));
+        if (!state.schoolData) {
+          const schoolSnapshot = await db.ref('/schools/Socrates School Preform one').once('value');
+          state.schoolData = schoolSnapshot.val() || {};
+        }
+
+        const discovered = [];
+        const candidateYears = new Set();
+
+        if (state.activeBookYear) candidateYears.add(String(state.activeBookYear));
+        if (currentYear) candidateYears.add(String(currentYear));
+        Object.values(state.childYears || {}).forEach(year => {
+          if (year) candidateYears.add(String(year));
+        });
+
+        candidateYears.forEach(yearKey => {
+          const node = state.schoolData?.[yearKey];
+          if (!node?.books) return;
+          Object.entries(node.books).forEach(([id, entry]) => {
+            discovered.push(normalizeBookEntry(id, entry, yearKey));
+          });
+        });
+
+        if (!discovered.length && state.schoolData) {
+          Object.entries(state.schoolData).forEach(([yearKey, node]) => {
+            if (!/^\d{4}$/.test(yearKey)) return;
+            if (!node?.books) return;
+            Object.entries(node.books).forEach(([id, entry]) => {
+              discovered.push(normalizeBookEntry(id, entry, yearKey));
+            });
+          });
+        }
+
+        state.books = discovered.sort((a, b) => parseDate(b.uploadedAt, b.createdAt) - parseDate(a.uploadedAt, a.createdAt));
       } catch (error) {
         console.warn('Unable to load books', error);
         state.books = [];
       }
+      renderBooks();
     }
 
     function openChildIdCard(child) {
@@ -774,23 +1053,92 @@
       navigateTo(`prefonechildreceipt.html?receipt=${receipt.receiptNumber}`);
     }
 
-    function openBookModal(titleEncoded, subjectEncoded, urlEncoded) {
-      const title = decodeURIComponent(titleEncoded);
-      const subject = decodeURIComponent(subjectEncoded);
-      const url = decodeURIComponent(urlEncoded);
-      document.getElementById('bookModalTitle').textContent = title;
-      document.getElementById('bookModalSubject').textContent = subject;
-      document.getElementById('bookModalFrame').src = url;
-      document.getElementById('bookModal').classList.remove('hidden');
+    function openBookModal(bookIdEncoded) {
+      const decodedId = decodeURIComponent(bookIdEncoded || '');
+      const book = state.books.find(item => item.id === decodedId) || state.books.find(item => encodeURIComponent(item.id) === bookIdEncoded);
+      if (!book) return;
+
+      const subjectLabel = [book.subject || 'General', book.year || state.activeBookYear || currentYear].filter(Boolean).join(' • ');
+      if (dom.bookModalTitle) dom.bookModalTitle.textContent = book.title || 'Book Viewer';
+      if (dom.bookModalSubject) dom.bookModalSubject.textContent = subjectLabel;
+
+      const fileType = book.fileType || detectFileType(book.url);
+      const isPdf = fileType === 'application/pdf';
+      const url = isPdf ? decoratePdfUrl(book.url) : book.url;
+
+      if (isPdf) {
+        dom.bookModalFrame?.classList.remove('hidden');
+        if (dom.bookModalFrame) dom.bookModalFrame.src = url;
+        dom.bookModalImageWrapper?.classList.add('hidden');
+        if (dom.bookModalImage) dom.bookModalImage.src = '';
+      } else {
+        dom.bookModalFrame?.classList.add('hidden');
+        if (dom.bookModalFrame) dom.bookModalFrame.src = '';
+        if (dom.bookModalImageWrapper) dom.bookModalImageWrapper.classList.remove('hidden');
+        if (dom.bookModalImage) dom.bookModalImage.src = url;
+      }
+
+      dom.bookModal?.classList.remove('hidden');
+      dom.bookModalContent?.focus({ preventScroll: true });
+      document.body.classList.add('overflow-hidden');
+      handleFullscreenChange();
     }
 
     function closeBookModal() {
-      document.getElementById('bookModalFrame').src = '';
-      document.getElementById('bookModal').classList.add('hidden');
+      if (dom.bookModalFrame) {
+        dom.bookModalFrame.src = '';
+        dom.bookModalFrame.classList.add('hidden');
+      }
+      if (dom.bookModalImage) {
+        dom.bookModalImage.src = '';
+      }
+      dom.bookModalImageWrapper?.classList.add('hidden');
+      dom.bookModal?.classList.add('hidden');
+      document.body.classList.remove('overflow-hidden');
+      if (document.fullscreenElement === dom.bookModalContent && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      handleFullscreenChange();
+    }
+
+    function toggleBookFullscreen() {
+      if (!dom.bookModalContent) return;
+      if (document.fullscreenElement === dom.bookModalContent) {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      } else if (dom.bookModalContent.requestFullscreen) {
+        dom.bookModalContent.requestFullscreen().catch(() => {});
+      }
+    }
+
+    function handleFullscreenChange() {
+      if (!dom.bookModalFullscreen) return;
+      const isActive = document.fullscreenElement === dom.bookModalContent;
+      dom.bookModalContent?.classList.toggle('fullscreen-active', isActive);
+      dom.bookModalFullscreen.innerHTML = isActive
+        ? '<i class="fas fa-compress text-white text-lg"></i>'
+        : '<i class="fas fa-expand text-white text-lg"></i>';
+    }
+
+    function decoratePdfUrl(url) {
+      if (!url) return '';
+      const [base, hashPart] = String(url).split('#');
+      const separator = base.includes('?') ? '&' : '?';
+      const viewerParams = 'inline=1&download=0&print=0';
+      const viewerHash = 'toolbar=0&navpanes=0&scrollbar=0&view=fitH';
+      const mergedHash = hashPart ? `${hashPart}&${viewerHash}` : viewerHash;
+      return `${base}${separator}${viewerParams}#${mergedHash}`;
     }
 
     function navigateTo(path) {
       localStorage.setItem('currentChildAdm', state.activeAdm);
+      if (state.activeBookYear) {
+        currentYear = Number(state.activeBookYear);
+        localStorage.setItem('prefone_year', currentYear);
+        localStorage.setItem('prefone_child_year', state.activeBookYear);
+        if (state.activeAdm) {
+          localStorage.setItem(`prefone_child_year_${state.activeAdm}`, state.activeBookYear);
+        }
+      }
       window.location.href = path;
     }
 
@@ -832,6 +1180,22 @@
     function formatCurrency(amount) {
       const value = Number(amount || 0);
       return `TSh ${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+    }
+
+    function formatGuardianContact(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return 'Not provided';
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length === 9) {
+        return `+255 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+      }
+      if (digits.length === 10 && digits.startsWith('0')) {
+        const trimmed = digits.slice(1);
+        return `+255 ${trimmed.slice(0, 3)} ${trimmed.slice(3, 6)} ${trimmed.slice(6)}`;
+      }
+      if (raw.startsWith('+')) return raw;
+      if (digits.length > 9) return `+${digits}`;
+      return raw;
     }
 
     function gradeFromPercent(percent) {
@@ -899,18 +1263,29 @@
   </nav>
 
   <div id="bookModal" class="menu-backdrop hidden">
-    <div class="max-w-5xl mx-auto bg-slate-900/95 border border-white/10 rounded-3xl mt-12 mb-8 overflow-hidden shadow-2xl text-slate-100">
+    <div id="bookModalContent" class="max-w-5xl mx-auto bg-slate-900/95 border border-white/10 rounded-3xl mt-12 mb-8 overflow-hidden shadow-2xl text-slate-100 focus:outline-none" tabindex="-1">
       <div class="flex items-center justify-between px-6 py-4 bg-white/5">
         <div>
           <h5 id="bookModalTitle" class="text-lg font-semibold text-white">Book Viewer</h5>
           <p id="bookModalSubject" class="text-sm text-slate-300"></p>
         </div>
-        <button class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center" onclick="closeBookModal()">
-          <i class="fas fa-xmark text-white text-lg"></i>
-        </button>
+        <div class="flex items-center gap-2">
+          <button id="bookModalFullscreen" class="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center" type="button">
+            <i class="fas fa-expand text-white text-lg"></i>
+          </button>
+          <button class="w-10 h-10 rounded-xl bg-red-500/80 hover:bg-red-500 flex items-center justify-center" type="button" onclick="closeBookModal()">
+            <i class="fas fa-xmark text-white text-lg"></i>
+          </button>
+        </div>
       </div>
-      <div class="aspect-[4/3] bg-slate-950">
-        <iframe id="bookModalFrame" src="" class="w-full h-full" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+      <div class="aspect-[4/3] bg-slate-950 relative">
+        <iframe id="bookModalFrame" src="" class="w-full h-full hidden" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-forms" allowfullscreen></iframe>
+        <div id="bookModalImageWrapper" class="absolute inset-0 hidden items-center justify-center bg-slate-950">
+          <img id="bookModalImage" src="" alt="Book preview" class="max-w-full max-h-full object-contain select-none pointer-events-none">
+        </div>
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 text-[0.65rem] tracking-[0.35em] uppercase text-white/60 bg-slate-900/70 px-3 py-1 rounded-full select-none pointer-events-none">
+          Read-only • Download & print disabled
+        </div>
       </div>
     </div>
   </div>

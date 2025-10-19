@@ -13,8 +13,20 @@ function uploadToCloudinary(file, folder = 'preformone', preset = 'somap_unsigne
 
 // Year Selector (global)
 let currentYear = new Date().getFullYear();
+const storedYearPreference = typeof localStorage !== 'undefined'
+  ? parseInt(localStorage.getItem('prefone_year'), 10)
+  : Number.NaN;
+if (!Number.isNaN(storedYearPreference)) {
+  currentYear = storedYearPreference;
+}
 function loadYear(year) {
-  currentYear = year;
+  const parsed = Number(year);
+  if (!Number.isNaN(parsed)) {
+    currentYear = parsed;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('prefone_year', currentYear);
+    }
+  }
   // Reload data for all components
   location.reload(); // Simple for HTML
 }

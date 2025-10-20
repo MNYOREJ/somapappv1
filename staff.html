@@ -3,309 +3,1908 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SoMApV2 — Teacher Dashboard (Staff)</title>
+  <title>SoMApV2 - Teacher Command Center</title>
 
-  <!-- Firebase compat (project uses compat in repo) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-
-  <!-- Use existing firebase config file in repo (firebase.js) -->
   <script src="firebase.js"></script>
 
-  <!-- Tailwind + FontAwesome + Chart.js -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
-    html,body { height:100%; }
-    body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: linear-gradient(135deg,#fef3c7 0%, #fff7ed 40%, #e0f2fe 100%); }
-    .sidebar { position:fixed; left:0; top:0; height:100vh; width:0; overflow:hidden; transition:width .35s ease; background:linear-gradient(180deg,#0ea5e9,#6366f1); z-index:60; }
-    .sidebar.expanded{ width:260px; }
-    .sidebar .item{ color:white; padding:14px 18px; display:flex; gap:12px; align-items:center; cursor:pointer; }
-    .sidebar .item:hover{ background: rgba(255,255,255,0.06); }
-    #menu-dots{ position:fixed; top:16px; left:16px; z-index:70; background:transparent; border-radius:999px; padding:10px; }
-    /* main area shifting */
-    .main { transition: margin-left .35s ease; margin-left:0; padding:28px; }
-    .main.shifted{ margin-left:260px; }
-    .card { background:white; border-radius:12px; padding:18px; box-shadow:0 8px 20px rgba(16,24,40,0.06); }
-    .welcome-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.35); z-index:80; }
-    .welcome-card{ background:linear-gradient(90deg,#60a5fa,#a78bfa); color:white; padding:22px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.25); text-align:center; }
-    .toast{ position:fixed; right:20px; bottom:20px; background:rgba(0,0,0,0.75); color:white; padding:10px 14px; border-radius:8px; z-index:90; display:none; }
+    :root {
+      --glass-bg: rgba(255,255,255,0.68);
+      --glass-border: rgba(255,255,255,0.32);
+      --glass-shadow: 0 20px 45px rgba(15,23,42,0.12);
+      --brand-primary: #2563eb;
+      --brand-secondary: #7c3aed;
+      --brand-accent: #f97316;
+      --text-muted: #64748b;
+    }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: radial-gradient(circle at top left, #fef3c7 0%, #fff7ed 28%, #e0f2fe 60%, #e9d5ff 100%);
+      color: #0f172a;
+    }
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      height: 100vh;
+      width: 0;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(14,165,233,0.92), rgba(99,102,241,0.88));
+      box-shadow: 10px 0 35px rgba(15,23,42,0.15);
+      transition: width 0.35s ease;
+      z-index: 70;
+    }
+    .sidebar.expanded { width: 280px; }
+    .sidebar .item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      margin-bottom: 6px;
+      color: rgba(255,255,255,0.92);
+      border-radius: 14px;
+      transition: background 0.2s ease, transform 0.2s ease;
+      cursor: pointer;
+    }
+    .sidebar .item:hover { background: rgba(255,255,255,0.12); transform: translateX(4px); }
+    .sidebar .item span { font-weight: 500; }
+    .sidebar .footer {
+      margin-top: auto;
+      padding: 18px;
+      color: rgba(255,255,255,0.78);
+      font-size: 13px;
+    }
+    #menu-dots {
+      position: fixed;
+      top: 18px;
+      left: 18px;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.6);
+      background: rgba(255,255,255,0.52);
+      color: #0f172a;
+      box-shadow: 0 12px 30px rgba(15,23,42,0.14);
+      transition: transform 0.2s ease;
+    }
+    #menu-dots:hover { transform: scale(1.04); }
+    .main {
+      transition: margin-left 0.35s ease;
+      margin-left: 0;
+      padding: 40px 28px 80px;
+      min-height: 100vh;
+    }
+    .main.shifted { margin-left: 280px; }
+    .glass-card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 26px;
+      box-shadow: var(--glass-shadow);
+      backdrop-filter: blur(24px);
+    }
+    .hero-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-card::after {
+      content: '';
+      position: absolute;
+      inset: -120px 20% auto auto;
+      width: 240px;
+      height: 240px;
+      background: radial-gradient(circle at center, rgba(124,58,237,0.25), transparent 70%);
+      transform: rotate(35deg);
+      opacity: 0.6;
+    }
+    .metric-card {
+      position: relative;
+      overflow: hidden;
+      padding: 24px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      cursor: pointer;
+    }
+    .metric-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 16px 35px rgba(37,99,235,0.18);
+    }
+    .metric-card::after {
+      content: '';
+      position: absolute;
+      inset: auto auto -120px -40px;
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle at center, rgba(37,99,235,0.16), transparent 65%);
+      pointer-events: none;
+    }
+    .metric-label { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+    .metric-value { font-size: 36px; font-weight: 700; }
+    .metric-sub { font-size: 14px; color: var(--text-muted); }
+    .quick-link {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 18px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.55);
+      box-shadow: 0 12px 28px rgba(15,23,42,0.12);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      cursor: pointer;
+    }
+    .quick-link:hover { transform: translateY(-3px); box-shadow: 0 18px 36px rgba(15,23,42,0.18); }
+    .quick-link .icon { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; font-size: 18px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(37,99,235,0.12);
+      color: #1d4ed8;
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(12,74,110,0.1);
+      color: #0f172a;
+      font-weight: 600;
+    }
+    .slim-scroll { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,0.6) transparent; }
+    .slim-scroll::-webkit-scrollbar { width: 6px; }
+    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+    .slim-scroll::-webkit-scrollbar-thumb { background-color: rgba(148,163,184,0.6); border-radius: 999px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); padding-bottom: 10px; }
+    td { padding: 12px 0; border-bottom: 1px solid rgba(148,163,184,0.18); font-size: 14px; }
+    tr:last-child td { border-bottom: none; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-pill.present { background: rgba(34,197,94,0.12); color: #15803d; }
+    .status-pill.absent { background: rgba(248,113,113,0.12); color: #b91c1c; }
+    .status-pill.special { background: rgba(246,176,32,0.16); color: #b45309; }
+    .alert-card {
+      display: flex;
+      gap: 16px;
+      padding: 18px 22px;
+      border-radius: 20px;
+      border: 1px solid rgba(248,113,113,0.22);
+      background: rgba(254,242,242,0.65);
+      box-shadow: 0 12px 30px rgba(248,113,113,0.18);
+    }
+    .alert-card+.alert-card { margin-top: 14px; }
+    .alert-card .alert-type {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      font-weight: 700;
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .empty-state {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      border-radius: 18px;
+      border: 1px dashed rgba(148,163,184,0.4);
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.48);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 90;
+      padding: 20px;
+    }
+    .modal.show { display: flex; }
+    .modal-card {
+      background: rgba(255,255,255,0.95);
+      border-radius: 24px;
+      border: 1px solid rgba(255,255,255,0.4);
+      box-shadow: 0 30px 60px rgba(15,23,42,0.32);
+      max-width: 640px;
+      width: 100%;
+      padding: 28px;
+      position: relative;
+    }
+    .close-btn {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 1px solid rgba(148,163,184,0.4);
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+      cursor: pointer;
+      background: white;
+      color: #0f172a;
+    }
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      background: rgba(15,23,42,0.84);
+      color: white;
+      padding: 12px 18px;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(15,23,42,0.3);
+      display: none;
+      z-index: 95;
+      font-size: 14px;
+    }
+    @media (max-width: 768px) {
+      .main { padding: 96px 18px 80px; }
+      .metric-card { padding: 20px; }
+      .metric-value { font-size: 30px; }
+      .quick-link { flex-direction: row; align-items: center; }
+      .quick-link .icon { width: 36px; height: 36px; border-radius: 12px; }
+    }
   </style>
 </head>
-<body>
-
-  <!-- three dots (hidden icons appear when clicked) -->
-  <button id="menu-dots" aria-label="open menu" title="open menu" class="text-white">
-    <i class="fas fa-ellipsis-vertical fa-2x"></i>
+<body class="antialiased">
+  <button id="menu-dots" aria-label="Toggle navigation">
+    <i class="fas fa-grip-vertical"></i>
   </button>
 
-  <!-- sidebar (initially collapsed) -->
   <nav id="sidebar" class="sidebar" aria-hidden="true">
-    <div class="p-4">
-      <img src="images/somap-logo.png.jpg" alt="SoMAp" class="w-20 h-20 mx-auto rounded-full shadow-lg mb-3"/>
-      <div class="text-white text-center font-semibold mb-4">SoMAp — Teacher</div>
-      <div class="item" onclick="navigateTo('academic')"><i class="fas fa-book"></i><span>Academic</span></div>
-      <div class="item" onclick="navigateTo('attendance')"><i class="fas fa-calendar-check"></i><span>Attendance</span></div>
-      <div class="item" onclick="navigateTo('discipline')"><i class="fas fa-exclamation-triangle"></i><span>Discipline</span></div>
-      <div class="item" onclick="navigateTo('studentlist')"><i class="fas fa-users"></i><span>Student List</span></div>
-      <div class="item" onclick="navigateTo('books')"><i class="fas fa-book-open"></i><span>Class Books</span></div>
-      <div id="preform-item" class="item" style="display:none;" onclick="window.location.href='preformonehtml/prefonedashboard.html'"><i class="fas fa-graduation-cap text-blue-500"></i><span>Preform One</span></div>
-      <div id="graduation-item" class="item" style="display:none;" onclick="window.location.href='Tostaffhtml/graduation.html'">
-        <i class="fas fa-trophy text-amber-400"></i><span>Graduation Suite</span>
+    <div class="flex flex-col h-full pt-10">
+      <div class="px-6 pb-6">
+        <div class="flex flex-col items-center gap-3 text-white">
+          <img src="images/somap-logo.png.jpg" alt="SoMAp" class="w-20 h-20 rounded-full shadow-lg border border-white/30" />
+          <p class="text-lg font-semibold text-white/90">SoMAp Teacher</p>
+          <p class="text-sm text-white/70 text-center leading-snug">Command center to keep your class sharp, safe, and financially on track.</p>
+        </div>
       </div>
-      <div class="item mt-6" onclick="logout()"><i class="fas fa-right-from-bracket"></i><span>Logout</span></div>
+      <div class="flex-1 overflow-y-auto slim-scroll px-4">
+        <p class="text-white/60 text-xs uppercase tracking-[0.3em] px-4 mb-3">Navigate</p>
+        <div class="space-y-2">
+          <div class="item" onclick="navigateTo('dashboard')"><i class="fas fa-table-cells-large"></i><span>ERP Dashboard</span></div>
+          <div class="item" onclick="navigateTo('academic')"><i class="fas fa-book-open"></i><span>Academic</span></div>
+          <div class="item" onclick="navigateTo('attendanceHub')"><i class="fas fa-clipboard-user"></i><span>Daily Attendance</span></div>
+          <div class="item" onclick="navigateTo('classattendance')"><i class="fas fa-list-check"></i><span>Class Attendance</span></div>
+          <div class="item" onclick="navigateTo('discipline')"><i class="fas fa-exclamation-triangle"></i><span>Discipline</span></div>
+          <div class="item" onclick="navigateTo('studentlist')"><i class="fas fa-users"></i><span>Students</span></div>
+          <div class="item" onclick="navigateTo('finance')"><i class="fas fa-sack-dollar"></i><span>Class Finance</span></div>
+          <div class="item" onclick="navigateTo('books')"><i class="fas fa-book"></i><span>Class Books</span></div>
+          <div id="preform-item" class="item hidden" onclick="window.location.href='preformonehtml/prefonedashboard.html'"><i class="fas fa-graduation-cap text-sky-200"></i><span>Preform One</span></div>
+          <div id="graduation-item" class="item hidden" onclick="window.location.href='Tostaffhtml/graduation.html'"><i class="fas fa-chess-king text-amber-300"></i><span>Graduation Suite</span></div>
+        </div>
+        <div class="mt-6 pt-6 border-t border-white/20">
+          <div class="item" onclick="logout()"><i class="fas fa-right-from-bracket"></i><span>Logout</span></div>
+        </div>
+      </div>
+      <div class="footer">
+        <div class="text-xs uppercase tracking-wide mb-2 text-white/60">Version</div>
+        <div>SoMApV2.1 Command</div>
+      </div>
     </div>
   </nav>
 
-  <!-- main content -->
   <main id="main" class="main">
-
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-3xl font-bold">Teacher Dashboard</h1>
-        <p class="text-sm text-gray-700">Live, class-filtered view for the signed-in teacher</p>
-      </div>
-      <div class="flex items-center gap-4">
-        <div id="user-badge" class="text-sm text-gray-700"></div>
-        <button id="speech-toggle" class="px-3 py-1 bg-white rounded-lg shadow text-gray-800 hidden"><i class="fas fa-volume-up"></i></button>
+    <div class="hero-card glass-card p-8 mb-8">
+      <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-8">
+        <div class="space-y-4 max-w-2xl">
+          <span class="tag">Teacher Command Center</span>
+          <h1 class="text-3xl lg:text-4xl font-bold">Hello, <span id="teacher-name">Teacher</span></h1>
+          <p class="text-lg text-slate-600">You are leading <span class="font-semibold text-slate-900" id="hero-class">-</span>. Let us keep every learner seen, supported, and ready.</p>
+          <div class="flex flex-wrap gap-3 text-sm text-slate-600">
+            <span class="badge bg-white/80 text-indigo-700"><i class="fas fa-calendar-day"></i><span id="hero-date" class="ml-2">-</span></span>
+            <span class="badge bg-white/80 text-indigo-700"><i class="fas fa-clock"></i><span id="hero-clock" class="ml-2">-</span></span>
+            <span class="badge bg-white/80 text-indigo-700"><i class="fas fa-children"></i><span id="hero-enrollment" class="ml-2">- students</span></span>
+          </div>
+        </div>
+        <div class="w-full max-w-md space-y-4">
+          <div class="glass-card p-4 flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-r from-sky-400 to-indigo-500 text-white grid place-items-center text-xl"><i class="fas fa-user-shield"></i></div>
+            <div class="flex-1">
+              <div id="user-badge" class="text-sm text-slate-600"></div>
+              <div class="text-xs text-slate-500 mt-1">Signed in via SoMAp secure auth</div>
+            </div>
+            <button id="speech-toggle" class="ml-auto px-3 py-2 rounded-full bg-white shadow hidden"><i class="fas fa-volume-up"></i></button>
+          </div>
+          <div class="glass-card p-4">
+            <label class="text-xs font-semibold text-slate-500 uppercase tracking-widest block mb-2" for="student-search">Search students or guardians</label>
+            <div class="relative">
+              <i class="fas fa-magnifying-glass text-slate-400 absolute inset-y-0 left-3 flex items-center"></i>
+              <input id="student-search" type="search" placeholder="Search by name, admission, parent or phone..." class="w-full pl-10 pr-4 py-3 rounded-xl border border-white/60 bg-white/70 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent transition" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <button class="quick-link" data-link="classattendance">
+              <div class="icon bg-gradient-to-r from-sky-400 to-indigo-500 text-white"><i class="fas fa-clipboard-check"></i></div>
+              <div>
+                <p class="text-sm font-semibold text-slate-800">Rapid Roll Call</p>
+                <p class="text-xs text-slate-500">Open class attendance grid</p>
+              </div>
+            </button>
+            <button class="quick-link" data-link="finance">
+              <div class="icon bg-gradient-to-r from-amber-400 to-rose-500 text-white"><i class="fas fa-sack-dollar"></i></div>
+              <div>
+                <p class="text-sm font-semibold text-slate-800">Fees Console</p>
+                <p class="text-xs text-slate-500">Track collections and balances</p>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div id="grid" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="card">
-        <h3 class="font-semibold">Academic Summary</h3>
-        <div class="mt-3 text-2xl font-bold" id="class-score">-</div>
-        <div class="text-sm text-gray-500">Class Average</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div class="glass-card metric-card" data-link="attendanceHub">
+        <div class="metric-label">Present Today</div>
+        <div id="summary-present" class="metric-value mt-2">-</div>
+        <div id="present-subtext" class="metric-sub mt-1">Awaiting roll call</div>
+        <div class="mt-6 text-xs uppercase tracking-widest text-indigo-500 font-semibold">Open daily attendance</div>
       </div>
-      <div class="card">
-        <h3 class="font-semibold">Attendance</h3>
-        <div class="mt-3 text-2xl font-bold" id="present-percent">-</div>
-        <div class="text-sm text-gray-500">% Present (monthly)</div>
+      <div class="glass-card metric-card" data-link="classattendance">
+        <div class="metric-label">Absent Today</div>
+        <div id="summary-absent" class="metric-value mt-2">-</div>
+        <div id="absent-subtext" class="metric-sub mt-1">No absentees recorded</div>
+        <div class="mt-6 text-xs uppercase tracking-widest text-rose-500 font-semibold">Investigate reasons</div>
       </div>
-      <div class="card">
-        <h3 class="font-semibold">Discipline</h3>
-        <div class="mt-3 text-2x font-bold" id="incidents-count">-</div>
-        <div class="text-sm text-gray-500">Incidents logged</div>
+      <div class="glass-card metric-card" data-link="followups">
+        <div class="metric-label">Follow-up Alerts</div>
+        <div id="summary-alerts" class="metric-value mt-2">-</div>
+        <div class="metric-sub mt-1 text-slate-500" id="alerts-subtext">All pupils accounted for</div>
+        <div class="mt-6 text-xs uppercase tracking-widest text-amber-500 font-semibold">Review priority list</div>
       </div>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="card">
-        <h3 class="font-semibold mb-2">Subject Performance</h3>
-        <canvas id="subjectsChart"></canvas>
-      </div>
-      <div class="card">
-        <h3 class="font-semibold mb-2">Attendance Trend</h3>
-        <canvas id="attendanceChart"></canvas>
+      <div class="glass-card metric-card" data-link="finance">
+        <div class="metric-label">Outstanding Fees</div>
+        <div id="summary-outstanding" class="metric-value mt-2">-</div>
+        <div id="outstanding-subtext" class="metric-sub mt-1">Waiting on finance data</div>
+        <div class="mt-6 text-xs uppercase tracking-widest text-emerald-500 font-semibold">Open finance workspace</div>
       </div>
     </div>
 
-    <div class="mt-6">
-      <a id="open-academic" href="academic.html" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded shadow">Open Academic (scoresheet)</a>
+    <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
+      <div class="glass-card metric-card">
+        <div class="metric-label">Class Population</div>
+        <div id="summary-total" class="metric-value mt-2">-</div>
+        <div class="metric-sub mt-1" id="population-subtext">Pulling student list</div>
+      </div>
+      <div class="glass-card metric-card">
+        <div class="metric-label">Boys</div>
+        <div id="summary-boys" class="metric-value mt-2">-</div>
+        <div class="metric-sub mt-1 text-slate-500">Gender balance monitor</div>
+      </div>
+      <div class="glass-card metric-card">
+        <div class="metric-label">Girls</div>
+        <div id="summary-girls" class="metric-value mt-2">-</div>
+        <div class="metric-sub mt-1 text-slate-500">Gender balance monitor</div>
+      </div>
+      <div class="glass-card metric-card">
+        <div class="metric-label">Cleared Fees</div>
+        <div id="summary-cleared" class="metric-value mt-2">-</div>
+        <div class="metric-sub mt-1 text-slate-500">Fully settled pupils</div>
+      </div>
+      <div class="glass-card metric-card">
+        <div class="metric-label">Discipline Incidents</div>
+        <div id="summary-discipline" class="metric-value mt-2">-</div>
+        <div class="metric-sub mt-1 text-slate-500">Logged this term</div>
+      </div>
     </div>
 
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+      <div class="glass-card p-6 xl:col-span-2">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+          <div class="flex-1">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-xl font-semibold text-slate-800">Attendance Pulse</h2>
+              <button class="text-sm text-indigo-600 hover:text-indigo-800 font-medium" data-link="attendanceHub">Open Attendance Hub</button>
+            </div>
+            <p class="text-sm text-slate-500 mb-5">Snapshot of today's roll call and reasons shared.</p>
+            <div id="reasons-list" class="space-y-3"></div>
+          </div>
+          <div class="w-full lg:w-72">
+            <canvas id="attendanceTrendChart" height="240"></canvas>
+            <p class="text-xs text-slate-400 mt-3">Monthly presence trend (last 6 months)</p>
+          </div>
+        </div>
+        <div class="mt-6 border-t border-slate-200 pt-4">
+          <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-[0.18em] mb-3">Last 5 Teaching Days</h3>
+          <div class="overflow-x-auto slim-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Present</th>
+                  <th>Absent</th>
+                  <th>Special Codes</th>
+                </tr>
+              </thead>
+              <tbody id="last-five-attendance"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="glass-card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-slate-800">Gender Balance</h2>
+          <span class="text-xs text-slate-500 uppercase tracking-widest">Live</span>
+        </div>
+        <canvas id="genderChart" height="220"></canvas>
+        <p class="text-xs text-slate-400 mt-4">Strive for equitable participation every day.</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+      <div class="glass-card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-slate-800">Student Spotlight</h2>
+          <button class="text-sm text-indigo-600 hover:text-indigo-800 font-medium" data-link="studentlist">View full list</button>
+        </div>
+        <p class="text-sm text-slate-500 mb-4">Quick glance at learners needing your attention. Click a name for their dossier.</p>
+        <div class="overflow-x-auto slim-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Parent</th>
+                <th>Contact</th>
+                <th>Balance</th>
+                <th>Last Status</th>
+              </tr>
+            </thead>
+            <tbody id="student-spotlight-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="glass-card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-slate-800">Finance Health</h2>
+          <button class="text-sm text-indigo-600 hover:text-indigo-800 font-medium" data-link="finance">Update payments</button>
+        </div>
+        <p class="text-sm text-slate-500 mb-4">Balances and collections for this class.</p>
+        <canvas id="financeChart" height="200"></canvas>
+        <div class="mt-5 border-t border-slate-200 pt-4">
+          <h3 class="text-sm font-semibold text-slate-600 uppercase tracking-[0.18em] mb-3">Top Outstanding Accounts</h3>
+          <div class="overflow-x-auto slim-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Balance</th>
+                  <th>Guardian</th>
+                  <th>Contact</th>
+                </tr>
+              </thead>
+              <tbody id="finance-watch-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+      <div class="glass-card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-slate-800">Inventory & Learning Tools</h2>
+          <span class="text-xs text-slate-500 uppercase tracking-widest">Class Assets</span>
+        </div>
+        <p class="text-sm text-slate-500 mb-4">Know exactly what is in your room before lessons start.</p>
+        <canvas id="inventoryChart" height="200"></canvas>
+        <ul id="inventory-list" class="mt-5 space-y-3 text-sm text-slate-600"></ul>
+      </div>
+      <div class="glass-card p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-slate-800">Books & Revision Coverage</h2>
+          <button class="text-sm text-indigo-600 hover:text-indigo-800 font-medium" data-link="books">Open class library</button>
+        </div>
+        <p class="text-sm text-slate-500 mb-4">Track distribution of required books and close the gaps.</p>
+        <div class="glass-card bg-white/70 border border-white/60 rounded-2xl p-4 mb-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Coverage</p>
+              <p id="books-coverage" class="text-2xl font-semibold text-slate-800">-</p>
+              <p id="books-coverage-sub" class="text-xs text-slate-500">Awaiting library data</p>
+            </div>
+            <div class="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400/70 to-sky-400/80 text-white grid place-items-center text-xl">
+              <i class="fas fa-book-reader"></i>
+            </div>
+          </div>
+        </div>
+        <div class="overflow-x-auto slim-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Subject</th>
+                <th>Have</th>
+                <th>Missing</th>
+              </tr>
+            </thead>
+            <tbody id="books-coverage-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="alert-center" class="glass-card p-6 mb-10">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold text-slate-800">Follow-up & Shift Watch</h2>
+        <span class="text-xs text-slate-500 uppercase tracking-widest">Action Required</span>
+      </div>
+      <p class="text-sm text-slate-500 mb-4">Any learner absent beyond three weeks, finance escalations, or discipline trends show here automatically.</p>
+      <div id="alert-list"></div>
+    </div>
   </main>
 
-  <!-- Welcome modal (appears briefly) -->
-  <div id="welcome" class="welcome-modal" style="display:none">
-    <div class="welcome-card">
-      <h2 id="welcome-msg" class="text-2xl font-bold">WELCOME</h2>
-      <p id="welcome-sub" class="mt-2 opacity-90">...</p>
-      <div class="mt-4"><button id="welcome-close" class="px-4 py-2 bg-white text-indigo-700 rounded">Continue</button></div>
+  <div id="welcome" class="modal">
+    <div class="modal-card max-w-md text-center">
+      <button id="welcome-close" class="close-btn"><i class="fas fa-xmark"></i></button>
+      <div class="text-2xl font-bold text-slate-800 mb-2" id="welcome-msg">Welcome</div>
+      <p class="text-sm text-slate-600 mb-3" id="welcome-sub">Loading class context...</p>
+      <p class="text-xs text-slate-500 mb-6">Tip: add quick notes for each alert after you follow up.</p>
+      <button class="px-4 py-2 rounded-lg bg-gradient-to-r from-sky-500 to-indigo-500 text-white font-semibold shadow" id="welcome-continue">Enter dashboard</button>
+    </div>
+  </div>
+
+  <div id="studentModal" class="modal">
+    <div class="modal-card">
+      <button class="close-btn" data-close="studentModal"><i class="fas fa-xmark"></i></button>
+      <div id="studentModalBody"></div>
+    </div>
+  </div>
+
+  <div id="shiftModal" class="modal">
+    <div class="modal-card">
+      <button class="close-btn" data-close="shiftModal"><i class="fas fa-xmark"></i></button>
+      <h3 class="text-xl font-semibold text-slate-800 mb-2">Mark Learner as Shifted</h3>
+      <p class="text-sm text-slate-500 mb-4">Capture the reason and destination so the office can update records.</p>
+      <div class="bg-slate-100/80 border border-slate-200 rounded-xl p-4 mb-4">
+        <div class="text-sm font-semibold text-slate-700" id="shiftStudentName">Student</div>
+        <div class="text-xs text-slate-500" id="shiftStudentInfo">ADM -</div>
+      </div>
+      <form id="shiftForm" class="space-y-4">
+        <div>
+          <label for="shiftReason" class="text-xs font-semibold text-slate-600 uppercase tracking-widest block mb-2">Reason / New School</label>
+          <textarea id="shiftReason" rows="3" class="w-full border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"></textarea>
+        </div>
+        <div class="flex items-center gap-3">
+          <button type="submit" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-500 text-white font-semibold rounded-xl shadow">Save Shift Details</button>
+          <button type="button" data-close="shiftModal" class="px-4 py-2 rounded-xl border border-slate-300 text-slate-600">Cancel</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <div id="toast" class="toast"></div>
 
   <script>
-    // Globals
-    const auth = firebase.auth();
-    const dbRef = firebase.database();
-    const GRAD_EMAILS = new Set(['ssclass42023@gmail.com','socratesschool2020@gmail.com']);
+    (function(){
+      const auth = firebase.auth();
+      const db = firebase.database();
+      const YEAR = new Date().getFullYear();
+      const CLASS_ALERT_ABSENCE_DAYS = 15;
 
-    // UI shortcuts
-    const sidebar = document.getElementById('sidebar');
-    const main = document.getElementById('main');
-    const menu = document.getElementById('menu-dots');
-    const userBadge = document.getElementById('user-badge');
-    const speechToggle = document.getElementById('speech-toggle');
-    const toast = document.getElementById('toast');
-    const graduationItem = document.getElementById('graduation-item');
+      const state = {
+        students: [],
+        studentIndex: new Map(),
+        attendance: {},
+        fees: {},
+        discipline: [],
+        books: {},
+        booksRows: [],
+        booksSummary: { coveragePct: 0, totalMissing: 0 },
+        inventory: {},
+        inventoryItems: [],
+        shifted: {},
+        todays: { present: 0, absent: 0, partial: 0, special: 0, reasons: {}, recorded: 0 },
+        financeTotals: { required: 0, paid: 0, balance: 0, cleared: 0, owing: 0 },
+        alerts: []
+      };
 
-    // App state
-    let currentUserClass = null;
-    let students = [];
-    let scores = {};
-    let attendance = {};
-    let discipline = {};
+      const userCtx = { displayName: '', email: '', className: '', safeEmail: '', safeClassKey: '' };
 
-    // previous hashes to detect changes
-    let prevScoresHash = null, prevAttendHash = null, prevDisciplineHash = null;
+      const el = (id) => document.getElementById(id);
+      const els = {
+        sidebar: document.getElementById('sidebar'),
+        main: document.getElementById('main'),
+        teacherName: el('teacher-name'),
+        heroClass: el('hero-class'),
+        heroDate: el('hero-date'),
+        heroClock: el('hero-clock'),
+        heroEnrollment: el('hero-enrollment'),
+        userBadge: el('user-badge'),
+        studentSearch: el('student-search'),
+        speechToggle: el('speech-toggle'),
+        summaryPresent: el('summary-present'),
+        presentSub: el('present-subtext'),
+        summaryAbsent: el('summary-absent'),
+        absentSub: el('absent-subtext'),
+        summaryAlerts: el('summary-alerts'),
+        alertsSub: el('alerts-subtext'),
+        summaryOutstanding: el('summary-outstanding'),
+        outstandingSub: el('outstanding-subtext'),
+        summaryTotal: el('summary-total'),
+        populationSub: el('population-subtext'),
+        summaryBoys: el('summary-boys'),
+        summaryGirls: el('summary-girls'),
+        summaryCleared: el('summary-cleared'),
+        summaryDiscipline: el('summary-discipline'),
+        reasonsList: el('reasons-list'),
+        lastFive: el('last-five-attendance'),
+        studentSpotlightBody: el('student-spotlight-body'),
+        financeWatchBody: el('finance-watch-body'),
+        inventoryList: el('inventory-list'),
+        booksCoverage: el('books-coverage'),
+        booksCoverageSub: el('books-coverage-sub'),
+        booksCoverageBody: el('books-coverage-body'),
+        alertList: el('alert-list'),
+        welcome: el('welcome'),
+        welcomeMsg: el('welcome-msg'),
+        welcomeSub: el('welcome-sub'),
+        welcomeContinue: el('welcome-continue'),
+        toast: el('toast'),
+        studentModal: el('studentModal'),
+        studentModalBody: el('studentModalBody'),
+        shiftModal: el('shiftModal'),
+        shiftForm: el('shiftForm'),
+        shiftReason: el('shiftReason'),
+        shiftStudentName: el('shiftStudentName'),
+        shiftStudentInfo: el('shiftStudentInfo'),
+        preformItem: el('preform-item'),
+        graduationItem: el('graduation-item')
+      };
 
-    // Charts
-    let subjectsChart = null, attendanceChart = null;
+      const charts = { attendance: null, gender: null, finance: null, inventory: null };
 
-    function showToast(msg, t=3000){ toast.textContent = msg; toast.style.display = 'block'; setTimeout(()=>{ toast.style.display='none'; }, t); }
-    function speak(msg){ if(!window.speechSynthesis) return; try{ const u=new SpeechSynthesisUtterance(msg); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);}catch(e){console.warn(e)} }
+      let renderPending = false;
+      let searchTerm = '';
+      let speechEnabled = false;
+      let pendingShiftStudent = null;
+      const pathCache = {};
 
-    // Menu behaviour: three dots open sidebar
-    menu.addEventListener('click', ()=>{
-      sidebar.classList.toggle('expanded');
-      main.classList.toggle('shifted');
-      sidebar.setAttribute('aria-hidden', !sidebar.classList.contains('expanded'));
-      // show speech toggle when menu open
-      speechToggle.classList.toggle('hidden', !sidebar.classList.contains('expanded'));
-    });
+      initLayout();
+      startClock();
 
-    // nav mapping
-   function navigateTo(page){
-   const map = { academic: 'academic.html', attendance: 'Toattendancehtml/classattendance.html', discipline: 'dashboard.html', studentlist: 'ToSchoolerp/studentlist.html', books: 'Bookshtml/classbook.html' };
-   const target = map[page] || page;
-   if (page === 'academic' && currentUserClass) {
-     sessionStorage.setItem('assignedClass', currentUserClass); // Store class for academic.html
-   }
-   window.location.href = target;
- }
-    function logout(){ auth.signOut().then(()=> window.location.href='index.html'); }
+      auth.onAuthStateChanged(handleAuthState);
 
-    // start auth
-    auth.onAuthStateChanged(user=>{
-      if(!user){ window.location.href='index.html'; return; }
-      const safeEmail = user.email.replace('.', '_');
-      dbRef.ref('users/'+safeEmail).once('value').then(snap=>{
-        const ud = snap.val() || {};
-        if(ud.role !== 'teacher'){ alert('Unauthorized: only teachers allowed'); auth.signOut(); window.location.href='index.html'; return; }
-        const display = user.displayName || user.email.split('@')[0];
-        currentUserClass = ud.class || ud['class'] || ud.classLevel || 'Class 7';
-        userBadge.innerHTML = `<strong>${display}</strong> · <span class="text-sm text-gray-600">${currentUserClass}</span>`;
-        // Show Preform One icon only for Class 7 teacher
-        if (user.email === 'ssclass72023@gmail.com' || localStorage.getItem('preformAccess') === 'true') {
-          document.getElementById('preform-item').style.display = 'flex';
+      function initLayout() {
+        const menuButton = document.getElementById('menu-dots');
+        menuButton.addEventListener('click', () => {
+          els.sidebar.classList.toggle('expanded');
+          els.main.classList.toggle('shifted');
+          const showSpeech = els.sidebar.classList.contains('expanded');
+          if (els.speechToggle) {
+            els.speechToggle.classList.toggle('hidden', !showSpeech);
+          }
+        });
+
+        if (window.innerWidth >= 1280) {
+          els.sidebar.classList.add('expanded');
+          els.main.classList.add('shifted');
         }
 
-        // Graduation suite visibility gate
-        if (graduationItem) {
-          graduationItem.style.display = GRAD_EMAILS.has(user.email.toLowerCase()) ? 'flex' : 'none';
-        }
+        window.addEventListener('resize', () => {
+          if (window.innerWidth >= 1280) {
+            els.sidebar.classList.add('expanded');
+            els.main.classList.add('shifted');
+          }
+        });
 
-        // brief welcome
-        document.getElementById('welcome-msg').textContent = `WELCOME ${display.toUpperCase()}`;
-        document.getElementById('welcome-sub').textContent = `You are viewing ${currentUserClass}`;
-        document.getElementById('welcome').style.display = 'flex';
-        speak(`Welcome ${display}. You are viewing ${currentUserClass}`);
-        setTimeout(()=>{ document.getElementById('welcome').style.display='none'; }, 2200);
-
-        attachListeners();
-      });
-    });
-
-    document.getElementById('welcome-close').addEventListener('click', ()=> document.getElementById('welcome').style.display='none');
-
-    function attachListeners(){
-      // students: we filter client-side by classLevel property (some projects store classLevel)
-      dbRef.ref('students').on('value', snap=>{
-        const all = snap.val() || {};
-        students = Object.values(all).filter(s => (s.classLevel===currentUserClass) || (s.class===currentUserClass) );
-        updateSummary();
-      });
-
-      // attendance for the class (path often attendance/<class>)
-      dbRef.ref(`attendance/${currentUserClass}`).on('value', snap=>{
-        const newAtt = snap.val() || {};
-        const hash = JSON.stringify(newAtt);
-        if(prevAttendHash && prevAttendHash !== hash){ speak('Attendance updated for ' + currentUserClass); showToast('Attendance updated'); }
-        prevAttendHash = hash; attendance = newAtt; updateSummary();
-      });
-
-      // scores often stored as scores/<year>/<class>
-      const year = new Date().getFullYear();
-      dbRef.ref(`scores/${year}/${currentUserClass}`).on('value', snap=>{
-        const newScores = snap.val() || {};
-        const hash = JSON.stringify(newScores);
-        if(prevScoresHash && prevScoresHash !== hash){ speak('Scores updated for ' + currentUserClass); showToast('Scores updated'); }
-        prevScoresHash = hash; scores = newScores; updateSummary();
-      });
-
-      // discipline
-      dbRef.ref('discipline').orderByChild('class').equalTo(currentUserClass).on('value', snap=>{
-        const newD = snap.val() || {};
-        const hash = JSON.stringify(newD);
-        if(prevDisciplineHash && prevDisciplineHash !== hash){ speak('Discipline incidents updated for ' + currentUserClass); showToast('Discipline updated'); }
-        prevDisciplineHash = hash; discipline = newD; updateSummary();
-      });
-    }
-
-    // compute and render summary + charts
-    function updateSummary(){
-      // Academic average
-      let totalAvg = 0; let count=0; const subjectAggregates = {};
-      students.forEach(s=>{
-        const adm = s.admissionNumber || s.admission || s.id;
-        // iterate scores structure: scores -> examKey -> month -> adm -> {subject: {score,max}}
-        Object.values(scores||{}).forEach(exam => {
-          Object.values(exam||{}).forEach(monthObj => {
-            const studentRow = monthObj[adm] || {};
-            Object.entries(studentRow).forEach(([subject, val])=>{
-              const score = Number(val.score||0); const max = Number(val.max||100);
-              const pct = max? (score/max)*100 : 0;
-              subjectAggregates[subject] = subjectAggregates[subject] || {sum:0, n:0};
-              subjectAggregates[subject].sum += pct; subjectAggregates[subject].n += 1;
-              totalAvg += pct; count++;
-            });
+        document.querySelectorAll('[data-link]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const target = btn.getAttribute('data-link');
+            if (target) navigateTo(target);
           });
         });
+
+        document.querySelectorAll('.metric-card').forEach(card => {
+          card.addEventListener('click', () => {
+            const target = card.getAttribute('data-link');
+            if (target) navigateTo(target);
+          });
+        });
+
+        if (els.studentSearch) {
+          els.studentSearch.addEventListener('input', (event) => {
+            searchTerm = (event.target.value || '').toLowerCase();
+            scheduleRender();
+          });
+        }
+
+        if (els.speechToggle) {
+          els.speechToggle.addEventListener('click', () => {
+            speechEnabled = !speechEnabled;
+            els.speechToggle.innerHTML = speechEnabled ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
+            showToast(`Speech ${speechEnabled ? 'enabled' : 'muted'}`);
+          });
+        }
+
+        document.querySelectorAll('.modal').forEach(modal => {
+          modal.addEventListener('click', (event) => {
+            if (event.target === modal) {
+              hideModal(modal);
+            }
+          });
+        });
+
+        document.querySelectorAll('[data-close]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const targetId = btn.getAttribute('data-close');
+            const modal = document.getElementById(targetId);
+            if (modal) hideModal(modal);
+          });
+        });
+
+        if (els.welcomeContinue) {
+          els.welcomeContinue.addEventListener('click', () => hideModal(els.welcome));
+        }
+
+        const welcomeClose = document.getElementById('welcome-close');
+        if (welcomeClose) welcomeClose.addEventListener('click', () => hideModal(els.welcome));
+
+        if (els.studentSpotlightBody) {
+          els.studentSpotlightBody.addEventListener('click', (event) => {
+            const row = event.target.closest('tr[data-student]');
+            if (row) {
+              openStudentModal(row.getAttribute('data-student'));
+            }
+          });
+        }
+
+        if (els.alertList) {
+          els.alertList.addEventListener('click', (event) => {
+            const button = event.target.closest('[data-shift]');
+            if (button) {
+              const lookupKey = button.getAttribute('data-shift');
+              const student = state.studentIndex.get(lookupKey);
+              if (student) {
+                openShiftModal(student);
+              }
+            }
+          });
+        }
+
+        if (els.shiftForm) {
+          els.shiftForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!pendingShiftStudent) {
+              showToast('No student selected.');
+              return;
+            }
+            const reason = (els.shiftReason.value || '').trim();
+            if (!reason) {
+              showToast('Please capture the shift reason or destination.');
+              return;
+            }
+            try {
+              const path = await getShiftedPath();
+              const node = `${path}/${pendingShiftStudent.lookupKey || normalizeAdm(pendingShiftStudent.adm) || pendingShiftStudent.id}`;
+              await db.ref(node).set({
+                name: pendingShiftStudent.name,
+                adm: pendingShiftStudent.adm || '',
+                class: userCtx.className,
+                recordedBy: userCtx.email,
+                reason,
+                contact: pendingShiftStudent.contact || '',
+                time: Date.now()
+              });
+              showToast('Shift record saved.');
+              hideModal(els.shiftModal);
+            } catch (err) {
+              console.error('Shift save failed', err);
+              showToast('Could not save shift record. Check your network.');
+            }
+          });
+        }
+      }
+
+      function startClock() {
+        const update = () => {
+          const now = new Date();
+          if (els.heroDate) {
+            els.heroDate.textContent = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+          }
+          if (els.heroClock) {
+            els.heroClock.textContent = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+          }
+        };
+        update();
+        setInterval(update, 60 * 1000);
+      }
+
+      async function handleAuthState(user) {
+        if (!user) {
+          window.location.href = 'index.html';
+          return;
+        }
+        userCtx.displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'Teacher');
+        userCtx.email = user.email || '';
+        userCtx.safeEmail = userCtx.email.replace(/\./g, '_');
+
+        try {
+          const snap = await db.ref(`users/${userCtx.safeEmail}`).get();
+          const profile = snap.exists() ? snap.val() : {};
+          if (profile.role && String(profile.role).toLowerCase() !== 'teacher') {
+            alert('This dashboard is restricted to teacher accounts.');
+            await auth.signOut();
+            window.location.href = 'index.html';
+            return;
+          }
+          userCtx.className = profile.class || profile.classLevel || profile.streamClass || 'Class 7';
+          userCtx.safeClassKey = encodeURIComponent(userCtx.className);
+
+          if (els.teacherName) els.teacherName.textContent = userCtx.displayName;
+          if (els.heroClass) els.heroClass.textContent = userCtx.className;
+          if (els.userBadge) {
+            els.userBadge.innerHTML = `<strong>${userCtx.displayName}</strong><div class="text-xs text-slate-500">${userCtx.email}</div>`;
+          }
+
+          if (profile.displaySpeech === true) {
+            speechEnabled = true;
+            if (els.speechToggle) {
+              els.speechToggle.classList.remove('hidden');
+              els.speechToggle.innerHTML = '<i class="fas fa-volume-up"></i>';
+            }
+          }
+
+          if (els.preformItem) {
+            if (userCtx.email === 'ssclass72023@gmail.com' || localStorage.getItem('preformAccess') === 'true') {
+              els.preformItem.classList.remove('hidden');
+            }
+          }
+          if (els.graduationItem) {
+            const GRAD_EMAILS = ['ssclass42023@gmail.com', 'socratesschool2020@gmail.com'];
+            if (GRAD_EMAILS.includes(userCtx.email.toLowerCase())) {
+              els.graduationItem.classList.remove('hidden');
+            } else {
+              els.graduationItem.classList.add('hidden');
+            }
+          }
+
+          showWelcome(userCtx.displayName, userCtx.className);
+
+          await initializeFeeds();
+        } catch (err) {
+          console.error('Auth bootstrap error', err);
+          showToast('Unable to load teacher profile.');
+        }
+      }
+
+      function showWelcome(name, className) {
+        if (!els.welcome) return;
+        els.welcomeMsg.textContent = `Welcome ${name.toUpperCase()}`;
+        els.welcomeSub.textContent = `Monitoring ${className}. Let us make today count.`;
+        els.welcome.classList.add('show');
+        setTimeout(() => hideModal(els.welcome), 2600);
+      }
+
+      async function initializeFeeds() {
+        await subscribeStudents(userCtx.className);
+        subscribeAttendance(userCtx.className);
+        subscribeFees(userCtx.className);
+        subscribeDiscipline(userCtx.className);
+        subscribeBooks(userCtx.className);
+        subscribeInventory(userCtx.className);
+        subscribeShifted(userCtx.className);
+      }
+
+      async function subscribeStudents(className) {
+        const paths = ['students', 'Students', 'studentsList', 'StudentsList', 'studentList'];
+        const resolved = await resolveFirstPath(paths);
+        const path = resolved || paths[0];
+        pathCache.students = path;
+        db.ref(path).on('value', snap => {
+          const raw = snap.val() || {};
+          handleStudentsSnapshot(raw, className);
+        }, err => console.error('students listener error', err));
+      }
+
+      function handleStudentsSnapshot(raw, className) {
+        const list = [];
+        const needle = normalizeClassName(className);
+        Object.entries(raw).forEach(([key, data]) => {
+          if (!data || typeof data !== 'object') return;
+          const classLabel = data.class || data.classLevel || data.currentClass || data.grade || '';
+          const normalized = normalizeClassName(classLabel);
+          if (needle && normalized && !(normalized.includes(needle) || needle.includes(normalized))) return;
+          const student = normalizeStudentRecord(key, data, classLabel);
+          list.push(student);
+        });
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        state.students = list;
+        state.studentIndex = new Map(list.map(s => [s.lookupKey, s]));
+        if (els.heroEnrollment) {
+          els.heroEnrollment.textContent = `${list.length} students`;
+        }
+        mergeFeesIntoStudents();
+        updateTodaysTotals();
+        refreshAlerts();
+        scheduleRender();
+      }
+
+      function normalizeStudentRecord(key, data, classLabel) {
+        const admRaw = data.admissionNumber || data.admNo || data.admission || data.adm || data.studentId || data.pupilId || key;
+        const adm = String(admRaw || '').trim();
+        const lookupKey = normalizeAdm(adm || key);
+        const nameParts = [data.firstName, data.middleName, data.lastName].filter(Boolean);
+        const name = (nameParts.join(' ').trim() || data.name || data.fullName || 'Student').replace(/\s+/g, ' ');
+        const gender = normalizeGender(data.gender || data.sex || '');
+        const parent = data.parentName || data.guardianName || data.caretaker || '';
+        const contact = data.parentContact || data.parentPhone || data.guardianPhone || data.contact || data.phone || '';
+        const feeDue = toNumber(data.totalFee || data.feePerYear || data.feeDue || data.required);
+        const feePaid = toNumber(data.feesPaid || data.feePaid || data.paidAmount || data.paid || 0);
+        const balance = data.balance != null ? toNumber(data.balance) : Math.max(0, feeDue - feePaid);
+        return {
+          id: key,
+          adm,
+          lookupKey,
+          name,
+          classLabel: classLabel || userCtx.className,
+          gender,
+          parent,
+          contact,
+          feeDue,
+          feePaid,
+          balance,
+          picture: data.photoUrl || data.passport || data.avatar || '',
+          raw: data
+        };
+      }
+
+      function subscribeAttendance(className) {
+        db.ref(`attendance/${className}`).on('value', snap => {
+          state.attendance = snap.val() || {};
+          updateTodaysTotals();
+          refreshAlerts();
+          scheduleRender();
+        }, err => console.error('attendance listener error', err));
+      }
+
+      function subscribeFees(className) {
+        db.ref(`fees/${YEAR}/${className}`).on('value', snap => {
+          const data = snap.val() || {};
+          const mapped = {};
+          Object.entries(data).forEach(([adm, value]) => {
+            const key = normalizeAdm(adm);
+            const required = toNumber(value.required || value.expected || value.total || 0);
+            const paid = toNumber(value.paid || value.paidAmount || value.totalPaid || 0);
+            const balance = value.balance != null ? toNumber(value.balance) : Math.max(0, required - paid);
+            mapped[key] = { required, paid, balance, raw: value };
+          });
+          state.fees = mapped;
+          mergeFeesIntoStudents();
+          refreshAlerts();
+          scheduleRender();
+        }, err => console.error('fees listener error', err));
+      }
+
+      function subscribeDiscipline(className) {
+        db.ref('discipline').orderByChild('class').equalTo(className).on('value', snap => {
+          const data = snap.val() || {};
+          state.discipline = Object.values(data);
+          refreshAlerts();
+          scheduleRender();
+        }, err => console.error('discipline listener error', err));
+      }
+
+      function subscribeBooks(className) {
+        const path = `class_books/${encodeURIComponent(className)}`;
+        pathCache.books = path;
+        db.ref(path).on('value', snap => {
+          handleBooksSnapshot(snap.val() || {});
+        }, err => console.error('books listener error', err));
+      }
+
+      async function subscribeInventory(className) {
+        const encoded = encodeURIComponent(className);
+        const paths = [
+          `class_inventory/${encoded}`,
+          `classInventory/${encoded}`,
+          `inventory/${encoded}`,
+          `inventory/${className}`,
+          `classes/${encoded}/inventory`,
+          `Classes/${encoded}/inventory`
+        ];
+        const resolved = await resolveFirstPath(paths);
+        if (!resolved) {
+          state.inventory = {};
+          state.inventoryItems = [];
+          scheduleRender();
+          return;
+        }
+        pathCache.inventory = resolved;
+        db.ref(resolved).on('value', snap => {
+          handleInventorySnapshot(snap.val() || {});
+        }, err => console.error('inventory listener error', err));
+      }
+
+      async function subscribeShifted(className) {
+        const encoded = encodeURIComponent(className);
+        const paths = [
+          `shiftedStudents/${encoded}`,
+          `shifted/${encoded}`,
+          `shifted/${className}`,
+          `studentsShifted/${encoded}`
+        ];
+        const resolved = await resolveFirstPath(paths);
+        const path = resolved || `shiftedStudents/${encoded}`;
+        pathCache.shifted = path;
+        db.ref(path).on('value', snap => {
+          state.shifted = snap.val() || {};
+          refreshAlerts();
+          scheduleRender();
+        }, err => console.error('shifted listener error', err));
+      }
+
+      async function resolveFirstPath(paths) {
+        for (const p of paths) {
+          try {
+            const snap = await db.ref(p).limitToFirst(1).get();
+            if (snap && snap.exists && snap.exists()) return p;
+          } catch (err) {
+            // ignore
+          }
+        }
+        return null;
+      }
+
+      function mergeFeesIntoStudents() {
+        let required = 0;
+        let paid = 0;
+        let balance = 0;
+        let clearedCount = 0;
+        let owingCount = 0;
+        state.students.forEach(student => {
+          const feeRec = state.fees[student.lookupKey];
+          if (feeRec) {
+            student.feeDue = feeRec.required;
+            student.feePaid = feeRec.paid;
+            student.balance = feeRec.balance;
+          } else {
+            student.balance = Math.max(0, (student.feeDue || 0) - (student.feePaid || 0));
+          }
+          required += student.feeDue || 0;
+          paid += student.feePaid || 0;
+          if (student.balance > 0.5) {
+            balance += student.balance;
+            owingCount += 1;
+          } else {
+            clearedCount += 1;
+          }
+        });
+        state.financeTotals = { required, paid, balance, cleared: clearedCount, owing: owingCount };
+      }
+
+      function handleBooksSnapshot(data) {
+        const rows = [];
+        let haveTotal = 0;
+        let requiredTotal = 0;
+        Object.entries(data).forEach(([id, book]) => {
+          if (!book || typeof book !== 'object') return;
+          const title = book.title || id;
+          const subject = book.subject || book.topic || '-';
+          const have = toNumber(book.haveCount || book.have || (book.studentsWithBook ? Object.keys(book.studentsWithBook).length : 0));
+          const required = toNumber(book.required || book.totalNeeded || book.expected || 0);
+          const missing = required ? Math.max(0, required - have) : toNumber(book.missingCount || book.missing || book.shortage || 0);
+          rows.push({ id, title, subject, have, missing });
+          haveTotal += have;
+          requiredTotal += required || have + missing;
+        });
+        rows.sort((a, b) => b.missing - a.missing);
+        state.books = data;
+        state.booksRows = rows;
+        const coverage = requiredTotal ? Math.round((haveTotal / requiredTotal) * 100) : (rows.length ? 100 : 0);
+        const totalMissing = rows.reduce((sum, row) => sum + row.missing, 0);
+        state.booksSummary = { coveragePct: coverage, totalMissing };
+        scheduleRender();
+      }
+
+      function handleInventorySnapshot(data) {
+        state.inventory = data;
+        const items = [];
+        Object.entries(data).forEach(([key, value]) => {
+          if (value == null) return;
+          let total = 0;
+          let available = 0;
+          let damaged = 0;
+          if (typeof value === 'number') {
+            total = toNumber(value);
+            available = total;
+          } else if (typeof value === 'object') {
+            total = toNumber(value.total || value.count || value.expected || 0);
+            available = toNumber(value.available || value.good || value.inUse || 0);
+            damaged = toNumber(value.damaged || value.broken || value.needingRepair || value.missing || 0);
+            if (!total && (available || damaged)) total = available + damaged;
+          }
+          items.push({ name: prettifyKey(key), total, available, damaged });
+        });
+        items.sort((a, b) => b.total - a.total);
+        state.inventoryItems = items;
+        scheduleRender();
+      }
+
+      function updateTodaysTotals() {
+        const now = new Date();
+        const dateKey = now.toISOString().slice(0, 10);
+        const monthKey = dateKey.slice(0, 7);
+        const monthObj = state.attendance[monthKey] || {};
+        const todayObj = monthObj[dateKey] || {};
+        let present = 0;
+        let absent = 0;
+        let partial = 0;
+        let special = 0;
+        const reasons = {};
+        const recorded = Object.keys(todayObj || {}).length;
+
+        Object.values(todayObj).forEach(rec => {
+          const status = classifyAttendance(rec);
+          if (status === 'present') present += 1;
+          else if (status === 'absent') {
+            absent += 1;
+            const note = rec.reason || rec.note || rec.notes || rec.explain || 'No reason shared';
+            reasons[note] = (reasons[note] || 0) + 1;
+          } else if (status === 'special') {
+            special += 1;
+            const note = rec.reason || rec.code || rec.am || rec.pm || 'Special code';
+            reasons[note] = (reasons[note] || 0) + 1;
+          } else {
+            partial += 1;
+          }
+        });
+
+        state.todays = { present, absent, partial, special, reasons, recorded };
+      }
+
+      function refreshAlerts() {
+        const alerts = [];
+        const shiftedKeys = new Set(Object.keys(state.shifted || {}).map(normalizeAdm));
+
+        state.students.forEach(student => {
+          const { streak, lastDate, reason } = calculateAbsenceStreak(student);
+          if (streak >= CLASS_ALERT_ABSENCE_DAYS && !shiftedKeys.has(student.lookupKey)) {
+            alerts.push({ type: 'attendance', student, streak, lastDate, reason: reason || 'Not provided' });
+          }
+        });
+
+        state.students
+          .filter(student => (student.balance || 0) > 0)
+          .sort((a, b) => b.balance - a.balance)
+          .slice(0, 3)
+          .forEach(student => {
+            alerts.push({ type: 'finance', student, balance: student.balance });
+          });
+
+        const disciplineEntries = Array.isArray(state.discipline) ? state.discipline : Object.values(state.discipline || {});
+        disciplineEntries
+          .sort((a, b) => (b.time || 0) - (a.time || 0))
+          .slice(0, 3)
+          .forEach(incident => {
+            alerts.push({ type: 'discipline', incident, student: findStudentByAny(incident.adm || incident.studentAdm || incident.admission || incident.studentId), recordedAt: incident.time || incident.date || '' });
+          });
+
+        state.alerts = alerts;
+      }
+
+      function scheduleRender() {
+        if (renderPending) return;
+        renderPending = true;
+        window.requestAnimationFrame(() => {
+          renderPending = false;
+          renderDashboard();
+        });
+      }
+
+      function renderDashboard() {
+        renderMetrics();
+        renderReasons();
+        renderLastFive();
+        renderAttendanceTrend();
+        renderGenderChart();
+        renderStudentSpotlight();
+        renderFinanceSection();
+        renderInventorySection();
+        renderBooksSection();
+        renderAlerts();
+      }
+
+      function renderMetrics() {
+        const total = state.students.length;
+        const present = state.todays.present || 0;
+        const absent = state.todays.absent || 0;
+        const special = state.todays.special || 0;
+
+        if (els.summaryPresent) {
+          els.summaryPresent.textContent = formatNumber(present);
+          const pct = total ? Math.round((present / total) * 100) : 0;
+          els.presentSub.textContent = total ? `${pct}% of class recorded` : 'Awaiting roll call';
+        }
+        if (els.summaryAbsent) {
+          els.summaryAbsent.textContent = formatNumber(absent);
+          if (absent) {
+            els.absentSub.textContent = `${absent} learner${absent > 1 ? 's' : ''} flagged for follow-up`;
+          } else if (special) {
+            els.absentSub.textContent = `${special} special codes (S/LE/MT)`;
+          } else {
+            els.absentSub.textContent = 'No absentees recorded';
+          }
+        }
+        if (els.summaryAlerts) {
+          els.summaryAlerts.textContent = formatNumber(state.alerts.length);
+          els.alertsSub.textContent = state.alerts.length
+            ? 'Review and close pending actions'
+            : 'All pupils accounted for';
+        }
+        if (els.summaryOutstanding) {
+          els.summaryOutstanding.textContent = formatCurrency(state.financeTotals.balance);
+          els.outstandingSub.textContent = state.financeTotals.owing
+            ? `${state.financeTotals.owing} learner${state.financeTotals.owing > 1 ? 's' : ''} owing`
+            : 'Everyone cleared';
+        }
+        if (els.summaryTotal) {
+          els.summaryTotal.textContent = formatNumber(total);
+          els.populationSub.textContent = total ? 'Registered in this class' : 'Loading registry...';
+        }
+        if (els.summaryBoys) {
+          const boys = state.students.filter(s => s.gender === 'M').length;
+          const girls = state.students.filter(s => s.gender === 'F').length;
+          els.summaryBoys.textContent = formatNumber(boys);
+          if (els.summaryGirls) els.summaryGirls.textContent = formatNumber(girls);
+        }
+        if (els.summaryCleared) {
+          els.summaryCleared.textContent = formatNumber(state.financeTotals.cleared);
+        }
+        if (els.summaryDiscipline) {
+          const count = Array.isArray(state.discipline) ? state.discipline.length : Object.keys(state.discipline || {}).length;
+          els.summaryDiscipline.textContent = formatNumber(count);
+        }
+      }
+
+      function renderReasons() {
+        if (!els.reasonsList) return;
+        els.reasonsList.innerHTML = '';
+        const entries = Object.entries(state.todays.reasons || {}).filter(([, count]) => count > 0);
+        if (!entries.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-state';
+          empty.textContent = 'No reasons captured yet. Update attendance remarks for quick insight.';
+          els.reasonsList.appendChild(empty);
+          return;
+        }
+        entries.sort((a, b) => b[1] - a[1]);
+        entries.slice(0, 6).forEach(([reason, count]) => {
+          const block = document.createElement('div');
+          block.className = 'glass-card bg-white/80 border border-white/70 rounded-2xl p-4 flex items-center gap-4';
+          block.innerHTML = `
+            <div class="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 grid place-items-center font-semibold">${count}</div>
+            <div>
+              <p class="text-sm font-semibold text-slate-700">${reason}</p>
+              <p class="text-xs text-slate-500">Learners impacted today</p>
+            </div>
+          `;
+          els.reasonsList.appendChild(block);
+        });
+      }
+
+      function renderLastFive() {
+        if (!els.lastFive) return;
+        els.lastFive.innerHTML = '';
+        const summaries = getRecentAttendanceSummaries(5);
+        if (!summaries.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td colspan="4" class="text-xs text-slate-500 py-6">No historical attendance stored yet.</td>`;
+          els.lastFive.appendChild(row);
+          return;
+        }
+        summaries.forEach(entry => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${formatDate(entry.date)}</td>
+            <td>${formatNumber(entry.present)}</td>
+            <td>${formatNumber(entry.absent)}</td>
+            <td>${formatNumber(entry.special)}</td>
+          `;
+          els.lastFive.appendChild(row);
+        });
+      }
+
+      function renderAttendanceTrend() {
+        const canvas = document.getElementById('attendanceTrendChart');
+        if (!canvas) return;
+        const monthKeys = Object.keys(state.attendance || {}).sort();
+        const recent = monthKeys.slice(-6);
+        if (!recent.length) {
+          if (charts.attendance) {
+            charts.attendance.destroy();
+            charts.attendance = null;
+          }
+          return;
+        }
+        const data = recent.map(month => {
+          const days = state.attendance[month] || {};
+          let present = 0;
+          let total = 0;
+          Object.values(days).forEach(day => {
+            Object.values(day || {}).forEach(rec => {
+              const status = classifyAttendance(rec);
+              if (status === 'present') present += 1;
+              total += 1;
+            });
+          });
+          return total ? Math.round((present / total) * 100) : 0;
+        });
+        const ctx = canvas.getContext('2d');
+        if (charts.attendance) charts.attendance.destroy();
+        charts.attendance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: recent.map(m => formatMonthLabel(m)),
+            datasets: [{
+              label: 'Presence %',
+              data,
+              borderColor: '#2563eb',
+              backgroundColor: 'rgba(37,99,235,0.18)',
+              tension: 0.35,
+              fill: true,
+              pointRadius: 3,
+              pointBackgroundColor: '#2563eb'
+            }]
+          },
+          options: {
+            scales: {
+              y: { beginAtZero: true, max: 100 }
+            },
+            plugins: {
+              legend: { display: false }
+          }
+        }
       });
-      const classAvg = count? (totalAvg/count): 0;
-      document.getElementById('class-score').textContent = classAvg? classAvg.toFixed(1)+'%':'-';
+      }
 
-      // Subject chart
-      const subjects = Object.keys(subjectAggregates);
-      const subjData = subjects.map(s => (subjectAggregates[s].sum/subjectAggregates[s].n).toFixed(1));
-      drawBar('subjectsChart', subjects, subjData, 'Avg % by Subject');
+      function renderGenderChart() {
+        const canvas = document.getElementById('genderChart');
+        if (!canvas) return;
+        const boys = state.students.filter(s => s.gender === 'M').length;
+        const girls = state.students.filter(s => s.gender === 'F').length;
+        const other = state.students.length - (boys + girls);
+        const ctx = canvas.getContext('2d');
+        if (charts.gender) charts.gender.destroy();
+        charts.gender = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Boys', 'Girls', 'Other'],
+            datasets: [{
+              data: [boys, girls, Math.max(0, other)],
+              backgroundColor: ['#38bdf8', '#f472b6', '#cbd5f5'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            cutout: '70%',
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12 } }
+            }
+          }
+        });
+      }
 
-      // Attendance percent (simple heuristic: present/total)
-      // attendance may contain daily records: { "2025-09": { adm1: {present: 20, total:21}, ... } }
-      let presentSum = 0, totalSum = 0;
-      Object.values(attendance||{}).forEach(month => {
-        Object.values(month||{}).forEach(rec => { if(rec.present!=null && rec.total!=null){ presentSum+=Number(rec.present); totalSum+=Number(rec.total); } });
-      });
-      const presentPct = totalSum? Math.round((presentSum/totalSum)*100): 0;
-      document.getElementById('present-percent').textContent = presentPct? presentPct+'%':'-';
+      function renderStudentSpotlight() {
+        if (!els.studentSpotlightBody) return;
+        els.studentSpotlightBody.innerHTML = '';
+        if (!state.students.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td colspan="5" class="text-xs text-slate-500 py-6">Student profile loading...</td>`;
+          els.studentSpotlightBody.appendChild(row);
+          return;
+        }
+        const filtered = state.students
+          .filter(student => {
+            if (!searchTerm) return true;
+            return (
+              student.name.toLowerCase().includes(searchTerm) ||
+              (student.adm || '').toLowerCase().includes(searchTerm) ||
+              (student.parent || '').toLowerCase().includes(searchTerm) ||
+              (student.contact || '').toLowerCase().includes(searchTerm)
+            );
+          })
+          .sort((a, b) => b.balance - a.balance)
+          .slice(0, 8);
 
-      // attendance trend chart (monthly totals)
-      const months = Object.keys(attendance||{}).sort();
-      const monthVals = months.map(m => {
-        const mm = attendance[m]||{}; let p=0,t=0; Object.values(mm).forEach(r=>{ p+= Number(r.present||0); t+=Number(r.total||0); });
-        return t? Math.round((p/t)*100): 0;
-      });
-      drawLine('attendanceChart', months, monthVals, 'Monthly % Present');
+        if (!filtered.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td colspan="5" class="text-xs text-slate-500 py-6">No students match your search.</td>`;
+          els.studentSpotlightBody.appendChild(row);
+          return;
+        }
 
-      // Discipline
-      const incCount = Object.keys(discipline||{}).length;
-      document.getElementById('incidents-count').textContent = incCount || 0;
-    }
+        filtered.forEach(student => {
+          const latest = getLatestAttendanceSummary(student);
+          const row = document.createElement('tr');
+          row.className = 'cursor-pointer hover:bg-white/70 transition';
+          row.setAttribute('data-student', student.lookupKey);
+          row.innerHTML = `
+            <td>
+              <div class="font-semibold text-slate-700">${student.name}</div>
+              <div class="text-xs text-slate-400">ADM ${student.adm || student.id}</div>
+            </td>
+            <td>${student.parent || '<span class="text-xs text-slate-400">-</span>'}</td>
+            <td>${student.contact || '<span class="text-xs text-slate-400">-</span>'}</td>
+            <td class="${student.balance > 0 ? 'text-rose-600 font-semibold' : 'text-emerald-600'}">${formatCurrency(student.balance)}</td>
+            <td><span class="status-pill ${latest.statusClass}">${latest.statusLabel}</span></td>
+          `;
+          els.studentSpotlightBody.appendChild(row);
+        });
+      }
 
-    // Chart helpers (destroy previous to avoid memory leaks)
-    function drawBar(el, labels, data, label){
-      const ctx = document.getElementById(el).getContext('2d');
-      if(window[el]) window[el].destroy();
-      window[el] = new Chart(ctx, { type:'bar', data:{ labels, datasets:[{ label, data }] }, options:{ responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, max:100 } } } });
-    }
-    function drawLine(el, labels, data, label){
-      const ctx = document.getElementById(el).getContext('2d');
-      if(window[el]) window[el].destroy();
-      window[el] = new Chart(ctx, { type:'line', data:{ labels, datasets:[{ label, data, tension:0.2, fill:false }] }, options:{ responsive:true, scales:{ y:{ beginAtZero:true, max:100 } } } });
-    }
+      function renderFinanceSection() {
+        renderFinanceChart();
+        if (!els.financeWatchBody) return;
+        els.financeWatchBody.innerHTML = '';
+        const owing = state.students.filter(s => s.balance > 0.5).sort((a, b) => b.balance - a.balance).slice(0, 5);
+        if (!owing.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td colspan="4" class="text-xs text-slate-500 py-6">All learners are cleared. Great job!</td>`;
+          els.financeWatchBody.appendChild(row);
+          return;
+        }
+        owing.forEach(student => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>
+              <div class="font-semibold text-slate-700">${student.name}</div>
+              <div class="text-xs text-slate-400">ADM ${student.adm || student.id}</div>
+            </td>
+            <td class="text-rose-600 font-semibold">${formatCurrency(student.balance)}</td>
+            <td>${student.parent || '<span class="text-xs text-slate-400">-</span>'}</td>
+            <td>${student.contact || '<span class="text-xs text-slate-400">-</span>'}</td>
+          `;
+          els.financeWatchBody.appendChild(row);
+        });
+      }
 
-    document.getElementById('open-academic').addEventListener('click', ()=>{ navigateTo('academic'); });
+      function renderFinanceChart() {
+        const canvas = document.getElementById('financeChart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const cleared = state.financeTotals.cleared || 0;
+        const owing = state.financeTotals.owing || 0;
+        if (charts.finance) charts.finance.destroy();
+        charts.finance = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: ['Cleared', 'Owing'],
+            datasets: [{
+              data: [cleared, owing],
+              backgroundColor: ['#10b981', '#f97316'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            cutout: '72%',
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12 } }
+            }
+          }
+        });
+      }
 
-    let speechEnabled = true;
-    speechToggle.addEventListener('click', ()=>{ speechEnabled = !speechEnabled; speechToggle.innerHTML = speechEnabled? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>'; showToast('Speech ' + (speechEnabled? 'enabled':'disabled')); });
-    const _speak = speak;
-    speak = function(msg){ if(!speechEnabled) return; _speak(msg); };
+      function renderInventorySection() {
+        const canvas = document.getElementById('inventoryChart');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!state.inventoryItems || !state.inventoryItems.length) {
+          if (els.inventoryList) {
+            els.inventoryList.innerHTML = '<li class="empty-state">No inventory data yet. Capture desks, chairs, and supplies.</li>';
+          }
+          if (charts.inventory) {
+            charts.inventory.destroy();
+            charts.inventory = null;
+          }
+          return;
+        }
+
+        if (els.inventoryList) {
+          els.inventoryList.innerHTML = '';
+          state.inventoryItems.slice(0, 6).forEach(item => {
+            const li = document.createElement('li');
+            const utilisation = item.total ? Math.round((item.available / item.total) * 100) : 0;
+            li.innerHTML = `
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-semibold text-slate-700">${item.name}</div>
+                  <div class="text-xs text-slate-400">${formatNumber(item.available)} available · ${formatNumber(item.damaged)} needing repair</div>
+                </div>
+                <div class="text-sm font-semibold text-slate-600">${utilisation}%</div>
+              </div>
+            `;
+            els.inventoryList.appendChild(li);
+          });
+        }
+
+        const labels = state.inventoryItems.slice(0, 6).map(item => item.name);
+        const totals = state.inventoryItems.slice(0, 6).map(item => item.total);
+        const available = state.inventoryItems.slice(0, 6).map(item => item.available);
+        if (charts.inventory) charts.inventory.destroy();
+        charts.inventory = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              { label: 'Total', data: totals, backgroundColor: 'rgba(99,102,241,0.25)', borderRadius: 8 },
+              { label: 'Available', data: available, backgroundColor: 'rgba(34,197,94,0.65)', borderRadius: 8 }
+            ]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: true } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+      }
+
+      function renderBooksSection() {
+        if (els.booksCoverage) {
+          els.booksCoverage.textContent = state.booksSummary.coveragePct ? `${state.booksSummary.coveragePct}%` : '-';
+          els.booksCoverageSub.textContent = state.booksSummary.totalMissing
+            ? `${state.booksSummary.totalMissing} copies missing`
+            : 'All learners have required books';
+        }
+        if (!els.booksCoverageBody) return;
+        els.booksCoverageBody.innerHTML = '';
+        if (!state.booksRows || !state.booksRows.length) {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td colspan="4" class="text-xs text-slate-500 py-6">No book data found. Upload class books to start tracking.</td>`;
+          els.booksCoverageBody.appendChild(row);
+          return;
+        }
+        state.booksRows.slice(0, 6).forEach(book => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${book.title}</td>
+            <td>${book.subject}</td>
+            <td>${formatNumber(book.have)}</td>
+            <td class="${book.missing > 0 ? 'text-rose-600 font-semibold' : 'text-emerald-600'}">${formatNumber(book.missing)}</td>
+          `;
+          els.booksCoverageBody.appendChild(row);
+        });
+      }
+
+      function renderAlerts() {
+        if (!els.alertList) return;
+        els.alertList.innerHTML = '';
+        if (!state.alerts.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty-state';
+          empty.textContent = 'No alerts at the moment. Keep the momentum going!';
+          els.alertList.appendChild(empty);
+          return;
+        }
+        state.alerts.forEach(alert => {
+          const card = document.createElement('div');
+          card.className = 'alert-card';
+          if (alert.type === 'attendance') {
+            card.innerHTML = `
+              <div class="alert-type"><i class="fas fa-person-circle-exclamation"></i></div>
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-rose-600">${alert.student?.name || 'Learner'} - ${alert.streak} days absent</h4>
+                  <span class="text-xs text-slate-500">${formatDate(alert.lastDate)}</span>
+                </div>
+                <p class="text-sm text-slate-600 mt-1">Reason: ${alert.reason || 'Not captured'}</p>
+                <div class="mt-3 flex gap-3">
+                  <button class="px-3 py-2 bg-rose-500 text-white rounded-lg text-xs font-semibold" data-shift="${alert.student?.lookupKey || ''}"><i class="fas fa-share-from-square mr-1"></i>Mark shifted</button>
+                  <a class="px-3 py-2 bg-white text-rose-500 rounded-lg border border-rose-200 text-xs font-semibold" href="tel:${alert.student?.contact || ''}"><i class="fas fa-phone-volume mr-1"></i>Call guardian</a>
+                </div>
+              </div>
+            `;
+          } else if (alert.type === 'finance') {
+            card.innerHTML = `
+              <div class="alert-type"><i class="fas fa-sack-dollar"></i></div>
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-amber-600">${alert.student?.name || 'Learner'} - High balance</h4>
+                  <span class="text-xs text-slate-500">Finance</span>
+                </div>
+                <p class="text-sm text-slate-600 mt-1">Outstanding: ${formatCurrency(alert.balance)}</p>
+                <p class="text-xs text-slate-500 mt-1">${alert.student?.parent || 'Guardian not set'} · ${alert.student?.contact || 'No contact'}</p>
+              </div>
+            `;
+          } else if (alert.type === 'discipline') {
+            card.innerHTML = `
+              <div class="alert-type"><i class="fas fa-exclamation"></i></div>
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-slate-700">Discipline case - ${alert.incident?.studentName || alert.student?.name || 'Learner'}</h4>
+                  <span class="text-xs text-slate-500">${formatDate(alert.recordedAt)}</span>
+                </div>
+                <p class="text-sm text-slate-600 mt-1">${alert.incident?.issue || alert.incident?.reason || 'See discipline log for details.'}</p>
+              </div>
+            `;
+          }
+          els.alertList.appendChild(card);
+        });
+      }
+
+      function openStudentModal(lookupKey) {
+        if (!lookupKey) return;
+        const student = state.studentIndex.get(lookupKey);
+        if (!student) return;
+        pendingShiftStudent = student;
+        const latest = getLatestAttendanceSummary(student);
+        const modal = els.studentModal;
+        if (!modal) return;
+        els.studentModalBody.innerHTML = `
+          <div class="space-y-5">
+            <div>
+              <h3 class="text-2xl font-semibold text-slate-800">${student.name}</h3>
+              <p class="text-sm text-slate-500">ADM ${student.adm || student.id} · ${student.classLabel}</p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="glass-card bg-white/70 border border-white/60 p-4">
+                <p class="text-xs uppercase tracking-[0.18em] text-slate-500 mb-2">Guardian</p>
+                <p class="text-sm font-semibold text-slate-700">${student.parent || 'Not provided'}</p>
+                <p class="text-xs text-slate-500">${student.contact || 'No contact number'}</p>
+              </div>
+              <div class="glass-card bg-white/70 border border-white/60 p-4">
+                <p class="text-xs uppercase tracking-[0.18em] text-slate-500 mb-2">Finance</p>
+                <p class="text-sm text-slate-700">Due: ${formatCurrency(student.feeDue)}</p>
+                <p class="text-sm text-slate-700">Paid: ${formatCurrency(student.feePaid)}</p>
+                <p class="text-sm font-semibold ${student.balance > 0 ? 'text-rose-600' : 'text-emerald-600'}">Balance: ${formatCurrency(student.balance)}</p>
+              </div>
+            </div>
+            <div class="glass-card bg-white/70 border border-white/60 p-4">
+              <p class="text-xs uppercase tracking-[0.18em] text-slate-500 mb-2">Attendance trail</p>
+              <p class="text-sm text-slate-700">${latest.summary}</p>
+              <p class="text-xs text-slate-500 mt-1">${latest.detail}</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button class="px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-500 text-white rounded-xl font-semibold" data-shift="${student.lookupKey}"><i class="fas fa-share-from-square mr-2"></i>Mark shifted</button>
+              <a class="px-4 py-2 border border-slate-300 rounded-xl text-slate-600" href="tel:${student.contact || ''}"><i class="fas fa-phone mr-2"></i>Call guardian</a>
+            </div>
+          </div>
+        `;
+        modal.classList.add('show');
+      }
+
+      function openShiftModal(student) {
+        pendingShiftStudent = student;
+        if (!els.shiftModal) return;
+        els.shiftReason.value = '';
+        els.shiftStudentName.textContent = student.name;
+        els.shiftStudentInfo.textContent = `ADM ${student.adm || student.id} · ${student.classLabel}`;
+        els.shiftModal.classList.add('show');
+      }
+
+      function hideModal(modal) {
+        if (!modal) return;
+        modal.classList.remove('show');
+      }
+
+      function showToast(message) {
+        if (!els.toast) return;
+        els.toast.textContent = message;
+        els.toast.style.display = 'block';
+        setTimeout(() => {
+          els.toast.style.display = 'none';
+        }, 2800);
+      }
+
+      function classifyAttendance(rec) {
+        if (!rec) return 'unknown';
+        const am = String(rec.am || '').toUpperCase();
+        const pm = String(rec.pm || '').toUpperCase();
+        const daily = String(rec.daily || '').toUpperCase();
+        const combo = daily || (am + pm);
+        if ((am === 'P' && pm === 'P') || combo === 'P') return 'present';
+        if (combo.includes('A') && !combo.includes('P')) return 'absent';
+        if (combo.includes('S') || combo.includes('LE') || combo.includes('MT') || combo.includes('PG')) return 'special';
+        if (combo.includes('A') && combo.includes('P')) return 'partial';
+        return 'partial';
+      }
+
+      function getRecentAttendanceSummaries(limit) {
+        const dates = getRecentAttendanceDates(limit);
+        return dates.map(date => {
+          const monthKey = date.slice(0, 7);
+          const dayObj = (state.attendance[monthKey] || {})[date] || {};
+          let present = 0;
+          let absent = 0;
+          let special = 0;
+          Object.values(dayObj).forEach(rec => {
+            const status = classifyAttendance(rec);
+            if (status === 'present') present += 1;
+            else if (status === 'absent') absent += 1;
+            else if (status === 'special') special += 1;
+          });
+          return { date, present, absent, special };
+        });
+      }
+
+      function getRecentAttendanceDates(limit = 10) {
+        const dates = [];
+        Object.entries(state.attendance || {}).forEach(([month, days]) => {
+          Object.keys(days || {}).forEach(date => dates.push(date));
+        });
+        dates.sort((a, b) => b.localeCompare(a));
+        return limit ? dates.slice(0, limit) : dates;
+      }
+
+      function getLatestAttendanceSummary(student) {
+        const dates = getRecentAttendanceDates(30);
+        for (const date of dates) {
+          const rec = findAttendanceRecordByStudent(date, student);
+          if (rec) {
+            const status = classifyAttendance(rec);
+            const mapping = {
+              present: { label: 'Present', cls: 'present', detail: `Present on ${formatDate(date)}` },
+              absent: { label: 'Absent', cls: 'absent', detail: `Absent on ${formatDate(date)} (${rec.reason || 'No reason provided'})` },
+              special: { label: 'Special', cls: 'special', detail: `Special code ${rec.am || rec.pm || rec.daily || ''} on ${formatDate(date)}` },
+              partial: { label: 'Partial', cls: 'special', detail: `Partial attendance on ${formatDate(date)}` }
+            };
+            const meta = mapping[status] || { label: 'Unknown', cls: 'special', detail: 'Status not recorded' };
+            return { statusLabel: meta.label, statusClass: meta.cls, summary: meta.detail, detail: rec.reason || rec.note || '' };
+          }
+        }
+        return { statusLabel: 'No data', statusClass: 'special', summary: 'No attendance history recorded yet.', detail: '' };
+      }
+
+      function findAttendanceRecordByStudent(date, student) {
+        if (!date || !student) return null;
+        const monthKey = date.slice(0, 7);
+        const month = state.attendance[monthKey] || {};
+        const day = month[date] || {};
+        const candidates = [student.id, student.adm, student.lookupKey];
+        for (const key of candidates) {
+          if (key && day[key]) return day[key];
+          const norm = normalizeAdm(key);
+          if (norm && day[norm]) return day[norm];
+        }
+        return null;
+      }
+
+      function calculateAbsenceStreak(student) {
+        const dates = getRecentAttendanceDates(30);
+        let streak = 0;
+        let lastDate = null;
+        let reason = '';
+        for (const date of dates) {
+          const rec = findAttendanceRecordByStudent(date, student);
+          if (!rec) break;
+          const status = classifyAttendance(rec);
+          if (status === 'absent') {
+            streak += 1;
+            if (!lastDate) {
+              lastDate = date;
+              reason = rec.reason || rec.note || rec.notes || 'Not captured';
+            }
+          } else {
+            break;
+          }
+        }
+        return { streak, lastDate, reason };
+      }
+
+      function getShiftedPath() {
+        if (pathCache.shifted) return pathCache.shifted;
+        return `shiftedStudents/${userCtx.safeClassKey}`;
+      }
+
+      function findStudentByAny(identifier) {
+        if (!identifier) return null;
+        const lookup = normalizeAdm(identifier);
+        return state.studentIndex.get(lookup) || null;
+      }
+
+      function toNumber(value) {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : 0;
+      }
+
+      function normalizeClassName(str) {
+        return String(str || '').toUpperCase().replace(/[\s\-\._]/g, '');
+      }
+
+      function normalizeAdm(adm) {
+        return String(adm || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      }
+
+      function normalizeGender(val) {
+        const g = String(val || '').trim().toUpperCase();
+        if (!g) return '';
+        if (g.startsWith('M') || g === 'BOY' || g === 'MALE') return 'M';
+        if (g.startsWith('F') || g === 'GIRL' || g === 'FEMALE') return 'F';
+        return 'O';
+      }
+
+      function prettifyKey(key) {
+        return String(key || '')
+          .replace(/[_\-]/g, ' ')
+          .replace(/\b\w/g, ch => ch.toUpperCase());
+      }
+
+      function formatNumber(value) {
+        return Number.isFinite(value) ? value.toLocaleString() : '-';
+      }
+
+      function formatCurrency(value) {
+        const amount = Math.round(Number(value) || 0);
+        return 'TZS ' + amount.toLocaleString();
+      }
+
+      function formatDate(dateStr) {
+        if (!dateStr) return '-';
+        const d = new Date(dateStr);
+        if (Number.isNaN(d.getTime())) return dateStr;
+        return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+      }
+
+      function formatMonthLabel(monthKey) {
+        const parts = monthKey.split('-');
+        if (parts.length !== 2) return monthKey;
+        const month = Number(parts[1]) - 1;
+        const year = Number(parts[0]);
+        const date = new Date(year, month, 1);
+        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      }
+
+      window.navigateTo = function(page) {
+        const map = {
+          dashboard: 'dashboard.html',
+          attendance: 'attendance.html',
+          attendanceHub: 'attendance.html',
+          classattendance: 'Toattendancehtml/classattendance.html',
+          discipline: 'dashboard.html#discipline',
+          studentlist: 'ToSchoolerp/studentlist.html',
+          academic: 'academic.html',
+          finance: 'Tofinancehtml/childreceipt.html',
+          books: 'Bookshtml/classbook.html',
+          followups: '#alert-center'
+        };
+        const target = map[page] || page;
+        if (target.startsWith('#')) {
+          const node = document.querySelector(target);
+          if (node) node.scrollIntoView({ behavior: 'smooth' });
+          return;
+        }
+        if (page === 'academic' && userCtx.className) {
+          sessionStorage.setItem('assignedClass', userCtx.className);
+        }
+        window.location.href = target;
+      };
+
+      window.logout = function() {
+        auth.signOut().then(() => window.location.href = 'index.html');
+      };
+    })();
   </script>
 </body>
 </html>

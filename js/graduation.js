@@ -460,27 +460,42 @@
       renderStudentTable();
       renderDashboardSummary();
     });
-    listen(`graduation/${year}/payments`, (payments) => {
-      state.payments = payments;
-      renderPaymentsTable();
-      renderDashboardSummary();
-    });
-    listen(`graduation/${year}/expenses`, (expenses) => {
-      state.expenses = expenses;
-      renderExpensesTable();
-    });
-    listen(`graduation/${year}/audits`, (audits) => {
-      state.audits = audits;
-      renderAuditLog();
-    });
-    listen(`graduation/${year}/certificates`, (certificates) => {
-      state.certificates = certificates;
-      renderCertificatesTable();
-    });
-    listen(`graduation/${year}/galleries`, (galleries) => {
-      state.galleries = galleries;
-      renderGallery();
-    });
+    const needsPayments = document.querySelector('#paymentsBody') || document.querySelector('#paymentStudent') || document.querySelector('#paymentForm');
+    if (needsPayments) {
+      listen(`graduation/${year}/payments`, (payments) => {
+        state.payments = payments;
+        renderPaymentsTable();
+        renderDashboardSummary();
+      });
+    }
+    const needsExpenses = document.querySelector('#expensesBody') || document.querySelector('#expenseForm');
+    if (needsExpenses) {
+      listen(`graduation/${year}/expenses`, (expenses) => {
+        state.expenses = expenses;
+        renderExpensesTable();
+      });
+    }
+    const needsAudits = document.querySelector('#auditBody');
+    if (needsAudits) {
+      listen(`graduation/${year}/audits`, (audits) => {
+        state.audits = audits;
+        renderAuditLog();
+      });
+    }
+    const needsCertificates = document.querySelector('#certificatesBody');
+    if (needsCertificates) {
+      listen(`graduation/${year}/certificates`, (certificates) => {
+        state.certificates = certificates;
+        renderCertificatesTable();
+      });
+    }
+    const needsGallery = document.querySelector('#galleryGrid') || document.querySelector('#galleryForm');
+    if (needsGallery) {
+      listen(`graduation/${year}/galleries`, (galleries) => {
+        state.galleries = galleries;
+        renderGallery();
+      });
+    }
   }
 
   // ---------- RENDERERS ----------
@@ -1147,7 +1162,8 @@
   }
 
   // ---------- CERTIFICATE GENERATION ----------
-  async function generateCertificate(admissionNoRaw) {
+  async function generateCertificate(admissionNoRaw, options = {}) {
+    const { triggerDownload = false } = options;
     const admissionNo = sanitizeKey(admissionNoRaw);
     const student = state.students?.[admissionNo];
     if (!student) throw new Error('Student not found');
@@ -1206,6 +1222,21 @@
     const height = pdf.internal.pageSize.getHeight();
     pdf.addImage(dataUrl, 'PNG', 0, 0, width, height);
     const pdfBlob = pdf.output('blob');
+
+    if (triggerDownload) {
+      const safeName = `${toStr(student.name).replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_') || admissionNo}_${state.currentYear}.pdf`;
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = safeName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(downloadUrl);
+        link.remove();
+      }, 1200);
+    }
 
     const year = state.currentYear;
     const base = `graduation/${year}/certificates/${admissionNo}`;
@@ -1343,7 +1374,7 @@
     } else if (action === 'generate-cert') {
       button.disabled = true;
       button.textContent = 'Generating...';
-      generateCertificate(admission)
+      generateCertificate(admission, { triggerDownload: true })
         .then(() => showToast('Certificate ready.'))
         .catch((err) => {
           console.error(err);

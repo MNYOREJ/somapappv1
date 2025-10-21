@@ -1,11 +1,13 @@
 ﻿(function (window) {
   'use strict';
 
+  // ---------- BASIC GUARDS ----------
   if (!window.firebase) {
     console.error('GraduationSuite: firebase SDK missing');
     return;
   }
 
+  // ---------- SETTINGS / CONSTANTS ----------
   const AUTHORIZED_EMAILS = new Set([
     'ssclass42023@gmail.com',
     'socratesschool2020@gmail.com',
@@ -14,10 +16,9 @@
   const YEAR_START = 2024;
   const YEAR_END = Math.max(2032, new Date().getFullYear() + 5);
   const YEARS = [];
-  for (let year = YEAR_START; year <= YEAR_END; year += 1) {
-    YEARS.push(year);
-  }
+  for (let year = YEAR_START; year <= YEAR_END; year += 1) YEARS.push(year);
 
+  // ---------- STATE ----------
   const state = {
     page: 'dashboard',
     user: null,
@@ -35,35 +36,23 @@
     watchers: [],
   };
 
+  // ---------- DOM HELPERS ----------
   const domCache = {};
-
   function $(selector) {
     if (!selector) return null;
     domCache[selector] = domCache[selector] || document.querySelector(selector);
     return domCache[selector];
   }
 
-  function db() {
-    return firebase.database();
-  }
-
-  function auth() {
-    return firebase.auth();
-  }
-
+  function db() { return firebase.database(); }
+  function auth() { return firebase.auth(); }
   function storage() {
     if (!firebase.storage) throw new Error('Firebase storage SDK missing');
     return firebase.storage();
   }
 
-  function toStr(value) {
-    if (value == null) return '';
-    return String(value);
-  }
-
-  function sanitizeKey(raw) {
-    return toStr(raw).replace(/[.#$/[\]]/g, '_');
-  }
+  function toStr(value) { return value == null ? '' : String(value); }
+  function sanitizeKey(raw) { return toStr(raw).replace(/[.#$/[\]]/g, '_'); }
 
   function formatCurrency(amount) {
     return `TSh ${Number(amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
@@ -115,8 +104,7 @@
 
   function setText(selector, value) {
     const node = $(selector);
-    if (!node) return;
-    node.textContent = value;
+    if (node) node.textContent = value;
   }
 
   function detachWatchers() {
@@ -132,6 +120,8 @@
     ref.on('value', wrapped);
     state.watchers.push(() => ref.off('value', wrapped));
   }
+
+  // ---------- BUSINESS HELPERS ----------
   function computeExpectedFee(className, metaObj) {
     const meta = metaObj || state.meta || {};
     const high = Number(meta.feePreunitAnd7 || 45000);
@@ -167,6 +157,7 @@
     if (shell) shell.style.display = allowed ? 'block' : 'none';
   }
 
+  // ---------- PUBLIC API ----------
   window.GraduationSuite = {
     init,
     loadYear,
@@ -175,6 +166,7 @@
     generateAllCertificates,
   };
 
+  // ---------- INIT ----------
   function init(options = {}) {
     state.page = options.page || document.body.dataset.page || 'dashboard';
     state.currentYear = normalizeYear(options.year || new Date().getFullYear());
@@ -183,6 +175,7 @@
     auth().onAuthStateChanged(handleAuthChange);
   }
 
+  // ---------- YEAR TABS ----------
   function buildYearSelector() {
     const host = $('#yearTabs');
     if (!host) return;
@@ -206,6 +199,7 @@
     });
   }
 
+  // ---------- BASE LISTENERS ----------
   function attachBaseListeners() {
     const searchBox = $('#studentSearch');
     if (searchBox) {
@@ -246,12 +240,32 @@
       if (target === 'certificates') button.addEventListener('click', () => { window.location.href = 'gradcertificates.html'; });
       if (target === 'galleries') button.addEventListener('click', () => { window.location.href = 'gradgalleries.html'; });
     });
+
+    // ✅ Wire up "Generate All Pending Certificates"
+    const genAllBtn = $('#generateAllCertificates');
+    if (genAllBtn) {
+      genAllBtn.addEventListener('click', async () => {
+        try {
+          setBusy('#generateAllCertificates', true);
+          await generateAllCertificates();
+          showToast('Certificates generated for all graduands.');
+        } catch (err) {
+          console.error(err);
+          showToast(err?.message || 'Bulk generation failed', 'error');
+        } finally {
+          setBusy('#generateAllCertificates', false);
+        }
+      });
+    }
   }
+
+  // ---------- AUTH & YEAR BOOTSTRAP ----------
   function handleAuthChange(user) {
     state.user = user;
     const allowed = isAuthorized(user?.email || '');
     showAuthGate(allowed);
     if (!allowed) return;
+
     ensureYearReady(state.currentYear)
       .then(() => {
         attachYearListeners(state.currentYear);
@@ -432,6 +446,8 @@
     }
     return '';
   }
+
+  // ---------- REALTIME LISTENERS PER YEAR ----------
   function attachYearListeners(year) {
     detachWatchers();
     listen(`graduation/${year}/meta`, (meta) => {
@@ -467,6 +483,7 @@
     });
   }
 
+  // ---------- RENDERERS ----------
   function renderAll() {
     renderDashboardSummary();
     renderStudentTable();
@@ -588,7 +605,9 @@
     if (!select) return;
     const rows = Object.values(state.students || {});
     select.innerHTML = `<option value="">Select student</option>${
-      rows.map((student) => `<option value="${sanitizeKey(student.admissionNo)}">${toStr(student.name)}  -  ${toStr(student.class)}  -  ${toStr(student.admissionNo)}</option>`).join('')
+      rows.map((student) =>
+        `<option value="${sanitizeKey(student.admissionNo)}">${toStr(student.name)}  -  ${toStr(student.class)}  -  ${toStr(student.admissionNo)}</option>`
+      ).join('')
     }`;
   }
 
@@ -732,6 +751,8 @@
         </div>
       </article>`).join('');
   }
+
+  // ---------- FORMS: PAYMENTS / EXPENSES / GALLERY ----------
   function handlePaymentSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -941,6 +962,8 @@
         at: firebase.database.ServerValue.TIMESTAMP,
       }));
   }
+
+  // ---------- EXPORTS ----------
   function handleExport(type, format) {
     if (format === 'csv') {
       downloadCsv(type);
@@ -1123,51 +1146,81 @@
     doc.save(`graduation_${state.currentYear}_${type}.pdf`);
   }
 
-  async function generateCertificate(admissionNo) {
-    const student = state.students?.[sanitizeKey(admissionNo)];
+  // ---------- CERTIFICATE GENERATION ----------
+  async function generateCertificate(admissionNoRaw) {
+    const admissionNo = sanitizeKey(admissionNoRaw);
+    const student = state.students?.[admissionNo];
     if (!student) throw new Error('Student not found');
     if (!student.isGraduand) throw new Error('Certificates available only for graduands');
-    const template = $('#certificateTemplate');
-    if (!template) throw new Error('Certificate template missing in DOM');
 
-    const clone = template.cloneNode(true);
-    clone.id = '';
-    clone.classList.remove('hidden');
-    document.body.appendChild(clone);
-    clone.querySelector('[data-cert="studentName"]').textContent = toStr(student.name);
-    clone.querySelector('[data-cert="classLevel"]').textContent = `${toStr(student.class)}  -  ${state.currentYear}`;
-    clone.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString('en-GB');
-    clone.querySelector('[data-cert="admission"]').textContent = toStr(student.admissionNo);
-    const photoNode = clone.querySelector('[data-cert="photo"]');
-    if (photoNode) photoNode.src = student.photoUrl || '../images/somap-logo.png.jpg';
+    // Use <template>.content and an offscreen sandbox so html2canvas can render it.
+    const template = document.getElementById('certificateTemplate');
+    if (!template || !template.content) throw new Error('Certificate template missing in DOM');
+
+    let sandbox = document.getElementById('renderSandbox');
+    if (!sandbox) {
+      sandbox = document.createElement('div');
+      sandbox.id = 'renderSandbox';
+      sandbox.style.position = 'fixed';
+      sandbox.style.left = '-10000px';
+      sandbox.style.top = '-10000px';
+      sandbox.style.pointerEvents = 'none';
+      document.body.appendChild(sandbox);
+    }
+    sandbox.innerHTML = '';
+    const fragment = template.content.cloneNode(true);
+    sandbox.appendChild(fragment);
+    const certNode = sandbox.firstElementChild;
+
+    // hydrate
+    certNode.querySelector('[data-cert="studentName"]').textContent = toStr(student.name);
+    certNode.querySelector('[data-cert="classLevel"]').textContent = `${toStr(student.class)}  -  ${state.currentYear}`;
+    certNode.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString('en-GB');
+    certNode.querySelector('[data-cert="admission"]').textContent = toStr(student.admissionNo);
+
+    // photo with crossOrigin
+    const photoNode = certNode.querySelector('[data-cert="photo"]');
+    if (photoNode) {
+      photoNode.crossOrigin = 'anonymous';
+      photoNode.src = student.photoUrl || '../images/somap-logo.png.jpg';
+      await new Promise((resolve) => {
+        if (photoNode.complete) return resolve();
+        photoNode.onload = () => resolve();
+        photoNode.onerror = () => resolve(); // don't block if image fails
+      });
+    }
 
     if (!window.html2canvas || !window.jspdf || !window.jspdf.jsPDF) {
-      clone.remove();
       throw new Error('html2canvas + jsPDF are required for certificate generation');
     }
 
-    const canvas = await window.html2canvas(clone, { scale: 2, useCORS: true });
+    const canvas = await window.html2canvas(certNode, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: null,
+    });
+
     const dataUrl = canvas.toDataURL('image/png');
     const pdf = new window.jspdf.jsPDF('landscape', 'pt', 'a4');
     const width = pdf.internal.pageSize.getWidth();
     const height = pdf.internal.pageSize.getHeight();
     pdf.addImage(dataUrl, 'PNG', 0, 0, width, height);
     const pdfBlob = pdf.output('blob');
-    clone.remove();
 
     const year = state.currentYear;
     const base = `graduation/${year}/certificates/${admissionNo}`;
     const pdfRef = storage().ref(`${base}.pdf`);
-    const previewRef = storage().ref(`${base}.png`);
+    const pngRef = storage().ref(`${base}.png`);
+
     await pdfRef.put(pdfBlob);
     const previewBlob = await (await fetch(dataUrl)).blob();
-    await previewRef.put(previewBlob);
-    const pdfUrl = await pdfRef.getDownloadURL();
-    const previewUrl = await previewRef.getDownloadURL();
+    await pngRef.put(previewBlob);
+
+    const [urlPdf, urlPreview] = await Promise.all([pdfRef.getDownloadURL(), pngRef.getDownloadURL()]);
 
     await db().ref(`graduation/${year}/certificates/${admissionNo}`).set({
-      urlPdf: pdfUrl,
-      urlPreview: previewUrl,
+      urlPdf,
+      urlPreview,
       generatedAt: firebase.database.ServerValue.TIMESTAMP,
       generatedBy: state.user?.email || 'unknown',
     });
@@ -1177,26 +1230,31 @@
       action: 'certificate:generate',
       refType: 'certificate',
       refId: admissionNo,
-      after: { urlPdf: pdfUrl },
+      after: { urlPdf },
       at: firebase.database.ServerValue.TIMESTAMP,
     });
   }
 
   async function generateAllCertificates() {
-    const graduands = Object.values(state.students || {}).filter((student) => student.isGraduand);
+    const graduands = Object.values(state.students || {}).filter((s) => s.isGraduand);
     if (!graduands.length) {
       showToast('No graduands available.', 'warn');
       return;
     }
-    for (const student of graduands) {
-      const existing = state.certificates?.[sanitizeKey(student.admissionNo)];
+    for (const s of graduands) {
+      const adm = sanitizeKey(s.admissionNo);
+      const existing = state.certificates?.[adm];
       if (existing?.urlPdf) continue;
-      await generateCertificate(sanitizeKey(student.admissionNo));
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      try {
+        await generateCertificate(adm);
+        await new Promise((r) => setTimeout(r, 400));
+      } catch (err) {
+        console.warn('Certificate generation failed for', adm, err?.message || err);
+      }
     }
-    showToast('Certificates generated for all graduands.');
   }
 
+  // ---------- ATTENDANCE SUMMARY ----------
   async function refreshTodayAttendance() {
     try {
       const master = await fetchMasterStudents();
@@ -1222,6 +1280,7 @@
     }
   }
 
+  // ---------- YEAR SWITCH ----------
   function loadYear(year) {
     const normalized = normalizeYear(year);
     state.currentYear = normalized;
@@ -1236,11 +1295,13 @@
       });
   }
 
+  // ---------- ACTION BUTTON DELEGATION ----------
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-action][data-adm]');
     if (!button) return;
     const action = button.dataset.action;
     const admission = button.dataset.adm;
+
     if (action === 'pay') {
       const select = $('#paymentStudent');
       if (select) {
@@ -1284,6 +1345,7 @@
     }
   });
 
+  // ---------- DEBT AUTO-MARKER ----------
   setInterval(() => {
     const cutoff = new Date(state.meta?.debtCutoffISO || `${state.currentYear}-11-07`);
     const now = new Date();
@@ -1300,13 +1362,13 @@
     db().ref().update(updates).catch((err) => console.warn('Debt updater error', err?.message || err));
   }, 15 * 60 * 1000);
 
+  // ---------- AUTO CERT GENERATION (Oct 18) ----------
   const autoCertTimer = setInterval(() => {
     const today = new Date();
-    if (today.getMonth() === 9 && today.getDate() === 18) {
+    if (today.getMonth() === 9 && today.getDate() === 18) { // 0-indexed months
       generateAllCertificates().catch((err) => console.warn('Auto certificate generation failed', err?.message || err));
       clearInterval(autoCertTimer);
     }
   }, 6 * 60 * 60 * 1000);
 
 }(window));
-

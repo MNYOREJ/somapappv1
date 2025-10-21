@@ -1212,11 +1212,22 @@
     const pdfRef = storage().ref(`${base}.pdf`);
     const pngRef = storage().ref(`${base}.png`);
 
-    await pdfRef.put(pdfBlob);
-    const previewBlob = await (await fetch(dataUrl)).blob();
-    await pngRef.put(previewBlob);
+    await pdfRef.put(pdfBlob, { contentType: 'application/pdf' });
+    let urlPreview = null;
+    try {
+      const previewBlob = await new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Canvas could not produce a preview blob'));
+        }, 'image/png');
+      });
+      await pngRef.put(previewBlob, { contentType: 'image/png' });
+      urlPreview = await pngRef.getDownloadURL();
+    } catch (err) {
+      console.warn('Certificate preview upload skipped', err?.message || err);
+    }
 
-    const [urlPdf, urlPreview] = await Promise.all([pdfRef.getDownloadURL(), pngRef.getDownloadURL()]);
+    const urlPdf = await pdfRef.getDownloadURL();
 
     await db().ref(`graduation/${year}/certificates/${admissionNo}`).set({
       urlPdf,

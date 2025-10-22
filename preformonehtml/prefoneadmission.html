@@ -746,41 +746,44 @@
       }
     });
     
-    function searchStudents() {
-      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+    function searchStudents(opts) {
       const tbody = document.getElementById('resultsBody');
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75"><i class="fas fa-spinner fa-spin mr-2"></i>Loading students...</td></tr>';
-      
-      db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then((snap) => {
-        const studentsObj = snap.val() || {};
-        studentsCache = studentsObj;
-        updateSummaryCards(studentsObj);
-        const students = Object.entries(studentsObj);
-        
+      if (!tbody) return;
+
+      const searchInput = document.getElementById('searchInput');
+      const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+      const forceReload = Boolean(opts && typeof opts === 'object' && 'force' in opts && opts.force === true);
+
+      const renderRows = () => {
+        const students = Object.entries(studentsCache || {});
         let filtered = students;
+
         if (query) {
-          filtered = students.filter(([adm, s]) => 
-            `${s.firstName} ${s.lastName} ${s.parentName} ${s.parentContact}`.toLowerCase().includes(query) ||
-            adm.toLowerCase().includes(query)
-          );
+          filtered = students.filter(([adm, s]) => {
+            if (!s) return false;
+            const haystack = `${s.firstName} ${s.lastName} ${s.parentName} ${s.parentContact}`.toLowerCase();
+            return haystack.includes(query) || adm.toLowerCase().includes(query);
+          });
         }
-        
-        if (filtered.length === 0) {
+
+        if (!filtered.length) {
           tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75">No students match your search. Try creating a new admission above.</td></tr>';
           return;
         }
-        
+
         tbody.innerHTML = filtered.map(([adm, s]) => {
-          const paymentsArray = Object.values(s.payments || {});
+          const paymentsArray = Object.values(s?.payments || {});
           const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-          const balance = Number(s.totalFee || 0) - paid;
-          const fullName = `${s.firstName} ${s.lastName}`;
+          const balance = Number(s?.totalFee || 0) - paid;
           const balanceClass = balance > 0 ? 'text-red-300' : 'text-green-300';
+          const fullName = `${s?.firstName || ''} ${s?.lastName || ''}`.trim();
+          const reportingDate = s?.reportingDate ? new Date(s.reportingDate).toLocaleDateString('en-GB') : 'N/A';
+
           return `<tr class="hover:bg-white/5 transition">
             <td class="p-3">${fullName}</td>
             <td class="p-3">${adm}</td>
-            <td class="p-3">${s.reportingDate ? new Date(s.reportingDate).toLocaleDateString('en-GB') : 'N/A'}</td>
-            <td class="p-3">${formatTSh(s.totalFee)}</td>
+            <td class="p-3">${reportingDate}</td>
+            <td class="p-3">${formatTSh(s?.totalFee)}</td>
             <td class="p-3 ${balanceClass}">${formatTSh(balance)}</td>
             <td class="p-3">
               <button class="bg-yellow-500 text-white px-3 py-1 rounded mr-2 text-sm shadow-sm hover:bg-yellow-600" onclick="editStudent('${adm}')"><i class="fas fa-edit mr-1"></i>Edit</button>
@@ -788,37 +791,24 @@
             </td>
           </tr>`;
         }).join('');
-      }).catch((err) => {
-        console.error('Search error:', err);
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-red-300"><i class="fas fa-exclamation-triangle mr-2"></i>Error loading students. Please try again.</td></tr>';
-      });
-    }        
-        if (filtered.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75">No students match your search. Try creating a new admission above.</td></tr>';
-          return;
-        }
-        
-        tbody.innerHTML = filtered.map(([adm, s]) => {
-          const paymentsArray = Object.values(s.payments || {});
-          const paid = paymentsArray.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-          const balance = Number(s.totalFee || 0) - paid;
-          const fullName = `${s.firstName} ${s.lastName}`;
-          return `<tr class="hover:bg-white/5">
-            <td class="p-3">${fullName}</td>
-            <td class="p-3">${adm}</td>
-            <td class="p-3">${s.reportingDate ? new Date(s.reportingDate).toLocaleDateString('en-GB') : 'N/A'}</td>
-            <td class="p-3">TSh ${Number(s.totalFee || 0).toLocaleString()}</td>
-            <td class="p-3 ${balance > 0 ? 'text-red-300' : 'text-green-300'}">TSh ${balance.toLocaleString()}</td>
-            <td class="p-3">
-              <button class="bg-yellow-500 text-white px-3 py-1 rounded mr-2 text-sm" onclick="editStudent('${adm}')"><i class="fas fa-edit mr-1"></i>Edit</button>
-              <button class="bg-red-500 text-white px-3 py-1 rounded text-sm" onclick="deleteStudent('${adm}')"><i class="fas fa-trash mr-1"></i>Delete</button>
-            </td>
-          </tr>`;
-        }).join('');
-      }).catch((err) => {
-        console.error('Search error:', err);
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-red-300"><i class="fas fa-exclamation-triangle mr-2"></i>Error loading students. Please try again.</td></tr>';
-      });
+      };
+
+      if (forceReload || !Object.keys(studentsCache).length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 opacity-75"><i class="fas fa-spinner fa-spin mr-2"></i>Loading students...</td></tr>';
+
+        db.ref(`/schools/Socrates School Preform one/${currentYear}/students`).once('value').then((snap) => {
+          studentsCache = snap.val() || {};
+          updateSummaryCards(studentsCache);
+          renderRows();
+        }).catch((err) => {
+          console.error('Search error:', err);
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-red-300"><i class="fas fa-exclamation-triangle mr-2"></i>Error loading students. Please try again.</td></tr>';
+        });
+
+        return;
+      }
+
+      renderRows();
     }
     
     function editStudent(adm) {
@@ -874,18 +864,13 @@
           });
         }
       });
-    }      });
     }
     
     // Initial load: Search students
-    searchStudents();
+    searchStudents({ force: true });
   </script>
 </body>
 </html>
-
-
-
-
 
 
 

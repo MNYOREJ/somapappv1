@@ -23,6 +23,31 @@
   .table th, .table td{padding:8px;border-bottom:1px solid #e6e9ef;white-space:nowrap}
   .table thead th{background:#f8fafc;font-weight:700;position:sticky;top:0}
   .scroll{overflow:auto}
+  .btn-shift{padding:6px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:#f97316;color:#fff;display:inline-flex;align-items:center;gap:4px}
+  .btn-shift span{font-size:14px}
+  .btn-shift:hover{background:#ea580c}
+  .btn-shift[disabled]{opacity:0.4;cursor:not-allowed}
+  .shift-flag{background:#fee2e2!important}
+  .shift-flag td{border-color:#fecaca}
+  .shift-flag-reported{background:#fef3c7!important}
+  .shift-flag-reported td{border-color:#fde68a}
+  .shift-note{display:block;font-size:11px;margin-top:6px;color:#b91c1c}
+  .shift-note.success{color:#a16207}
+  #shiftModal{position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px}
+  #shiftModal.hidden{display:none!important}
+  #shiftModal .modal-panel{background:#fff;max-width:420px;width:100%;border-radius:18px;padding:24px;box-shadow:0 22px 60px rgba(15,23,42,0.28);position:relative}
+  #shiftModal .modal-panel h3{font-size:1.1rem;font-weight:700;margin-bottom:0.75rem;color:#0f172a}
+  #shiftModal .modal-panel p{margin:0 0 12px;font-size:0.9rem;color:#475569}
+  #shiftModal label{display:block;font-size:0.82rem;font-weight:600;color:#1f2937;margin-top:12px}
+  #shiftModal input,#shiftModal select,#shiftModal textarea{width:100%;border:1px solid #d1d5db;border-radius:10px;padding:8px 10px;font-size:0.9rem;margin-top:4px}
+  #shiftModal textarea{min-height:70px;resize:vertical}
+  #shiftModal .close-btn{position:absolute;top:14px;right:16px;font-size:1.25rem;color:#94a3b8;cursor:pointer}
+  #shiftModal .close-btn:hover{color:#475569}
+  #shiftModal .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+  #shiftModal .actions button{padding:8px 16px;border-radius:9999px;font-weight:600}
+  #shiftModal .actions .cancel-btn{background:#e2e8f0;color:#0f172a}
+  #shiftModal .actions .submit-btn{background:#2563eb;color:#fff}
+  #shiftModal .actions .submit-btn:hover{background:#1d4ed8}
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -110,6 +135,46 @@
 
 </main>
 
+<!-- Shift Modal -->
+<div id="shiftModal" class="hidden">
+  <div class="modal-panel">
+    <button type="button" class="close-btn" id="shiftModalClose" aria-label="Close">&times;</button>
+    <h3>Shift Alert Review</h3>
+    <p id="shiftStudentMeta"></p>
+    <form id="shiftForm">
+      <div>
+        <label for="shiftedChoice">Shifted?</label>
+        <select id="shiftedChoice" name="shiftedChoice" required>
+          <option value="">Select</option>
+          <option value="YES">YES - confirmed shifted</option>
+          <option value="NO">NO - not yet shifted</option>
+        </select>
+      </div>
+      <div>
+        <label for="shiftReason">Reason / Notes</label>
+        <textarea id="shiftReason" name="shiftReason" placeholder="Why do you suspect the student shifted?" required></textarea>
+      </div>
+      <div>
+        <label for="shiftInfoSource">Information from?</label>
+        <input id="shiftInfoSource" name="shiftInfoSource" type="text" placeholder="Parent, neighbour, classmate..." required/>
+      </div>
+      <div>
+        <label for="shiftDate">Date shifted (or last seen)</label>
+        <input id="shiftDate" name="shiftDate" type="date" required/>
+      </div>
+      <div>
+        <label for="shiftProbableSchool">Probable new school</label>
+        <input id="shiftProbableSchool" name="shiftProbableSchool" type="text" placeholder="School name"/>
+      </div>
+      <div id="shiftFormAlert" class="shift-note hidden"></div>
+      <div class="actions">
+        <button type="button" class="cancel-btn" id="shiftModalCancel">Cancel</button>
+        <button type="submit" class="submit-btn" id="shiftSubmitBtn">Save Shift Alert</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <footer class="bg-white border-t py-3 sticky bottom-0">
   <div class="max-w-6xl mx-auto px-4 text-sm text-slate-500 flex items-center gap-3">
     <div>SoMAp Class Attendance · Mobile friendly</div>
@@ -133,6 +198,8 @@
   const SCHOOL_DAY_CUTOFF_HOUR = 15;
   const HOLIDAYS = ['01-01','04-07','04-26','05-01','07-07','08-08','10-14','12-09','12-25','12-26'];
   const MOVABLE = ['2025-03-29','2025-04-01','2025-04-10','2025-04-11','2025-06-16'];
+  const SHIFT_CONSECUTIVE_DAYS = 10;
+  const SHIFT_REPORT_PATH = 'shiftReports';
 
   // ---------- STATE ----------
   let students = [];
@@ -143,9 +210,19 @@
   let attendanceCache = {};
   let monthAttendance = {};
   let db = null;
+  let shiftReports = {};
+  let shiftRef = null;
+  let currentShiftStudent = null;
 
   // ---------- HELPERS ----------
   const el = id => document.getElementById(id);
+  const shiftModal = document.getElementById('shiftModal');
+  const shiftForm = document.getElementById('shiftForm');
+  const shiftModalClose = document.getElementById('shiftModalClose');
+  const shiftModalCancel = document.getElementById('shiftModalCancel');
+  const shiftStudentMeta = document.getElementById('shiftStudentMeta');
+  const shiftFormAlert = document.getElementById('shiftFormAlert');
+  const shiftSubmitBtn = document.getElementById('shiftSubmitBtn');
   function fmtDate(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
   function toMonthKey(dStr){ const d = new Date(dStr + 'T00:00:00'); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
   function isWeekend(d){ const day = d.getDay(); return day===0 || day===6; }
@@ -156,6 +233,36 @@
     if(A==='P' && P==='P') return 'P';
     const map = {'P-A':'PA','A-P':'AP','P-S':'PS','P-MT':'PMT','P-PG':'PPG','P-LE':'PLE','S-P':'SP','MT-P':'MTP','PG-P':'PGP','LE-P':'LEP'};
     return map[`${A}-${P}`] || `${A}${P}`;
+  }
+  function isAbsentDay(rec){
+    if(!rec) return false;
+    const daily = rec.daily || deriveDaily(rec.am, rec.pm) || '';
+    return daily.includes('A');
+  }
+  function getStudentAttendanceHistory(studentId){
+    const history = {};
+    const monthData = monthAttendance[studentId] || {};
+    Object.keys(monthData).forEach(dateKey => {
+      if(monthData[dateKey]) history[dateKey] = { ...monthData[dateKey] };
+    });
+    if(attendanceCache[studentId]){
+      const merged = { ...(history[currentDateStr] || {}), ...attendanceCache[studentId] };
+      merged.daily = merged.daily || deriveDaily(merged.am, merged.pm);
+      history[currentDateStr] = merged;
+    }
+    return Object.keys(history).map(date => ({ date, rec: history[date] })).sort((a,b) => a.date.localeCompare(b.date));
+  }
+  function getConsecutiveAbsences(studentId){
+    const hist = getStudentAttendanceHistory(studentId);
+    let streak = 0;
+    for(let i = hist.length - 1; i >= 0; i--){
+      if(isAbsentDay(hist[i].rec)) streak++;
+      else break;
+    }
+    return streak;
+  }
+  function getShiftEntry(studentId){
+    return shiftReports && shiftReports[studentId] ? shiftReports[studentId] : null;
   }
   function monthWorkingDays(dateStr){
     const d = new Date(dateStr + 'T00:00:00'); const y=d.getFullYear(), m=d.getMonth();
@@ -210,8 +317,23 @@
             const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || 0);
             const feePaid = Number(s.feesPaid || s.feePaid || s.paidAmount || 0);
             const balance = Number(s.balance || (feeDue - feePaid) || 0);
-            return { id: k, admissionNo: s.admissionNumber || s.admNo || s.admissionNo || '', name, class: s.class || s.classLevel || s.grade || 'Unknown', feeDue, feePaid, balance };
-          });
+            const status = String(s.status || '').toLowerCase();
+            if (status === 'shifted') return null;
+            const parentName = s.primaryParentName || s.parentName || s.guardianName || '';
+            const parentContact = s.primaryParentContact || s.parentPhone || s.parentContact || s.guardianContact || '';
+            return {
+              id: k,
+              admissionNo: s.admissionNumber || s.admNo || s.admissionNo || '',
+              name,
+              class: s.class || s.classLevel || s.grade || 'Unknown',
+              feeDue,
+              feePaid,
+              balance,
+              parentName,
+              parentContact,
+              status: status || 'active'
+            };
+          }).filter(Boolean);
         }
       } catch (e) {
         console.warn('Failed to load path', p, ':', e.message);
@@ -263,6 +385,15 @@
       alert('Save failed: ' + e.message);
     }
   }
+  function subscribeShiftReports() {
+    if (!db) return;
+    if (shiftRef) shiftRef.off();
+    shiftRef = db.ref(SHIFT_REPORT_PATH);
+    shiftRef.on('value', snap => {
+      shiftReports = snap.exists() ? snap.val() : {};
+      renderTable();
+    });
+  }
 
   // ---------- Render UI ----------
   function renderTable() {
@@ -285,7 +416,11 @@
         <td id="chips-${s.id}"></td>
         <td><span id="daily-${s.id}" class="status-pill">—</span></td>
         <td>
-          <button data-id="${s.id}" class="btn-export text-sm px-2 py-1 border rounded">Export</button>
+          <div class="flex gap-2 items-center">
+            <button data-id="${s.id}" class="btn-export text-sm px-2 py-1 border rounded">Export</button>
+            <button data-id="${s.id}" data-action="shift" class="btn-shift hidden" title="Send shift alert to admin">Shift</button>
+          </div>
+          <span id="shift-note-${s.id}" class="shift-note hidden"></span>
         </td>
       `;
       body.appendChild(tr);
@@ -331,10 +466,14 @@
       chipsCell.appendChild(pmGroup);
 
       updateRowVisuals(s.id);
+      decorateShiftState(tr, s);
     });
 
     document.querySelectorAll('.btn-export').forEach(btn => {
       btn.addEventListener('click', () => exportPdfForStudent(btn.dataset.id));
+    });
+    document.querySelectorAll('[data-action="shift"]').forEach(btn => {
+      btn.addEventListener('click', () => handleShiftClick(btn.dataset.id));
     });
   }
 
@@ -350,6 +489,8 @@
     const s = students.find(x => x.id === stu);
     attendanceCache[stu].snap = { admissionNo: s?.admissionNo || '', name: s?.name || '', class: s?.class || '', feeDue: s?.feeDue || 0, feePaid: s?.feePaid || 0, balance: s?.balance || 0 };
     updateRowVisuals(stu);
+    const row = b.closest('tr');
+    if (row && s) decorateShiftState(row, s);
   }
 
   function updateRowVisuals(stu) {
@@ -361,6 +502,186 @@
       el.style.outline = (rec.pm && el.dataset.val === rec.pm) ? '3px solid rgba(11,103,255,0.12)' : 'none';
     });
     setStatusElem(el('daily-' + stu), rec.daily || deriveDaily(rec.am, rec.pm));
+  }
+  function decorateShiftState(row, student) {
+    if (!row || !student) return;
+    const shiftBtn = row.querySelector('[data-action="shift"]');
+    const note = row.querySelector(`#shift-note-${student.id}`);
+    if (note) {
+      note.classList.add('hidden');
+      note.classList.remove('success');
+      note.textContent = '';
+    }
+    row.classList.remove('shift-flag', 'shift-flag-reported');
+    if (shiftBtn) {
+      shiftBtn.classList.add('hidden');
+      shiftBtn.textContent = 'Shift';
+    }
+
+    const existing = getShiftEntry(student.id);
+    const status = existing && existing.status ? existing.status : 'pending';
+    const consecutive = getConsecutiveAbsences(student.id);
+    const shouldFlag = consecutive >= SHIFT_CONSECUTIVE_DAYS || !!existing;
+
+    if (shiftBtn) shiftBtn.dataset.streak = String(consecutive);
+
+    if (status === 'shifted') {
+      if (shiftBtn) shiftBtn.classList.add('hidden');
+      if (note) {
+        note.classList.remove('hidden');
+        note.classList.add('success');
+        note.textContent = 'Shifted by admin';
+      }
+      return;
+    }
+
+    if (!shouldFlag) return;
+
+    if (shiftBtn) {
+      shiftBtn.classList.remove('hidden');
+      shiftBtn.textContent = existing ? 'Update' : 'Shift';
+    }
+    if (existing) {
+      row.classList.add('shift-flag-reported');
+      if (note) {
+        note.classList.remove('hidden');
+        note.classList.add('success');
+        note.textContent = 'Alert sent to admin. You can update details.';
+      }
+    } else {
+      row.classList.add('shift-flag');
+      if (note) {
+        note.classList.remove('hidden');
+        note.textContent = `${consecutive} consecutive absent days. Provide shift info.`;
+      }
+    }
+  }
+  function setShiftFormMessage(message, variant) {
+    if (!shiftFormAlert) return;
+    if (!message) {
+      shiftFormAlert.classList.add('hidden');
+      shiftFormAlert.classList.remove('success');
+      shiftFormAlert.textContent = '';
+      return;
+    }
+    shiftFormAlert.textContent = message;
+    shiftFormAlert.classList.remove('hidden');
+    if (variant === 'success') shiftFormAlert.classList.add('success');
+    else shiftFormAlert.classList.remove('success');
+  }
+  function handleShiftClick(studentId) {
+    if (!studentId) return;
+    const student = students.find(x => x.id === studentId);
+    if (!student) {
+      alert('Student record not found in this class view.');
+      return;
+    }
+    currentShiftStudent = student;
+    const consecutive = getConsecutiveAbsences(student.id);
+    const existing = getShiftEntry(student.id);
+    openShiftModal(student, consecutive, existing);
+  }
+  function openShiftModal(student, consecutive, existing) {
+    if (!shiftModal || !shiftForm) return;
+    const today = currentDateStr || fmtDate(new Date());
+    shiftForm.reset();
+    if (shiftStudentMeta) {
+      shiftStudentMeta.textContent = `${student.name} • ${student.class || ''} • Adm ${student.admissionNo || 'N/A'} • ${consecutive} absent days`;
+    }
+    shiftFormAlert && shiftFormAlert.classList.add('hidden');
+    if (existing) {
+      if (shiftForm.shiftedChoice) shiftForm.shiftedChoice.value = existing.shiftChoice || existing.shiftedChoice || '';
+      if (shiftForm.shiftReason) shiftForm.shiftReason.value = existing.reason || '';
+      if (shiftForm.shiftInfoSource) shiftForm.shiftInfoSource.value = existing.infoSource || '';
+      if (shiftForm.shiftDate) shiftForm.shiftDate.value = existing.dateShifted || today;
+      if (shiftForm.shiftProbableSchool) shiftForm.shiftProbableSchool.value = existing.probableSchool || '';
+    } else {
+      if (shiftForm.shiftedChoice) shiftForm.shiftedChoice.value = '';
+      if (shiftForm.shiftReason) shiftForm.shiftReason.value = '';
+      if (shiftForm.shiftInfoSource) shiftForm.shiftInfoSource.value = '';
+      if (shiftForm.shiftDate) shiftForm.shiftDate.value = today;
+      if (shiftForm.shiftProbableSchool) shiftForm.shiftProbableSchool.value = '';
+    }
+    shiftModal.classList.remove('hidden');
+  }
+  function closeShiftModal() {
+    if (!shiftModal) return;
+    shiftModal.classList.add('hidden');
+    setShiftFormMessage('');
+    currentShiftStudent = null;
+  }
+  function setupShiftModal() {
+    if (shiftModalClose) shiftModalClose.addEventListener('click', closeShiftModal);
+    if (shiftModalCancel) shiftModalCancel.addEventListener('click', closeShiftModal);
+    if (shiftModal) {
+      shiftModal.addEventListener('click', (e) => {
+        if (e.target === shiftModal) closeShiftModal();
+      });
+    }
+    if (shiftForm) {
+      shiftForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!db) {
+          setShiftFormMessage('No database connection. Please reconnect.', 'error');
+          return;
+        }
+        if (!currentShiftStudent) {
+          setShiftFormMessage('Select the student again before submitting.', 'error');
+          return;
+        }
+        const shiftChoice = shiftForm.shiftedChoice ? shiftForm.shiftedChoice.value : '';
+        const reason = shiftForm.shiftReason ? shiftForm.shiftReason.value.trim() : '';
+        const infoSource = shiftForm.shiftInfoSource ? shiftForm.shiftInfoSource.value.trim() : '';
+        const dateShifted = shiftForm.shiftDate ? shiftForm.shiftDate.value : '';
+        const probableSchool = shiftForm.shiftProbableSchool ? shiftForm.shiftProbableSchool.value.trim() : '';
+        if (!shiftChoice || !reason || !infoSource || !dateShifted) {
+          setShiftFormMessage('Please fill in all the required fields.', 'error');
+          return;
+        }
+        const student = currentShiftStudent;
+        const existing = getShiftEntry(student.id) || {};
+        const now = Date.now();
+        const flaggedAbsences = getConsecutiveAbsences(student.id);
+        const payload = {
+          ...existing,
+          studentId: student.id,
+          studentName: student.name,
+          admissionNo: student.admissionNo || '',
+          className: student.class,
+          parentName: student.parentName || '',
+          parentContact: student.parentContact || '',
+          shiftChoice,
+          reason,
+          infoSource,
+          dateShifted,
+          probableSchool,
+          flaggedAbsences,
+          balance: Number(student.balance || 0),
+          feeDue: Number(student.feeDue || 0),
+          feePaid: Number(student.feePaid || 0),
+          debtStatus: Number(student.balance || 0) > 0 ? 'not cleared' : 'cleared',
+          teacherClass: student.class,
+          flaggedDate: existing.flaggedDate || currentDateStr || fmtDate(new Date()),
+          teacherReportedAt: existing.teacherReportedAt || now,
+          updatedAt: now,
+          status: existing.status === 'shifted' ? 'shifted' : 'pending'
+        };
+        try {
+          if (shiftSubmitBtn) shiftSubmitBtn.disabled = true;
+          await db.ref(`${SHIFT_REPORT_PATH}/${student.id}`).set(payload);
+          setShiftFormMessage('Shift alert saved. Admin has been notified.', 'success');
+          setTimeout(() => {
+            closeShiftModal();
+            renderTable();
+          }, 400);
+        } catch (err) {
+          console.error('Failed to save shift alert', err);
+          setShiftFormMessage(err && err.message ? err.message : 'Failed to save shift alert.', 'error');
+        } finally {
+          if (shiftSubmitBtn) shiftSubmitBtn.disabled = false;
+        }
+      });
+    }
   }
 
   // ---------- Quick / Mark all ----------
@@ -374,6 +695,11 @@
       attendanceCache[s.id].daily = deriveDaily(attendanceCache[s.id].am, attendanceCache[s.id].pm);
       attendanceCache[s.id].snap = { admissionNo: s.admissionNo || '', name: s.name, class: s.class, feeDue: s.feeDue, feePaid: s.feePaid, balance: s.balance };
       updateRowVisuals(s.id);
+      const noteEl = document.getElementById(`shift-note-${s.id}`);
+      if (noteEl) {
+        const row = noteEl.closest('tr');
+        if (row) decorateShiftState(row, s);
+      }
     });
   }
   function markAllPresent() {
@@ -384,6 +710,11 @@
       attendanceCache[s.id].daily = 'P';
       attendanceCache[s.id].snap = { admissionNo: s.admissionNo || '', name: s.name, class: s.class, feeDue: s.feeDue, feePaid: s.feePaid, balance: s.balance };
       updateRowVisuals(s.id);
+      const noteEl = document.getElementById(`shift-note-${s.id}`);
+      if (noteEl) {
+        const row = noteEl.closest('tr');
+        if (row) decorateShiftState(row, s);
+      }
     });
   }
 
@@ -565,6 +896,8 @@
     populateClassSelect();
     el('rtState').textContent = 'Ready';
     wireUI();
+    setupShiftModal();
+    subscribeShiftReports();
     if (students.length && !currentClass) {
       const classes = Array.from(new Set(students.map(s => s.class))).sort();
       if (classes.length === 1) {

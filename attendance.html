@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>SoMAp — Attendance</title>
+<title>SoMAp ΓÇö Attendance</title>
 
 <!-- Tailwind for quick styling -->
 <script src="https://cdn.tailwindcss.com"></script>
@@ -23,6 +23,12 @@
   .table th, .table td{padding:8px;border-bottom:1px solid #e6e9ef;white-space:nowrap}
   .table thead th{background:#f8fafc;font-weight:700;position:sticky;top:0}
   .scroll{overflow:auto}
+  .shift-list-table th, .shift-list-table td{padding:10px;border-bottom:1px solid #e6e9ef;white-space:nowrap}
+  .shift-list-table thead th{background:#fff7ed;color:#9a3412}
+  .badge-status{display:inline-flex;align-items:center;padding:4px 10px;border-radius:9999px;font-weight:600;font-size:12px}
+  .badge-status.pending{background:#fef3c7;color:#b45309}
+  .badge-status.shifted{background:#dcfce7;color:#15803d}
+  .badge-status.review{background:#e0e7ff;color:#3730a3}
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -30,12 +36,12 @@
 <header class="bg-white border-b sticky top-0 z-30">
   <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
     <div class="flex items-center gap-4">
-      <a href="schoolerp.html" class="text-slate-700 hover:text-blue-600">← Back to ERP</a>
-      <h1 class="text-lg font-semibold">SoMAp — Attendance</h1>
+      <a href="schoolerp.html" class="text-slate-700 hover:text-blue-600">ΓåÉ Back to ERP</a>
+      <h1 class="text-lg font-semibold">SoMAp ΓÇö Attendance</h1>
     </div>
     <div class="flex items-center gap-3">
       <button id="btnFullscreen" class="px-3 py-1 rounded-md border bg-slate-100">Enter Fullscreen</button>
-      <div id="rtState" class="text-sm text-slate-500">Connecting…</div>
+      <div id="rtState" class="text-sm text-slate-500">ConnectingΓÇª</div>
     </div>
   </div>
 </header>
@@ -46,19 +52,19 @@
   <section id="analytics" class="bg-white rounded-2xl p-4 shadow-sm border">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <div class="text-sm text-slate-500">Analytics — <span id="monthLabel">—</span></div>
+        <div class="text-sm text-slate-500">Analytics ΓÇö <span id="monthLabel">ΓÇö</span></div>
         <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="p-3 rounded-xl border bg-[var(--muted,#fbfcfe)]">
             <div class="text-sm text-slate-500">Class Days (excl. weekends & holidays)</div>
-            <div id="classDays" class="text-2xl font-bold">—</div>
+            <div id="classDays" class="text-2xl font-bold">ΓÇö</div>
           </div>
           <div class="p-3 rounded-xl border bg-[var(--muted,#fbfcfe)]">
             <div class="text-sm text-slate-500">% Present (Class Avg)</div>
-            <div id="classPctPresent" class="text-2xl font-bold">—</div>
+            <div id="classPctPresent" class="text-2xl font-bold">ΓÇö</div>
           </div>
           <div class="p-3 rounded-xl border bg-[var(--muted,#fbfcfe)]">
-            <div class="text-sm text-slate-500">Yellow Alerts (≥ 10 absent days/month)</div>
-            <div id="yellowCount" class="text-2xl font-bold">—</div>
+            <div class="text-sm text-slate-500">Yellow Alerts (ΓëÑ 10 absent days/month)</div>
+            <div id="yellowCount" class="text-2xl font-bold">ΓÇö</div>
           </div>
         </div>
       </div>
@@ -81,11 +87,43 @@
     </div>
   </section>
 
+  <!-- Shift Alerts -->
+  <section class="bg-white rounded-2xl p-4 shadow-sm border">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+      <div>
+        <h2 class="text-lg font-semibold text-rose-600">Shift Alerts</h2>
+        <p class="text-sm text-slate-500">Students absent for 10+ consecutive school days. Admin action needed.</p>
+      </div>
+      <span id="shiftAlertsCount" class="badge-status review">0 pending</span>
+    </div>
+    <div class="overflow-auto">
+      <table class="shift-list-table min-w-full">
+        <thead>
+          <tr>
+            <th>Student</th>
+            <th>Class</th>
+            <th>Parent Contact</th>
+            <th>Reason</th>
+            <th>Info Source</th>
+            <th>Date Shifted</th>
+            <th>Probable School</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="shiftListBody">
+          <tr>
+            <td colspan="8" class="text-center text-slate-500 py-4">No shift alerts yet. Teachers will flag students here.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 </main>
 
 <footer class="bg-white border-t py-3 sticky bottom-0">
   <div class="max-w-6xl mx-auto px-4 text-sm text-slate-500 flex items-center gap-3">
-    <div>SoMAp Attendance · Mobile friendly</div>
+    <div>SoMAp Attendance ┬╖ Mobile friendly</div>
     <div id="todayAlert" class="ml-auto text-sm text-yellow-700 hidden"></div>
   </div>
 </footer>
@@ -113,9 +151,13 @@
   let attendanceCache = {};
   let monthAttendance = {};
   let db = null;
+  let shiftReports = {};
+  let shiftRef = null;
 
   // ---------- HELPERS ----------
   const el = id => document.getElementById(id);
+  const shiftListBody = el('shiftListBody');
+  const shiftAlertsCount = el('shiftAlertsCount');
   function fmtDate(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
   function toMonthKey(dStr){ const d = new Date(dStr + 'T00:00:00'); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
   function isWeekend(d){ const day = d.getDay(); return day===0 || day===6; }
@@ -131,7 +173,7 @@
   }
   function setStatusElem(elm, val){
     if(!elm) return;
-    elm.textContent = val || '—';
+    elm.textContent = val || 'ΓÇö';
     elm.className = 'status-pill ' + (val==='P' ? 'bg-green-100 text-green-800' : (val||'').includes('A') ? 'bg-red-100 text-red-700' : (val||'').includes('S') ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700');
   }
 
@@ -177,8 +219,23 @@
             const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || 0);
             const feePaid = Number(s.feesPaid || s.feePaid || s.paidAmount || 0);
             const balance = Number(s.balance || (feeDue - feePaid) || 0);
-            return { id: k, admissionNo: s.admissionNumber || s.admNo || s.admissionNo || '', name, class: s.class || s.classLevel || s.grade || 'Unknown', feeDue, feePaid, balance };
-          });
+            const status = String(s.status || '').toLowerCase();
+            if (status === 'shifted') return null;
+            const parentName = s.primaryParentName || s.parentName || s.guardianName || '';
+            const parentContact = s.primaryParentContact || s.parentPhone || s.parentContact || s.guardianContact || '';
+            return {
+              id: k,
+              admissionNo: s.admissionNumber || s.admNo || s.admissionNo || '',
+              name,
+              class: s.class || s.classLevel || s.grade || 'Unknown',
+              feeDue,
+              feePaid,
+              balance,
+              parentName,
+              parentContact,
+              status: status || 'active'
+            };
+          }).filter(Boolean);
         }
       } catch (e) {
         console.warn('Failed to load path', p, ':', e.message);
@@ -205,6 +262,69 @@
     } catch (e) {
       console.warn('Failed to load month attendance:', e.message);
     }
+  }
+  function subscribeShiftReports() {
+    if (!db) return;
+    if (shiftRef) shiftRef.off();
+    shiftRef = db.ref('shiftReports');
+    shiftRef.on('value', snap => {
+      shiftReports = snap.exists() ? snap.val() : {};
+      renderShiftList();
+    });
+  }
+  function getShiftEntries() {
+    const data = shiftReports || {};
+    return Object.keys(data).map(key => ({ key, ...(data[key] || {}) }));
+  }
+  function updateShiftAlertsBadge(pendingCount, totalCount) {
+    if (!shiftAlertsCount) return;
+    const descriptor = totalCount ? `${pendingCount} pending / ${totalCount}` : `${pendingCount} pending`;
+    shiftAlertsCount.textContent = descriptor;
+    shiftAlertsCount.classList.remove('pending', 'shifted', 'review');
+    if (pendingCount > 0) shiftAlertsCount.classList.add('pending');
+    else if (totalCount > 0) shiftAlertsCount.classList.add('shifted');
+    else shiftAlertsCount.classList.add('review');
+  }
+  function renderShiftList() {
+    if (!shiftListBody) return;
+    const entries = getShiftEntries();
+    const pendingCount = entries.filter(e => (e.status || 'pending') !== 'shifted').length;
+    if (!entries.length) {
+      shiftListBody.innerHTML = `<tr><td colspan="8" class="text-center text-slate-500 py-4">No shift alerts yet. Teachers will flag students here.</td></tr>`;
+      updateShiftAlertsBadge(0, 0);
+      return;
+    }
+    entries.sort((a, b) => {
+      const statusA = (a.status || 'pending') === 'shifted' ? 1 : 0;
+      const statusB = (b.status || 'pending') === 'shifted' ? 1 : 0;
+      if (statusA !== statusB) return statusA - statusB;
+      const dateA = a.flaggedDate || a.teacherReportedAt || '';
+      const dateB = b.flaggedDate || b.teacherReportedAt || '';
+      return String(dateA).localeCompare(String(dateB));
+    });
+    shiftListBody.innerHTML = entries.map(entry => {
+      const status = (entry.status || 'pending').toLowerCase();
+      const statusClass = status === 'shifted' ? 'shifted' : status === 'pending' ? 'pending' : 'review';
+      const debtStatus = entry.debtStatus || ((Number(entry.balance || 0) > 0) ? 'not cleared' : 'cleared');
+      const statusText = status === 'shifted'
+        ? `Shifted - Debt: ${debtStatus.replace(/\b\w/g, c => c.toUpperCase())}`
+        : `Pending - Debt: ${debtStatus.replace(/\b\w/g, c => c.toUpperCase())}${entry.shiftChoice ? ` - Teacher: ${String(entry.shiftChoice).toUpperCase()}` : ''}`;
+      const parentParts = [entry.parentName, entry.parentContact].filter(Boolean);
+      const parentCell = parentParts.length ? parentParts.join(' | ') : '-';
+      return `
+        <tr>
+          <td>${escapeHtml(entry.studentName || '')}</td>
+          <td>${escapeHtml(entry.className || '')}</td>
+          <td>${escapeHtml(parentCell)}</td>
+          <td>${escapeHtml(entry.reason || '-')}</td>
+          <td>${escapeHtml(entry.infoSource || '-')}</td>
+          <td>${escapeHtml(entry.dateShifted || '-')}</td>
+          <td>${escapeHtml(entry.probableSchool || '-')}</td>
+          <td><span class="badge-status ${statusClass}">${escapeHtml(statusText)}</span></td>
+        </tr>
+      `;
+    }).join('');
+    updateShiftAlertsBadge(pendingCount, entries.length);
   }
 
   // ---------- Analytics compute ----------
@@ -252,8 +372,9 @@
       if (absent >= 10) yellow++;
     });
 
-    el('classPctPresent').textContent = nWithData ? Math.round(totalPct / nWithData) + '%' : '—';
-    el('yellowCount').textContent = yellow;
+    el('classPctPresent').textContent = nWithData ? Math.round(totalPct / nWithData) + '%' : 'ΓÇö';
+    const pendingShift = getShiftEntries().filter(e => (e.status || 'pending') !== 'shifted').length;
+    el('yellowCount').textContent = pendingShift ? `${pendingShift} pending` : yellow;
   }
 
   // ---------- Archive load range ----------
@@ -310,7 +431,7 @@
         return !(rec.am && rec.pm);
       });
       if (need) {
-        box.textContent = '⚠️ 3:00 PM: Attendance not fully marked for today';
+        box.textContent = 'ΓÜá∩╕Å 3:00 PM: Attendance not fully marked for today';
         box.classList.remove('hidden');
       } else {
         box.classList.add('hidden');
@@ -351,6 +472,8 @@
     }
     el('rtState').textContent = 'Ready';
     wireUI();
+    subscribeShiftReports();
+    renderShiftList();
     if (students.length && !currentClass) {
       const classes = Array.from(new Set(students.map(s => s.class))).sort();
       if (classes.length === 1) {

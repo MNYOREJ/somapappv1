@@ -292,6 +292,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // ---- Password for restricted actions ----
   const ACTION_PASSWORD = 'REHEMam!'; // Hardcoded password for Edit/Delete
+  const SHIFT_REPORT_PATH = 'shiftReports';
 
   // ---- Modal open/close ----
   const openModalBtn = document.getElementById('openRegistrationModal');
@@ -573,10 +574,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // ---- Live cache + rendering for search (and edit buttons) ----
   let cachedStudents = [];
+  let shiftReports = {};
   if (db) {
     db.ref('students').on('value', (snapshot) => {
       const raw = snapshot.val() || {};
       cachedStudents = Object.entries(raw).map(([key, s]) => ({ key, ...s }));
+      renderSearchList(cachedStudents);
+    });
+    db.ref(SHIFT_REPORT_PATH).on('value', (snapshot) => {
+      shiftReports = snapshot.exists() ? snapshot.val() : {};
       renderSearchList(cachedStudents);
     });
   }
@@ -596,6 +602,18 @@ document.addEventListener('DOMContentLoaded', function() {
     filtered.forEach(stu => {
       const div = document.createElement('div');
       div.className = 'student-card';
+      const shiftInfo = (shiftReports && shiftReports[stu.key]) ? shiftReports[stu.key] : null;
+      const shiftStatus = shiftInfo && shiftInfo.status ? String(shiftInfo.status).toLowerCase() : null;
+      const showShiftButton = shiftInfo && shiftStatus !== 'shifted';
+      const shiftButtonHtml = showShiftButton ? `<button class="btn shift-btn bg-amber-100 text-amber-800 px-3 py-1 rounded" data-key="${stu.key}">Shift</button>` : '';
+      const shiftSummaryHtml = shiftInfo ? `
+        <div class="mt-2 text-xs ${shiftStatus === 'shifted' ? 'text-emerald-600' : 'text-amber-600'}">
+          Shift status: ${escapeHtml((shiftStatus || 'pending').toUpperCase())}
+          ${shiftInfo.flaggedAbsences ? ` • ${escapeHtml(String(shiftInfo.flaggedAbsences))} absent days` : ''}
+          ${shiftInfo.dateShifted ? ` • Date: ${escapeHtml(shiftInfo.dateShifted)}` : ''}
+          ${shiftInfo.reason ? ` • Reason: ${escapeHtml(shiftInfo.reason)}` : ''}
+        </div>
+      ` : '';
       div.innerHTML = `
         <div class="flex justify-between items-start">
           <div>
@@ -607,6 +625,7 @@ document.addEventListener('DOMContentLoaded', function() {
           <div class="flex gap-2">
             <button class="btn edit-btn bg-yellow-100 text-yellow-800 px-3 py-1 rounded" data-key="${stu.key}">Edit</button>
             <button class="btn delete-btn bg-red-100 text-red-800 px-3 py-1 rounded" data-key="${stu.key}">Delete</button>
+            ${shiftButtonHtml}
           </div>
         </div>
         ${stu.passportPhotoUrl ? `<img src="${stu.passportPhotoUrl}" alt="Passport" style="width:80px; height:80px; margin-top:8px; border-radius:6px;" />` : ''}
@@ -616,6 +635,7 @@ document.addEventListener('DOMContentLoaded', function() {
           ${stu.joiningLetterUrl ? `<a href="${stu.joiningLetterUrl}" download target="_blank" class="text-indigo-600 hover:underline">Joining Letter</a> | ` : ''}
           ${stu.medicalDocsUrl ? `<a href="${stu.medicalDocsUrl}" download target="_blank" class="text-indigo-600 hover:underline">Medical Docs</a>` : ''}
         </div>
+        ${shiftSummaryHtml}
       `;
       searchList.appendChild(div);
     });
@@ -631,6 +651,17 @@ document.addEventListener('DOMContentLoaded', function() {
       const key = e.currentTarget.getAttribute('data-key');
       if (restrictAction('Delete')) {
         doDeleteKey(key);
+      }
+    }));
+    document.querySelectorAll('.shift-btn').forEach(btn => btn.addEventListener('click', (e) => {
+      const key = e.currentTarget.getAttribute('data-key');
+      if (!key) return;
+      if (!shiftReports || !shiftReports[key]) {
+        alert('No shift alert recorded for this student.');
+        return;
+      }
+      if (restrictAction('Shift')) {
+        doShiftKey(key);
       }
     }));
   }
@@ -703,6 +734,48 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ---- Delete flow (with cleanup) ----
+  async function doShiftKey(key) {
+    try {
+      const shiftInfo = shiftReports ? shiftReports[key] : null;
+      if (!shiftInfo) {
+        alert('No shift alert details found for this student.');
+        return;
+      }
+      const snap = await db.ref('students/' + key).get();
+      if (!snap.exists()) {
+        alert('Student record not found or already shifted.');
+        return;
+      }
+      const studentData = snap.val() || {};
+      const balance = Number(studentData.balance || studentData.outstandingBalance || shiftInfo.balance || 0);
+      const nowIso = new Date().toISOString();
+      const shiftDate = shiftInfo.dateShifted || nowIso.slice(0, 10);
+      const updates = {};
+      updates[`shiftedStudents/${key}`] = {
+        ...studentData,
+        status: 'shifted',
+        shiftedAt: shiftDate,
+        outstandingBalance: balance,
+        shiftReport: {
+          ...shiftInfo,
+          status: 'shifted',
+          adminShiftedAt: nowIso,
+          outstandingBalance: balance
+        }
+      };
+      updates[`students/${key}`] = null;
+      updates[`${SHIFT_REPORT_PATH}/${key}/status`] = 'shifted';
+      updates[`${SHIFT_REPORT_PATH}/${key}/adminShiftedAt`] = nowIso;
+      updates[`${SHIFT_REPORT_PATH}/${key}/outstandingBalance`] = balance;
+      updates[`${SHIFT_REPORT_PATH}/${key}/statusNote`] = 'Shifted to hub';
+      await db.ref().update(updates);
+      alert('Student shifted to SHIFTED HUB successfully.');
+    } catch (err) {
+      console.error('Shift student error', err);
+      alert('Failed to shift student: ' + (err && err.message ? err.message : err));
+    }
+  }
+
   async function doDeleteKey(key) {
     if (!confirm('Delete this student record? This action cannot be undone.')) return;
     try {

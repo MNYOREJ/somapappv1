@@ -59,9 +59,12 @@
     .paid{background:rgba(34,197,94,.22);color:#86efac;border:1px solid rgba(34,197,94,.4)}
     .partial{background:rgba(250,204,21,.18);color:#facc15;border:1px solid rgba(250,204,21,.38)}
     .overdue{background:rgba(248,113,113,.2);color:#fca5a5;border:1px solid rgba(248,113,113,.45)}
+    .pending{background:rgba(56,189,248,.18);color:#7dd3fc;border:1px solid rgba(56,189,248,.38)}
     .chip{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.3rem .85rem;border:1px solid rgba(148,163,184,.24);background:rgba(148,163,184,.12);font-size:.75rem;color:rgba(226,232,240,.85);letter-spacing:.02em;text-transform:uppercase}
     .chip.over{border-color:rgba(248,113,113,.45);background:rgba(248,113,113,.12);color:#fca5a5}
     .chip.soon{border-color:rgba(250,204,21,.4);background:rgba(250,204,21,.12);color:#facc15}
+    .chip.good{border-color:rgba(34,197,94,.45);background:rgba(34,197,94,.14);color:#bbf7d0}
+    .chip.wait{border-color:rgba(59,130,246,.4);background:rgba(59,130,246,.14);color:#bfdbfe}
     table thead th{text-transform:uppercase;letter-spacing:.04em;font-size:.68rem}
     table tbody td{border-bottom:1px solid rgba(148,163,184,.12)}
     table tfoot td{background:rgba(59,130,246,.12);border-top:1px solid rgba(59,130,246,.35)}
@@ -137,6 +140,8 @@
       </div>
 
       <div class="mt-6 hidden items-center gap-2 text-slate-400" id="loadLine"><i class="fas fa-circle-notch fa-spin"></i><span>Loading learners…</span></div>
+
+      <div id="debtorAlert" class="mt-6 hidden rounded-3xl border border-rose-500/40 bg-rose-900/40 p-5 text-sm text-rose-100 shadow-lg shadow-rose-900/30"></div>
 
       <div class="mt-4 overflow-x-auto rounded-3xl border border-slate-500/30 bg-slate-900/35">
         <table class="min-w-full text-left text-sm text-slate-100">
@@ -250,6 +255,60 @@
     </div>
   </div>
 
+  <!-- Edit Payment Modal -->
+  <div id="editPaymentModal" class="backdrop">
+    <div class="card p-6">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-white"><i class="fas fa-pen-to-square mr-2 text-amber-300"></i> Edit Payment</h2>
+        <button type="button" class="text-slate-400 transition hover:text-white" onclick="closeModal('editPaymentModal')"><i class="fas fa-times text-lg"></i></button>
+      </div>
+      <form id="editPaymentForm" class="mt-6 space-y-4">
+        <div>
+          <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Chagua Malipo</label>
+          <select id="editPaymentSelect" class="px-4 py-3 text-sm">
+            <option value="">--</option>
+          </select>
+          <p id="editNoPayments" class="mt-2 text-xs font-medium text-rose-300 hidden">Hakuna malipo ya kuhariri kwa mwanafunzi huyu.</p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Kiasi kipya</label>
+            <input id="editPaymentAmount" type="number" min="1" class="px-4 py-3 text-sm" placeholder="Ingiza kiasi" required />
+          </div>
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Tarehe</label>
+            <input id="editPaymentDate" type="date" class="px-4 py-3 text-sm" required />
+          </div>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Njia</label>
+            <select id="editPaymentMethod" class="px-4 py-3 text-sm">
+              <option>Cash</option>
+              <option>MPesa</option>
+              <option>Airtel Money</option>
+              <option>TigoPesa</option>
+              <option>Bank Transfer</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Mkusanyaji</label>
+            <input id="editPaymentCollector" type="text" class="px-4 py-3 text-sm" placeholder="Aliyepokea" />
+          </div>
+        </div>
+        <div>
+          <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Maelezo</label>
+          <textarea id="editPaymentNote" rows="2" class="px-4 py-3 text-sm" placeholder="Kumbukumbu, risiti, n.k."></textarea>
+        </div>
+        <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button type="button" onclick="closeModal('editPaymentModal')" class="inline-flex items-center justify-center gap-2 rounded-full border border-slate-500/40 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-300 hover:text-white">Cancel</button>
+          <button id="editPaymentSubmit" type="submit" class="inline-flex items-center justify-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/25 px-5 py-2 text-sm font-semibold text-amber-100 transition hover:border-amber-300 hover:bg-amber-500/35"><i class="fas fa-save"></i> Update Payment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Details Modal -->
   <div id="detailsModal" class="backdrop">
     <div class="card wide p-6">
@@ -281,11 +340,32 @@
     let expensesCache = [];
     let showingDebtors = false;
     let selectedAdm = '';
+    let selectedPaymentId = '';
     const todayStr = () => new Date().toISOString().split('T')[0];
     const resolveYear = () => (window.currentYear ?? new Date().getFullYear());
 
+    const DAY_MS = 24 * 60 * 60 * 1000;
     const fmt = (v) => `TSh ${Number(v||0).toLocaleString()}`;
     const safe = (v='') => String(v).replace(/<[^>]*>/g,'');
+    const toDateOrNull = (value) => {
+      if(!value) return null;
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    const formatLocalDate = (value) => {
+      const d = value instanceof Date ? value : toDateOrNull(value);
+      return d ? d.toLocaleDateString('en-GB') : '--';
+    };
+    const timeValue = (value) => {
+      const d = toDateOrNull(value);
+      return d ? d.getTime() : 0;
+    };
+    const statusMeta = {
+      cleared: { label:'UMESHALIPA', pillClass:'paid', rowClass:'bg-emerald-500/10 border border-emerald-400/25', balanceClass:'text-emerald-200' },
+      overdue: { label:'LIPA SASA', pillClass:'overdue', rowClass:'bg-rose-500/20 border border-rose-400/30', balanceClass:'text-rose-200' },
+      dueSoon: { label:'KARIBIA', pillClass:'partial', rowClass:'bg-amber-500/15 border border-amber-400/25', balanceClass:'text-amber-200' },
+      pending: { label:'BADO', pillClass:'pending', rowClass:'bg-sky-500/15 border border-sky-400/25', balanceClass:'text-sky-200' },
+    };
 
     // --- Helpers: flexible school path detection (handles naming variations) ---
     async function detectPrefoneBase(){
@@ -339,35 +419,96 @@
         let due=0, coll=0;
 
         financeData = list.map(([adm, s])=>{
-          const payments = Object.values(s.payments || {}).map(p=>({
+          const payments = Object.entries(s.payments || {}).map(([id,p])=>({
+            id,
             amount: Number(p.amount||0),
             date: p.date || todayStr(),
             method: p.method || 'Cash',
             note: p.note || '',
             collector: p.collector || p.recorder || '',
           }));
+          payments.sort((a,b)=> timeValue(b.date) - timeValue(a.date));
           const paid = payments.reduce((t,p)=>t+Number(p.amount||0),0);
           const totalFee = Number(s.totalFee || s.required || 0);
-          const bal = Math.max(0, totalFee - paid);
+          const rawBalance = totalFee - paid;
+          const bal = rawBalance > 0 ? rawBalance : 0;
+          const overPay = rawBalance < 0 ? Math.abs(rawBalance) : 0;
           due += totalFee; coll += paid;
 
-          const planStart = s.reportingDate || s.planStart || s.joinDate || null;
-          const nextDue = planStart ? new Date(planStart) : new Date();
-          nextDue.setMonth(nextDue.getMonth()+1);
-          const days = (nextDue - new Date())/(1000*60*60*24);
-          const chipCls = days<0? 'chip over' : days<7? 'chip soon' : 'chip';
-          const debtLabel = days<0? `Overdue ${Math.abs(days).toFixed(0)} days` : days<7? `Due in ${days.toFixed(0)} days` : `Due ${nextDue.toLocaleDateString('en-GB')}`;
-          const status = bal<=0? 'paid' : (days<0? 'overdue' : 'partial');
+          const planStartRaw = s.reportingDate || s.planStart || s.joinDate || s.registrationDate || null;
+          const planStart = toDateOrNull(planStartRaw);
+          const plan = planStart ? `Kuanzia ${formatLocalDate(planStart)}` : 'Mpango Kamili';
 
+          const dueCandidates = [
+            s.nextDueDate, s.nextDue, s.dueDate, s.expectedDueDate, s.debtDueDate,
+            s.planDueDate, s.paymentDueDate, s.nextPaymentDate, s.nextPaymentDue
+          ];
+          let dueDate = dueCandidates.map(toDateOrNull).find(Boolean) || null;
+          if(!dueDate && planStart){
+            dueDate = new Date(planStart.getTime());
+            dueDate.setMonth(dueDate.getMonth()+1);
+          }
+
+          const now = new Date();
+          let statusKey = 'pending';
+          let chipCls = 'chip wait';
+          let debtLabel = '';
+          let debtDays = null;
+
+          if(bal <= 0){
+            statusKey = 'cleared';
+            chipCls = 'chip good';
+            debtLabel = overPay>0 ? `Umezidi kulipa ${fmt(overPay)}` : 'Umeshalipa ada yote';
+          }else if(dueDate){
+            const diffMs = dueDate.getTime() - now.getTime();
+            if(diffMs < 0){
+              const overdueDays = Math.max(1, Math.ceil(Math.abs(diffMs)/DAY_MS));
+              statusKey = 'overdue';
+              chipCls = 'chip over';
+              debtLabel = `Umepitisha deni siku ${overdueDays}`;
+              debtDays = -overdueDays;
+            }else if(diffMs <= 7*DAY_MS){
+              const daysLeft = Math.max(1, Math.ceil(diffMs/DAY_MS));
+              const floorDays = Math.floor(diffMs/DAY_MS);
+              statusKey = 'dueSoon';
+              chipCls = 'chip soon';
+              debtLabel = floorDays <= 0 ? 'Lipia leo' : (daysLeft === 1 ? 'Malipo ni kesho' : `Siku ${daysLeft} kabla ya malipo`);
+              debtDays = daysLeft;
+            }else{
+              const daysLeft = Math.ceil(diffMs/DAY_MS);
+              statusKey = 'pending';
+              chipCls = 'chip wait';
+              debtLabel = `Lipa kabla ya ${formatLocalDate(dueDate)}`;
+              debtDays = daysLeft;
+            }
+          }else{
+            statusKey = bal>0 ? 'pending' : 'cleared';
+            chipCls = bal>0 ? 'chip wait' : 'chip good';
+            debtLabel = bal>0 ? 'Weka tarehe ya malipo' : 'Umeshalipa ada yote';
+          }
+
+          const meta = statusMeta[statusKey] || statusMeta.pending;
           const name = `${s.firstName||s.firstname||''} ${s.lastName||s.lastname||''}`.trim() || (s.name||'Unnamed Learner');
           const contact = s.parentContact || s.parentPhone || s.guardianPhone || s.phone || '';
 
           return {
-            adm, name, contact, totalFee, plan: planStart? `From ${new Date(planStart).toLocaleDateString('en-GB')}` : 'Full Program',
-            paid, bal, debtTill:`<span class="${chipCls}">${safe(debtLabel)}</span>`, status,
+            adm,
+            name,
+            contact,
+            totalFee,
+            plan,
+            paid,
+            bal,
+            debtTill:`<span class="${chipCls}">${safe(debtLabel)}</span>`,
+            debtText: debtLabel,
+            statusKey,
+            statusLabel: meta.label,
+            statusClass: meta.pillClass,
+            rowToneClass: meta.rowClass,
+            balanceClass: meta.balanceClass,
             cohort: s.cohort || s.batch || '',
             photoUrl: s.photoUrl || '',
-            rawDebtInfo:{ label:debtLabel },
+            rawDebtInfo:{ label:debtLabel, dueDate: dueDate ? dueDate.toISOString() : null, days: debtDays, status: statusKey, overPay },
             payments,
           }
         });
@@ -422,6 +563,7 @@
       const tbody = document.getElementById('financeBody');
       const tfoot = document.getElementById('financeTotals');
       tbody.innerHTML = ''; tfoot.innerHTML='';
+      renderDebtorBanner();
 
       const rows = visibleRows();
       let tFee=0, tPaid=0, tBal=0;
@@ -432,37 +574,73 @@
         rows.forEach(row=>{
           tFee += row.totalFee; tPaid += row.paid; tBal += row.bal;
           tbody.insertAdjacentHTML('beforeend', `
-            <tr class="transition hover:bg-slate-900/45">
+            <tr class="transition ${row.rowToneClass||''} hover:bg-slate-900/55">
               <td class="px-5 py-4 font-semibold text-slate-200">${row.adm}</td>
               <td class="px-5 py-4">${safe(row.name)}</td>
               <td class="px-5 py-4">${safe(row.contact)}</td>
               <td class="px-5 py-4">${fmt(row.totalFee)}</td>
               <td class="px-5 py-4 text-xs text-slate-400">${safe(row.plan)}</td>
               <td class="px-5 py-4 text-emerald-200">${fmt(row.paid)}</td>
-              <td class="px-5 py-4 text-amber-200">${fmt(row.bal)}</td>
+              <td class="px-5 py-4 ${row.balanceClass||'text-amber-200'} font-semibold">${fmt(row.bal)}</td>
               <td class="px-5 py-4">${row.debtTill}</td>
-              <td class="px-5 py-4"><span class="pill ${row.status}">${row.status[0].toUpperCase()+row.status.slice(1)}</span></td>
+              <td class="px-5 py-4"><span class="pill ${row.statusClass}">${row.statusLabel}</span></td>
               <td class="px-5 py-4 text-right">
-                <div class="flex justify-end gap-2">
-                  <button class="inline-flex items-center gap-1 rounded-full border border-slate-500/40 px-3 py-1 text-xs font-semibold text-slate-200 transition hover:border-slate-300 hover:text-white" onclick="viewDetails('${row.adm}')"><i class="fas fa-eye"></i> View</button>
-                  <button class="inline-flex items-center gap-1 rounded-full border border-emerald-400/50 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-500/25" onclick="openPaymentModal('${row.adm}')"><i class="fas fa-money-bill"></i> Pay</button>
+                <div class="flex flex-wrap justify-end gap-2">
+                  <button class="inline-flex items-center gap-1 rounded-full border border-slate-500/40 px-3 py-1 text-xs font-semibold text-slate-200 transition hover:border-slate-300 hover:text-white" onclick="viewDetails('${row.adm}')"><i class="fas fa-eye"></i> Tazama</button>
+                  <button class="inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-100 transition hover:border-amber-300 hover:bg-amber-500/25" onclick="openEditPayments('${row.adm}')"><i class="fas fa-pen"></i> Hariri</button>
+                  <button class="inline-flex items-center gap-1 rounded-full border border-emerald-400/50 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-500/25" onclick="openPaymentModal('${row.adm}')"><i class="fas fa-money-bill"></i> Lipa</button>
                 </div>
               </td>
             </tr>`);
         });
       }
 
+      const totalBalanceClass = tBal>0 ? 'text-rose-200' : 'text-emerald-200';
       tfoot.innerHTML = `
         <tr class="text-sm font-semibold text-slate-200">
           <td colspan="3" class="px-5 py-4 uppercase tracking-widest text-slate-300">Totals (${rows.length} learners)</td>
           <td class="px-5 py-4">${fmt(tFee)}</td>
           <td class="px-5 py-4 text-center text-slate-500">--</td>
           <td class="px-5 py-4 text-emerald-200">${fmt(tPaid)}</td>
-          <td class="px-5 py-4 text-amber-200">${fmt(tBal)}</td>
+          <td class="px-5 py-4 ${totalBalanceClass}">${fmt(tBal)}</td>
           <td class="px-5 py-4 text-center text-slate-500">--</td>
           <td class="px-5 py-4 text-center text-slate-500">--</td>
           <td class="px-5 py-4 text-right text-slate-500">--</td>
         </tr>`;
+    }
+
+    function renderDebtorBanner(){
+      const alertBox = document.getElementById('debtorAlert');
+      if(!alertBox) return;
+      const overdue = financeData
+        .filter(r=>r.statusKey==='overdue' && r.bal>0)
+        .sort((a,b)=>b.bal - a.bal);
+      if(!overdue.length){
+        alertBox.classList.add('hidden');
+        alertBox.innerHTML = '';
+        return;
+      }
+      const rowsHtml = overdue.slice(0,7).map(r=>`
+        <div class="flex flex-wrap items-center gap-3 rounded-2xl border border-rose-400/30 bg-rose-500/20 px-3 py-2 text-xs sm:text-sm">
+          <span class="font-semibold text-rose-50">${safe(r.adm)}</span>
+          <span class="flex-1 text-rose-100" title="${safe(r.name)}">${safe(r.name)}</span>
+          <span class="text-rose-200" title="${safe(r.contact||'--')}">${safe(r.contact||'--')}</span>
+          <span class="font-semibold text-rose-50">${fmt(r.bal)}</span>
+          <span class="text-rose-200">${safe(r.rawDebtInfo.label)}</span>
+        </div>`).join('');
+      const extra = overdue.length>7 ? `<p class="text-xs text-rose-200/80">+${overdue.length-7} wanafunzi zaidi wana deni la kufuatiliwa zaidi.</p>` : '';
+      alertBox.classList.remove('hidden');
+      alertBox.innerHTML = `
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center gap-3 text-rose-100">
+            <i class="fas fa-bullhorn text-rose-200 text-lg"></i>
+            <p class="text-base font-semibold uppercase tracking-wide">SEND HOME HAS NOT PAID FEE</p>
+          </div>
+          <div class="grid gap-2">
+            ${rowsHtml}
+          </div>
+          ${extra}
+        </div>`;
     }
 
     function renderExpenses(){
@@ -495,20 +673,86 @@
     // --- Modals ---
     function openPaymentModal(adm){
       selectedAdm = adm;
+      selectedPaymentId = '';
       document.getElementById('paymentDate').value = todayStr();
       document.getElementById('paymentModal').style.display='flex';
     }
-    function closeModal(id){ document.getElementById(id).style.display='none'; }
+    function closeModal(id){
+      const el = document.getElementById(id);
+      if(el) el.style.display='none';
+      if(id==='editPaymentModal'){
+        selectedPaymentId = '';
+        toggleEditInputs(true);
+      }
+    }
+
+    function toggleEditInputs(disabled){
+      ['editPaymentAmount','editPaymentDate','editPaymentMethod','editPaymentCollector','editPaymentNote','editPaymentSubmit'].forEach(id=>{
+        const el = document.getElementById(id);
+        if(el) el.disabled = !!disabled;
+      });
+    }
+
+    function fillEditPaymentForm(payment){
+      if(!payment){
+        toggleEditInputs(true);
+        selectedPaymentId = '';
+        return;
+      }
+      selectedPaymentId = payment.id;
+      document.getElementById('editPaymentAmount').value = payment.amount;
+      document.getElementById('editPaymentDate').value = payment.date || todayStr();
+      document.getElementById('editPaymentMethod').value = payment.method || 'Cash';
+      document.getElementById('editPaymentCollector').value = payment.collector || '';
+      document.getElementById('editPaymentNote').value = payment.note || '';
+      toggleEditInputs(false);
+    }
+
+    function openEditPayments(adm){
+      selectedAdm = adm;
+      selectedPaymentId = '';
+      const form = document.getElementById('editPaymentForm');
+      const select = document.getElementById('editPaymentSelect');
+      const notice = document.getElementById('editNoPayments');
+      if(form) form.reset();
+      toggleEditInputs(true);
+
+      const row = financeData.find(r=>r.adm===adm);
+      if(!row || !row.payments.length){
+        if(select){
+          select.innerHTML = `<option value="">Hakuna malipo</option>`;
+          select.disabled = true;
+        }
+        if(notice) notice.classList.remove('hidden');
+        document.getElementById('editPaymentModal').style.display='flex';
+        return;
+      }
+
+      if(select){
+        const options = row.payments.map(p=>`<option value="${p.id}">${fmt(p.amount)} - ${formatLocalDate(p.date)} - ${safe(p.method||'Cash')}</option>`).join('');
+        select.innerHTML = `<option value="">Chagua malipo ya kurekebisha</option>${options}`;
+        select.disabled = false;
+        select.value = row.payments[0].id;
+      }
+      if(notice) notice.classList.add('hidden');
+      fillEditPaymentForm(row.payments[0]);
+      document.getElementById('editPaymentModal').style.display='flex';
+    }
 
     document.getElementById('paymentForm').addEventListener('submit', async (e)=>{
       e.preventDefault();
-      const amount = parseInt(document.getElementById('paymentAmount').value,10);
+      const amount = Number(document.getElementById('paymentAmount').value);
       const method = document.getElementById('paymentMethod').value;
       const note = document.getElementById('paymentNote').value;
       const date = document.getElementById('paymentDate').value;
       const collector = document.getElementById('paymentCollector').value;
-      if(!amount) return Swal.fire('Error','Enter amount','error');
+      if(!amount || amount<=0) return Swal.fire('Error','Enter amount','error');
       if(!date) return Swal.fire('Error','Select the date received','error');
+
+      const row = financeData.find(r=>r.adm===selectedAdm);
+      if(row && row.totalFee>0 && (row.paid + amount) > row.totalFee){
+        return Swal.fire('Angalizo','THIS IS MORE THAN WHAT THE CHILD SHOULD PAY.','warning');
+      }
 
       try{
         const base = await detectPrefoneBase();
@@ -520,6 +764,57 @@
         await loadFinance(base);
       }catch(err){
         Swal.fire('Error','Failed to add payment: '+err.message,'error');
+      }
+    });
+
+    document.getElementById('editPaymentSelect').addEventListener('change', (e)=>{
+      const row = financeData.find(r=>r.adm===selectedAdm);
+      if(!row) return;
+      const payment = row.payments.find(p=>p.id===e.target.value);
+      if(!payment){
+        selectedPaymentId = '';
+        toggleEditInputs(true);
+        return;
+      }
+      fillEditPaymentForm(payment);
+    });
+
+    document.getElementById('editPaymentForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      if(!selectedAdm || !selectedPaymentId){
+        return Swal.fire('Error','Chagua malipo ya kuhariri kwanza.','error');
+      }
+      const amount = Number(document.getElementById('editPaymentAmount').value);
+      const date = document.getElementById('editPaymentDate').value;
+      const method = document.getElementById('editPaymentMethod').value;
+      const collector = document.getElementById('editPaymentCollector').value;
+      const note = document.getElementById('editPaymentNote').value;
+      if(!amount || amount<=0) return Swal.fire('Error','Enter amount','error');
+      if(!date) return Swal.fire('Error','Select the date received','error');
+
+      const row = financeData.find(r=>r.adm===selectedAdm);
+      if(!row){
+        return Swal.fire('Error','Learner not found in the current list. Reload and try again.','error');
+      }
+      const original = row.payments.find(p=>p.id===selectedPaymentId);
+      if(!original){
+        return Swal.fire('Error','Payment record missing. Reload and try again.','error');
+      }
+      const projected = row.paid - Number(original.amount||0) + amount;
+      if(row.totalFee>0 && projected > row.totalFee){
+        return Swal.fire('Angalizo','THIS IS MORE THAN WHAT THE CHILD SHOULD PAY.','warning');
+      }
+
+      try{
+        const base = await detectPrefoneBase();
+        await db.ref(`${base}/students/${selectedAdm}/payments/${selectedPaymentId}`).update({ amount, method, date, collector, note });
+        await db.ref(`${base}/students/${selectedAdm}`).update({ updatedAt: Date.now() });
+        Swal.fire('Success','Payment updated','success');
+        closeModal('editPaymentModal');
+        e.target.reset();
+        await loadFinance(base);
+      }catch(err){
+        Swal.fire('Error','Failed to update payment: '+err.message,'error');
       }
     });
 
@@ -540,7 +835,9 @@
         <p><strong class="text-slate-200">Total Fee:</strong> ${fmt(row.totalFee)}</p>
         <p><strong class="text-slate-200">Paid:</strong> ${fmt(row.paid)}</p>
         <p><strong class="text-slate-200">Balance:</strong> ${fmt(row.bal)}</p>
-        <p><strong class="text-slate-200">Debt Status:</strong> ${safe(row.rawDebtInfo.label)}</p>
+        <p><strong class="text-slate-200">Hali ya Ada:</strong> ${safe(row.statusLabel)}</p>
+        <p><strong class="text-slate-200">Maelezo ya Deni:</strong> ${safe(row.rawDebtInfo.label)}</p>
+        ${row.rawDebtInfo.dueDate ? `<p><strong class="text-slate-200">Mpango wa Malipo:</strong> ${formatLocalDate(row.rawDebtInfo.dueDate)}</p>` : ''}
         ${row.photoUrl? `<img src="${row.photoUrl}" alt="Learner photo" class="mt-4 h-28 w-28 rounded-2xl object-cover">` : ''}
         ${history}`;
       document.getElementById('detailsModal').style.display='flex';
@@ -583,7 +880,7 @@
         Paid: r.paid,
         Balance: r.bal,
         DebtTill: r.rawDebtInfo.label,
-        Status: r.status.toUpperCase(),
+        Status: r.statusLabel,
       }));
     }
 

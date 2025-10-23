@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Kuajiri Wafanyakazi | SoMAp</title>
   <link rel="stylesheet" href="../css/workers.css">
+
+  <!-- Firebase Compat SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-  <script src="../firebase/firebase-config.js"></script>
+  <!-- IMPORTANT: do NOT include firebase-config.js as a classic script if it uses `export` -->
 </head>
 <body>
   <main>
@@ -52,7 +54,7 @@
       </div>
     </section>
 
-    <form id="admissionForm" class="workers-form workers-fieldset">
+    <form id="admissionForm" class="workers-form workers-fieldset" novalidate>
       <fieldset class="workers-fieldset">
         <legend>Wasifu wa Mfanyakazi</legend>
         <label>Jina la Kwanza / First Name
@@ -78,10 +80,10 @@
 
       <fieldset class="workers-fieldset">
         <legend>Wasiliana (Next of Kin)</legend>
-        <label>Jina la Mtu wa Dh emergency
+        <label>Jina la Mtu wa Dharura
           <input name="nextOfKinName" required>
         </label>
-        <label>Namba ya Simu ya Mtu wa Dh emergency
+        <label>Namba ya Simu ya Mtu wa Dharura
           <input name="nextOfKinPhone" required placeholder="+2550XXXXXXXXX">
         </label>
       </fieldset>
@@ -194,11 +196,17 @@
   </main>
 
   <script type="module">
-    import { ensureAnonymousAuth, dbRefs, sha256Hex, localTs, toast } from '../modules/workers_helpers.js';
-    import { normalizeThreeNames, validateAdmissionPayload, isTZWorkerPhone, ROLE_DOC_REQUIREMENTS } from '../modules/workers_validation.js';
-    import { uploadFileToStorage, renderTable } from '../modules/workers_ui.js';
-    import { defaultContractLanguage, templateKeyForRole } from '../modules/workers_contracts.js';
+    /***** 1) Correct imports (paths are from workershtml/) *****/
+    import { firebaseConfig } from './firebase/firebase-config.js';           // FIXED path
+    import { ensureAnonymousAuth, sha256Hex, localTs, toast } from './modules/workers_helpers.js';   // FIXED path
+    import { normalizeThreeNames, validateAdmissionPayload, ROLE_DOC_REQUIREMENTS } from './modules/workers_validation.js'; // FIXED path
+    import { uploadFileToStorage, renderTable } from './modules/workers_ui.js';  // FIXED path
+    import { defaultContractLanguage, templateKeyForRole } from './modules/workers_contracts.js';     // FIXED path
 
+    // 2) Initialize Firebase (critical)
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
+    // 3) DOM refs
     const form = document.getElementById('admissionForm');
     const roleDocsContainer = document.getElementById('roleDocs');
     const workerTable = document.getElementById('workerTable');
@@ -208,54 +216,61 @@
 
     const DOC_LABELS = {
       cv: 'CV (PDF)',
-      formFourCert: 'Cheti cha Kidato cha Nne',
-      roleCert: 'Cheti cha Jukumu',
-      villageLetter: 'Barua ya Kijiji',
+      formFourCert: 'Cheti cha Kidato cha Nne (PDF)',
+      roleCert: 'Cheti cha Jukumu (PDF/IMG)',
+      villageLetter: 'Barua ya Kijiji (PDF/IMG)',
       medicalProof: 'Uthibitisho wa Afya'
     };
 
+    // 4) Today label
     dateLabel.textContent = new Date().toLocaleString('sw-TZ', {
-      timeZone: 'Africa/Nairobi',
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
+      timeZone: 'Africa/Nairobi', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
 
-    ensureAnonymousAuth().then(checkAdmin).then(loadWorkers);
+    // 5) Auth & admin check, then load workers
+    try {
+      const user = await ensureAnonymousAuth();
+      const uid = user?.uid;
+      if (!uid) throw new Error('Auth failed');
 
+      const adminSnap = await firebase.database().ref(`admins/${uid}`).get();
+      if (!adminSnap.exists() || adminSnap.val() !== true) {
+        toast('Hakuna ruhusa ya kuajiri. Ongeza UID hii kwenye admins/ kisha jaribu tena.', 'error');
+        console.warn('Your current UID is not admin:', uid);
+        // redirect if you want:
+        // window.location.href = '../index.html';
+      } else {
+        await loadWorkers();
+      }
+    } catch (e) {
+      console.error(e);
+      toast(e.message || 'Hitilafu ya uhalalishaji', 'error');
+    }
+
+    // 6) Events
     roleSelect.addEventListener('change', renderRoleDocs);
-    form.addEventListener('change', evt => {
+    form.addEventListener('change', (evt) => {
       if (evt.target.name === 'maritalStatus') {
         spouseFields.style.display = evt.target.value === 'married' ? 'grid' : 'none';
       }
     });
     form.addEventListener('submit', handleSubmit);
 
-    async function checkAdmin(user) {
-      const uid = user.uid;
-      const adminSnap = await firebase.database().ref(`admins/${uid}`).once('value');
-      if (!adminSnap.exists() || adminSnap.val() !== true) {
-        toast('Hakuna ruhusa ya kuajiri. Wasiliana na msimamizi.', 'error');
-        window.location.href = '../index.html';
-        throw new Error('Not admin');
-      }
-      return uid;
-    }
+    // Render initial role docs section (empty until role chosen)
+    renderRoleDocs();
 
     function renderRoleDocs() {
       roleDocsContainer.innerHTML = '';
       const role = roleSelect.value;
       const requirements = ROLE_DOC_REQUIREMENTS[role] || [];
-
-      requirements.forEach(key => {
+      requirements.forEach((key) => {
         const wrapper = document.createElement('label');
         wrapper.textContent = DOC_LABELS[key] || key;
         const input = document.createElement('input');
         input.type = 'file';
         input.name = key;
         input.required = true;
-        input.accept = key === 'cv' || key === 'formFourCert' ? '.pdf' : '.pdf,image/*';
+        input.accept = (key === 'cv' || key === 'formFourCert') ? '.pdf' : '.pdf,image/*';
         wrapper.appendChild(input);
         roleDocsContainer.appendChild(wrapper);
       });
@@ -263,39 +278,65 @@
 
     async function handleSubmit(event) {
       event.preventDefault();
-      const formData = new FormData(form);
-      const rawProfile = Object.fromEntries(formData.entries());
-      const profile = { ...rawProfile };
-      ['idPhoto', 'passportPhoto', 'medicalProof', 'cv', 'formFourCert', 'roleCert', 'villageLetter'].forEach(key => {
-        delete profile[key];
-      });
-      ['firstName', 'middleName', 'lastName', 'nextOfKinName', 'fatherName', 'motherName', 'spouseName', 'area', 'tribe', 'villageHome', 'country', 'role', 'nssfNumber', 'nidaOrPassport', 'maritalStatus'].forEach(field => {
-        if (profile[field]) {
-          profile[field] = String(profile[field]).trim();
-        }
-      });
-      profile.baseSalary = Number(profile.baseSalary || 0);
-      profile.createdBy = firebase.auth().currentUser.uid;
-      profile.admissionDate = localTs();
-      profile.active = profile.active !== 'false';
-      profile.fullNameUpper = normalizeThreeNames(`${profile.firstName} ${profile.middleName} ${profile.lastName}`);
-      profile.phone = profile.phone.trim();
-      profile.nextOfKinPhone = profile.nextOfKinPhone.trim();
-      if (profile.spousePhone) profile.spousePhone = profile.spousePhone.trim();
 
-      const docs = {
+      // Let the browser show built-in errors for required inputs if any
+      if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+      }
+
+      const formData = new FormData(form);
+
+      const profile = {
+        firstName: (formData.get('firstName') || '').trim(),
+        middleName: (formData.get('middleName') || '').trim(),
+        lastName: (formData.get('lastName') || '').trim(),
+        phone: (formData.get('phone') || '').trim(),
+        country: (formData.get('country') || 'TZ').trim(),
+        nextOfKinName: (formData.get('nextOfKinName') || '').trim(),
+        nextOfKinPhone: (formData.get('nextOfKinPhone') || '').trim(),
+        nssfNumber: (formData.get('nssfNumber') || '').trim(),
+        nidaOrPassport: (formData.get('nidaOrPassport') || '').trim(),
+        fatherName: (formData.get('fatherName') || '').trim(),
+        motherName: (formData.get('motherName') || '').trim(),
+        maritalStatus: (formData.get('maritalStatus') || '').trim(),
+        spouseName: (formData.get('spouseName') || '').trim(),
+        spousePhone: (formData.get('spousePhone') || '').trim(),
+        area: (formData.get('area') || '').trim(),
+        tribe: (formData.get('tribe') || '').trim(),
+        villageHome: (formData.get('villageHome') || '').trim(),
+        role: (formData.get('role') || '').trim(),
+        baseSalary: Number(formData.get('baseSalary') || 0),
+        active: (formData.get('active') || 'true') !== 'false',
+        medicalConditions: (formData.get('medicalConditions') || '').trim(),
+        createdBy: firebase.auth().currentUser?.uid || '',
+        admissionDate: localTs()
+      };
+
+      // Enforce three-names and +2550… here as well (validation module also checks)
+      try {
+        profile.fullNameUpper = normalizeThreeNames(`${profile.firstName} ${profile.middleName} ${profile.lastName}`);
+      } catch (e) {
+        toast('Majina lazima yawe MATATU na yaandikwe kwa usahihi', 'error');
+        return;
+      }
+
+      // Collect required files
+      const baseDocs = {
         idPhoto: formData.get('idPhoto'),
         passportPhoto: formData.get('passportPhoto'),
         medicalProof: formData.get('medicalProof')
       };
 
-      Object.keys(ROLE_DOC_REQUIREMENTS).forEach(role => {
-        ROLE_DOC_REQUIREMENTS[role].forEach(docKey => {
-          docs[docKey] = formData.get(docKey);
-        });
-      });
+      // Only the selected role’s required docs
+      const roleDocs = {};
+      const reqs = ROLE_DOC_REQUIREMENTS[profile.role] || [];
+      for (const key of reqs) {
+        roleDocs[key] = formData.get(key);
+      }
 
-      const errors = validateAdmissionPayload({ profile, docs });
+      // Validate payload (fields + files)
+      const errors = validateAdmissionPayload({ profile, docs: { ...baseDocs, ...roleDocs } });
       if (errors.length) {
         toast(errors.join(', '), 'error');
         return;
@@ -307,20 +348,31 @@
         const storageBase = `workers/${workerId}`;
         const uploads = {};
 
-        uploads.idPhotoUrl = await uploadFileToStorage(docs.idPhoto, `${storageBase}/idPhoto-${Date.now()}.jpg`);
-        uploads.passportPhotoUrl = await uploadFileToStorage(docs.passportPhoto, `${storageBase}/passport-${Date.now()}.jpg`);
-        if (docs.medicalProof && docs.medicalProof.size) {
-          uploads.medicalProofUrl = await uploadFileToStorage(docs.medicalProof, `${storageBase}/medical-${Date.now()}.${getExtension(docs.medicalProof)}`);
+        // Upload mandatory photos
+        uploads.idPhotoUrl = await uploadFileToStorage(baseDocs.idPhoto, `${storageBase}/idPhoto-${Date.now()}.jpg`);
+        uploads.passportPhotoUrl = await uploadFileToStorage(baseDocs.passportPhoto, `${storageBase}/passport-${Date.now()}.jpg`);
+
+        // Optional medical proof
+        if (baseDocs.medicalProof && baseDocs.medicalProof.size) {
+          uploads.medicalProofUrl = await uploadFileToStorage(
+            baseDocs.medicalProof,
+            `${storageBase}/medical-${Date.now()}.${getExtension(baseDocs.medicalProof)}`
+          );
         }
 
-        const roleDocs = ROLE_DOC_REQUIREMENTS[profile.role] || [];
-        for (const key of roleDocs) {
-          const file = docs[key];
+        // Upload role-specific docs
+        for (const key of reqs) {
+          const file = roleDocs[key];
           if (file && file.size) {
-            uploads[`${mapDocKey(key)}Url`] = await uploadFileToStorage(file, `${storageBase}/${key}-${Date.now()}.${getExtension(file)}`);
+            const urlKey = mapDocKey(key) + 'Url';
+            uploads[urlKey] = await uploadFileToStorage(
+              file,
+              `${storageBase}/${key}-${Date.now()}.${getExtension(file)}`
+            );
           }
         }
 
+        // Contract defaults
         const contractLanguage = defaultContractLanguage(profile.role);
         const contractTemplateKey = templateKeyForRole(profile.role);
 
@@ -344,76 +396,71 @@
           }
         };
 
+        // Write to RTDB (requires your current UID to be /admins/{uid}=true)
         await firebase.database().ref(`workers/${workerId}`).set(payload);
         await firebase.database().ref(`workers_index_by_loginKey/${loginKey}`).set({ workerId });
-        toast('Mfanyakazi amesajiliwa kikamilifu ðŸŽ‰', 'success');
+
+        toast('Mfanyakazi amesajiliwa kikamilifu 🎉', 'success');
         form.reset();
         renderRoleDocs();
         loadWorkers();
       } catch (error) {
-        console.error(error);
-        toast(error.message || 'Imeshindikana kuhifadhi', 'error');
+        console.error('Save error:', error);
+        toast(error?.message || 'Imeshindikana kuhifadhi (angalia rules / admins / storage)', 'error');
       }
     }
 
     function mapDocKey(key) {
       switch (key) {
-        case 'cv':
-          return 'cvPdf';
-        case 'formFourCert':
-          return 'formFourCert';
-        case 'roleCert':
-          return 'roleCert';
-        case 'villageLetter':
-          return 'villageLetter';
-        default:
-          return key;
+        case 'cv': return 'cvPdf';
+        case 'formFourCert': return 'formFourCert';
+        case 'roleCert': return 'roleCert';
+        case 'villageLetter': return 'villageLetter';
+        default: return key;
       }
     }
 
     function getExtension(file) {
-      const name = file.name || '';
-      const match = name.match(/\.([a-zA-Z0-9]+)$/);
-      if (match) return match[1];
+      const name = file?.name || '';
+      const m = name.match(/\.([a-zA-Z0-9]+)$/);
+      if (m) return m[1];
+      if (!file?.type) return 'dat';
       if (file.type === 'application/pdf') return 'pdf';
       if (file.type.startsWith('image/')) return file.type.split('/')[1];
       return 'dat';
     }
 
     async function loadWorkers() {
-      const snap = await firebase.database().ref('workers').orderByChild('profile/fullNameUpper').once('value');
-      const workers = [];
-      snap.forEach(child => {
-        const data = child.val() || {};
-        workers.push({
-          id: child.key,
-          name: data.profile?.fullNameUpper || '',
-          role: data.profile?.role || '',
-          phone: data.profile?.phone || '',
-          baseSalary: data.profile?.baseSalary || 0,
-          active: data.profile?.active !== false
+      try {
+        const snap = await firebase.database().ref('workers').orderByChild('profile/fullNameUpper').get();
+        const workers = [];
+        snap.forEach((child) => {
+          const data = child.val() || {};
+          workers.push({
+            id: child.key,
+            name: data.profile?.fullNameUpper || '',
+            role: data.profile?.role || '',
+            phone: data.profile?.phone || '',
+            baseSalary: data.profile?.baseSalary || 0,
+            active: data.profile?.active !== false
+          });
         });
-      });
 
-      renderTable(workerTable, {
-        columns: [
-          { label: 'Jina Kamili', field: 'name' },
-          { label: 'Jukumu', field: 'role' },
-          { label: 'Simu', field: 'phone' },
-          {
-            label: 'Mshahara (TZS)',
-            value: row => Number(row.baseSalary || 0).toLocaleString('sw-TZ')
-          },
-          {
-            label: 'Hali',
-            value: row => row.active ? 'Active' : 'Inactive'
-          }
-        ],
-        rows: workers
-      });
+        renderTable(workerTable, {
+          columns: [
+            { label: 'Jina Kamili', field: 'name' },
+            { label: 'Jukumu', field: 'role' },
+            { label: 'Simu', field: 'phone' },
+            { label: 'Mshahara (TZS)', value: (row) => Number(row.baseSalary || 0).toLocaleString('sw-TZ') },
+            { label: 'Hali', value: (row) => (row.active ? 'Active' : 'Inactive') }
+          ],
+          rows: workers
+        });
+      } catch (e) {
+        console.error('Load workers error:', e);
+        toast('Imeshindikana kupakia orodha ya wafanyakazi', 'error');
+      }
     }
   </script>
 </body>
 </html>
-
-

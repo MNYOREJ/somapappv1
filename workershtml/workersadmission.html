@@ -155,7 +155,7 @@
 </main>
 
 <script type="module">
-  /* ---------- Firebase init (one place) ---------- */
+  /* ---------- Firebase init (no auth required) ---------- */
   const firebaseConfig = {
     apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
     authDomain: "somaptestt.firebaseapp.com",
@@ -166,8 +166,9 @@
     appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
   };
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
 
-  /* ---------- Cloudinary config (edit only if yours differ) ---------- */
+  /* ---------- Cloudinary (edit in DevTools if needed) ---------- */
   const CLD_CLOUD_NAME    = localStorage.getItem('cloud_name')    || 'dg7vnrkgd';
   const CLD_UPLOAD_PRESET = localStorage.getItem('upload_preset') || 'books_unsigned';
   const CLD_FOLDER        = 'somapappv1/workers';
@@ -222,17 +223,11 @@
     const hash = await crypto.subtle.digest('SHA-256', buf);
     return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
-  function getExt(file){
-    const n = file?.name||''; const m=n.match(/\.([a-z0-9]+)$/i);
-    if (m) return m[1]; if (!file?.type) return 'dat';
-    if (file.type==='application/pdf') return 'pdf';
-    if (file.type.startsWith('image/')) return file.type.split('/')[1];
-    return 'dat';
-  }
 
   async function cldUpload(file, publicIdHint='file'){
     if (!file || !file.size) throw new Error('Chagua faili kwanza');
-    const resource = (file.type||'').startsWith('image/') ? 'image' : 'raw';
+    const isImage = (file.type||'').startsWith('image/');
+    const resource = isImage ? 'image' : 'raw';
     const url = `https://api.cloudinary.com/v1_1/${CLD_CLOUD_NAME}/${resource}/upload`;
     const fd = new FormData();
     fd.append('file', file);
@@ -245,32 +240,20 @@
     return data.secure_url;
   }
 
-  function alertToast(m){ alert(m); }
-
-  /* ---------- Sign in (anonymous ok) ---------- */
-  const user = await new Promise(res=>{
-    const off = firebase.auth().onAuthStateChanged(u=>{off();res(u);});
-  }) || await firebase.auth().signInAnonymously();
-
-  /* ---------- Spouse fields toggle ---------- */
-  document.getElementById('maritalStatus').addEventListener('change', e=>{
-    document.getElementById('spouseFields').style.display = e.target.value==='married'?'grid':'none';
-  });
-
-  /* ---------- Load table ---------- */
-  async function loadWorkers(){
-    const snap = await firebase.database().ref('workers').orderByChild('profile/fullNameUpper').get();
-    const rows=[]; snap.forEach(ch=>{
-      const v=ch.val()||{};
-      rows.push({
-        name: v.profile?.fullNameUpper||'',
-        role: v.profile?.role||'',
-        phone: v.profile?.phone||'',
-        baseSalary: v.profile?.baseSalary||0,
-        active: v.profile?.active!==false
-      });
-    });
+  /* ---------- Nicer empty-state + table render ---------- */
+  function renderWorkersTable(rows){
     const el = $('workerTable');
+    el.innerHTML = '';
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.style.padding = '12px';
+      empty.style.background = '#f3f4f6';
+      empty.style.border = '1px solid #e5e7eb';
+      empty.style.borderRadius = '10px';
+      empty.textContent = 'Hakuna wafanyakazi waliopatikana (bado).';
+      el.appendChild(empty);
+      return;
+    }
     const tbl = document.createElement('table'); tbl.className='workers-table';
     tbl.innerHTML = `
       <thead><tr>
@@ -287,7 +270,30 @@
         <td>${r.active?'Active':'Inactive'}</td>`;
       tb.appendChild(tr);
     });
-    el.innerHTML=''; el.appendChild(tbl);
+    el.appendChild(tbl);
+  }
+
+  async function loadWorkers(){
+    try{
+      const snap = await db.ref('workers').get();    // <- no orderByChild (works even if field missing)
+      const rows=[];
+      (snap && snap.forEach) && snap.forEach(ch=>{
+        const v=ch.val()||{};
+        rows.push({
+          name: v.profile?.fullNameUpper||'',
+          role: v.profile?.role||'',
+          phone: v.profile?.phone||'',
+          baseSalary: v.profile?.baseSalary||0,
+          active: v.profile?.active!==false
+        });
+      });
+      // Sort client-side by name to look nice
+      rows.sort((a,b)=>a.name.localeCompare(b.name,'sw-TZ'));
+      renderWorkersTable(rows);
+    }catch(e){
+      console.error('Load workers error:', e);
+      renderWorkersTable([]);
+    }
   }
   loadWorkers();
 
@@ -305,38 +311,39 @@
 
     let fullNameUpper;
     try { fullNameUpper = normalizeThreeNames(`${firstName} ${middleName} ${lastName}`); }
-    catch(err){ return alertToast(err.message); }
+    catch(err){ return alert(err.message); }
 
-    if (!isTZWorkerPhone(phone)) return alertToast('Simu lazima iwe kama +2550XXXXXXXXX');
-    if (!role) return alertToast('Chagua jukumu (Role)');
+    if (!isTZWorkerPhone(phone)) return alert('Simu lazima iwe kama +2550XXXXXXXXX');
+    if (!role) return alert('Chagua jukumu (Role)');
 
     // Required photos
     const idPhoto = fd.get('idPhoto');
     const passportPhoto = fd.get('passportPhoto');
-    if (!idPhoto?.size || !passportPhoto?.size) return alertToast('Weka Picha ya Kitambulisho na Picha ya Passport');
+    if (!idPhoto?.size || !passportPhoto?.size) return alert('Weka Picha ya Kitambulisho na Picha ya Passport');
 
     // Role required docs
     for (const k of (ROLE_DOC_REQUIREMENTS[role]||[])){
       const f=fd.get(k);
-      if (!f?.size) return alertToast(`Faili ya lazima: ${DOC_LABELS[k]||k}`);
+      if (!f?.size) return alert(`Faili ya lazima: ${DOC_LABELS[k]||k}`);
     }
 
     try{
-      const workerId = firebase.database().ref('workers').push().key;
-      const basePathHint = `w_${workerId}_${Date.now()}`;
+      // ONE workerId for everything
+      const workerId = db.ref('workers').push().key;
+      const baseHint = `w_${workerId}_${Date.now()}`;
 
       // Uploads to Cloudinary
-      const idPhotoUrl       = await cldUpload(idPhoto,       `${basePathHint}_id`);
-      const passportPhotoUrl = await cldUpload(passportPhoto, `${basePathHint}_passport`);
+      const idPhotoUrl       = await cldUpload(idPhoto,       `${baseHint}_id`);
+      const passportPhotoUrl = await cldUpload(passportPhoto, `${baseHint}_passport`);
 
       let medicalProofUrl = '';
       const medicalProof = fd.get('medicalProof');
-      if (medicalProof?.size) medicalProofUrl = await cldUpload(medicalProof, `${basePathHint}_medical`);
+      if (medicalProof?.size) medicalProofUrl = await cldUpload(medicalProof, `${baseHint}_medical`);
 
       const extra = {};
       for (const k of (ROLE_DOC_REQUIREMENTS[role]||[])){
         const f=fd.get(k);
-        extra[ (k==='cv'?'cvPdf':k) + 'Url' ] = await cldUpload(f, `${basePathHint}_${k}`);
+        extra[ (k==='cv'?'cvPdf':k) + 'Url' ] = await cldUpload(f, `${baseHint}_${k}`);
       }
 
       const profile = {
@@ -359,7 +366,7 @@
         baseSalary:Number(fd.get('baseSalary')||0),
         active:(fd.get('active')||'true')!=='false',
         medicalConditions:(fd.get('medicalConditions')||'').trim(),
-        createdBy: firebase.auth().currentUser?.uid || '',
+        createdBy: '',  // no auth required
         admissionDate: Date.now()
       };
 
@@ -374,8 +381,8 @@
       };
 
       const loginKey = await sha256Hex(`${fullNameUpper}|${phone}`);
-      await firebase.database().ref(`workers/${workerId}`).set(payload);
-      await firebase.database().ref(`workers_index_by_loginKey/${loginKey}`).set({ workerId });
+      await db.ref(`workers/${workerId}`).set(payload);
+      await db.ref(`workers_index_by_loginKey/${loginKey}`).set({ workerId });
 
       alert('Mfanyakazi amesajiliwa kikamilifu ✅');
       e.currentTarget.reset();

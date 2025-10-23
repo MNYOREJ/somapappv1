@@ -16,16 +16,20 @@
   <script src="../firebase/firebase-config.js"></script>
 
   <style>
-    /* ===== DARK GLASS UI ===== */
+    /* =========================
+       DARK GLASS THEME + LAYOUT
+       ========================= */
     :root{
       --bg:#0b1020; --ink:#e5e7eb; --muted:#a0a7ba;
       --glass:rgba(255,255,255,.06); --border:rgba(255,255,255,.16);
       --accent:#7c8aff; --accent2:#35d1e2;
       --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --chip:rgba(255,255,255,.10);
+      --shadow:0 10px 40px rgba(0,0,0,.35);
     }
     html,body{height:100%}
     body{
-      margin:0; color:var(--ink); font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;
+      margin:0; color:var(--ink);
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;
       background:
         radial-gradient(1200px 800px at 10% -10%, #1f276a 0%, transparent 60%),
         radial-gradient(1000px 700px at 100% 0%, #0a6aa6 0%, transparent 55%),
@@ -36,7 +40,7 @@
     .appbar{
       display:flex;align-items:center;justify-content:space-between;gap:16px;
       padding:14px 16px;border-radius:16px;background:var(--glass);backdrop-filter:blur(16px);
-      border:1px solid var(--border);box-shadow:0 10px 50px rgba(0,0,0,.35);
+      border:1px solid var(--border);box-shadow:var(--shadow);
     }
     .brand{display:flex;gap:12px;align-items:center}
     .brand .logo{
@@ -56,7 +60,8 @@
     .btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b1020;border:0}
 
     .glass{background:var(--glass);border:1px solid var(--border);backdrop-filter:blur(16px);
-      border-radius:16px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+      border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+
     .hero{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
     .avatar{width:56px;height:56px;border-radius:14px;overflow:hidden;border:1px solid var(--border);
       background:radial-gradient(circle at 30% 20%,#233062,#11152a);display:grid;place-items:center;font-weight:800}
@@ -135,8 +140,8 @@
       </div>
     </section>
 
-    <!-- YOUR RESPONSIBILITY (ALWAYS SHOWN) -->
-    <section class="glass" id="myRoleSection" style="margin-top:16px;display:none">
+    <!-- YOUR RESPONSIBILITY (ALWAYS VISIBLE IF ROLE KNOWN) -->
+    <section class="glass" id="myRoleSection" style="margin-top:16px; display:none;">
       <div class="section-head" style="margin:0 0 8px 0">
         <h2 style="margin:0">Your Responsibility · Jukumu Lako</h2>
         <span class="chip">Bofya uanze kazi</span>
@@ -184,7 +189,7 @@
 
   <div id="toast"></div>
 
-  <!-- ===== keep your working helpers ===== -->
+  <!-- ===== Hook into your helpers; be resilient if anon is disabled ===== -->
   <script type="module">
     import {
       ensureAnonymousAuth,
@@ -196,7 +201,9 @@
     } from '../modules/workers_helpers.js';
     import { createCard } from '../modules/workers_ui.js';
 
-    /* ---- Clock ---- */
+    /* ==============================
+       CLOCK (Africa/Nairobi)
+       ============================== */
     function tzParts(){
       const d = new Date();
       const optD={timeZone:'Africa/Nairobi',year:'numeric',month:'2-digit',day:'2-digit'};
@@ -212,24 +219,28 @@
       document.getElementById('todayChip').textContent=`Leo: ${p.yr}-${p.mon}-${p.day}`;
     },1000);
 
-    /* ---- Firebase ---- */
+    /* ==============================
+       FIREBASE HANDLES
+       ============================== */
     const db = firebase.database();
     const auth = firebase.auth();
 
-    /* ---- UI ---- */
+    /* ==============================
+       UI REFS
+       ============================== */
     const greetEl   = document.getElementById('helloName');
     const roleChip  = document.getElementById('roleChip');
     const statusChp = document.getElementById('statusChip');
-    const linksGrid = document.getElementById('linksGrid');
     const myRoleSection = document.getElementById('myRoleSection');
     const myRoleGrid    = document.getElementById('myRoleGrid');
+    const linksGrid = document.getElementById('linksGrid');
     const schoolKpi = document.getElementById('schoolKpiGrid');
     const classWrap = document.getElementById('classTableWrap');
 
     document.getElementById('refreshBtn').addEventListener('click', ()=> loadDashboard(true));
     document.getElementById('signOutBtn').addEventListener('click', async ()=>{
       try{ await auth.signOut(); }catch(e){}
-      localStorage.removeItem('workerId'); localStorage.removeItem('role');
+      localStorage.removeItem('workerId'); localStorage.removeItem('role'); localStorage.removeItem('fullNameUpper');
       location.href = '../index.html';
     });
 
@@ -239,28 +250,75 @@
       return !!(snap && snap.exists() && snap.val()===true);
     }
 
-    /* ---- MAIN ---- */
+    /* ==========================================================
+       SAFE AUTH + DEVICE→WORKER RESOLUTION (NO RED ERRORS)
+       ========================================================== */
+    async function getAuthUserSafe(){
+      // Prefer your helper, but if anon is disabled, fall back to currentUser
+      try{
+        const u = await ensureAnonymousAuth();
+        if (u && u.uid) return u;
+      }catch(e){
+        // ignore; maybe anon sign-in disabled -> use currentUser
+      }
+      return auth.currentUser || null;
+    }
+
+    async function getWorkerIdSafe(){
+      // 1) localStorage (fast path if index already mapped)
+      let wid = localStorage.getItem('workerId');
+      if (wid) return wid;
+
+      // 2) try helper
+      try{
+        const viaHelper = await getLinkedWorkerId();
+        if (viaHelper){ localStorage.setItem('workerId', viaHelper); return viaHelper; }
+      }catch(e){ /* ignore */ }
+
+      // 3) check devices mapping if we have a user
+      const u = await getAuthUserSafe();
+      if (u && u.uid){
+        try{
+          const snap = await db.ref(`devices/${u.uid}/workerId`).once('value');
+          if (snap.exists()){
+            wid = snap.val(); localStorage.setItem('workerId', wid); return wid;
+          }
+        }catch(e){ /* ignore */ }
+      }
+
+      // 4) last resort: still none -> redirect (polite)
+      return null;
+    }
+
+    /* ==============================
+       MAIN LOADER
+       ============================== */
     async function loadDashboard(){
       try{
-        const authUser = await ensureAnonymousAuth(); // your working flow
-        const workerId = await getLinkedWorkerId();
-        if (!workerId){ toast('Device not linked. Tafadhali ingia tena.', 'error'); location.href='../index.html'; return; }
+        const authUser = await getAuthUserSafe();
+        const workerId = await getWorkerIdSafe();
+        if (!workerId){
+          toast('Kifaa hakijaunganishwa. Tafadhali ingia tena kwenye ukurasa mkuu.', 'error');
+          setTimeout(()=> location.href='../index.html', 900);
+          return;
+        }
 
-        const wSnap = await dbRefs.worker(workerId).once('value');
-        if (!wSnap.exists()){ toast('Profile missing. Wasiliana na HR.', 'error'); location.href='../index.html'; return; }
+        // Profile
+        const wSnap = await dbRefs.worker(workerId).once('value').catch(()=>null);
+        if (!wSnap || !wSnap.exists()){
+          toast('Wasifu wa mfanyakazi haujapatikana. Wasiliana na HR.', 'error');
+          setTimeout(()=> location.href='../index.html', 900);
+          return;
+        }
 
         const worker = wSnap.val()||{};
         const p = worker.profile||{};
-        const fullName = p.fullNameUpper || [p.firstName,p.middleName,p.lastName].filter(Boolean).join(' ').toUpperCase() || '—';
-        let role = String(p.role||'').trim().toLowerCase();
-        if (!role) { role = localStorage.getItem('role') || ''; }
-        localStorage.setItem('role', role);
 
-        // HERO
-        greetEl.textContent = `${fullName} — ${role ? role.toUpperCase() : 'WORKER'}`;
-        roleChip.textContent = `Role: ${role || '—'}`;
-        statusChp.textContent = (p.active===false) ? 'Status: Inactive' : 'Status: Active';
-        statusChp.classList.remove('ok','bad'); statusChp.classList.add(p.active===false?'bad':'ok');
+        // Full name + avatar
+        const fullNameUpper = p.fullNameUpper || [p.firstName,p.middleName,p.lastName].filter(Boolean).join(' ').toUpperCase() || '—';
+        localStorage.setItem('fullNameUpper', fullNameUpper);
+        greetEl.textContent = fullNameUpper;
+
         if (worker?.docs?.idPhotoUrl){
           document.getElementById('userAvatar').innerHTML =
             `<img src="${worker.docs.idPhotoUrl}" alt="ID" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>`;
@@ -269,18 +327,30 @@
           document.getElementById('userAvatar').textContent = initials.toUpperCase();
         }
 
-        // Always show the specific responsibility card FIRST
+        // Role detection (robust)
+        let role = String(p.role||'').trim().toLowerCase();
+        if (!role){ role = String(localStorage.getItem('role')||'').trim().toLowerCase(); }
+        localStorage.setItem('role', role || '');
+        roleChip.textContent = `Role: ${role || '—'}`;
+
+        // Status
+        const active = (p.active!==false);
+        statusChp.textContent = active ? 'Status: Active' : 'Status: Inactive';
+        statusChp.classList.remove('ok','bad'); statusChp.classList.add(active?'ok':'bad');
+
+        // Always show responsibility card if we know role
         renderMyRoleCard(role);
 
-        // Personal KPIs
+        // Personal KPIs (reads only own trees -> allowed by rules)
         await renderSelfKpis(workerId);
 
-        // Snapshot + class breakdown (best effort)
+        // Best-effort global tiles (hide if locked by rules)
         await renderSchoolSnapshot();
         await renderClassBreakdown();
 
         // Quick Links (role-aware)
-        renderLinks(role, await isAdmin(authUser.uid));
+        const admin = await isAdmin(authUser?.uid);
+        renderLinks(role, admin);
 
       }catch(err){
         console.error(err);
@@ -288,34 +358,35 @@
       }
     }
 
-    /* ---- Your Responsibility Card ---- */
+    /* ==============================
+       YOUR RESPONSIBILITY CARD
+       ============================== */
     function renderMyRoleCard(role){
       const map = {
-        cook:        { title:'Kitchen · Bwalo',    sub:'Pax, menu, variances', href:'workerscooks.html' },
-        guard:       { title:'Security · Ulinzi',  sub:'Handover & assets',    href:'workersmlinzi.html' },
-        cleaner:     { title:'Cleaning · Usafi',   sub:'Checklist & supplies', href:'workersmsafi.html' },
-        storekeeper: { title:'Storekeeper · Ghala',sub:'Ledger & stock',       href:'workersstorekeeper.html' },
-        driver:      { title:'Transport · Usafiri',sub:'Safari & ratiba',      href:'../transport.html' },
-        teacher:     { title:'Tasks · Kazi',       sub:'Daily duties',         href:'workertasks.html' },
-        accountant:  { title:'Payroll · Malipo',   sub:'NSSF & payslips',      href:'workerspayroll_admin.html' },
-        manager:     { title:'Approvals · Uthibitisho', sub:'Flags & incidents', href:'workersapprovals_admin.html' },
-        hr:          { title:'Admission · Kuajiri', sub:'Register & docs',     href:'workersadmission.html' },
-        academic:    { title:'Performance · Utendaji', sub:'Ranking & best',   href:'workersperformance.html' },
-        admin:       { title:'Admin · Msimamizi',  sub:'All controls',         href:'workersapprovals_admin.html' }
+        cook:        { title:'Kitchen · Bwalo',      sub:'Pax, menu, variances',        href:'workerscooks.html' },
+        guard:       { title:'Security · Ulinzi',    sub:'Handover & assets',           href:'workersmlinzi.html' },
+        cleaner:     { title:'Cleaning · Usafi',     sub:'Checklist & supplies',        href:'workersmsafi.html' },
+        storekeeper: { title:'Storekeeper · Ghala',  sub:'Ledger & stock',              href:'workersstorekeeper.html' },
+        driver:      { title:'Transport · Usafiri',  sub:'Safari & ratiba',             href:'../transport.html' },
+        teacher:     { title:'Tasks · Kazi',         sub:'Daily duties',                href:'workertasks.html' },
+        accountant:  { title:'Payroll · Malipo',     sub:'NSSF & payslips',             href:'workerspayroll_admin.html' },
+        manager:     { title:'Approvals · Uthibitisho', sub:'Flags & incidents',       href:'workersapprovals_admin.html' },
+        hr:          { title:'Admission · Kuajiri',  sub:'Register & docs',             href:'workersadmission.html' },
+        academic:    { title:'Performance · Utendaji', sub:'Ranking & best',           href:'workersperformance.html' },
+        admin:       { title:'Admin · Msimamizi',    sub:'All controls',                href:'workersapprovals_admin.html' }
       };
-      const cfg = map[role];
-      myRoleGrid.innerHTML = '';
-      if (!cfg){ myRoleSection.style.display='none'; return; }
-      myRoleSection.style.display = 'block';
 
-      // Try your createCard; fall back to inline tile
+      myRoleGrid.innerHTML = '';
+      const cfg = map[role];
+      if (!cfg){ myRoleSection.style.display='none'; return; }
+      myRoleSection.style.display='block';
+
       const el = createCard({
         title: cfg.title,
         subtitle: cfg.sub,
         body: `<a class="btn primary" href="${cfg.href}">Open | Fungua</a>`
       });
-      const wrap = document.createElement('div');
-      wrap.className='tile';
+      const wrap = document.createElement('div'); wrap.className='tile';
       if (typeof el === 'string'){
         wrap.innerHTML = `<h4>${cfg.title}</h4><p>${cfg.sub}</p><a class="btn primary" href="${cfg.href}">Open | Fungua</a>`;
       }else{
@@ -324,9 +395,12 @@
       myRoleGrid.appendChild(wrap);
     }
 
-    /* ---- Personal KPIs ---- */
+    /* ==============================
+       PERSONAL KPIs (OWN TREES)
+       ============================== */
     async function renderSelfKpis(workerId){
       const ymd = todayYMD(); const mm = yyyymm(new Date()); const dayKey = ymd.replace(/-/g,'');
+
       const [attSnap, taskSnap, leaveSnap, penSnap] = await Promise.all([
         db.ref(`attendance/${workerId}/${mm}`).once('value').catch(()=>null),
         db.ref(`tasks/${workerId}/${dayKey}`).once('value').catch(()=>null),
@@ -341,15 +415,18 @@
       const kpiLeave = document.getElementById('kpiLeave');
       const kpiPens  = document.getElementById('kpiPenalties');
 
+      // Check-in
       const rec = attSnap?.val()?.[dayKey] || null;
       const checked = !!(rec && rec.checkInTs);
       const lateMin = Number(rec?.lateMinutes||0);
       kpiCheck.className='glass kpi ' + (checked?(lateMin>0?'warn':'ok'):'bad');
       kpiCheck.querySelector('.val').textContent = checked ? (lateMin>0?`Late ${lateMin}m`:'Checked in') : (after0720()?'Not in 07:20+':'Not yet');
 
+      // Lates this month
       let lates=0; Object.values(attSnap?.val()||{}).forEach(v=>{ if (v && Number(v.lateMinutes||0)>0) lates++; });
       kpiLates.className='glass kpi ' + (lates?'warn':'ok'); kpiLates.querySelector('.val').textContent=lates;
 
+      // Tasks today
       let pending=0, overdue=0, now=Date.now();
       Object.values(taskSnap?.val()||{}).forEach(t=>{
         if (!t) return; const done=Number(t.completedTs||0)>0;
@@ -358,17 +435,21 @@
       kpiTasks.className='glass kpi ' + (pending?'warn':'ok'); kpiTasks.querySelector('.val').textContent=pending;
       kpiOver.className='glass kpi ' + (overdue?'bad':'ok');   kpiOver.querySelector('.val').textContent=overdue;
 
+      // Leave today
       let leaveToday='None';
       Object.values(leaveSnap?.val()||{}).forEach(req=>{
         if (req?.status==='approved' && ymd>=req.startYmd && ymd<=req.endYmd) leaveToday=(req.type||'leave').toUpperCase();
       });
       kpiLeave.className='glass kpi ' + (leaveToday==='None'?'ok':'warn'); kpiLeave.querySelector('.val').textContent=leaveToday;
 
+      // Penalties
       let penTotal=0; Object.values(penSnap?.val()||{}).forEach(e=> penTotal+=Number(e?.amountTZS||0));
       kpiPens.className='glass kpi ' + (penTotal?'bad':'ok'); kpiPens.querySelector('.val').textContent=penTotal.toLocaleString('sw-TZ');
     }
 
-    /* ---- School Snapshot ---- */
+    /* ==============================
+       SCHOOL SNAPSHOT (BEST-EFFORT)
+       ============================== */
     async function renderSchoolSnapshot(){
       schoolKpi.innerHTML='';
       const ymd = todayYMD(); const mm = yyyymm(new Date()); const dayKey = ymd.replace(/-/g,'');
@@ -426,7 +507,9 @@
       }
     }
 
-    /* ---- Class Breakdown ---- */
+    /* ==============================
+       CLASS BREAKDOWN (BEST-EFFORT)
+       ============================== */
     async function renderClassBreakdown(){
       classWrap.innerHTML='';
       const table=document.createElement('table'); table.className='brief';
@@ -437,7 +520,10 @@
       const tbody=table.querySelector('#classTbody');
 
       const sSnap = await db.ref('students').once('value').catch(()=>null);
-      if (!sSnap || !sSnap.exists()){ const div=document.createElement('div'); div.className='empty'; div.textContent='No student data (rules or empty).'; classWrap.appendChild(div); return; }
+      if (!sSnap || !sSnap.exists()){
+        const div=document.createElement('div'); div.className='empty';
+        div.textContent='No student data (rules or empty).'; classWrap.appendChild(div); return;
+      }
       const students=sSnap.val()||{};
 
       const ymd=todayYMD(), mm=yyyymm(new Date()), dayKey=ymd.replace(/-/g,'');
@@ -465,7 +551,9 @@
       classWrap.appendChild(table);
     }
 
-    /* ---- Quick Links (role-aware) ---- */
+    /* ==============================
+       QUICK LINKS (ROLE-AWARE)
+       ============================== */
     function renderLinks(role, admin){
       linksGrid.innerHTML='';
       const cards=[
@@ -493,7 +581,7 @@
       if (admin) allow.add('admin');
       if (['hr','manager','accountant'].includes(role)) allow.add(role);
 
-      // Put the role-specific card first in Quick Links too (but won't duplicate the MyRole section)
+      // Put the role-specific card near the top (no duplication with MyRole section)
       const ordered=[];
       cards.forEach(c=>{ if (c.roles.includes(role)) ordered.push(c); });
       cards.forEach(c=>{ if (c.roles.some(r=>allow.has(r)) && !ordered.find(x=>x.key===c.key)) ordered.push(c); });
@@ -507,7 +595,9 @@
       });
     }
 
-    // GO
+    /* ==============================
+       BOOT
+       ============================== */
     loadDashboard();
   </script>
 </body>

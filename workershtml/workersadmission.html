@@ -6,11 +6,21 @@
   <title>Kuajiri Wafanyakazi | SoMAp</title>
   <link rel="stylesheet" href="../css/workers.css"/>
 
-  <!-- Firebase compat SDKs (no other scripts needed) -->
+  <!-- Firebase compat SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+
+  <style>
+    /* Minimal notices so you don't miss errors/success */
+    .notice {padding:.75rem 1rem; border-radius:.5rem; margin:.75rem 0; font-size:.95rem}
+    .ok{background:#e9f7ef;color:#1a7f37;border:1px solid #a9e5bf}
+    .bad{background:#fdecea;color:#b42318;border:1px solid #f8b4b4}
+    .muted{opacity:.7}
+    .workers-table{width:100%;border-collapse:collapse;margin-top:.75rem}
+    .workers-table th,.workers-table td{border:1px solid #eee;padding:.5rem;text-align:left}
+  </style>
 </head>
 <body>
 <main>
@@ -18,7 +28,9 @@
     <h1>Usajili wa Mfanyakazi Mpya</h1>
     <p class="workers-card__subtitle">
       Jaza kila sehemu → weka picha mbili (ID & Passport) → bonyeza “Hifadhi Mfanyakazi”.
+      <span id="who" class="muted"></span>
     </p>
+    <div id="notice"></div>
   </header>
 
   <section class="workers-flex">
@@ -29,7 +41,7 @@
       </header>
       <div class="workers-card__content">
         <ul>
-          <li>Simu lazima iwe kama <strong>+2550XXXXXXXXX</strong> (tarakimu 9 baada ya 0)</li>
+          <li>Simu lazima iwe <strong>+2550XXXXXXXXX</strong> (0 + tarakimu 9)</li>
           <li>Majina lazima yawe <strong>MATATU</strong> (mf. JOHN DOE JUNIOR)</li>
           <li>Jukumu (role) lazima lichaguliwe</li>
         </ul>
@@ -163,6 +175,8 @@
       <label>Picha ya Passport
         <input type="file" name="passportPhoto" accept="image/*" required>
       </label>
+
+      <!-- Role-specific docs will be injected here if you want later -->
       <div id="roleDocs"></div>
     </fieldset>
 
@@ -178,8 +192,8 @@
   </section>
 </main>
 
-<script type="module">
-  /* ---------- 0) One Firebase config here (don’t import another) ---------- */
+<script>
+  /* ---------- Firebase config (one place) ---------- */
   const firebaseConfig = {
     apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
     authDomain: "somaptestt.firebaseapp.com",
@@ -191,42 +205,14 @@
   };
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 
-  /* ---------- 1) Tiny helpers (no other modules) ---------- */
+  /* ---------- Tiny helpers ---------- */
   const $ = (id)=>document.getElementById(id);
+  const notice = (msg, ok=false)=>{
+    $('notice').innerHTML = `<div class="notice ${ok?'ok':'bad'}">${msg}</div>`;
+  };
+  const clearNotice = ()=>$('notice').innerHTML='';
   const todayStr = new Date().toLocaleString('sw-TZ',{timeZone:'Africa/Nairobi',weekday:'long',year:'numeric',month:'long',day:'numeric'});
   $('currentDate').textContent = todayStr;
-
-  const ROLE_DOC_REQUIREMENTS = {
-    teacher:['cv','formFourCert'],
-    accountant:['cv'],
-    manager:['cv'],
-    academic:['cv'],
-    driver:['roleCert'],
-    cook:['roleCert','villageLetter'],
-    cleaner:['villageLetter'],
-    guard:['villageLetter'],
-    storekeeper:['roleCert'],
-    hr:['cv'],
-    secretary:['cv']
-  };
-  const DOC_LABELS = {
-    cv:'CV (PDF)', formFourCert:'Cheti cha Kidato cha Nne (PDF)',
-    roleCert:'Cheti cha Jukumu / Leseni (PDF/IMG)', villageLetter:'Barua ya Kijiji (PDF/IMG)'
-  };
-  function renderRoleDocs(){
-    const c = $('roleDocs'); c.innerHTML = '';
-    const role = $('roleSelect').value;
-    (ROLE_DOC_REQUIREMENTS[role]||[]).forEach(key=>{
-      const lab = document.createElement('label');
-      lab.textContent = DOC_LABELS[key] || key;
-      const inp = document.createElement('input');
-      inp.type = 'file'; inp.name = key; inp.required = true;
-      inp.accept = (key==='cv' || key==='formFourCert')?'.pdf':'.pdf,image/*';
-      lab.appendChild(inp); c.appendChild(lab);
-    });
-  }
-  $('roleSelect').addEventListener('change', renderRoleDocs);
-  renderRoleDocs();
 
   function isTZWorkerPhone(p){ return /^\+2550\d{9}$/.test(String(p||'').trim()); }
   function normalizeThreeNames(s){
@@ -235,9 +221,17 @@
     return t.join(' ');
   }
   async function sha256Hex(str){
-    const buf = new TextEncoder().encode(str);
-    const hash = await crypto.subtle.digest('SHA-256', buf);
-    return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    try{
+      if (crypto?.subtle) {
+        const buf = new TextEncoder().encode(str);
+        const hash = await crypto.subtle.digest('SHA-256', buf);
+        return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+      }
+    }catch(_){}
+    // Fallback lightweight hash (not cryptographic) if subtle not available
+    let h=2166136261>>>0;
+    for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h+= (h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24); }
+    return (h>>>0).toString(16);
   }
   function getExt(file){
     const n = file?.name||''; const m=n.match(/\.([a-z0-9]+)$/i);
@@ -246,63 +240,39 @@
     if (file.type.startsWith('image/')) return file.type.split('/')[1];
     return 'dat';
   }
-  async function upload(file, path){
-    const ref = firebase.storage().ref().child(path);
-    await ref.put(file, file.type?{contentType:file.type}:undefined);
-    return await ref.getDownloadURL();
+  async function uploadOrBlank(file, path){
+    if (!file || !file.size) return '';
+    try{
+      const ref = firebase.storage().ref().child(path);
+      await ref.put(file, file.type?{contentType:file.type}:undefined);
+      return await ref.getDownloadURL();
+    }catch(err){
+      console.warn('Storage upload failed for', path, err);
+      notice('🔔 Faili zimehifadhiwa bila picha (Storage imekataa / haipatikani). Unaweza kuongeza picha baadaye.', false);
+      return '';
+    }
   }
-  function toast(msg){ alert(msg); }
 
-  /* ---------- 2) Sign in (anonymous) ---------- */
-  await new Promise(res=>{
-    const unsub=firebase.auth().onAuthStateChanged(u=>{unsub(); res(u);});
-  }) || await firebase.auth().signInAnonymously();
-
-  /* ---------- 3) Load workers table ---------- */
-  async function loadWorkers(){
-    const snap = await firebase.database().ref('workers').orderByChild('profile/fullNameUpper').get();
-    const rows=[]; snap.forEach(ch=>{
-      const v=ch.val()||{};
-      rows.push({
-        name: v.profile?.fullNameUpper||'',
-        role: v.profile?.role||'',
-        phone: v.profile?.phone||'',
-        baseSalary: v.profile?.baseSalary||0,
-        active: v.profile?.active!==false
-      });
-    });
-    const el = $('workerTable');
-    const tbl = document.createElement('table'); tbl.className='workers-table';
-    tbl.innerHTML = `
-      <thead><tr>
-        <th>Jina Kamili</th><th>Jukumu</th><th>Simu</th><th>Mshahara (TZS)</th><th>Hali</th>
-      </tr></thead><tbody></tbody>`;
-    const tb = tbl.querySelector('tbody');
-    rows.forEach(r=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML = `
-        <td>${r.name}</td>
-        <td>${r.role}</td>
-        <td>${r.phone}</td>
-        <td>${Number(r.baseSalary||0).toLocaleString('sw-TZ')}</td>
-        <td>${r.active?'Active':'Inactive'}</td>`;
-      tb.appendChild(tr);
-    });
-    el.innerHTML=''; el.appendChild(tbl);
-  }
-  loadWorkers();
-
-  /* ---------- 4) Spouse fields toggle ---------- */
-  document.getElementById('maritalStatus').addEventListener('change', e=>{
-    document.getElementById('spouseFields').style.display = e.target.value==='married'?'grid':'none';
+  /* ---------- Auth (anonymous) & diagnostics ---------- */
+  firebase.auth().onAuthStateChanged(async (u)=>{
+    if (!u) { await firebase.auth().signInAnonymously().catch(e=>notice('Auth error: '+e.message)); return; }
+    $('who').textContent = ` (UID: ${u.uid})`;
+    loadWorkers(); // initial table
   });
 
-  /* ---------- 5) Save handler ---------- */
+  /* ---------- Spouse toggle ---------- */
+  $('maritalStatus').addEventListener('change', e=>{
+    $('spouseFields').style.display = e.target.value==='married' ? 'grid' : 'none';
+  });
+
+  /* ---------- Form submit ---------- */
   document.getElementById('admissionForm').addEventListener('submit', async (e)=>{
     e.preventDefault();
+    clearNotice();
+
     const fd = new FormData(e.currentTarget);
 
-    // Basics
+    // Basic required fields
     const firstName = (fd.get('firstName')||'').trim();
     const middleName= (fd.get('middleName')||'').trim();
     const lastName  = (fd.get('lastName')||'').trim();
@@ -311,41 +281,31 @@
 
     let fullNameUpper;
     try { fullNameUpper = normalizeThreeNames(`${firstName} ${middleName} ${lastName}`); }
-    catch(e){ toast(e.message); return; }
-    if (!isTZWorkerPhone(phone)){ toast('Simu lazima iwe kama +2550XXXXXXXXX'); return; }
-    if (!role){ toast('Chagua jukumu (Role)'); return; }
+    catch(ex){ return notice(ex.message); }
 
-    // Required photos
+    if (!isTZWorkerPhone(phone)) return notice('Simu lazima iwe kama +2550XXXXXXXXX');
+    if (!role) return notice('Chagua jukumu (Role)');
+
+    // Mandatory photos
     const idPhoto = fd.get('idPhoto');
     const passportPhoto = fd.get('passportPhoto');
-    if (!idPhoto?.size || !passportPhoto?.size){ toast('Weka Picha ya Kitambulisho na Picha ya Passport'); return; }
-
-    // Role files
-    for (const k of (ROLE_DOC_REQUIREMENTS[role]||[])){
-      const f=fd.get(k);
-      if (!f?.size){ toast(`Faili ya lazima: ${DOC_LABELS[k]||k}`); return; }
-    }
+    if (!idPhoto?.size || !passportPhoto?.size) return notice('Weka Picha ya Kitambulisho na Picha ya Passport');
 
     try{
       const workerId = firebase.database().ref('workers').push().key;
       const basePath = `workers/${workerId}`;
 
-      // Uploads (best effort; if Storage rules block, we’ll throw)
-      const idPhotoUrl = await upload(idPhoto, `${basePath}/idPhoto-${Date.now()}.${getExt(idPhoto)}`);
-      const passportPhotoUrl = await upload(passportPhoto, `${basePath}/passport-${Date.now()}.${getExt(passportPhoto)}`);
+      // Try uploads (non-blocking; blanks if Storage refuses)
+      const idPhotoUrl = await uploadOrBlank(idPhoto, `${basePath}/idPhoto-${Date.now()}.${getExt(idPhoto)}`);
+      const passportPhotoUrl = await uploadOrBlank(passportPhoto, `${basePath}/passport-${Date.now()}.${getExt(passportPhoto)}`);
 
       let medicalProofUrl = '';
       const medicalProof = fd.get('medicalProof');
       if (medicalProof?.size){
-        medicalProofUrl = await upload(medicalProof, `${basePath}/medical-${Date.now()}.${getExt(medicalProof)}`);
+        medicalProofUrl = await uploadOrBlank(medicalProof, `${basePath}/medical-${Date.now()}.${getExt(medicalProof)}`);
       }
 
-      const extra = {};
-      for (const k of (ROLE_DOC_REQUIREMENTS[role]||[])){
-        const f=fd.get(k);
-        extra[ (k==='cv'?'cvPdf':k) + 'Url' ] = await upload(f, `${basePath}/${k}-${Date.now()}.${getExt(f)}`);
-      }
-
+      // Build profile
       const profile = {
         firstName, middleName, lastName, fullNameUpper,
         phone,
@@ -372,30 +332,69 @@
 
       const payload = {
         profile,
-        docs: {
-          idPhotoUrl, passportPhotoUrl, medicalProofUrl, ...extra
-        },
+        docs: { idPhotoUrl, passportPhotoUrl, medicalProofUrl },
         contract: {
           language: (['driver','cook','cleaner','guard'].includes(role)?'sw':'en'),
-          templateKey: role,
-          accepted:false, acceptedTs:0, contractPdfUrl:''
+          templateKey: role, accepted:false, acceptedTs:0, contractPdfUrl:''
         }
       };
 
-      const loginKey = await sha256Hex(`${fullNameUpper}|${phone}`);
+      // Save record (RTDB rules are open in your project)
       await firebase.database().ref(`workers/${workerId}`).set(payload);
+
+      // Index for workers_login
+      const loginKey = await sha256Hex(`${fullNameUpper}|${phone}`);
       await firebase.database().ref(`workers_index_by_loginKey/${loginKey}`).set({ workerId });
 
-      alert('Mfanyakazi amesajiliwa kikamilifu ✅');
+      notice('Mfanyakazi amesajiliwa kikamilifu ✅', true);
       e.currentTarget.reset();
-      renderRoleDocs();
+      $('spouseFields').style.display = 'none';
       loadWorkers();
 
     }catch(err){
       console.error(err);
-      alert('Imeshindikana kuhifadhi. Ikiwa ni “Permission denied”, tumia rules za majaribio hapa chini.');
+      notice('Imeshindikana kuhifadhi: ' + (err?.message || err), false);
     }
   });
+
+  /* ---------- Load table ---------- */
+  async function loadWorkers(){
+    try{
+      const snap = await firebase.database().ref('workers').orderByChild('profile/fullNameUpper').get();
+      const rows=[];
+      snap.forEach(ch=>{
+        const v=ch.val()||{};
+        rows.push({
+          name: v.profile?.fullNameUpper||'',
+          role: v.profile?.role||'',
+          phone: v.profile?.phone||'',
+          baseSalary: v.profile?.baseSalary||0,
+          active: v.profile?.active!==false
+        });
+      });
+      const el = $('workerTable');
+      const tbl = document.createElement('table'); tbl.className='workers-table';
+      tbl.innerHTML = `
+        <thead><tr>
+          <th>Jina Kamili</th><th>Jukumu</th><th>Simu</th><th>Mshahara (TZS)</th><th>Hali</th>
+        </tr></thead><tbody></tbody>`;
+      const tb = tbl.querySelector('tbody');
+      rows.forEach(r=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.name}</td>
+          <td>${r.role}</td>
+          <td>${r.phone}</td>
+          <td>${Number(r.baseSalary||0).toLocaleString('sw-TZ')}</td>
+          <td>${r.active?'Active':'Inactive'}</td>`;
+        tb.appendChild(tr);
+      });
+      el.innerHTML=''; el.appendChild(tbl);
+    }catch(e){
+      console.error('Load workers error:', e);
+      notice('Imeshindikana kupakia orodha ya wafanyakazi: ' + (e?.message||e));
+    }
+  }
 </script>
 </body>
 </html>

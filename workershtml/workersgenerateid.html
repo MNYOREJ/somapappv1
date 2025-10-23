@@ -1,0 +1,142 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generate Worker IDs</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Worker ID Cards</h1>
+      <p class="workers-card__subtitle">Tengeneza vitambulisho vyenye picha, nembo ya shule, namba ya simu, na namba ya dharura.</p>
+    </header>
+
+    <section class="workers-grid" id="idGrid"></section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      toast,
+      dbRefs,
+      localTs
+    } from '../modules/workers_helpers.js';
+    import { ensureHtml2Pdf, uploadFileToStorage } from '../modules/workers_ui.js';
+
+    const idGrid = document.getElementById('idGrid');
+
+    ensureAnonymousAuth()
+      .then(checkAdmin)
+      .then(loadWorkers)
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function checkAdmin(user) {
+      const snap = await firebase.database().ref(`admins/${user.uid}`).once('value');
+      if (!snap.exists() || snap.val() !== true) {
+        toast('Huna ruhusa ya kutengeneza ID.', 'error');
+        window.location.href = '../index.html';
+        throw new Error('Not admin');
+      }
+    }
+
+    async function loadWorkers() {
+      const snap = await firebase.database().ref('workers').once('value');
+      if (!snap.exists()) {
+        idGrid.innerHTML = '<p>Hakuna wafanyakazi.</p>';
+        return;
+      }
+      const workers = snap.val();
+      Object.entries(workers).forEach(([workerId, data]) => {
+        const profile = data.profile || {};
+        const docs = data.docs || {};
+        const card = document.createElement('section');
+        card.className = 'workers-card';
+        card.innerHTML = `
+          <header class="workers-card__header">
+            <h2>${profile.fullNameUpper || 'N/A'}</h2>
+            <p class="workers-card__subtitle">${profile.role || 'Role'} - ${profile.phone || ''}</p>
+          </header>
+          <div class="workers-card__content">
+            <img src="${docs.passportPhotoUrl || docs.idPhotoUrl || ''}" alt="ID photo" style="width:120px;height:120px;border-radius:12px;object-fit:cover;">
+            <p>ID Card: ${docs.idCardUrl ? '<a href="' + docs.idCardUrl + '" target="_blank">Angalia</a>' : 'Bado'}</p>
+            <button class="workers-btn secondary" data-worker="${workerId}">Generate ID</button>
+          </div>
+        `;
+        idGrid.appendChild(card);
+      });
+      idGrid.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => generateIdCard(btn.dataset.worker));
+      });
+    }
+
+    async function generateIdCard(workerId) {
+      const workerSnap = await dbRefs.worker(workerId).once('value');
+      const worker = workerSnap.val();
+      const profile = worker.profile || {};
+      const docs = worker.docs || {};
+
+      if (!docs.passportPhotoUrl && !docs.idPhotoUrl) {
+        toast('Huna picha ya mfanyakazi huyu.', 'warning');
+        return;
+      }
+
+      await ensureHtml2Pdf();
+
+      const card = document.createElement('div');
+      card.style.width = '320px';
+      card.style.height = '200px';
+      card.style.padding = '16px';
+      card.style.border = '2px solid #1f5dbb';
+      card.style.borderRadius = '16px';
+      card.style.fontFamily = "'Segoe UI', sans-serif";
+      card.style.background = '#f5f7ff';
+      card.innerHTML = `
+        <h2 style="margin:0;color:#1f5dbb;">SoMAp Schools</h2>
+        <p style="margin:4px 0;">Staff ID Card</p>
+        <div style="display:flex;gap:12px;">
+          <img src="${docs.passportPhotoUrl || docs.idPhotoUrl}" style="width:80px;height:80px;border-radius:12px;object-fit:cover;">
+          <div>
+            <p style="margin:0;font-weight:600;">${profile.fullNameUpper}</p>
+            <p style="margin:4px 0;">Role: ${profile.role}</p>
+            <p style="margin:4px 0;">Phone: ${profile.phone}</p>
+            <p style="margin:4px 0;">Emergency: ${profile.nextOfKinPhone || ''}</p>
+          </div>
+        </div>
+        <p style="margin-top:12px;font-size:12px;">Issued: ${new Date().toLocaleDateString('sw-TZ')}</p>
+      `;
+      document.body.appendChild(card);
+
+      const blob = await window.html2pdf().set({
+        margin: 5,
+        filename: `${profile.fullNameUpper || workerId}-id-card.pdf`,
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: [90, 60], orientation: 'landscape' }
+      }).from(card).toPdf().output('blob');
+
+      card.remove();
+
+      const storagePath = `ids/${workerId}/id-card-${Date.now()}.pdf`;
+      const url = await uploadFileToStorage(blob, storagePath);
+      await dbRefs.workerDocs(workerId).update({
+        idCardUrl: url,
+        idCardGeneratedTs: localTs()
+      });
+      toast('ID imehifadhiwa na imeshirikishwa kwa mfanyakazi.', 'success');
+      idGrid.innerHTML = '';
+      loadWorkers();
+    }
+  </script>
+</body>
+</html>
+
+

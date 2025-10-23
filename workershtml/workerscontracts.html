@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mkataba wa Kazi</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Mkataba | Contract</h1>
+      <p class="workers-card__subtitle">
+        Soma vizuri. Ukikubali, PDF itawekwa na kuonekana kwenye akaunti yako.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Taarifa ya Mkataba</h2>
+        <p id="statusLabel" class="workers-card__subtitle"></p>
+      </header>
+      <div class="workers-card__content" id="contractInfo">
+        <p>Inapakia...</p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      getLinkedWorkerId,
+      dbRefs,
+      toast,
+      localTs
+    } from '../modules/workers_helpers.js';
+    import { defaultContractLanguage, templateKeyForRole, generateContractPdf } from '../modules/workers_contracts.js';
+
+    const info = document.getElementById('contractInfo');
+    const statusLabel = document.getElementById('statusLabel');
+
+    let workerId = null;
+    let workerProfile = null;
+    let contract = null;
+
+    ensureAnonymousAuth()
+      .then(init)
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function init() {
+      workerId = await getLinkedWorkerId();
+      if (!workerId) {
+        toast('Ingia tena.', 'error');
+        window.location.href = '../index.html';
+        return;
+      }
+
+      const snap = await dbRefs.worker(workerId).once('value');
+      if (!snap.exists()) {
+        toast('Profile haipo.', 'error');
+        return;
+      }
+      const data = snap.val();
+      workerProfile = data.profile;
+      contract = data.contract || {};
+      render();
+    }
+
+    function render() {
+      info.innerHTML = '';
+      const lang = contract.language || defaultContractLanguage(workerProfile.role);
+      statusLabel.textContent = contract.accepted
+        ? `Ulikubali ${new Date(contract.acceptedTs).toLocaleString('sw-TZ')}`
+        : 'Bado haujakubali';
+
+      const details = document.createElement('div');
+      details.innerHTML = `
+        <p><strong>Jina:</strong> ${workerProfile.fullNameUpper}</p>
+        <p><strong>Jukumu:</strong> ${workerProfile.role}</p>
+        <p><strong>Mshahara:</strong> ${Number(workerProfile.baseSalary || 0).toLocaleString('sw-TZ')} TZS</p>
+        <p><strong>Lugha ya mkataba:</strong> ${lang.toUpperCase()}</p>
+        <p><strong>Sheria ya kuchelewa:</strong> Uchelewaji wa pili (kila tukio la pili ndani ya mwezi) -> 0.001 x mshahara wa msingi</p>
+        <p><strong>Vikomo vya likizo:</strong> Sick/General hadi 3 kwa siku 90 bila uthibitisho</p>
+      `;
+      info.appendChild(details);
+
+      if (contract.contractPdfUrl) {
+        const link = document.createElement('a');
+        link.href = contract.contractPdfUrl;
+        link.target = '_blank';
+        link.className = 'workers-btn secondary';
+        link.textContent = 'Pakua PDF';
+        info.appendChild(link);
+      }
+
+      if (!contract.accepted) {
+        const btn = document.createElement('button');
+        btn.className = 'workers-btn';
+        btn.textContent = 'Nakubali / I Agree';
+        btn.addEventListener('click', acceptContract);
+        info.appendChild(btn);
+      }
+    }
+
+    async function acceptContract() {
+      try {
+        toast('Inatengeneza PDF ya mkataba...', 'info');
+        const url = await generateContractPdf(workerId, workerProfile, {
+          language: contract.language || defaultContractLanguage(workerProfile.role),
+          templateKey: templateKeyForRole(workerProfile.role)
+        });
+        contract = {
+          ...contract,
+          accepted: true,
+          acceptedTs: localTs(),
+          contractPdfUrl: url
+        };
+        render();
+        toast('Hongera! Mkataba umehifadhiwa.', 'success');
+      } catch (err) {
+        console.error(err);
+        toast(err.message || 'Imeshindikana', 'error');
+      }
+    }
+  </script>
+</body>
+</html>
+
+

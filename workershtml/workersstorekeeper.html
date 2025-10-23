@@ -1,0 +1,312 @@
+﻿<!DOCTYPE html>
+<html lang="sw">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ghala | Storekeeper</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Ghala la Shule</h1>
+      <p class="workers-card__subtitle">
+        Pokea shehena, toa vifaa kwa sahihi mbili, angalia upya hesabu kila siku. Ukosefu wa kulinganisha unahitaji maelezo ya kina.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Orodha ya Bidhaa</h2>
+        <p class="workers-card__subtitle">Items with low stock zinaonekana nyekundu.</p>
+      </header>
+      <div class="workers-card__content">
+        <table class="workers-table" id="itemsTable">
+          <thead>
+            <tr>
+              <th>Jina</th>
+              <th>SKU</th>
+              <th>Kategoria</th>
+              <th>On Hand</th>
+              <th>Reorder</th>
+              <th>Kitendo</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <button id="addItemBtn" class="workers-btn secondary" style="margin-top:12px;">Ongeza Bidhaa</button>
+      </div>
+    </section>
+
+    <section class="workers-grid" style="margin-top:24px;">
+      <div class="workers-card">
+        <header class="workers-card__header">
+          <h2>Pokea Shehena</h2>
+        </header>
+        <div class="workers-card__content workers-form">
+          <label>Bidhaa
+            <select id="receiveItem"></select>
+          </label>
+          <label>Kiasi
+            <input type="number" id="receiveQty" min="0">
+          </label>
+          <label>Gharama kwa Kimoja (TZS)
+            <input type="number" id="receiveCost" min="0">
+          </label>
+          <label>Muuzaji
+            <input id="receiveSupplier">
+          </label>
+          <label>Invoice #
+            <input id="receiveInvoice">
+          </label>
+          <label>Picha ya Risiti (hiari)
+            <input type="file" id="receivePhoto" accept="image/*">
+          </label>
+          <button id="receiveBtn" class="workers-btn">Hifadhi Shehena</button>
+        </div>
+      </div>
+
+      <div class="workers-card">
+        <header class="workers-card__header">
+          <h2>Toa Vifaa</h2>
+        </header>
+        <div class="workers-card__content workers-form">
+          <label>Bidhaa
+            <select id="issueItem"></select>
+          </label>
+          <label>Kiasi
+            <input type="number" id="issueQty" min="0">
+          </label>
+          <label>Sababu (RECEIVE/COOK_MENU/CLEANING/SECURITY)
+            <input id="issueReason" placeholder="COOK_MENU">
+          </label>
+          <label>Role anayetumia
+            <select id="issueRole">
+              <option value="cook">Cook</option>
+              <option value="cleaner">Cleaner</option>
+              <option value="guard">Guard</option>
+              <option value="storekeeper">Storekeeper</option>
+            </select>
+          </label>
+          <label>Requester Worker ID
+            <input id="issueWorkerUid" placeholder="ID ya mfanyakazi anayepokea">
+          </label>
+          <label>Saini ya Storekeeper (uid)
+            <input id="issueCounterUid" placeholder="UID yako">
+          </label>
+          <label>Picha ya Ushahidi (hiari)
+            <input type="file" id="issuePhoto" accept="image/*">
+          </label>
+          <button id="issueBtn" class="workers-btn danger">Toa Bidhaa</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      toast
+    } from '../modules/workers_helpers.js';
+    import {
+      createOrUpdateItem,
+      recordReceive,
+      recordIssue,
+      flagInventoryMismatch
+    } from '../modules/workers_inventory.js';
+
+    const itemsTableBody = document.querySelector('#itemsTable tbody');
+    const receiveItemSelect = document.getElementById('receiveItem');
+    const issueItemSelect = document.getElementById('issueItem');
+    const addItemBtn = document.getElementById('addItemBtn');
+    const receiveBtn = document.getElementById('receiveBtn');
+    const issueBtn = document.getElementById('issueBtn');
+
+    const receiveQty = document.getElementById('receiveQty');
+    const receiveCost = document.getElementById('receiveCost');
+    const receiveSupplier = document.getElementById('receiveSupplier');
+    const receiveInvoice = document.getElementById('receiveInvoice');
+    const receivePhoto = document.getElementById('receivePhoto');
+
+    const issueQty = document.getElementById('issueQty');
+    const issueReason = document.getElementById('issueReason');
+    const issueRole = document.getElementById('issueRole');
+    const issueWorkerUid = document.getElementById('issueWorkerUid');
+    const issueCounterUid = document.getElementById('issueCounterUid');
+    const issuePhoto = document.getElementById('issuePhoto');
+
+    let items = {};
+
+    ensureAnonymousAuth()
+      .then(loadItems)
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    addItemBtn.addEventListener('click', addNewItem);
+    receiveBtn.addEventListener('click', handleReceive);
+    issueBtn.addEventListener('click', handleIssue);
+
+    async function loadItems() {
+      const snap = await firebase.database().ref('inventory/items').once('value');
+      items = snap.val() || {};
+      renderItems();
+      populateSelects();
+    }
+
+    function renderItems() {
+      itemsTableBody.innerHTML = '';
+      Object.entries(items).forEach(([itemId, item]) => {
+        const tr = document.createElement('tr');
+        if (Number(item.onHand || 0) <= Number(item.reorderPoint || 0)) {
+          tr.style.background = 'rgba(220,38,38,0.08)';
+        }
+        tr.innerHTML = `
+          <td>${item.name}</td>
+          <td>${item.sku}</td>
+          <td>${item.category}</td>
+          <td>${item.onHand || 0}</td>
+          <td>${item.reorderPoint || 0}</td>
+          <td><button class="workers-btn secondary" data-item="${itemId}">Update Count</button></td>
+        `;
+        itemsTableBody.appendChild(tr);
+      });
+      itemsTableBody.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => openAdjustmentDialog(btn.dataset.item));
+      });
+    }
+
+    function populateSelects() {
+      [receiveItemSelect, issueItemSelect].forEach(select => {
+        select.innerHTML = '';
+        Object.entries(items).forEach(([id, item]) => {
+          const option = document.createElement('option');
+          option.value = id;
+          option.textContent = `${item.name} (${item.onHand || 0})`;
+          select.appendChild(option);
+        });
+      });
+    }
+
+    async function addNewItem() {
+      const name = prompt('Jina la item?');
+      if (!name) return;
+      const sku = prompt('SKU?');
+      const unit = prompt('Unit (kg, l, pcs)?');
+      const category = prompt('Kategoria (kitchen/cleaning/security/tools/asset)?', 'kitchen');
+      const reorder = Number(prompt('Reorder point?', '0') || 0);
+      const key = await createOrUpdateItem(null, {
+        name,
+        sku,
+        unit,
+        category,
+        reorderPoint: reorder,
+        onHand: 0,
+        unitCost: 0
+      });
+      await loadItems();
+    }
+
+    async function handleReceive() {
+      const itemId = receiveItemSelect.value;
+      const qty = Number(receiveQty.value || 0);
+      if (!itemId || qty <= 0) {
+        toast('Weka kiasi sahihi.', 'warning');
+        return;
+      }
+      try {
+        await recordReceive({
+          itemId,
+          qty,
+          unitCost: Number(receiveCost.value || 0),
+          supplier: receiveSupplier.value,
+          invoiceNumber: receiveInvoice.value,
+          photoFile: receivePhoto.files[0],
+          workerUid: firebase.auth().currentUser.uid,
+          counterUid: firebase.auth().currentUser.uid,
+          role: 'storekeeper'
+        });
+        receiveQty.value = '';
+        receiveCost.value = '';
+        receiveSupplier.value = '';
+        receiveInvoice.value = '';
+        receivePhoto.value = '';
+        loadItems();
+      } catch (err) {
+        toast(err.message || 'Imeshindikana kupokea', 'error');
+      }
+    }
+
+    async function handleIssue() {
+      const itemId = issueItemSelect.value;
+      const qty = Number(issueQty.value || 0);
+      if (!itemId || qty <= 0) {
+        toast('Weka kiasi sahihi.', 'warning');
+        return;
+      }
+      try {
+        await recordIssue({
+          itemId,
+          qty,
+          reason: issueReason.value || 'COOK_MENU',
+          role: issueRole.value,
+          workerUid: issueWorkerUid.value || firebase.auth().currentUser.uid,
+          counterUid: issueCounterUid.value || firebase.auth().currentUser.uid,
+          photoFile: issuePhoto.files[0]
+        });
+        issueQty.value = '';
+        issueReason.value = '';
+        issueWorkerUid.value = '';
+        issueCounterUid.value = '';
+        issuePhoto.value = '';
+        loadItems();
+      } catch (err) {
+        toast(err.message || 'Imeshindikana kutoa', 'error');
+      }
+    }
+
+    async function openAdjustmentDialog(itemId) {
+      const item = items[itemId];
+      const newCountStr = prompt(`Hesabu mpya ya ${item.name}?`, item.onHand);
+      if (newCountStr === null) return;
+      const newCount = Number(newCountStr);
+      if (Number.isNaN(newCount)) {
+        toast('Namba si sahihi.', 'warning');
+        return;
+      }
+      const explanation = prompt(`Eleza tofauti (sasa ${newCount}, awali ${item.onHand}).`);
+      if (!explanation) {
+        toast('Maelezo ni lazima.', 'warning');
+        return;
+      }
+      const diff = newCount - Number(item.onHand || 0);
+      if (diff === 0) {
+        toast('Hakuna mabadiliko.', 'info');
+        return;
+      }
+      await flagInventoryMismatch({
+        dateKey: new Date().toISOString().slice(0, 10),
+        item: itemId,
+        previousCount: item.onHand || 0,
+        newCount,
+        explanation,
+        workerId: await getStorekeeperWorkerId()
+      });
+    }
+
+    async function getStorekeeperWorkerId() {
+      const uid = firebase.auth().currentUser.uid;
+      const snap = await firebase.database().ref(`devices/${uid}/workerId`).once('value');
+      return snap.val() || '';
+    }
+  </script>
+</body>
+</html>
+
+

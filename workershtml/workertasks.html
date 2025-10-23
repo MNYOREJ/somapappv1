@@ -1,0 +1,230 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kazi za Kila Siku</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Kazi | Tasks</h1>
+      <p class="workers-card__subtitle">
+        Kila kazi ina muda wa saa 8. Ukishindwa kumaliza kwa wakati mara ya pili, nne, sita... faini ya 0.001 Ã— mshahara wa msingi.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Kazi Zangu Za Leo</h2>
+        <p id="taskDateLabel" class="workers-card__subtitle"></p>
+      </header>
+      <div class="workers-card__content">
+        <ul id="taskList"></ul>
+      </div>
+    </section>
+
+    <section class="workers-card" id="adminAssign" style="display:none; margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Admin - Gawa Kazi</h2>
+        <p class="workers-card__subtitle">Chagua mfanyakazi na kazi maalum</p>
+      </header>
+      <div class="workers-card__content">
+        <label>Chagua Mfanyakazi
+          <select id="workerSelect"></select>
+        </label>
+        <label>Kichwa cha Kazi
+          <input id="taskTitle" placeholder="Mfano: Safisha jikoni">
+        </label>
+        <label>Maelezo / Notes
+          <textarea id="taskNotes" placeholder="Maelezo mafupi ya kazi."></textarea>
+        </label>
+        <button id="assignTaskBtn" class="workers-btn">Gawa Kazi</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      getLinkedWorkerId,
+      dbRefs,
+      todayYMD,
+      localTs,
+      toast
+    } from '../modules/workers_helpers.js';
+    import { applyPenalty } from '../modules/workers_penalties.js';
+
+    const taskList = document.getElementById('taskList');
+    const taskDateLabel = document.getElementById('taskDateLabel');
+    const adminPanel = document.getElementById('adminAssign');
+    const workerSelect = document.getElementById('workerSelect');
+    const taskTitle = document.getElementById('taskTitle');
+    const taskNotes = document.getElementById('taskNotes');
+    const assignBtn = document.getElementById('assignTaskBtn');
+
+    let currentWorkerId = null;
+    let workerProfile = null;
+    let settings = null;
+    let isAdminUser = false;
+    const today = todayYMD();
+
+    ensureAnonymousAuth()
+      .then(setup)
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function setup(user) {
+      currentWorkerId = await getLinkedWorkerId();
+      if (!currentWorkerId) {
+        toast('Hakuna ulinganisho wa kifaa. Rudi ukurasa wa kuingia.', 'error');
+        window.location.href = '../index.html';
+        return;
+      }
+
+      const [profileSnap, settingsSnap, adminSnap] = await Promise.all([
+        dbRefs.worker(currentWorkerId).once('value'),
+        dbRefs.settings().once('value'),
+        firebase.database().ref(`admins/${user.uid}`).once('value')
+      ]);
+
+      workerProfile = profileSnap.val().profile;
+      settings = settingsSnap.val() || {};
+      isAdminUser = adminSnap.exists() && adminSnap.val() === true;
+      if (!isAdminUser && ['manager', 'hr'].includes(workerProfile.role)) {
+        isAdminUser = true;
+      }
+
+      taskDateLabel.textContent = new Date().toLocaleDateString('sw-TZ', {
+        timeZone: 'Africa/Nairobi',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+
+      await loadTasks();
+      if (isAdminUser) {
+        adminPanel.style.display = 'block';
+        await loadWorkersForAssignment();
+        assignBtn.addEventListener('click', assignTask);
+      }
+    }
+
+    async function loadTasks() {
+      taskList.innerHTML = '';
+      const snap = await dbRefs.tasksDay(currentWorkerId, today).once('value');
+      const tasks = snap.val() || {};
+      const now = Date.now();
+
+      Object.entries(tasks).forEach(([taskId, task]) => {
+        const li = document.createElement('li');
+        li.className = 'workers-fieldset';
+        const dueText = task.dueTs
+          ? new Date(task.dueTs).toLocaleTimeString('sw-TZ', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' })
+          : '€”';
+        const isCompleted = Boolean(task.completedTs);
+        const overdue = !isCompleted && task.dueTs && now > task.dueTs;
+
+        li.innerHTML = `
+          <strong>${task.title}</strong>
+          <p>${task.notes || ''}</p>
+          <p>Due / Mwisho: ${dueText}</p>
+          <p>Status: ${isCompleted ? 'Imekamilika' : overdue ? 'Imechelewa' : 'Inavyoendelea'}</p>
+        `;
+
+        if (!isCompleted) {
+          const btn = document.createElement('button');
+          btn.className = 'workers-btn secondary';
+          btn.textContent = 'Mark Complete | Imekamilika';
+          btn.addEventListener('click', () => markComplete(taskId));
+          li.appendChild(btn);
+        }
+
+        taskList.appendChild(li);
+
+        if (overdue) {
+          handleOverduePenalty(taskId, task);
+        }
+      });
+
+      if (!taskList.children.length) {
+        const empty = document.createElement('p');
+        empty.textContent = 'Hakuna kazi kwa sasa.';
+        taskList.appendChild(empty);
+      }
+    }
+
+    async function markComplete(taskId) {
+      const ref = dbRefs.tasksDay(currentWorkerId, today).child(taskId);
+      await ref.update({ completedTs: localTs() });
+      toast('Kazi imekamilika. Hongera!', 'success');
+      loadTasks();
+    }
+
+    async function handleOverduePenalty(taskId, task) {
+      if (task.penaltyApplied) return;
+      const ref = dbRefs.tasksDay(currentWorkerId, today).child(taskId);
+      const rulePercent = settings.penalties?.todo?.percent || 0.001;
+      await applyPenalty({
+        workerId: currentWorkerId,
+        kind: 'todo',
+        baseSalary: workerProfile.baseSalary,
+        refPath: `/tasks/${currentWorkerId}/${today}/${taskId}`,
+        rulePercent
+      });
+      await ref.update({ penaltyApplied: true });
+      toast(`Kazi "${task.title}" imechelewa. Faini imewekwa.`, 'warning');
+    }
+
+    async function loadWorkersForAssignment() {
+      workerSelect.innerHTML = '';
+      const snap = await firebase.database().ref('workers').once('value');
+      snap.forEach(child => {
+        const profile = child.val().profile || {};
+        if (profile.active === false) return;
+        const option = document.createElement('option');
+        option.value = child.key;
+        option.textContent = `${profile.fullNameUpper} - ${profile.role}`;
+        workerSelect.appendChild(option);
+      });
+    }
+
+    async function assignTask() {
+      const targetWorker = workerSelect.value;
+      const title = taskTitle.value.trim();
+      const notes = taskNotes.value.trim();
+      if (!targetWorker || !title) {
+        toast('Chagua mfanyakazi na andika kazi.', 'warning');
+        return;
+      }
+      const ref = dbRefs.tasksDay(targetWorker, today).push();
+      const assignedTs = localTs();
+      const dueTs = assignedTs + (8 * 60 * 60 * 1000);
+      await ref.set({
+        title,
+        notes,
+        assignedTs,
+        dueTs,
+        completedTs: 0
+      });
+      toast('Kazi imegawiwa.', 'success');
+      taskTitle.value = '';
+      taskNotes.value = '';
+      if (targetWorker === currentWorkerId) {
+        loadTasks();
+      }
+    }
+  </script>
+</body>
+</html>
+
+

@@ -1,0 +1,183 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Utendaji wa Wafanyakazi</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Utendaji | Performance</h1>
+      <p class="workers-card__subtitle">
+        Tathmini: uchelewaji mchache, kazi zilizokamilika, hakuna bendera nyekundu, hakuna likizo zilizokataliwa.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Kinara wa Mwezi</h2>
+      </header>
+      <div class="workers-card__content" id="championCard">
+        <p>Inapakia...</p>
+      </div>
+    </section>
+
+    <section class="workers-card" style="margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Bodaboda ya Utendaji | Ranking</h2>
+      </header>
+      <div class="workers-card__content">
+        <table class="workers-table" id="rankTable">
+          <thead>
+            <tr>
+              <th>Mfanyakazi</th>
+              <th>Role</th>
+              <th>Lates</th>
+              <th>Task %</th>
+              <th>Flags</th>
+              <th>Leaves Rejected</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { ensureAnonymousAuth, toast, yyyymm } from '../modules/workers_helpers.js';
+
+    const championCard = document.getElementById('championCard');
+    const rankTableBody = document.querySelector('#rankTable tbody');
+
+    ensureAnonymousAuth()
+      .then(checkAdmin)
+      .then(loadPerformance)
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function checkAdmin(user) {
+      const snap = await firebase.database().ref(`admins/${user.uid}`).once('value');
+      if (!snap.exists() || snap.val() !== true) {
+        toast('Huna ruhusa kuona utendaji.', 'error');
+        window.location.href = '../index.html';
+        throw new Error('Not admin');
+      }
+    }
+
+    async function loadPerformance() {
+      const workersSnap = await firebase.database().ref('workers').once('value');
+      const penaltiesSnap = await firebase.database().ref('penalties_ledger').once('value');
+      const tasksSnap = await firebase.database().ref('tasks').once('value');
+      const approvalsSnap = await firebase.database().ref('approvals').once('value');
+      const leavesSnap = await firebase.database().ref('leave_requests').once('value');
+
+      const workers = workersSnap.val() || {};
+      const penalties = penaltiesSnap.val() || {};
+      const tasks = tasksSnap.val() || {};
+      const approvals = approvalsSnap.val() || {};
+      const leaves = leavesSnap.val() || {};
+
+      const ranking = Object.entries(workers).map(([workerId, data]) => {
+        const profile = data.profile || {};
+        if (profile.active === false) return null;
+        const lateCount = countLate(penalties[workerId]);
+        const taskPct = taskCompletion(tasks[workerId]);
+        const flagCount = approvalFlags(approvals, workerId);
+        const rejectedLeaves = leaveRejects(leaves[workerId]);
+        const score = Math.max(0, 100 - lateCount * 10 + taskPct - flagCount * 15 - rejectedLeaves * 5);
+        return {
+          workerId,
+          profile,
+          lateCount,
+          taskPct,
+          flagCount,
+          rejectedLeaves,
+          score
+        };
+      }).filter(Boolean).sort((a, b) => b.score - a.score);
+
+      renderRanking(ranking);
+    }
+
+    function countLate(penaltyNode = {}) {
+      let total = 0;
+      Object.values(penaltyNode).forEach(monthNode => {
+        Object.values(monthNode || {}).forEach(entry => {
+          if (entry.kind === 'late') total += 1;
+        });
+      });
+      return total;
+    }
+
+    function taskCompletion(taskNode = {}) {
+      let total = 0;
+      let completed = 0;
+      Object.values(taskNode).forEach(dayNode => {
+        Object.values(dayNode || {}).forEach(task => {
+          total += 1;
+          if (task.completedTs) completed += 1;
+        });
+      });
+      if (!total) return 100;
+      return Math.round((completed / total) * 100);
+    }
+
+    function approvalFlags(approvalsNode = {}, workerId) {
+      let flags = 0;
+      Object.values(approvalsNode).forEach(entry => {
+        if (entry.workerId === workerId && entry.status === 'flagged') flags += 1;
+      });
+      return flags;
+    }
+
+    function leaveRejects(leavesNode = {}) {
+      let rejected = 0;
+      Object.values(leavesNode).forEach(entry => {
+        if (entry.status === 'rejected') rejected += 1;
+      });
+      return rejected;
+    }
+
+    function renderRanking(ranking) {
+      if (!ranking.length) {
+        championCard.innerHTML = '<p>Hakuna data ya kutosha.</p>';
+        return;
+      }
+      const champion = ranking[0];
+      championCard.innerHTML = `
+        <h3>${champion.profile.fullNameUpper}</h3>
+        <p>Role: ${champion.profile.role}</p>
+        <p>Score: ${champion.score}</p>
+      <p>Lates: ${champion.lateCount} - Task%: ${champion.taskPct} - Flags: ${champion.flagCount} - Rejects: ${champion.rejectedLeaves}</p>
+      `;
+
+      rankTableBody.innerHTML = '';
+      ranking.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${index + 1}. ${row.profile.fullNameUpper}</td>
+          <td>${row.profile.role}</td>
+          <td>${row.lateCount}</td>
+          <td>${row.taskPct}%</td>
+          <td>${row.flagCount}</td>
+          <td>${row.rejectedLeaves}</td>
+          <td>${row.score}</td>
+        `;
+        rankTableBody.appendChild(tr);
+      });
+    }
+  </script>
+</body>
+</html>
+
+

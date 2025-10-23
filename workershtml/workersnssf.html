@@ -1,0 +1,225 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Michango | NSSF & WCF</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>NSSF - WCF - PAYE</h1>
+      <p class="workers-card__subtitle">
+        Sasisha viwango vya kisheria na rekodi malipo ya kila mwezi kwa kila mfanyakazi.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Viwango vya Sasa</h2>
+      </header>
+      <div class="workers-card__content workers-form">
+        <label>WCF Rate (%)
+          <input type="number" step="0.01" id="wcfRate">
+        </label>
+        <label>NSSF Employee Rate (%)
+          <input type="number" step="0.01" id="nssfEmployeeRate">
+        </label>
+        <label>NSSF Employer Rate (%)
+          <input type="number" step="0.01" id="nssfEmployerRate">
+        </label>
+        <button id="saveRates" class="workers-btn">Hifadhi Viwango</button>
+      </div>
+    </section>
+
+    <section class="workers-card" style="margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Michango ya Mwezi</h2>
+      </header>
+      <div class="workers-card__content workers-form">
+        <label>Mwezi (YYYY-MM)
+          <input type="month" id="monthInput">
+        </label>
+        <button id="loadMonth" class="workers-btn">Pakia</button>
+      </div>
+      <div class="workers-card__content">
+        <table class="workers-table" id="nssfTable">
+          <thead>
+            <tr>
+              <th>Jina</th>
+              <th>Base</th>
+              <th>NSSF (Emp)</th>
+              <th>NSSF (Er)</th>
+              <th>WCF</th>
+              <th>Paid</th>
+              <th>Receipt</th>
+              <th>Kitendo</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      dbRefs,
+      toast
+    } from '../modules/workers_helpers.js';
+    import { computePayrollForWorker } from '../modules/workers_payroll.js';
+    import { uploadFileToStorage } from '../modules/workers_ui.js';
+
+    const wcfRateInput = document.getElementById('wcfRate');
+    const nssfEmployeeInput = document.getElementById('nssfEmployeeRate');
+    const nssfEmployerInput = document.getElementById('nssfEmployerRate');
+    const saveRatesBtn = document.getElementById('saveRates');
+    const monthInput = document.getElementById('monthInput');
+    const loadMonthBtn = document.getElementById('loadMonth');
+    const tableBody = document.querySelector('#nssfTable tbody');
+
+    let settings = null;
+    let currentMonth = null;
+    let workers = [];
+    const payrollMap = new Map();
+
+    ensureAnonymousAuth()
+      .then(checkAdmin)
+      .then(loadSettings)
+      .then(() => {
+        monthInput.value = new Date().toISOString().slice(0, 7);
+        saveRatesBtn.addEventListener('click', saveRates);
+        loadMonthBtn.addEventListener('click', loadMonthData);
+      })
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function checkAdmin(user) {
+      const snap = await firebase.database().ref(`admins/${user.uid}`).once('value');
+      if (!snap.exists() || snap.val() !== true) {
+        toast('Huna ruhusa ya ukurasa huu.', 'error');
+        window.location.href = '../index.html';
+        throw new Error('Not admin');
+      }
+    }
+
+    async function loadSettings() {
+      const snap = await dbRefs.settings().once('value');
+      settings = snap.val() || {};
+      const stat = settings.statutory || {};
+      wcfRateInput.value = stat.wcfRate ?? 0.5;
+      nssfEmployeeInput.value = stat.nssfEmployeeRate ?? 5;
+      nssfEmployerInput.value = stat.nssfEmployerRate ?? 15;
+    }
+
+    async function saveRates() {
+      const payload = {
+        wcfRate: Number(wcfRateInput.value || 0),
+        nssfEmployeeRate: Number(nssfEmployeeInput.value || 0),
+        nssfEmployerRate: Number(nssfEmployerInput.value || 0)
+      };
+      await dbRefs.settings().child('statutory').set(payload);
+      toast('Viwango vimehifadhiwa.', 'success');
+    }
+
+    async function loadWorkers() {
+      const snap = await firebase.database().ref('workers').once('value');
+      workers = [];
+      snap.forEach(child => {
+        const profile = child.val().profile || {};
+        if (profile.active === false) return;
+        workers.push({ id: child.key, profile });
+      });
+    }
+
+    async function loadMonthData() {
+      currentMonth = monthInput.value.replace('-', '');
+      if (!currentMonth) {
+        toast('Chagua mwezi.', 'warning');
+        return;
+      }
+      await loadWorkers();
+      tableBody.innerHTML = '';
+      payrollMap.clear();
+      for (const worker of workers) {
+        const payroll = await computePayrollForWorker(worker.id, currentMonth);
+        payrollMap.set(worker.id, payroll);
+        const contribSnap = await dbRefs.nssfMonth(worker.id, currentMonth).once('value');
+        const contrib = contribSnap.val() || {};
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${worker.profile.fullNameUpper}</td>
+          <td>${formatTZS(payroll.baseSalary)}</td>
+          <td>${formatTZS(payroll.statutory.nssf.employee)}</td>
+          <td>${formatTZS(payroll.statutory.nssf.employer)}</td>
+          <td>${formatTZS(payroll.statutory.wcf)}</td>
+          <td>${contrib.paid ? 'Yes' : 'No'}</td>
+          <td>${contrib.receiptUrl ? `<a href="${contrib.receiptUrl}" target="_blank">View</a>` : '€”'}</td>
+          <td><button class="workers-btn secondary" data-worker="${worker.id}">${contrib.paid ? 'Update' : 'Mark Paid'}</button></td>
+        `;
+        tableBody.appendChild(row);
+      }
+
+      tableBody.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => openReceiptDialog(btn.dataset.worker));
+      });
+    }
+
+    async function openReceiptDialog(workerId) {
+      const paid = confirm('Je, malipo yamethibitishwa?');
+      if (!paid) return;
+      const proof = await pickFile();
+      let receiptUrl = '';
+      if (proof) {
+        receiptUrl = await uploadFileToStorage(proof, `nssf/${workerId}/${currentMonth}-${Date.now()}.${getExtension(proof)}`);
+      }
+      await dbRefs.nssfMonth(workerId, currentMonth).set({
+        employeeRate: Number(nssfEmployeeInput.value || 0),
+        employerRate: Number(nssfEmployerInput.value || 0),
+        base: payrollMap.get(workerId)?.baseSalary || 0,
+        contributionEmployee: Number(payrollMap.get(workerId)?.statutory.nssf.employee || 0),
+        contributionEmployer: Number(payrollMap.get(workerId)?.statutory.nssf.employer || 0),
+        paid: true,
+        receiptUrl,
+        updatedTs: Date.now()
+      });
+      toast('Imeandikwa kama imeshalipwa.', 'success');
+      loadMonthData();
+    }
+
+    function formatTZS(value) {
+      return Number(value || 0).toLocaleString('sw-TZ');
+    }
+
+    function pickFile() {
+      return new Promise(resolve => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,image/*';
+        input.onchange = () => resolve(input.files[0]);
+        input.click();
+      });
+    }
+
+    function getExtension(file) {
+      const name = file.name || '';
+      const ext = name.split('.').pop();
+      if (ext) return ext;
+      if (file.type === 'application/pdf') return 'pdf';
+      if (file.type.startsWith('image/')) return file.type.split('/')[1];
+      return 'dat';
+    }
+  </script>
+</body>
+</html>
+
+

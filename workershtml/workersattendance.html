@@ -1,0 +1,300 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mahudhurio ya Kazi</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Mahudhurio | Attendance</h1>
+      <p class="workers-card__subtitle">
+        Check-in kabla ya 07:20 Africa/Nairobi. Ukichelewa mara ya 2, 4, 6... utapigwa faini ya 0.001 Ã— mshahara wa msingi.
+      </p>
+    </header>
+
+    <section class="workers-grid">
+      <div class="workers-card">
+        <header class="workers-card__header">
+          <h2>Check-In</h2>
+          <p class="workers-card__subtitle">Piga picha + GPS</p>
+        </header>
+        <div class="workers-card__content">
+          <label>Kumbukumbu ya Picha
+            <input type="file" id="checkInPhoto" accept="image/*" capture="environment">
+          </label>
+          <button id="checkInBtn" class="workers-btn">Check-In Sasa</button>
+        </div>
+      </div>
+
+      <div class="workers-card">
+        <header class="workers-card__header">
+          <h2>Check-Out</h2>
+          <p class="workers-card__subtitle">Ondoka kwa nidhamu</p>
+        </header>
+        <div class="workers-card__content">
+          <label>Picha ya Kuondoka
+            <input type="file" id="checkOutPhoto" accept="image/*" capture="environment">
+          </label>
+          <button id="checkOutBtn" class="workers-btn secondary">Check-Out Sasa</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="workers-card" style="margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Mahudhurio ya Mwezi</h2>
+        <p id="monthLabel" class="workers-card__subtitle"></p>
+      </header>
+      <div class="workers-card__content">
+        <table class="workers-table" id="attendanceTable">
+          <thead>
+            <tr>
+              <th>Siku</th>
+              <th>Check-In</th>
+              <th>Check-Out</th>
+              <th>Late (dakika)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="workers-card" id="adminPanel" style="display:none; margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Admin - Leo walio Chelewa</h2>
+        <p class="workers-card__subtitle">Walio ingia baada ya 07:20</p>
+      </header>
+      <div class="workers-card__content">
+        <ul id="lateList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      getLinkedWorkerId,
+      dbRefs,
+      todayYMD,
+      yyyymm,
+      localTs,
+      inGeofence,
+      toast
+    } from '../modules/workers_helpers.js';
+    import { uploadFileToStorage } from '../modules/workers_ui.js';
+    import { applyPenalty } from '../modules/workers_penalties.js';
+
+    const checkInBtn = document.getElementById('checkInBtn');
+    const checkOutBtn = document.getElementById('checkOutBtn');
+    const checkInPhoto = document.getElementById('checkInPhoto');
+    const checkOutPhoto = document.getElementById('checkOutPhoto');
+    const attendanceTable = document.getElementById('attendanceTable').querySelector('tbody');
+    const lateList = document.getElementById('lateList');
+    const adminPanel = document.getElementById('adminPanel');
+    const monthLabel = document.getElementById('monthLabel');
+
+    let workerId = null;
+    let workerProfile = null;
+    let settings = null;
+    let monthKey = yyyymm(new Date());
+    let today = todayYMD();
+
+    ensureAnonymousAuth()
+      .then(init)
+      .catch(err => {
+        console.error(err);
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function init() {
+      workerId = await getLinkedWorkerId();
+      if (!workerId) {
+        toast('Tafadhali ingia tena.', 'error');
+        window.location.href = '../index.html';
+        return;
+      }
+      await Promise.all([loadProfile(), loadSettings(), renderTable()]);
+      await maybeShowAdminPanel();
+
+      checkInBtn.addEventListener('click', () => handleCheck('in'));
+      checkOutBtn.addEventListener('click', () => handleCheck('out'));
+    }
+
+    async function loadProfile() {
+      const snap = await dbRefs.worker(workerId).once('value');
+      if (!snap.exists()) {
+        throw new Error('Worker profile missing');
+      }
+      workerProfile = snap.val().profile;
+    }
+
+    async function loadSettings() {
+      const snap = await dbRefs.settings().once('value');
+      settings = snap.val() || {};
+    }
+
+    async function handleCheck(direction) {
+      const fileInput = direction === 'in' ? checkInPhoto : checkOutPhoto;
+      if (!fileInput.files.length) {
+        toast('Chagua au piga picha kwanza.', 'warning');
+        return;
+      }
+      const file = fileInput.files[0];
+      const geo = await getLocation();
+      if (!geo) {
+        toast('GPS inahitajika.', 'error');
+        return;
+      }
+
+      const geofence = settings.geofence || {};
+      if (!inGeofence(geo.lat, geo.lng, geofence, geofence.radius_m || 350)) {
+        toast('Nje ya eneo la shule. Huwezi kuingia.', 'error');
+        return;
+      }
+
+      const timestamp = localTs();
+      const dayKey = today.replace(/-/g, '');
+      const storagePath = `attendance/${workerId}/${dayKey}-${direction}-${Date.now()}.jpg`;
+      const photoUrl = await uploadFileToStorage(file, storagePath);
+
+      const dayRef = dbRefs.attendanceDay(workerId, monthKey, dayKey);
+      const daySnap = await dayRef.once('value');
+      const existing = daySnap.val() || {};
+
+      if (direction === 'in' && existing.checkInTs) {
+        toast('Ulishafanya check-in leo.', 'warning');
+        return;
+      }
+      if (direction === 'out' && !existing.checkInTs) {
+        toast('Hujafanya check-in bado.', 'warning');
+        return;
+      }
+
+      const payload = direction === 'in'
+        ? {
+            checkInTs: timestamp,
+            checkInGps: [geo.lat, geo.lng],
+            checkInPhotoUrl: photoUrl,
+            lateMinutes: computeLateMinutes(timestamp)
+          }
+        : {
+            checkOutTs: timestamp,
+            checkOutGps: [geo.lat, geo.lng],
+            checkOutPhotoUrl: photoUrl
+          };
+
+      await dayRef.update(payload);
+      toast(direction === 'in' ? 'Karibu kazini!' : 'Asante kwa kazi!', 'success');
+      fileInput.value = '';
+      await renderTable();
+
+      if (direction === 'in') {
+        await maybeApplyPenalty(payload.lateMinutes || 0, dayKey);
+      }
+    }
+
+    function computeLateMinutes(checkInTs) {
+      const start = new Date(`${today}T07:20:00`);
+      const startLocal = new Date(start.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+      const diff = checkInTs - startLocal.getTime();
+      return diff > 0 ? Math.round(diff / 60000) : 0;
+    }
+
+    async function maybeApplyPenalty(lateMinutes, dayKey) {
+      if (!lateMinutes) return;
+      const rulePercent = settings.penalties?.late?.percent || 0.001;
+      await applyPenalty({
+        workerId,
+        kind: 'late',
+        baseSalary: workerProfile.baseSalary,
+        refPath: `/attendance/${workerId}/${monthKey}/${dayKey}`,
+        rulePercent
+      });
+    }
+
+    async function renderTable() {
+      monthLabel.textContent = new Date().toLocaleString('sw-TZ', {
+        timeZone: 'Africa/Nairobi',
+        month: 'long',
+        year: 'numeric'
+      });
+      attendanceTable.innerHTML = '';
+      const snap = await dbRefs.attendanceMonth(workerId, monthKey).once('value');
+      const data = snap.val() || {};
+      const dayKeys = Object.keys(data).sort();
+      dayKeys.forEach(dayKey => {
+        const record = data[dayKey];
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${dayKey}</td>
+          <td>${formatTs(record.checkInTs)}</td>
+          <td>${formatTs(record.checkOutTs)}</td>
+          <td>${record.lateMinutes || 0}</td>
+        `;
+        attendanceTable.appendChild(row);
+      });
+    }
+
+    async function maybeShowAdminPanel() {
+      const authUser = firebase.auth().currentUser;
+      const adminSnap = await firebase.database().ref(`admins/${authUser.uid}`).once('value');
+      if (!adminSnap.exists() || adminSnap.val() !== true) {
+        adminPanel.style.display = 'none';
+        return;
+      }
+      adminPanel.style.display = 'block';
+      const todayKey = today.replace(/-/g, '');
+      const attendanceSnap = await firebase.database().ref('attendance').once('value');
+      const workersSnap = await firebase.database().ref('workers').once('value');
+      const attendanceData = attendanceSnap.val() || {};
+      const workerData = workersSnap.val() || {};
+
+      lateList.innerHTML = '';
+      Object.entries(attendanceData).forEach(([wId, months]) => {
+        const todayRecord = months?.[monthKey]?.[todayKey];
+        const profile = workerData[wId]?.profile || {};
+        if (!todayRecord || !todayRecord.checkInTs || todayRecord.lateMinutes > 0) {
+          const li = document.createElement('li');
+          li.textContent = `${profile.fullNameUpper || wId} - ${profile.role || ''} - late ${todayRecord?.lateMinutes ?? 'no check'}`;
+          lateList.appendChild(li);
+        }
+      });
+    }
+
+    function formatTs(ts) {
+      if (!ts) return '€”';
+      return new Date(ts).toLocaleTimeString('sw-TZ', {
+        timeZone: 'Africa/Nairobi',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function getLocation() {
+      return new Promise(resolve => {
+        if (!navigator.geolocation) {
+          resolve(null);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve(null),
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      });
+    }
+  </script>
+</body>
+</html>
+
+

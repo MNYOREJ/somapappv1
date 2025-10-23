@@ -1,0 +1,156 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mshahara</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Mshahara | Salary</h1>
+      <p class="workers-card__subtitle">
+        Hapa utaona makato (penalties), mikopo/advances, michango ya lazima (NSSF, WCF, PAYE) na NET ya mwezi huu.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Muhtasari wa Mwezi</h2>
+        <p id="monthLabel" class="workers-card__subtitle"></p>
+      </header>
+      <div class="workers-card__content">
+        <p><strong>Base:</strong> <span id="baseSalary">€”</span></p>
+        <p><strong>Penalties:</strong> <span id="penalties">€”</span></p>
+        <p><strong>Advances:</strong> <span id="advances">€”</span></p>
+        <p><strong>Statutory:</strong> <span id="statutory">€”</span></p>
+        <p><strong>Net:</strong> <span id="net">€”</span></p>
+        <div>
+          <button id="payslipBtn" class="workers-btn secondary" disabled>Pakua Payslip</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="workers-card" style="margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Makato ya Penalty</h2>
+      </header>
+      <div class="workers-card__content">
+        <ul id="penaltyList"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      getLinkedWorkerId,
+      yyyymm,
+      toast
+    } from '../modules/workers_helpers.js';
+    import { computePayrollForWorker, generatePayslip } from '../modules/workers_payroll.js';
+    import { listMonthlyPenalties } from '../modules/workers_penalties.js';
+
+    const monthLabel = document.getElementById('monthLabel');
+    const baseSalaryEl = document.getElementById('baseSalary');
+    const penaltiesEl = document.getElementById('penalties');
+    const advancesEl = document.getElementById('advances');
+    const statutoryEl = document.getElementById('statutory');
+    const netEl = document.getElementById('net');
+    const penaltyList = document.getElementById('penaltyList');
+    const payslipBtn = document.getElementById('payslipBtn');
+
+    let workerId = null;
+    const monthKey = yyyymm(new Date());
+    let payrollData = null;
+
+    ensureAnonymousAuth()
+      .then(load)
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function load() {
+      workerId = await getLinkedWorkerId();
+      if (!workerId) {
+        toast('Ingia tena.', 'error');
+        window.location.href = '../index.html';
+        return;
+      }
+
+      monthLabel.textContent = `${monthKey.slice(0, 4)}-${monthKey.slice(4)}`;
+      payrollData = await computePayrollForWorker(workerId, monthKey);
+      renderSummary();
+      await renderPenalties();
+    }
+
+    function renderSummary() {
+      baseSalaryEl.textContent = formatTZS(payrollData.baseSalary);
+      penaltiesEl.textContent = formatTZS(payrollData.penalties);
+      advancesEl.textContent = formatTZS(payrollData.advances);
+      statutoryEl.textContent = formatTZS(payrollData.statutory.total);
+      netEl.textContent = formatTZS(payrollData.net);
+
+      if (payrollData.existingPayslip?.pdfUrl) {
+        payslipBtn.disabled = false;
+        payslipBtn.textContent = 'Fungua Payslip';
+        payslipBtn.onclick = () => window.open(payrollData.existingPayslip.pdfUrl, '_blank');
+      } else {
+        payslipBtn.disabled = false;
+        payslipBtn.textContent = 'Tengeneza Payslip';
+        payslipBtn.onclick = generatePayslipPdf;
+      }
+    }
+
+    async function renderPenalties() {
+      penaltyList.innerHTML = '';
+      const penalties = await listMonthlyPenalties(workerId, monthKey);
+      if (!penalties.length) {
+        penaltyList.innerHTML = '<li>Hakuna makato mwezi huu. Endelea na nidhamu nzuri!</li>';
+        return;
+      }
+      penalties.forEach(item => {
+        const li = document.createElement('li');
+        li.className = 'workers-fieldset';
+        li.innerHTML = `
+          <strong>${item.kind.toUpperCase()} (#${item.occurrence})</strong>
+          <p>Makato: ${formatTZS(item.amountTZS)}</p>
+          <p>Kanuni: ${item.rulePercent}</p>
+          <p>Rejea: ${item.refPath || ''}</p>
+        `;
+        penaltyList.appendChild(li);
+      });
+    }
+
+    async function generatePayslipPdf() {
+      try {
+        payslipBtn.disabled = true;
+        payslipBtn.textContent = 'Inatengeneza...';
+        const url = await generatePayslip(workerId, monthKey, payrollData);
+        payslipBtn.disabled = false;
+        payslipBtn.textContent = 'Fungua Payslip';
+        payslipBtn.onclick = () => window.open(url, '_blank');
+        toast('Payslip imewekwa.', 'success');
+      } catch (err) {
+        console.error(err);
+        toast(err.message || 'Imeshindikana', 'error');
+        payslipBtn.disabled = false;
+        payslipBtn.textContent = 'Tengeneza Payslip';
+      }
+    }
+
+    function formatTZS(value) {
+      return Number(value || 0).toLocaleString('sw-TZ', { style: 'currency', currency: 'TZS', currencyDisplay: 'code' });
+    }
+  </script>
+</body>
+</html>
+
+

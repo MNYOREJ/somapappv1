@@ -1,0 +1,315 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoMAp Workers Hub</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header class="workers-flex">
+      <div>
+        <h1>SoMAp Workers Hub</h1>
+        <p id="workerGreeting" class="workers-card__subtitle">Karibu | Welcome</p>
+      </div>
+      <div>
+        <button id="refreshDashboard" class="workers-btn secondary">Refresh | Onyesha upya</button>
+      </div>
+    </header>
+
+    <section class="workers-grid" id="kpiGrid"></section>
+
+    <h2 class="workers-section-title">Quick Links | Njia za Haraka</h2>
+    <section class="workers-grid" id="quickLinks"></section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      getLinkedWorkerId,
+      dbRefs,
+      localTs,
+      todayYMD,
+      yyyymm,
+      toast
+    } from '../modules/workers_helpers.js';
+    import { createCard } from '../modules/workers_ui.js';
+
+    const kpiGrid = document.getElementById('kpiGrid');
+    const quickLinks = document.getElementById('quickLinks');
+    const greetingEl = document.getElementById('workerGreeting');
+    const refreshBtn = document.getElementById('refreshDashboard');
+
+    refreshBtn.addEventListener('click', () => loadDashboard(true));
+
+    async function loadDashboard(force = false) {
+      try {
+        const authUser = await ensureAnonymousAuth();
+        const workerId = await getLinkedWorkerId();
+        if (!workerId) {
+          toast('Worker device is not linked. Tafadhali ingia tena.', 'error');
+          window.location.href = '../index.html';
+          return;
+        }
+
+        const workerSnap = await dbRefs.worker(workerId).once('value');
+        if (!workerSnap.exists()) {
+          toast('Profile missing. Wasiliana na HR.', 'error');
+          window.location.href = '../index.html';
+          return;
+        }
+
+        const worker = workerSnap.val();
+        const profile = worker.profile || {};
+        const role = (profile.role || '').toLowerCase();
+        greetingEl.textContent = `${profile.fullNameUpper || ''} - ${role.toUpperCase()}`;
+
+        await renderKpis();
+        renderQuickLinks({ role, isAdmin: await isAdmin(authUser.uid) });
+      } catch (error) {
+        console.error(error);
+        toast(error.message || 'Failed to load dashboard', 'error');
+      }
+    }
+
+    async function isAdmin(uid) {
+      const snap = await firebase.database().ref(`admins/${uid}`).once('value');
+      return snap.exists() && snap.val() === true;
+    }
+
+    async function renderKpis() {
+      kpiGrid.innerHTML = '';
+      const today = todayYMD();
+      const monthKey = yyyymm(new Date());
+
+      const workersPromise = firebase.database().ref('workers').once('value');
+      const attendancePromise = firebase.database().ref('attendance').once('value');
+      const studentsPromise = firebase.database().ref('students').once('value');
+      const leavePromise = firebase.database().ref('leave_requests').once('value');
+
+      const [workersSnap, attendanceSnap, studentsSnap, leaveSnap] = await Promise.all([
+        workersPromise.catch(() => null),
+        attendancePromise.catch(() => null),
+        studentsPromise.catch(() => null),
+        leavePromise.catch(() => null)
+      ]);
+
+      const workers = workersSnap?.val() || {};
+      const activeWorkers = Object.values(workers).filter(w => w.profile?.active !== false).length;
+
+      const lateCount = computeLateCount(attendanceSnap?.val() || {}, today, monthKey);
+      const sickToday = computeSickToday(leaveSnap?.val() || {}, today);
+      const { totalStudents, totalBoys, totalGirls } = computeStudents(studentsSnap?.val() || {});
+
+      const kpis = [
+        { label: 'Active Workers | Wafanyakazi', value: activeWorkers },
+        { label: 'Sick Today | Wagonjwa Leo', value: sickToday },
+        { label: 'Late After 07:20 | Wamechelewa', value: lateCount },
+        { label: 'Students | Wanafunzi', value: totalStudents },
+        { label: 'Boys | Wavulana', value: totalBoys },
+        { label: 'Girls | Wasichana', value: totalGirls }
+      ];
+
+      kpis.forEach(kpi => {
+        const card = document.createElement('div');
+        card.className = 'workers-kpi';
+        const title = document.createElement('h3');
+        title.textContent = kpi.label;
+        const value = document.createElement('span');
+        value.textContent = kpi.value ?? 0;
+        card.appendChild(title);
+        card.appendChild(value);
+        kpiGrid.appendChild(card);
+      });
+    }
+
+    function computeLateCount(attendanceRoot, today, monthKey) {
+      let count = 0;
+      const dayKey = today.replace(/-/g, '');
+      Object.values(attendanceRoot || {}).forEach(workerData => {
+        const monthData = workerData?.[monthKey];
+        if (!monthData) return;
+        const record = monthData?.[dayKey];
+        if (!record || record.lateMinutes > 0 || !record.checkInTs) {
+          count += 1;
+        }
+      });
+      return count;
+    }
+
+    function computeSickToday(leaveRoot, today) {
+      let total = 0;
+      Object.values(leaveRoot || {}).forEach(workerLeaves => {
+        Object.values(workerLeaves || {}).forEach(request => {
+          if (request.type === 'sick' && request.status === 'approved') {
+            if (today >= request.startYmd && today <= request.endYmd) {
+              total += 1;
+            }
+          }
+        });
+      });
+      return total;
+    }
+
+    function computeStudents(studentsRoot) {
+      let totalStudents = 0;
+      let totalBoys = 0;
+      let totalGirls = 0;
+      Object.values(studentsRoot || {}).forEach(child => {
+        totalStudents += 1;
+        if (child.gender === 'M') totalBoys += 1;
+        if (child.gender === 'F') totalGirls += 1;
+      });
+      return { totalStudents, totalBoys, totalGirls };
+    }
+
+    function renderQuickLinks({ role, isAdmin }) {
+      quickLinks.innerHTML = '';
+
+      const cards = [
+        {
+          key: 'attendance',
+          roles: ['all'],
+          title: 'Attendance | Mahudhurio',
+          subtitle: 'Check-in, GPS, photos',
+          href: 'workersattendance.html'
+        },
+        {
+          key: 'tasks',
+          roles: ['all'],
+          title: 'Tasks | Kazi',
+          subtitle: 'Assignments & SLA 8h',
+          href: 'workertasks.html'
+        },
+        {
+          key: 'leaves',
+          roles: ['all'],
+          title: 'Leave | Likizo',
+          subtitle: 'Omba na fuatilia',
+          href: 'workersleaves.html'
+        },
+        {
+          key: 'salary',
+          roles: ['all'],
+          title: 'Salary | Mshahara',
+          subtitle: 'Penalties, payslip',
+          href: 'workerssalary.html'
+        },
+        {
+          key: 'contracts',
+          roles: ['all'],
+          title: 'Contract | Mkataba',
+          subtitle: 'Review & accept',
+          href: 'workerscontracts.html'
+        },
+        {
+          key: 'cooks',
+          roles: ['cook'],
+          title: 'Kitchen | Bwalo',
+          subtitle: 'Menu, headcount, variances',
+          href: 'workerscooks.html'
+        },
+        {
+          key: 'guard',
+          roles: ['guard'],
+          title: 'Security | Ulinzi',
+          subtitle: 'Handover & assets',
+          href: 'workersmlinzi.html'
+        },
+        {
+          key: 'cleaner',
+          roles: ['cleaner'],
+          title: 'Cleaning | Usafi',
+          subtitle: 'Checklist & supplies',
+          href: 'workersmsafi.html'
+        },
+        {
+          key: 'store',
+          roles: ['storekeeper'],
+          title: 'Storekeeper | Ghala',
+          subtitle: 'Ledger & stock',
+          href: 'workersstorekeeper.html'
+        },
+        {
+          key: 'transport',
+          roles: ['driver'],
+          title: 'Transport | Usafiri',
+          subtitle: 'Safari & ratiba',
+          href: '../transport.html'
+        },
+        {
+          key: 'admission',
+          roles: ['admin', 'hr', 'manager'],
+          title: 'Admission | Kuajiri',
+          subtitle: 'Register & docs',
+          href: 'workersadmission.html'
+        },
+        {
+          key: 'payroll',
+          roles: ['admin', 'hr', 'manager', 'accountant'],
+          title: 'Payroll | Malipo',
+          subtitle: 'NSSF, slips, finalize',
+          href: 'workerspayroll_admin.html'
+        },
+        {
+          key: 'nssf',
+          roles: ['admin', 'hr', 'accountant'],
+          title: 'NSSF | Michango',
+          subtitle: 'Rates & receipts',
+          href: 'workersnssf.html'
+        },
+        {
+          key: 'approvals',
+          roles: ['admin', 'hr', 'manager'],
+          title: 'Approvals | Uthibitisho',
+          subtitle: 'Flags & incidents',
+          href: 'workersapprovals_admin.html'
+        },
+        {
+          key: 'performance',
+          roles: ['admin', 'hr', 'manager'],
+          title: 'Performance | Utendaji',
+          subtitle: 'Ranking & best',
+          href: 'workersperformance.html'
+        },
+        {
+          key: 'ids',
+          roles: ['admin', 'hr', 'manager'],
+          title: 'Worker IDs | Vitambulisho',
+          subtitle: 'Generate & distribute',
+          href: 'workersgenerateid.html'
+        }
+      ];
+
+      const allowRoles = new Set(['all', role]);
+      if (isAdmin) {
+        allowRoles.add('admin');
+      }
+      if (['hr', 'manager', 'accountant'].includes(role)) {
+        allowRoles.add(role);
+      }
+
+      cards
+        .filter(card => card.roles.some(r => allowRoles.has(r)))
+        .forEach(card => {
+          const el = createCard({
+            title: card.title,
+            subtitle: card.subtitle,
+            body: `<a class="workers-btn" href="${card.href}">Open | Fungua</a>`
+          });
+          quickLinks.appendChild(el);
+        });
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>
+
+

@@ -1,0 +1,201 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payroll Admin</title>
+  <link rel="stylesheet" href="../css/workers.css">
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase/firebase-config.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Payroll Admin</h1>
+      <p class="workers-card__subtitle">
+        Hesabu mishahara, weka payslip, na funga mwezi. Hakikisha makato (penalties) na michango ya NSSF / WCF / PAYE.
+      </p>
+    </header>
+
+    <section class="workers-card">
+      <header class="workers-card__header">
+        <h2>Mwezi wa Payroll</h2>
+      </header>
+      <div class="workers-card__content workers-form">
+        <label>Mwezi (YYYY-MM)
+          <input type="month" id="monthInput">
+        </label>
+        <button id="loadPayroll" class="workers-btn">Pakia taarifa</button>
+      </div>
+    </section>
+
+    <section class="workers-card" style="margin-top:24px;">
+      <header class="workers-card__header">
+        <h2>Muhtasari wa Mishahara</h2>
+        <p id="totalsLabel" class="workers-card__subtitle"></p>
+      </header>
+      <div class="workers-card__content">
+        <div class="workers-card__actions">
+          <button id="saveDraft" class="workers-btn secondary" disabled>Hifadhi kama Draft</button>
+          <button id="generatePayslips" class="workers-btn" disabled>Tengeneza Payslips</button>
+          <button id="finalizePayroll" class="workers-btn danger" disabled>Finalize Mwezi</button>
+        </div>
+        <table class="workers-table" id="payrollTable">
+          <thead>
+            <tr>
+              <th>Jina</th>
+              <th>Jukumu</th>
+              <th>Base</th>
+              <th>Makato</th>
+              <th>Advances</th>
+              <th>Statutory</th>
+              <th>Net</th>
+              <th>Payslip</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      ensureAnonymousAuth,
+      dbRefs,
+      toast
+    } from '../modules/workers_helpers.js';
+    import {
+      computePayrollForWorker,
+      generatePayslip,
+      upsertPayrollRun,
+      finalizePayrollRun
+    } from '../modules/workers_payroll.js';
+
+    const monthInput = document.getElementById('monthInput');
+    const loadBtn = document.getElementById('loadPayroll');
+    const saveDraftBtn = document.getElementById('saveDraft');
+    const generateBtn = document.getElementById('generatePayslips');
+    const finalizeBtn = document.getElementById('finalizePayroll');
+    const tableBody = document.querySelector('#payrollTable tbody');
+    const totalsLabel = document.getElementById('totalsLabel');
+
+    let selectedMonth = null;
+    let payrollItems = [];
+    let workers = [];
+
+    ensureAnonymousAuth()
+      .then(checkAdmin)
+      .then(() => {
+        monthInput.value = new Date().toISOString().slice(0, 7);
+        loadBtn.addEventListener('click', loadPayroll);
+        saveDraftBtn.addEventListener('click', saveDraft);
+        generateBtn.addEventListener('click', generateAllPayslips);
+        finalizeBtn.addEventListener('click', finalize);
+      })
+      .catch(err => {
+        toast(err.message || 'Error', 'error');
+        window.location.href = '../index.html';
+      });
+
+    async function checkAdmin(user) {
+      const snap = await firebase.database().ref(`admins/${user.uid}`).once('value');
+      if (!snap.exists() || snap.val() !== true) {
+        toast('Huna ruhusa ya payroll.', 'error');
+        window.location.href = '../index.html';
+        throw new Error('Not admin');
+      }
+    }
+
+    async function loadWorkers() {
+      const snap = await firebase.database().ref('workers').once('value');
+      workers = [];
+      snap.forEach(child => {
+        const profile = child.val().profile || {};
+        if (profile.active === false) return;
+        workers.push({ id: child.key, profile });
+      });
+    }
+
+    async function loadPayroll() {
+      selectedMonth = monthInput.value.replace('-', '');
+      if (!selectedMonth) {
+        toast('Chagua mwezi.', 'warning');
+        return;
+      }
+      await loadWorkers();
+      tableBody.innerHTML = '';
+      payrollItems = [];
+
+      for (const worker of workers) {
+        const data = await computePayrollForWorker(worker.id, selectedMonth);
+        payrollItems.push({
+          workerId: worker.id,
+          ...data
+        });
+      }
+
+      renderTable();
+      saveDraftBtn.disabled = false;
+      generateBtn.disabled = false;
+      finalizeBtn.disabled = false;
+    }
+
+    function renderTable() {
+      tableBody.innerHTML = '';
+      let totals = { base: 0, deductions: 0, advances: 0, statutory: 0, net: 0 };
+      payrollItems.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${item.profile.fullNameUpper || ''}</td>
+          <td>${item.profile.role || ''}</td>
+          <td>${formatTZS(item.baseSalary)}</td>
+          <td>${formatTZS(item.penalties)}</td>
+          <td>${formatTZS(item.advances)}</td>
+          <td>${formatTZS(item.statutory.total)}</td>
+          <td>${formatTZS(item.net)}</td>
+          <td>${item.existingPayslip?.pdfUrl ? `<a href="${item.existingPayslip.pdfUrl}" target="_blank">View</a>` : '€”'}</td>
+        `;
+        tableBody.appendChild(tr);
+        totals.base += item.baseSalary;
+        totals.deductions += item.penalties;
+        totals.advances += item.advances;
+        totals.statutory += item.statutory.total;
+        totals.net += item.net;
+      });
+      totalsLabel.textContent = `Base ${formatTZS(totals.base)} | Penalties ${formatTZS(totals.deductions)} | Net ${formatTZS(totals.net)}`;
+    }
+
+    async function saveDraft() {
+      await upsertPayrollRun(selectedMonth, payrollItems);
+      toast('Draft imehifadhiwa.', 'success');
+    }
+
+    async function generateAllPayslips() {
+      generateBtn.disabled = true;
+      for (const item of payrollItems) {
+        const url = await generatePayslip(item.workerId, selectedMonth, item);
+        item.slipUrl = url;
+      }
+      await upsertPayrollRun(selectedMonth, payrollItems);
+      toast('Payslips zimetengenezwa.', 'success');
+      generateBtn.disabled = false;
+      renderTable();
+    }
+
+    async function finalize() {
+      await finalizePayrollRun(selectedMonth);
+      toast('Payroll imefungwa.', 'success');
+    }
+
+    function formatTZS(value) {
+      return Number(value || 0).toLocaleString('sw-TZ');
+    }
+  </script>
+</body>
+</html>
+
+

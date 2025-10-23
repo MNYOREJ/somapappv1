@@ -202,9 +202,14 @@
   const SHIFT_REPORT_PATH = 'shiftReports';
 
   // ---------- STATE ----------
+  const urlParams = new URLSearchParams(window.location.search);
+  const queryClassRaw = (urlParams.get('class') || '').trim();
+  const lockedClassStorage = (sessionStorage.getItem('lockedClassAttendance') || '').trim();
+  const lockedTeacherStorage = (sessionStorage.getItem('lockedClassTeacher') || '').trim();
+
   let students = [];
   let filtered = [];
-  let currentClass = '';
+  let currentClass = lockedClassStorage || queryClassRaw || '';
   let currentDateStr = '';
   let monthKey = '';
   let attendanceCache = {};
@@ -233,6 +238,34 @@
     if(A==='P' && P==='P') return 'P';
     const map = {'P-A':'PA','A-P':'AP','P-S':'PS','P-MT':'PMT','P-PG':'PPG','P-LE':'PLE','S-P':'SP','MT-P':'MTP','PG-P':'PGP','LE-P':'LEP'};
     return map[`${A}-${P}`] || `${A}${P}`;
+  }
+  function normalizeClassName(str){
+    return String(str || '').toUpperCase().replace(/[\s\-\._]/g, '');
+  }
+  function canonicalClassKey(str){
+    const norm = normalizeClassName(str);
+    if (!norm) return '';
+    let key = norm.replace(/(19|20)\d{2}$/, '');
+    key = key.replace(/^(CLASS|GRADE|STD|STANDARD|FORM|PRIMARY)/, '');
+    key = key.replace(/STREAM/g, '');
+    return key;
+  }
+  function isSameClass(a, b){
+    if (!a || !b) return false;
+    const normA = normalizeClassName(a);
+    const normB = normalizeClassName(b);
+    if (!normA || !normB) return false;
+    if (normA === normB) return true;
+    const canonicalA = canonicalClassKey(a);
+    const canonicalB = canonicalClassKey(b);
+    return canonicalA && canonicalA === canonicalB;
+  }
+  function resolveClassNameForData(candidate){
+    if (!candidate) return '';
+    const targetKey = canonicalClassKey(candidate);
+    if (!targetKey) return candidate;
+    const direct = students.find(s => canonicalClassKey(s.class) === targetKey);
+    return direct ? direct.class : candidate;
   }
   function isAbsentDay(rec){
     if(!rec) return false;
@@ -400,7 +433,10 @@
     const body = el('attBody');
     body.innerHTML = '';
     const q = (el('searchInput').value || '').toLowerCase();
-    filtered = students.filter(s => s.class === currentClass).filter(s => !q || s.name.toLowerCase().includes(q) || String(s.admissionNo || '').includes(q));
+    const classKey = canonicalClassKey(currentClass);
+    filtered = students
+      .filter(s => classKey ? canonicalClassKey(s.class) === classKey : s.class === currentClass)
+      .filter(s => !q || s.name.toLowerCase().includes(q) || String(s.admissionNo || '').includes(q));
     el('studentCount').textContent = filtered.length;
 
     filtered.forEach((s, idx) => {
@@ -788,14 +824,44 @@
   }
 
   // ---------- UI wiring ----------
+  async function activateClass(cls) {
+    if (!cls) return;
+    const resolved = resolveClassNameForData(cls);
+    if (!resolved) return;
+    currentClass = resolved;
+    const select = el('classSelect');
+    if (select) {
+      const match = Array.from(select.options).find(opt => isSameClass(opt.value, resolved));
+      if (match) {
+        select.value = match.value;
+      } else {
+        const option = new Option(resolved, resolved, true, true);
+        select.add(option);
+      }
+    }
+    await loadDayAttendance(currentClass, currentDateStr);
+    monthKey = toMonthKey(currentDateStr);
+    await loadMonthAttendance(currentClass, monthKey);
+    renderTable();
+  }
+
   function wireUI() {
     el('classSelect').addEventListener('change', async (e) => {
-      currentClass = e.target.value;
-      if (!currentClass) return;
-      await loadDayAttendance(currentClass, currentDateStr);
-      monthKey = toMonthKey(currentDateStr);
-      await loadMonthAttendance(currentClass, monthKey);
-      renderTable();
+      const requested = e.target.value;
+      if (!requested) {
+        currentClass = '';
+        renderTable();
+        return;
+      }
+      if (lockedClassStorage) {
+        const lockedKey = canonicalClassKey(lockedClassStorage);
+        const requestedKey = canonicalClassKey(requested);
+        if (lockedKey && requestedKey !== lockedKey) {
+          e.target.value = currentClass || '';
+          return;
+        }
+      }
+      await activateClass(requested);
     });
 
     el('dateInput').addEventListener('change', async (e) => {
@@ -872,6 +938,53 @@
   }
 
   // ---------- Start ----------
+  async function applyInitialClassSelection() {
+    const sel = el('classSelect');
+    if (!sel) return;
+    const setAndActivate = async (value, lock = false) => {
+      if (!value) return false;
+      await activateClass(value);
+      sel.value = currentClass;
+      if (lock) {
+        sel.disabled = true;
+        sel.classList.add('cursor-not-allowed','opacity-60');
+        const lockedLabel = lockedClassStorage || currentClass || value;
+        sel.title = lockedTeacherStorage
+          ? `Locked to ${lockedLabel} for ${lockedTeacherStorage}`
+          : `Locked to ${lockedLabel}`;
+      }
+      return true;
+    };
+
+    if (lockedClassStorage) {
+      const lockedKey = canonicalClassKey(lockedClassStorage);
+      let candidate = '';
+      if (lockedKey) {
+        const match = Array.from(sel.options).find(opt => canonicalClassKey(opt.value) === lockedKey);
+        if (match) candidate = match.value;
+      }
+      if (!candidate) {
+        candidate = resolveClassNameForData(lockedClassStorage) || lockedClassStorage;
+      }
+      await setAndActivate(candidate, true);
+      return;
+    }
+
+    if (currentClass) {
+      if (await setAndActivate(currentClass)) return;
+    }
+
+    if (queryClassRaw) {
+      const candidate = resolveClassNameForData(queryClassRaw);
+      if (await setAndActivate(candidate)) return;
+    }
+
+    const classOptions = Array.from(sel.options).slice(1);
+    if (classOptions.length === 1) {
+      await setAndActivate(classOptions[0].value);
+    }
+  }
+
   async function init() {
     const now = new Date();
     currentDateStr = fmtDate(now);
@@ -894,27 +1007,47 @@
       return;
     }
     populateClassSelect();
-    el('rtState').textContent = 'Ready';
     wireUI();
     setupShiftModal();
     subscribeShiftReports();
-    if (students.length && !currentClass) {
-      const classes = Array.from(new Set(students.map(s => s.class))).sort();
+    await applyInitialClassSelection();
+    if (!currentClass) {
+      const classes = Array.from(new Set(students.map(s => s.class))).filter(Boolean);
       if (classes.length === 1) {
-        el('classSelect').value = classes[0];
-        el('classSelect').dispatchEvent(new Event('change'));
+        await activateClass(classes[0]);
       }
+    }
+    if (lockedClassStorage) {
+      el('rtState').textContent = `Locked to ${currentClass || lockedClassStorage}`;
+    } else if (currentClass) {
+      el('rtState').textContent = `Ready · ${currentClass}`;
+    } else {
+      el('rtState').textContent = 'Ready';
     }
   }
 
   function populateClassSelect() {
-    const classes = Array.from(new Set(students.map(s => s.class))).filter(Boolean).sort();
+    const baseClasses = Array.from(new Set(students.map(s => s.class))).filter(Boolean);
+    const options = [];
+    const seen = new Set();
+    const pushOption = (value) => {
+      if (!value) return;
+      const key = canonicalClassKey(value) || normalizeClassName(value);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      options.push(value);
+    };
+    baseClasses.forEach(pushOption);
+    pushOption(lockedClassStorage);
+    pushOption(queryClassRaw);
+    pushOption(currentClass);
+    options.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     const sel = el('classSelect');
-    sel.innerHTML = `<option value="">-- Select class --</option>` + classes.map(c => `<option value="${c}">${c}</option>`).join('');
+    const markup = options.map(c => `<option value="${c}">${c}</option>`).join('');
+    sel.innerHTML = `<option value="">-- Select class --</option>` + markup;
   }
 
   await init();
-  el('rtState').textContent = db ? 'Connected' : 'No DB';
 })();
 </script>
 </body>

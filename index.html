@@ -288,8 +288,31 @@
                                     <input type="tel" class="form-control form-control-custom" id="parent-phone" placeholder="e.g., +255123456789" required>
                                 </div>
                             </div>
-                            <button type="submit" class="btn btn-success btn-lg w-100 quick-action-btn">Sign In as Parent</button>
+                                <button type="submit" class="btn btn-success btn-lg w-100 quick-action-btn">Sign In as Parent</button>
                         </form>
+                    </div>
+                    <hr class="my-4">
+                    <div>
+                        <h3 class="text-lg font-semibold mb-2">Worker Sign-In</h3>
+                        <p class="text-center text-gray-600 mb-3">Enter THREE NAMES (any spacing, case-insensitive) and phone starting with +2550.</p>
+                        <form id="worker-login-form">
+                            <div class="mb-3">
+                                <label for="worker-full-name" class="form-label">Full Name (Three Names)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-user-tie"></i></span>
+                                    <input type="text" class="form-control form-control-custom" id="worker-full-name" placeholder="e.g., John Doe Junior" required>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="worker-phone" class="form-label">Phone Number (+2550xxxxxxxxx)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="fas fa-phone"></i></span>
+                                    <input type="tel" class="form-control form-control-custom" id="worker-phone" placeholder="+2550XXXXXXXXX" required>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-lg w-100 quick-action-btn" id="worker-login-btn">Sign In as Worker</button>
+                        </form>
+                        <div id="worker-error" class="error hidden text-center mt-3"></div>
                     </div>
                     <div id="error-message" class="error hidden text-center mt-3"></div>
                 </div>
@@ -337,6 +360,82 @@
                 if (btn) btn.addEventListener('click', goToLogin);
             });
         });
+
+        const WORKER_PHONE_REGEX = /^\+2550\d{9}$/;
+
+        function normalizeThreeNames(rawName) {
+            if (!rawName) throw new Error('Please enter your full name.');
+            const tokens = rawName.trim().split(/\s+/).filter(Boolean);
+            if (tokens.length !== 3) {
+                throw new Error('Enter exactly three names (First Middle Last).');
+            }
+            return tokens.map(t => t.toUpperCase()).join(' ');
+        }
+
+        async function sha256Hex(value) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(value);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            return Array.from(new Uint8Array(hashBuffer))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        }
+
+        const workerForm = document.getElementById('worker-login-form');
+        if (workerForm) {
+            workerForm.addEventListener('submit', async event => {
+                event.preventDefault();
+                const btn = document.getElementById('worker-login-btn');
+                const errorEl = document.getElementById('worker-error');
+                errorEl.classList.add('hidden');
+                errorEl.textContent = '';
+
+                const fullNameInput = document.getElementById('worker-full-name');
+                const phoneInput = document.getElementById('worker-phone');
+                const rawName = fullNameInput.value.trim();
+                const rawPhone = phoneInput.value.trim();
+
+                try {
+                    btn.disabled = true;
+                    btn.textContent = 'Signing In...';
+
+                    const normalizedName = normalizeThreeNames(rawName);
+                    if (!WORKER_PHONE_REGEX.test(rawPhone)) {
+                        throw new Error('Phone must start with +2550 followed by 9 digits.');
+                    }
+                    const loginKey = await sha256Hex(`${normalizedName}|${rawPhone}`);
+                    const indexSnap = await db.ref(`workers_index_by_loginKey/${loginKey}`).once('value');
+                    if (!indexSnap.exists()) {
+                        throw new Error('Worker not found. Confirm names and phone with HR.');
+                    }
+
+                    const record = indexSnap.val() || {};
+                    const workerId = record.workerId || record.id;
+                    if (!workerId) {
+                        throw new Error('Worker record incomplete. Contact admin.');
+                    }
+
+                    if (auth.currentUser && !auth.currentUser.isAnonymous) {
+                        await auth.signOut();
+                    }
+                    const current = auth.currentUser && auth.currentUser.isAnonymous ? auth.currentUser : (await auth.signInAnonymously()).user;
+
+                    await db.ref(`devices/${current.uid}`).update({
+                        workerId,
+                        linkedTs: Date.now()
+                    });
+
+                    localStorage.setItem('role', 'worker');
+                    window.location.href = 'workershtml/workersdashboard.html';
+                } catch (err) {
+                    errorEl.textContent = err.message || 'Worker login failed.';
+                    errorEl.classList.remove('hidden');
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In as Worker';
+                }
+            });
+        }
 
         // Helper function for Preform One: Match at least 2 names (case-insensitive) in student data
         function namesMatch(studentData, inputNames) {
@@ -588,6 +687,19 @@
                 return;
             }
             try {
+                const workerDeviceSnap = await db.ref(`devices/${user.uid}/workerId`).once('value');
+                if (workerDeviceSnap.exists()) {
+                    localStorage.setItem('role', 'worker');
+                    document.getElementById('sign-out').classList.remove('hidden');
+                    window.location.href = 'workershtml/workersdashboard.html';
+                    return;
+                }
+                if (!user.email) {
+                    await auth.signOut();
+                    localStorage.removeItem('role');
+                    localStorage.removeItem('class');
+                    return;
+                }
                 const emailKey = user.email.replace(/\./g, '_');
                 const snap = await db.ref('users/' + emailKey).once('value');
                 const userData = snap.val();

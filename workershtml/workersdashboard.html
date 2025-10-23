@@ -1,315 +1,360 @@
 ﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>SoMAp Workers Hub</title>
+
+  <!-- Your shared stylesheet -->
   <link rel="stylesheet" href="../css/workers.css">
+
+  <!-- Firebase compat SDKs (no frameworks) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+
+  <!-- Project config (we fall back to inline config if this file is missing) -->
   <script src="../firebase/firebase-config.js"></script>
+
+  <style>
+    :root{
+      --ink:#0f172a; --sub:#64748b; --muted:#94a3b8;
+      --bg:#f8fafc; --card:#ffffff; --line:#e2e8f0;
+      --accent:#4f46e5; --accent-2:#06b6d4; --ok:#10b981;
+      --warn:#f59e0b; --bad:#ef4444; --chip:#f1f5f9;
+    }
+    body{margin:0;background:linear-gradient(135deg,#007bff,#6610f2);font-family:system-ui,-apple-system,Inter,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial}
+    main{max-width:1200px;margin-inline:auto;padding:18px}
+    header.appbar{
+      display:flex;align-items:center;justify-content:space-between;gap:16px;
+      padding:14px 16px;border-radius:16px;background:linear-gradient(135deg,#fff,#eef2ff);
+      color:#111; box-shadow:0 10px 30px rgba(0,0,0,.08)
+    }
+    .idline{color:var(--sub);font-size:.95rem}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{border:0;border-radius:12px;padding:10px 14px;background:#111827;color:#fff;cursor:pointer}
+    .btn.alt{background:#334155}
+    .btn.line{background:transparent;border:1px solid var(--line);color:#111}
+    .grid{display:grid;gap:14px;margin-top:16px}
+    @media(min-width:720px){ .grid.kpi{grid-template-columns:repeat(4,1fr)} .grid.links{grid-template-columns:repeat(3,1fr)} }
+    @media(min-width:980px){ .grid.kpi{grid-template-columns:repeat(6,1fr)} .grid.links{grid-template-columns:repeat(4,1fr)} }
+    .kpi{
+      background:var(--card);border:1px solid var(--line);border-radius:14px;
+      padding:14px;display:flex;flex-direction:column;gap:8px;min-height:110px;
+      box-shadow:0 8px 20px rgba(10,16,28,.06)
+    }
+    .kpi h3{margin:0;font-size:.92rem;color:var(--sub);font-weight:600}
+    .kpi .val{font-size:1.9rem;font-weight:800;color:#0b1120}
+    .kpi.ok .val{color:var(--ok)} .kpi.bad .val{color:var(--bad)} .kpi.warn .val{color:var(--warn)}
+    .card{
+      background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;
+      box-shadow:0 8px 20px rgba(10,16,28,.06);display:flex;flex-direction:column;gap:8px
+    }
+    .link-tile{
+      display:flex;flex-direction:column;gap:6px;border-radius:16px;border:1px solid var(--line);
+      background:linear-gradient(135deg,#ffffff,#f8fafc);padding:14px;min-height:120px
+    }
+    .link-tile h4{margin:0;font-size:1.02rem;color:#0b1120}
+    .link-tile p{margin:0;color:var(--sub);font-size:.9rem}
+    .link-tile a{margin-top:auto;align-self:flex-start}
+    .chip{display:inline-flex;align-items:center;gap:6px;background:var(--chip);border-radius:999px;padding:6px 10px;font-size:.82rem;color:#0b1120}
+    .chip.ok{background:rgba(16,185,129,.12)} .chip.bad{background:rgba(239,68,68,.12)} .chip.warn{background:rgba(245,158,11,.12)}
+    /* tiny toast */
+    #toast{position:fixed;right:14px;bottom:14px;display:none;z-index:9999}
+    #toast.show{display:block;animation:fadein .2s ease-out}
+    #toast .t{background:rgba(15,23,42,.96);color:#fff;padding:10px 12px;border-radius:10px;margin-top:8px;box-shadow:0 10px 30px rgba(2,6,23,.3);font-size:.92rem}
+    @keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  </style>
 </head>
 <body>
   <main>
-    <header class="workers-flex">
+    <header class="appbar">
       <div>
-        <h1>SoMAp Workers Hub</h1>
-        <p id="workerGreeting" class="workers-card__subtitle">Karibu | Welcome</p>
+        <h1 style="margin:0 0 4px 0;">SoMAp Workers Hub</h1>
+        <div id="greet" class="idline">Karibu | Welcome</div>
       </div>
-      <div>
-        <button id="refreshDashboard" class="workers-btn secondary">Refresh | Onyesha upya</button>
+      <div class="actions">
+        <button id="refreshBtn" class="btn alt">Refresh</button>
+        <button id="signOutBtn" class="btn line">Sign Out</button>
       </div>
     </header>
 
-    <section class="workers-grid" id="kpiGrid"></section>
+    <!-- KPI strip -->
+    <section class="grid kpi" id="kpiGrid" aria-live="polite"></section>
 
-    <h2 class="workers-section-title">Quick Links | Njia za Haraka</h2>
-    <section class="workers-grid" id="quickLinks"></section>
+    <!-- Shortcuts -->
+    <section class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <h2 style="margin:0;font-size:1.15rem">Quick Links | Njia za Haraka</h2>
+        <span id="roleChip" class="chip">Role: …</span>
+      </div>
+      <div class="grid links" id="linksGrid" style="margin-top:12px"></div>
+    </section>
   </main>
 
-  <script type="module">
-    import {
-      ensureAnonymousAuth,
-      getLinkedWorkerId,
-      dbRefs,
-      localTs,
-      todayYMD,
-      yyyymm,
-      toast
-    } from '../modules/workers_helpers.js';
-    import { createCard } from '../modules/workers_ui.js';
+  <!-- toast -->
+  <div id="toast"></div>
 
-    const kpiGrid = document.getElementById('kpiGrid');
-    const quickLinks = document.getElementById('quickLinks');
-    const greetingEl = document.getElementById('workerGreeting');
-    const refreshBtn = document.getElementById('refreshDashboard');
+  <script>
+    // ---------- Firebase init (fallback to your known config if firebase-config.js isn't present) ----------
+    (function initFirebase(){
+      const fallback = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+      };
+      const cfg = window.firebaseConfig || fallback;
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+    })();
 
-    refreshBtn.addEventListener('click', () => loadDashboard(true));
+    // ---------- Tiny helpers (single-file, no modules) ----------
+    const db = firebase.database();
+    const auth = firebase.auth();
 
-    async function loadDashboard(force = false) {
-      try {
-        const authUser = await ensureAnonymousAuth();
-        const workerId = await getLinkedWorkerId();
-        if (!workerId) {
-          toast('Worker device is not linked. Tafadhali ingia tena.', 'error');
-          window.location.href = '../index.html';
-          return;
-        }
+    const $ = sel => document.querySelector(sel);
 
-        const workerSnap = await dbRefs.worker(workerId).once('value');
-        if (!workerSnap.exists()) {
-          toast('Profile missing. Wasiliana na HR.', 'error');
-          window.location.href = '../index.html';
-          return;
-        }
-
-        const worker = workerSnap.val();
-        const profile = worker.profile || {};
-        const role = (profile.role || '').toLowerCase();
-        greetingEl.textContent = `${profile.fullNameUpper || ''} - ${role.toUpperCase()}`;
-
-        await renderKpis();
-        renderQuickLinks({ role, isAdmin: await isAdmin(authUser.uid) });
-      } catch (error) {
-        console.error(error);
-        toast(error.message || 'Failed to load dashboard', 'error');
-      }
+    function toast(msg, type='info'){
+      const wrap = $('#toast');
+      const div = document.createElement('div');
+      div.className = 't';
+      div.textContent = msg;
+      if (type==='error') div.style.background = 'rgba(239,68,68,.96)';
+      if (type==='ok') div.style.background = 'rgba(16,185,129,.96)';
+      wrap.appendChild(div);
+      wrap.classList.add('show');
+      setTimeout(()=>{ div.remove(); if(!wrap.children.length) wrap.classList.remove('show'); }, 4000);
     }
 
-    async function isAdmin(uid) {
-      const snap = await firebase.database().ref(`admins/${uid}`).once('value');
+    function tzPartsNow(){
+      // Always Africa/Nairobi regardless of device timezone
+      const optsDate = { timeZone:'Africa/Nairobi', year:'numeric', month:'2-digit', day:'2-digit' };
+      const optsTime = { timeZone:'Africa/Nairobi', hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' };
+      const [d,m,y] = new Intl.DateTimeFormat('en-GB', optsDate).format(new Date()).split('/');
+      const time = new Intl.DateTimeFormat('en-GB', optsTime).format(new Date()); // "HH:MM:SS"
+      return { y, m, d, time };
+    }
+    function todayYMD(){
+      const {y,m,d} = tzPartsNow();
+      return `${y}-${m}-${d}`; // YYYY-MM-DD
+    }
+    function yyyymm(){
+      const {y,m} = tzPartsNow();
+      return `${y}${m}`; // YYYYMM
+    }
+    function isAfterCutoff_0720(){
+      const t = tzPartsNow().time.slice(0,5); // "HH:MM"
+      return t >= '07:20';
+    }
+
+    async function ensureAnonymousAuth(){
+      if (auth.currentUser) return auth.currentUser;
+      const { user } = await auth.signInAnonymously();
+      return user;
+    }
+    async function getLinkedWorkerId(){
+      // Fast path: stored
+      const fromLocal = localStorage.getItem('workerId');
+      if (fromLocal) return fromLocal;
+
+      const user = await ensureAnonymousAuth();
+      const snap = await db.ref(`devices/${user.uid}/workerId`).once('value');
+      if (snap.exists()) {
+        const workerId = snap.val();
+        localStorage.setItem('workerId', workerId);
+        return workerId;
+      }
+      return null;
+    }
+    async function isAdmin(uid){
+      if (!uid) return false;
+      const snap = await db.ref(`admins/${uid}`).once('value');
       return snap.exists() && snap.val() === true;
     }
 
-    async function renderKpis() {
-      kpiGrid.innerHTML = '';
-      const today = todayYMD();
-      const monthKey = yyyymm(new Date());
+    // ---------- Page wiring ----------
+    $('#refreshBtn').addEventListener('click', () => loadDashboard(true));
+    $('#signOutBtn').addEventListener('click', async () => {
+      try{
+        await auth.signOut();
+      }catch(e){}
+      localStorage.removeItem('workerId');
+      localStorage.removeItem('role');
+      location.href = '../index.html';
+    });
 
-      const workersPromise = firebase.database().ref('workers').once('value');
-      const attendancePromise = firebase.database().ref('attendance').once('value');
-      const studentsPromise = firebase.database().ref('students').once('value');
-      const leavePromise = firebase.database().ref('leave_requests').once('value');
+    async function loadDashboard(force=false){
+      try{
+        const user = await ensureAnonymousAuth();
+        const workerId = await getLinkedWorkerId();
+        if (!workerId) {
+          toast('Device not linked to any worker. Tafadhali ingia tena.', 'error');
+          location.href = '../index.html';
+          return;
+        }
 
-      const [workersSnap, attendanceSnap, studentsSnap, leaveSnap] = await Promise.all([
-        workersPromise.catch(() => null),
-        attendancePromise.catch(() => null),
-        studentsPromise.catch(() => null),
-        leavePromise.catch(() => null)
+        // Profile & role
+        const wSnap = await db.ref(`workers/${workerId}`).once('value');
+        if (!wSnap.exists()) {
+          toast('Worker profile missing. Wasiliana na HR.', 'error');
+          location.href = '../index.html';
+          return;
+        }
+        const worker = wSnap.val() || {};
+        const p = worker.profile || {};
+        const role = String(p.role||'').toLowerCase();
+        localStorage.setItem('role', role);
+
+        // Greeting
+        $('#greet').textContent = `${p.fullNameUpper || ''} · ${role ? role.toUpperCase() : 'WORKER'}`;
+        $('#roleChip').textContent = `Role: ${role || '—'}`;
+
+        // KPIs
+        await renderKPIs();
+
+        // Links (role-aware)
+        const adminFlag = await isAdmin(auth.currentUser?.uid);
+        renderQuickLinks(role, adminFlag);
+      }catch(err){
+        console.error(err);
+        toast(err.message || 'Failed to load dashboard', 'error');
+      }
+    }
+
+    async function renderKPIs(){
+      const grid = $('#kpiGrid');
+      grid.innerHTML = '';
+
+      const ymd = todayYMD();         // YYYY-MM-DD
+      const monthKey = yyyymm();      // YYYYMM
+      const dayKey = ymd.replace(/-/g,''); // YYYYMMDD
+
+      // Read in parallel
+      const workersP   = db.ref('workers').once('value');
+      const studentsP  = db.ref('students').once('value');
+      const leavesP    = db.ref('leave_requests').once('value');
+      const attendanceP= db.ref('attendance').once('value');
+
+      const [wSnap, sSnap, lSnap, aSnap] = await Promise.all([
+        workersP.catch(()=>null),
+        studentsP.catch(()=>null),
+        leavesP.catch(()=>null),
+        attendanceP.catch(()=>null)
       ]);
 
-      const workers = workersSnap?.val() || {};
-      const activeWorkers = Object.values(workers).filter(w => w.profile?.active !== false).length;
+      // Workers
+      const workers = wSnap?.val() || {};
+      const activeWorkers = Object.values(workers).filter(w => w?.profile?.active !== false).length;
 
-      const lateCount = computeLateCount(attendanceSnap?.val() || {}, today, monthKey);
-      const sickToday = computeSickToday(leaveSnap?.val() || {}, today);
-      const { totalStudents, totalBoys, totalGirls } = computeStudents(studentsSnap?.val() || {});
-
-      const kpis = [
-        { label: 'Active Workers | Wafanyakazi', value: activeWorkers },
-        { label: 'Sick Today | Wagonjwa Leo', value: sickToday },
-        { label: 'Late After 07:20 | Wamechelewa', value: lateCount },
-        { label: 'Students | Wanafunzi', value: totalStudents },
-        { label: 'Boys | Wavulana', value: totalBoys },
-        { label: 'Girls | Wasichana', value: totalGirls }
-      ];
-
-      kpis.forEach(kpi => {
-        const card = document.createElement('div');
-        card.className = 'workers-kpi';
-        const title = document.createElement('h3');
-        title.textContent = kpi.label;
-        const value = document.createElement('span');
-        value.textContent = kpi.value ?? 0;
-        card.appendChild(title);
-        card.appendChild(value);
-        kpiGrid.appendChild(card);
+      // Students
+      let totalStudents=0, totalBoys=0, totalGirls=0;
+      const students = sSnap?.val() || {};
+      Object.values(students).forEach(st=>{
+        totalStudents += 1;
+        if (st.gender === 'M') totalBoys += 1;
+        if (st.gender === 'F') totalGirls += 1;
       });
-    }
 
-    function computeLateCount(attendanceRoot, today, monthKey) {
-      let count = 0;
-      const dayKey = today.replace(/-/g, '');
-      Object.values(attendanceRoot || {}).forEach(workerData => {
-        const monthData = workerData?.[monthKey];
-        if (!monthData) return;
-        const record = monthData?.[dayKey];
-        if (!record || record.lateMinutes > 0 || !record.checkInTs) {
-          count += 1;
-        }
-      });
-      return count;
-    }
-
-    function computeSickToday(leaveRoot, today) {
-      let total = 0;
-      Object.values(leaveRoot || {}).forEach(workerLeaves => {
-        Object.values(workerLeaves || {}).forEach(request => {
-          if (request.type === 'sick' && request.status === 'approved') {
-            if (today >= request.startYmd && today <= request.endYmd) {
-              total += 1;
-            }
+      // Sick today
+      let sickToday = 0;
+      const leaves = lSnap?.val() || {};
+      Object.values(leaves).forEach(workerLeaves=>{
+        Object.values(workerLeaves || {}).forEach(req=>{
+          if (req?.type==='sick' && req?.status==='approved'){
+            if (ymd >= req.startYmd && ymd <= req.endYmd) sickToday += 1;
           }
         });
       });
-      return total;
-    }
 
-    function computeStudents(studentsRoot) {
-      let totalStudents = 0;
-      let totalBoys = 0;
-      let totalGirls = 0;
-      Object.values(studentsRoot || {}).forEach(child => {
-        totalStudents += 1;
-        if (child.gender === 'M') totalBoys += 1;
-        if (child.gender === 'F') totalGirls += 1;
+      // Attendance: checked-in today & late today
+      let checkedInToday = 0;
+      let lateToday = 0;
+      const attendance = aSnap?.val() || {};
+      Object.entries(attendance).forEach(([wid, byMonth])=>{
+        const m = byMonth?.[monthKey];
+        if (!m) return;
+        const rec = m?.[dayKey];
+        if (!rec) return;
+        if (rec.checkInTs) checkedInToday += 1;
+        if (Number(rec.lateMinutes||0) > 0) lateToday += 1;
       });
-      return { totalStudents, totalBoys, totalGirls };
-    }
 
-    function renderQuickLinks({ role, isAdmin }) {
-      quickLinks.innerHTML = '';
+      // Not checked-in AFTER 07:20 (only show this KPI when time is past 07:20)
+      const showAfterCutoff = isAfterCutoff_0720();
+      const notCheckedAfterCutoff = showAfterCutoff ? Math.max(activeWorkers - checkedInToday, 0) : null;
 
-      const cards = [
-        {
-          key: 'attendance',
-          roles: ['all'],
-          title: 'Attendance | Mahudhurio',
-          subtitle: 'Check-in, GPS, photos',
-          href: 'workersattendance.html'
-        },
-        {
-          key: 'tasks',
-          roles: ['all'],
-          title: 'Tasks | Kazi',
-          subtitle: 'Assignments & SLA 8h',
-          href: 'workertasks.html'
-        },
-        {
-          key: 'leaves',
-          roles: ['all'],
-          title: 'Leave | Likizo',
-          subtitle: 'Omba na fuatilia',
-          href: 'workersleaves.html'
-        },
-        {
-          key: 'salary',
-          roles: ['all'],
-          title: 'Salary | Mshahara',
-          subtitle: 'Penalties, payslip',
-          href: 'workerssalary.html'
-        },
-        {
-          key: 'contracts',
-          roles: ['all'],
-          title: 'Contract | Mkataba',
-          subtitle: 'Review & accept',
-          href: 'workerscontracts.html'
-        },
-        {
-          key: 'cooks',
-          roles: ['cook'],
-          title: 'Kitchen | Bwalo',
-          subtitle: 'Menu, headcount, variances',
-          href: 'workerscooks.html'
-        },
-        {
-          key: 'guard',
-          roles: ['guard'],
-          title: 'Security | Ulinzi',
-          subtitle: 'Handover & assets',
-          href: 'workersmlinzi.html'
-        },
-        {
-          key: 'cleaner',
-          roles: ['cleaner'],
-          title: 'Cleaning | Usafi',
-          subtitle: 'Checklist & supplies',
-          href: 'workersmsafi.html'
-        },
-        {
-          key: 'store',
-          roles: ['storekeeper'],
-          title: 'Storekeeper | Ghala',
-          subtitle: 'Ledger & stock',
-          href: 'workersstorekeeper.html'
-        },
-        {
-          key: 'transport',
-          roles: ['driver'],
-          title: 'Transport | Usafiri',
-          subtitle: 'Safari & ratiba',
-          href: '../transport.html'
-        },
-        {
-          key: 'admission',
-          roles: ['admin', 'hr', 'manager'],
-          title: 'Admission | Kuajiri',
-          subtitle: 'Register & docs',
-          href: 'workersadmission.html'
-        },
-        {
-          key: 'payroll',
-          roles: ['admin', 'hr', 'manager', 'accountant'],
-          title: 'Payroll | Malipo',
-          subtitle: 'NSSF, slips, finalize',
-          href: 'workerspayroll_admin.html'
-        },
-        {
-          key: 'nssf',
-          roles: ['admin', 'hr', 'accountant'],
-          title: 'NSSF | Michango',
-          subtitle: 'Rates & receipts',
-          href: 'workersnssf.html'
-        },
-        {
-          key: 'approvals',
-          roles: ['admin', 'hr', 'manager'],
-          title: 'Approvals | Uthibitisho',
-          subtitle: 'Flags & incidents',
-          href: 'workersapprovals_admin.html'
-        },
-        {
-          key: 'performance',
-          roles: ['admin', 'hr', 'manager'],
-          title: 'Performance | Utendaji',
-          subtitle: 'Ranking & best',
-          href: 'workersperformance.html'
-        },
-        {
-          key: 'ids',
-          roles: ['admin', 'hr', 'manager'],
-          title: 'Worker IDs | Vitambulisho',
-          subtitle: 'Generate & distribute',
-          href: 'workersgenerateid.html'
-        }
+      // Render tiles
+      const tiles = [
+        {label:'Active Workers | Wafanyakazi', val: activeWorkers, cls:'ok'},
+        {label:'Checked-in Today | Walioingia Leo', val: checkedInToday, cls:''},
+        {label:'Late Today | Wamechelewa Leo', val: lateToday, cls: lateToday>0 ? 'bad' : 'ok'},
+        ...(showAfterCutoff ? [{label:'Not Checked-in after 07:20 | Hawajaingia 07:20+', val: notCheckedAfterCutoff, cls: notCheckedAfterCutoff>0?'warn':'ok'}] : []),
+        {label:'Students | Wanafunzi', val: totalStudents, cls:''},
+        {label:'Boys | Wavulana', val: totalBoys, cls:''},
+        {label:'Girls | Wasichana', val: totalGirls, cls:''},
+        {label:'Sick Today | Wagonjwa Leo', val: sickToday, cls: sickToday>0?'warn':'ok'}
       ];
 
-      const allowRoles = new Set(['all', role]);
-      if (isAdmin) {
-        allowRoles.add('admin');
-      }
-      if (['hr', 'manager', 'accountant'].includes(role)) {
-        allowRoles.add(role);
-      }
+      tiles.forEach(t=>{
+        const div = document.createElement('div');
+        div.className = `kpi ${t.cls||''}`;
+        div.innerHTML = `<h3>${t.label}</h3><div class="val">${t.val ?? 0}</div>`;
+        grid.appendChild(div);
+      });
+    }
+
+    function renderQuickLinks(role, isAdmin){
+      const grid = $('#linksGrid');
+      grid.innerHTML = '';
+
+      const cards = [
+        // Everyone
+        {key:'attendance', roles:['all'], title:'Attendance | Mahudhurio', sub:'Check-in, GPS, photos', href:'workersattendance.html'},
+        {key:'tasks', roles:['all'], title:'Tasks | Kazi', sub:'Assignments & 8h SLA', href:'workertasks.html'},
+        {key:'leaves', roles:['all'], title:'Leave | Likizo', sub:'Omba na fuatilia', href:'workersleaves.html'},
+        {key:'salary', roles:['all'], title:'Salary | Mshahara', sub:'Penalties, payslip', href:'workerssalary.html'},
+        {key:'contracts', roles:['all'], title:'Contract | Mkataba', sub:'Review & accept', href:'workerscontracts.html'},
+
+        // Role-specific
+        {key:'cook', roles:['cook'], title:'Kitchen | Bwalo', sub:'Menu, headcount, variances', href:'workerscooks.html'},
+        {key:'guard', roles:['guard'], title:'Security | Ulinzi', sub:'Handover & assets', href:'workersmlinzi.html'},
+        {key:'cleaner', roles:['cleaner'], title:'Cleaning | Usafi', sub:'Checklist & supplies', href:'workersmsafi.html'},
+        {key:'store', roles:['storekeeper'], title:'Storekeeper | Ghala', sub:'Ledger & stock', href:'workersstorekeeper.html'},
+        {key:'transport', roles:['driver'], title:'Transport | Usafiri', sub:'Safari & ratiba', href:'../transport.html'},
+
+        // Admin/HR/Manager/Accountant
+        {key:'admission', roles:['admin','hr','manager'], title:'Admission | Kuajiri', sub:'Register & docs', href:'workersadmission.html'},
+        {key:'payroll', roles:['admin','hr','manager','accountant'], title:'Payroll | Malipo', sub:'NSSF, slips, finalize', href:'workerspayroll_admin.html'},
+        {key:'nssf', roles:['admin','hr','accountant'], title:'NSSF | Michango', sub:'Rates & receipts', href:'workersnssf.html'},
+        {key:'approvals', roles:['admin','hr','manager'], title:'Approvals | Uthibitisho', sub:'Flags & incidents', href:'workersapprovals_admin.html'},
+        {key:'performance', roles:['admin','hr','manager'], title:'Performance | Utendaji', sub:'Ranking & best', href:'workersperformance.html'},
+        {key:'ids', roles:['admin','hr','manager'], title:'Worker IDs | Vitambulisho', sub:'Generate & distribute', href:'workersgenerateid.html'}
+      ];
+
+      const allowed = new Set(['all', role]);
+      if (isAdmin) allowed.add('admin');
+      if (['hr','manager','accountant'].includes(role)) allowed.add(role);
 
       cards
-        .filter(card => card.roles.some(r => allowRoles.has(r)))
-        .forEach(card => {
-          const el = createCard({
-            title: card.title,
-            subtitle: card.subtitle,
-            body: `<a class="workers-btn" href="${card.href}">Open | Fungua</a>`
-          });
-          quickLinks.appendChild(el);
+        .filter(c => c.roles.some(r => allowed.has(r)))
+        .forEach(c => {
+          const card = document.createElement('div');
+          card.className = 'link-tile';
+          card.innerHTML = `
+            <h4>${c.title}</h4>
+            <p>${c.sub}</p>
+            <a class="btn alt" href="${c.href}">Open | Fungua</a>
+          `;
+          grid.appendChild(card);
         });
     }
 
+    // Boot
     loadDashboard();
   </script>
 </body>
 </html>
-
-

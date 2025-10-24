@@ -420,15 +420,29 @@ if (workerForm) {
         throw new Error('Phone must start with +2550 followed by 9 digits.');
       }
 
-      const loginKey = await sha256Hex(`${normalizedName}|${rawPhone}`);
-      const indexSnap = await db.ref(`workers_index_by_loginKey/${loginKey}`).once('value');
-      if (!indexSnap.exists()) {
-        throw new Error('Worker not found. Confirm THREE NAMES and phone with HR.');
+      // Search directly in /workers/ by matching fullNameUpper and phone
+      const workersSnap = await db.ref('workers').once('value');
+      if (!workersSnap.exists()) {
+        throw new Error('No workers in database. Contact admin.');
       }
 
-      const record = indexSnap.val() || {};
-      const workerId = record.workerId || record.id;
-      if (!workerId) throw new Error('Worker record incomplete. Contact admin.');
+      const workers = workersSnap.val();
+      let foundWorkerId = null;
+      
+      // Find worker by matching fullNameUpper and phone
+      for (const [id, worker] of Object.entries(workers)) {
+        const profile = worker?.profile || {};
+        if (profile.fullNameUpper === normalizedName && profile.phone === rawPhone) {
+          foundWorkerId = id;
+          break;
+        }
+      }
+      
+      if (!foundWorkerId) {
+        throw new Error('Worker not found. Confirm THREE NAMES and phone with HR.');
+      }
+      
+      const workerId = foundWorkerId;
 
       // ✅ No Firebase auth needed. Just remember and go.
       localStorage.setItem('role', 'worker');

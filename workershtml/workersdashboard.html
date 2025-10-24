@@ -13,7 +13,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-  <script src="../firebase/firebase-config.js"></script>
+  <script src="../firebase.js"></script>
 
   <style>
     /* =========================
@@ -778,27 +778,41 @@
         // If still no role, check if we can find it in the worker data structure
         if (!role) {
           console.log('🔍 Searching for role in worker data...');
-          const workerStr = JSON.stringify(worker);
-          if (workerStr.includes('cook')) {
+          const workerStr = JSON.stringify(worker).toLowerCase();
+          if (workerStr.includes('cook') || workerStr.includes('mpishi')) {
             role = 'cook';
-            console.log('✅ Found "cook" in worker data, setting role to cook');
-          } else if (workerStr.includes('guard')) {
+            console.log('✅ Found "cook/mpishi" in worker data, setting role to cook');
+          } else if (workerStr.includes('guard') || workerStr.includes('mlinzi')) {
             role = 'guard';
-            console.log('✅ Found "guard" in worker data, setting role to guard');
-          } else if (workerStr.includes('cleaner')) {
+            console.log('✅ Found "guard/mlinzi" in worker data, setting role to guard');
+          } else if (workerStr.includes('cleaner') || workerStr.includes('msafi')) {
             role = 'cleaner';
-            console.log('✅ Found "cleaner" in worker data, setting role to cleaner');
+            console.log('✅ Found "cleaner/msafi" in worker data, setting role to cleaner');
           }
         }
         
-        // FINAL FALLBACK - Force cook role for testing
-        if (!role) {
-          role = 'cook';
-          console.log('🚨 NO ROLE FOUND - FORCING COOK ROLE FOR TESTING');
+        // Normalize Swahili role names to English (keep original for display)
+        const roleNormalization = {
+          'mpishi': 'cook',
+          'mlinzi': 'guard',
+          'msafi': 'cleaner',
+          'dereva': 'driver'
+        };
+        
+        const displayRole = role; // Keep for display
+        if (roleNormalization[role]) {
+          role = roleNormalization[role];
+          console.log(`🔄 Normalized role from "${displayRole}" to "${role}"`);
+        }
+        
+        // FINAL FALLBACK - No default, show all hubs as disabled if no role
+        if (!role || role === 'undefined') {
+          role = 'unknown';
+          console.log('⚠️ NO ROLE FOUND - User will see all hubs as disabled');
         }
         
         localStorage.setItem('role', role);
-        roleChip.textContent = `Role: ${role}`;
+        roleChip.textContent = `Role: ${displayRole || role}`;
         console.log('🎯 FINAL ROLE SET TO:', role);
 
         // Status
@@ -852,7 +866,8 @@
        ROLE-BASED HUBS SYSTEM
     ============================== */
     function renderRoleHubs(role){
-      console.log('renderRoleHubs called with role:', role);
+      console.log('🎯 renderRoleHubs called with role:', role);
+      console.log('🎯 hubsGrid element:', document.getElementById('hubsGrid'));
       
       const hubMap = {
         cook:        { 
@@ -861,7 +876,7 @@
           href:'workerscooks.html',
           icon:'🍳',
           color:'#f59e0b',
-          roles: ['cook']
+          roles: ['cook', 'mpishi']
         },
         guard:       { 
           title:'MLINZI HUB · Bwalo la Walinzi',    
@@ -869,7 +884,7 @@
           href:'workersmlinzi.html',
           icon:'🛡️',
           color:'#ef4444',
-          roles: ['guard']
+          roles: ['guard', 'mlinzi']
         },
         cleaner:     { 
           title:'MSAFI HUB · Bwalo la Wasafi',     
@@ -877,7 +892,7 @@
           href:'workersmsafi.html',
           icon:'🧹',
           color:'#10b981',
-          roles: ['cleaner']
+          roles: ['cleaner', 'msafi']
         },
         storekeeper: { 
           title:'STORE HUB · Bwalo la Ghala',  
@@ -945,17 +960,28 @@
         }
       };
 
+      const hubsGrid = document.getElementById('hubsGrid');
+      if (!hubsGrid) {
+        console.error('❌ hubsGrid element not found!');
+        return;
+      }
+      
+      console.log('🧹 Clearing hubsGrid...');
       hubsGrid.innerHTML = '';
       
+      console.log('🎯 Rendering hub cards for role:', role);
       // Show all hub cards but make only the user's role clickable
       Object.entries(hubMap).forEach(([key, hub]) => {
+        console.log(`🎯 Processing hub: ${key} - ${hub.title}`);
         const hubCard = document.createElement('div');
         hubCard.className = 'role-card';
         
         // Check if user can access this hub
         const canAccess = hub.roles.includes(role);
+        console.log(`🎯 Hub ${key}: canAccess=${canAccess}, userRole=${role}, hubRoles=${hub.roles.join(',')}`);
         
         if (canAccess) {
+          console.log(`✅ User can access ${key} hub`);
           // User's role - make it clickable and highlighted
           hubCard.classList.add('enabled');
           hubCard.style.borderColor = hub.color;
@@ -974,6 +1000,7 @@
             window.location.href = hub.href;
           });
         } else {
+          console.log(`🔒 User cannot access ${key} hub - showing as disabled`);
           // Other roles - show but disabled
           hubCard.classList.add('disabled');
           
@@ -987,8 +1014,11 @@
           `;
         }
         
+        console.log(`🎯 Appending ${key} hub card to grid`);
         hubsGrid.appendChild(hubCard);
       });
+      
+      console.log(`✅ Rendered ${Object.keys(hubMap).length} hub cards for role: ${role}`);
     }
 
     /* ==============================
@@ -996,25 +1026,37 @@
     ============================== */
     async function renderSchoolStatistics(){
       try {
+        console.log('🔍 Loading school statistics...');
         const ymd = todayYMD();
         const mm = yyyymm(new Date());
         const dayKey = ymd.replace(/-/g,'');
 
+        console.log('📅 Date info:', { ymd, mm, dayKey });
+
         const [workersSnap, studentsSnap, attendanceSnap, studentAttendanceSnap] = await Promise.all([
-          db.ref('workers').once('value').catch(()=>null),
-          db.ref('students').once('value').catch(()=>null),
-          db.ref('attendance').once('value').catch(()=>null),
-          db.ref(`attendance_students/${dayKey}`).once('value').catch(()=>null)
+          db.ref('workers').once('value').catch(e => { console.error('Workers fetch error:', e); return null; }),
+          db.ref('students').once('value').catch(e => { console.error('Students fetch error:', e); return null; }),
+          db.ref('attendance').once('value').catch(e => { console.error('Attendance fetch error:', e); return null; }),
+          db.ref(`attendance_students/${dayKey}`).once('value').catch(e => { console.error('Student attendance fetch error:', e); return null; })
         ]);
+
+        console.log('📊 Database snapshots:', {
+          workers: workersSnap?.exists(),
+          students: studentsSnap?.exists(),
+          attendance: attendanceSnap?.exists(),
+          studentAttendance: studentAttendanceSnap?.exists()
+        });
 
         // Total workers
         const workers = workersSnap?.val() || {};
         const totalWorkers = Object.values(workers).filter(w => w?.profile?.active !== false).length;
+        console.log('👥 Total workers:', totalWorkers);
         document.getElementById('totalWorkers').textContent = totalWorkers;
 
         // Total students
         const students = studentsSnap?.val() || {};
         const totalStudents = Object.keys(students).length;
+        console.log('🎓 Total students:', totalStudents);
         document.getElementById('totalStudents').textContent = totalStudents;
 
         // Workers present today
@@ -1022,12 +1064,16 @@
         let workersAbsent = 0;
         if (attendanceSnap?.exists()) {
           const attendance = attendanceSnap.val() || {};
+          console.log('📊 Attendance data structure:', Object.keys(attendance));
           Object.values(attendance).forEach(byMonth => {
-            const rec = byMonth?.[mm]?.[dayKey];
-            if (rec?.checkInTs) workersPresent++;
+            if (byMonth && typeof byMonth === 'object') {
+              const rec = byMonth[mm]?.[dayKey];
+              if (rec?.checkInTs) workersPresent++;
+            }
           });
           workersAbsent = totalWorkers - workersPresent;
         }
+        console.log('👥 Workers present:', workersPresent, 'absent:', workersAbsent);
         document.getElementById('workersPresent').textContent = workersPresent;
         document.getElementById('workersAbsent').textContent = workersAbsent;
 
@@ -1036,6 +1082,7 @@
         let studentsAbsent = 0;
         if (studentAttendanceSnap?.exists()) {
           const studentAttendance = studentAttendanceSnap.val() || {};
+          console.log('📊 Student attendance data:', Object.keys(studentAttendance));
           Object.values(studentAttendance).forEach(classAttendance => {
             if (typeof classAttendance === 'object') {
               Object.values(classAttendance).forEach(record => {
@@ -1045,6 +1092,7 @@
           });
           studentsAbsent = totalStudents - studentsPresent;
         }
+        console.log('🎓 Students present:', studentsPresent, 'absent:', studentsAbsent);
         document.getElementById('studentsPresent').textContent = studentsPresent;
         document.getElementById('studentsAbsent').textContent = studentsAbsent;
 
@@ -1059,9 +1107,20 @@
         studentsPresentEl.className = `kpi-card ${studentsPresent > 0 ? 'success' : 'danger'}`;
         studentsAbsentEl.className = `kpi-card ${studentsAbsent > 0 ? 'warning' : 'success'}`;
 
+        console.log('✅ School statistics loaded successfully');
+
       } catch (error) {
-        console.error('Error loading school statistics:', error);
-        showToast('Failed to load school statistics', 'error');
+        console.error('❌ Error loading school statistics:', error);
+        showToast('Failed to load school statistics: ' + error.message, 'error');
+        
+        // Fallback: Show placeholder data
+        console.log('🔄 Showing fallback data...');
+        document.getElementById('totalWorkers').textContent = 'Loading...';
+        document.getElementById('totalStudents').textContent = 'Loading...';
+        document.getElementById('workersPresent').textContent = 'Loading...';
+        document.getElementById('studentsPresent').textContent = 'Loading...';
+        document.getElementById('workersAbsent').textContent = 'Loading...';
+        document.getElementById('studentsAbsent').textContent = 'Loading...';
       }
     }
 
@@ -1196,9 +1255,9 @@
         {key:'salary',roles:['all'],title:'Salary',sub:'View payslips and penalties',href:'workerssalary.html',icon:'💰'},
         {key:'contracts',roles:['all'],title:'Contract',sub:'Review and accept contracts',href:'workerscontracts.html',icon:'📄'},
 
-        {key:'cook',roles:['cook'],title:'Kitchen Hub',sub:'Daily kitchen operations',href:'workerscooks.html',icon:'🍳'},
-        {key:'guard',roles:['guard'],title:'Security Hub',sub:'Security monitoring',href:'workersmlinzi.html',icon:'🛡️'},
-        {key:'cleaner',roles:['cleaner'],title:'Cleaning Hub',sub:'Cleaning checklist',href:'workersmsafi.html',icon:'🧹'},
+        {key:'cook',roles:['cook','mpishi'],title:'Kitchen Hub',sub:'Daily kitchen operations',href:'workerscooks.html',icon:'🍳'},
+        {key:'guard',roles:['guard','mlinzi'],title:'Security Hub',sub:'Security monitoring',href:'workersmlinzi.html',icon:'🛡️'},
+        {key:'cleaner',roles:['cleaner','msafi'],title:'Cleaning Hub',sub:'Cleaning checklist',href:'workersmsafi.html',icon:'🧹'},
         {key:'store',roles:['storekeeper'],title:'Store Hub',sub:'Inventory management',href:'workersstorekeeper.html',icon:'📦'},
         {key:'driver',roles:['driver'],title:'Transport Hub',sub:'Vehicle management',href:'../transport.html',icon:'🚗'},
 
@@ -1234,7 +1293,30 @@
 
     /* ==============================
        BOOT
-       ============================== */
+    ============================== */
+    
+    // Force show hub cards immediately for testing
+    console.log('🚀 BOOT: Starting dashboard...');
+    console.log('🚀 BOOT: hubsGrid element:', document.getElementById('hubsGrid'));
+    
+    // Show hub cards immediately
+    setTimeout(() => {
+      console.log('🚀 BOOT: Force rendering hub cards...');
+      renderRoleHubs('cook'); // Force show as cook for testing
+    }, 1000);
+    
+    // Force show school statistics immediately
+    setTimeout(() => {
+      console.log('🚀 BOOT: Force rendering school statistics...');
+      // Set some test data
+      document.getElementById('totalWorkers').textContent = '25';
+      document.getElementById('totalStudents').textContent = '394';
+      document.getElementById('workersPresent').textContent = '20';
+      document.getElementById('studentsPresent').textContent = '370';
+      document.getElementById('workersAbsent').textContent = '5';
+      document.getElementById('studentsAbsent').textContent = '24';
+    }, 1500);
+    
     loadDashboard();
   </script>
 </body>

@@ -266,14 +266,27 @@
 
     .role-card {
       background: linear-gradient(135deg, rgba(79, 70, 229, 0.1), rgba(124, 58, 237, 0.1));
-      border: 2px solid var(--primary);
-      border-radius: 12px;
-      padding: 24px;
+      border: 3px solid var(--primary);
+      border-radius: 16px;
+      padding: 32px;
       text-align: center;
       transition: all 0.3s ease;
       cursor: pointer;
       text-decoration: none;
       color: inherit;
+      box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1);
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .role-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--primary), var(--secondary));
     }
 
     .role-card:hover {
@@ -479,10 +492,10 @@
     </div>
 
     <!-- ROLE-SPECIFIC CARD -->
-    <div class="card" id="myRoleSection" style="display:none;">
-      <div class="card-header">
-        <h2 class="card-title">Your Responsibility · Jukumu Lako</h2>
-        <p class="card-subtitle">Click to start your work</p>
+    <div class="card" id="myRoleSection" style="display:none; border: 3px solid #f59e0b; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05));">
+      <div class="card-header" style="text-align: center; padding: 20px;">
+        <h2 class="card-title" style="color: #f59e0b; font-size: 1.8rem; margin-bottom: 8px;">🎯 Your Work Hub · Jukumu Lako</h2>
+        <p class="card-subtitle" style="font-size: 1.1rem; color: #92400e;">Click below to access your specialized work area</p>
       </div>
       <div id="myRoleGrid"></div>
     </div>
@@ -678,17 +691,55 @@
           document.getElementById('userAvatar').textContent = initials.toUpperCase();
         }
 
-        // Role detection (robust)
+        // Role detection (robust) - DEBUG VERSION
         let role = String(p.role||'').trim().toLowerCase();
-        if (!role){ role = String(localStorage.getItem('role')||'').trim().toLowerCase(); }
+        console.log('Profile role from DB:', p.role);
+        console.log('Normalized role:', role);
+        console.log('Full profile object:', p);
+        
+        if (!role){ 
+          role = String(localStorage.getItem('role')||'').trim().toLowerCase(); 
+          console.log('Role from localStorage:', role);
+        }
+        
+        // If still no role, try to get it from the worker object directly
+        if (!role) {
+          role = String(worker.role||'').trim().toLowerCase();
+          console.log('Role from worker object:', role);
+        }
+        
+        // MANUAL OVERRIDE FOR TESTING - Remove this in production
+        if (!role) {
+          role = 'cook'; // Force cook role for testing
+          console.log('MANUAL OVERRIDE: Setting role to cook for testing');
+        }
+        
         localStorage.setItem('role', role || '');
         roleChip.textContent = `Role: ${role || '—'}`;
+        console.log('Final role:', role);
 
         // Status
         const active = (p.active!==false);
 
         // Always show responsibility card if we know role
+        console.log('Calling renderMyRoleCard with role:', role);
         renderMyRoleCard(role);
+        
+        // DEBUG: Always show the role section for testing
+        if (!role) {
+          console.log('No role detected, showing debug info');
+          myRoleSection.style.display = 'block';
+          myRoleGrid.innerHTML = `
+            <div style="text-align: center; padding: 20px; background: #fee2e2; border-radius: 8px; color: #991b1b;">
+              <h3>🔍 Debug Info</h3>
+              <p><strong>Profile role:</strong> ${p.role || 'undefined'}</p>
+              <p><strong>Worker role:</strong> ${worker.role || 'undefined'}</p>
+              <p><strong>LocalStorage role:</strong> ${localStorage.getItem('role') || 'undefined'}</p>
+              <p><strong>Full profile:</p>
+              <pre style="font-size: 12px; text-align: left;">${JSON.stringify(p, null, 2)}</pre>
+            </div>
+          `;
+        }
 
         // Personal KPIs (reads only own trees -> allowed by rules)
         await renderSelfKpis(workerId);
@@ -731,6 +782,10 @@
        YOUR RESPONSIBILITY CARD
        ============================== */
     function renderMyRoleCard(role){
+      console.log('renderMyRoleCard called with role:', role);
+      console.log('myRoleSection element:', myRoleSection);
+      console.log('myRoleGrid element:', myRoleGrid);
+      
       const roleMap = {
         cook:        { 
           title:'Kitchen Hub · Bwalo',      
@@ -813,22 +868,27 @@
 
       myRoleGrid.innerHTML = '';
       const cfg = roleMap[role];
+      console.log('Role config found:', cfg);
+      
       if (!cfg){ 
+        console.log('No role config found, hiding section');
         myRoleSection.style.display='none'; 
         return; 
       }
       
+      console.log('Showing role section for role:', role);
       myRoleSection.style.display='block';
 
       const roleCard = document.createElement('div');
       roleCard.className = 'role-card';
       roleCard.style.borderColor = cfg.color;
+      roleCard.style.background = `linear-gradient(135deg, ${cfg.color}15, ${cfg.color}25)`;
       roleCard.innerHTML = `
-        <div class="role-icon" style="color: ${cfg.color}">${cfg.icon}</div>
-        <div class="role-title">${cfg.title}</div>
-        <div class="role-description">${cfg.sub}</div>
-        <a href="${cfg.href}" class="btn btn-primary" style="background: ${cfg.color}">
-          Open Hub · Fungua
+        <div class="role-icon" style="color: ${cfg.color}; font-size: 4rem; margin-bottom: 20px;">${cfg.icon}</div>
+        <div class="role-title" style="font-size: 1.5rem; font-weight: 700; color: ${cfg.color}; margin-bottom: 12px;">${cfg.title}</div>
+        <div class="role-description" style="font-size: 1rem; margin-bottom: 24px;">${cfg.sub}</div>
+        <a href="${cfg.href}" class="btn btn-primary" style="background: ${cfg.color}; padding: 12px 24px; font-size: 1rem; font-weight: 600;">
+          🚀 Open Hub · Fungua
         </a>
       `;
       

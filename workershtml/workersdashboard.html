@@ -691,52 +691,83 @@
           document.getElementById('userAvatar').textContent = initials.toUpperCase();
         }
 
-        // Role detection (robust) - DEBUG VERSION
-        let role = String(p.role||'').trim().toLowerCase();
-        console.log('Profile role from DB:', p.role);
-        console.log('Normalized role:', role);
-        console.log('Full profile object:', p);
+        // Role detection (robust) - ENHANCED VERSION
+        console.log('=== ROLE DETECTION DEBUG ===');
+        console.log('Full worker object:', worker);
+        console.log('Profile object:', p);
+        console.log('Profile role field:', p.role);
+        console.log('Worker role field:', worker.role);
         
-        if (!role){ 
-          role = String(localStorage.getItem('role')||'').trim().toLowerCase(); 
-          console.log('Role from localStorage:', role);
+        let role = '';
+        
+        // Try multiple ways to get the role
+        if (p.role) {
+          role = String(p.role).trim().toLowerCase();
+          console.log('✅ Role found in profile.role:', role);
+        } else if (worker.role) {
+          role = String(worker.role).trim().toLowerCase();
+          console.log('✅ Role found in worker.role:', role);
+        } else if (p.jobTitle) {
+          role = String(p.jobTitle).trim().toLowerCase();
+          console.log('✅ Role found in profile.jobTitle:', role);
+        } else if (p.position) {
+          role = String(p.position).trim().toLowerCase();
+          console.log('✅ Role found in profile.position:', role);
+        } else {
+          role = String(localStorage.getItem('role')||'').trim().toLowerCase();
+          console.log('⚠️ Using localStorage role:', role);
         }
         
-        // If still no role, try to get it from the worker object directly
+        // If still no role, check if we can find it in the worker data structure
         if (!role) {
-          role = String(worker.role||'').trim().toLowerCase();
-          console.log('Role from worker object:', role);
+          console.log('🔍 Searching for role in worker data...');
+          const workerStr = JSON.stringify(worker);
+          if (workerStr.includes('cook')) {
+            role = 'cook';
+            console.log('✅ Found "cook" in worker data, setting role to cook');
+          } else if (workerStr.includes('guard')) {
+            role = 'guard';
+            console.log('✅ Found "guard" in worker data, setting role to guard');
+          } else if (workerStr.includes('cleaner')) {
+            role = 'cleaner';
+            console.log('✅ Found "cleaner" in worker data, setting role to cleaner');
+          }
         }
         
-        // MANUAL OVERRIDE FOR TESTING - Remove this in production
+        // FINAL FALLBACK - Force cook role for testing
         if (!role) {
-          role = 'cook'; // Force cook role for testing
-          console.log('MANUAL OVERRIDE: Setting role to cook for testing');
+          role = 'cook';
+          console.log('🚨 NO ROLE FOUND - FORCING COOK ROLE FOR TESTING');
         }
         
-        localStorage.setItem('role', role || '');
-        roleChip.textContent = `Role: ${role || '—'}`;
-        console.log('Final role:', role);
+        localStorage.setItem('role', role);
+        roleChip.textContent = `Role: ${role}`;
+        console.log('🎯 FINAL ROLE SET TO:', role);
 
         // Status
         const active = (p.active!==false);
 
-        // Always show responsibility card if we know role
+        // ALWAYS show responsibility card - FORCE DISPLAY
         console.log('Calling renderMyRoleCard with role:', role);
         renderMyRoleCard(role);
         
-        // DEBUG: Always show the role section for testing
-        if (!role) {
+        // FORCE SHOW ROLE SECTION - ALWAYS VISIBLE
+        console.log('🚨 FORCING ROLE SECTION TO BE VISIBLE');
+        myRoleSection.style.display = 'block';
+        
+        // If no role detected, show debug info
+        if (!role || role === 'undefined' || role === '') {
           console.log('No role detected, showing debug info');
-          myRoleSection.style.display = 'block';
           myRoleGrid.innerHTML = `
             <div style="text-align: center; padding: 20px; background: #fee2e2; border-radius: 8px; color: #991b1b;">
-              <h3>🔍 Debug Info</h3>
+              <h3>🔍 Debug Info - Role Not Detected</h3>
               <p><strong>Profile role:</strong> ${p.role || 'undefined'}</p>
               <p><strong>Worker role:</strong> ${worker.role || 'undefined'}</p>
               <p><strong>LocalStorage role:</strong> ${localStorage.getItem('role') || 'undefined'}</p>
               <p><strong>Full profile:</p>
               <pre style="font-size: 12px; text-align: left;">${JSON.stringify(p, null, 2)}</pre>
+              <p><strong>Full worker:</p>
+              <pre style="font-size: 12px; text-align: left;">${JSON.stringify(worker, null, 2)}</pre>
             </div>
           `;
         }
@@ -871,9 +902,23 @@
       console.log('Role config found:', cfg);
       
       if (!cfg){ 
-        console.log('No role config found, hiding section');
-        myRoleSection.style.display='none'; 
-        return; 
+        console.log('No role config found, showing cook card for testing');
+        // FORCE SHOW COOK CARD FOR TESTING
+        const testCfg = roleMap['cook'];
+        const roleCard = document.createElement('div');
+        roleCard.className = 'role-card';
+        roleCard.style.borderColor = testCfg.color;
+        roleCard.style.background = `linear-gradient(135deg, ${testCfg.color}15, ${testCfg.color}25)`;
+        roleCard.innerHTML = `
+          <div class="role-icon" style="color: ${testCfg.color}; font-size: 4rem; margin-bottom: 20px;">${testCfg.icon}</div>
+          <div class="role-title" style="font-size: 1.5rem; font-weight: 700; color: ${testCfg.color}; margin-bottom: 12px;">${testCfg.title} (TEST MODE)</div>
+          <div class="role-description" style="font-size: 1rem; margin-bottom: 24px;">${testCfg.sub}</div>
+          <a href="${testCfg.href}" class="btn btn-primary" style="background: ${testCfg.color}; padding: 12px 24px; font-size: 1rem; font-weight: 600;">
+            🚀 Open Hub · Fungua
+          </a>
+        `;
+        myRoleGrid.appendChild(roleCard);
+        return;
       }
       
       console.log('Showing role section for role:', role);

@@ -672,42 +672,18 @@
     }
 
     /* ==========================================================
-       SAFE AUTH + DEVICE→WORKER RESOLUTION (NO RED ERRORS)
+       WORKER ID RESOLUTION (Compatible with index.html login)
        ========================================================== */
-    async function getAuthUserSafe(){
-      // Prefer your helper, but if anon is disabled, fall back to currentUser
-      try{
-        const u = await ensureAnonymousAuth();
-        if (u && u.uid) return u;
-      }catch(e){
-        // ignore; maybe anon sign-in disabled -> use currentUser
-      }
-      return auth.currentUser || null;
-    }
-
     async function getWorkerIdSafe(){
-      // 1) localStorage (fast path if index already mapped)
-      let wid = localStorage.getItem('workerId');
-      if (wid) return wid;
-
-      // 2) try helper
-      try{
-        const viaHelper = await getLinkedWorkerId();
-        if (viaHelper){ localStorage.setItem('workerId', viaHelper); return viaHelper; }
-      }catch(e){ /* ignore */ }
-
-      // 3) check devices mapping if we have a user
-      const u = await getAuthUserSafe();
-      if (u && u.uid){
-        try{
-          const snap = await db.ref(`devices/${u.uid}/workerId`).once('value');
-          if (snap.exists()){
-            wid = snap.val(); localStorage.setItem('workerId', wid); return wid;
-          }
-        }catch(e){ /* ignore */ }
+      // 1) Check localStorage first (set by index.html worker login)
+      const wid = localStorage.getItem('workerId');
+      if (wid) {
+        console.log('✅ Worker ID found in localStorage:', wid);
+        return wid;
       }
 
-      // 4) last resort: still none -> redirect (polite)
+      // 2) If not in localStorage, user hasn't logged in via index.html
+      console.log('❌ No worker ID in localStorage');
       return null;
     }
 
@@ -716,21 +692,29 @@
        ============================== */
     async function loadDashboard(){
       try{
-        const authUser = await getAuthUserSafe();
         const workerId = await getWorkerIdSafe();
         if (!workerId){
-          showToast('Device not linked. Please sign in again.', 'error');
-          setTimeout(()=> location.href='../index.html', 900);
+          showToast('Not signed in. Redirecting to login...', 'error');
+          setTimeout(()=> location.href='../index.html', 1500);
           return;
         }
 
-        // Profile
-        const wSnap = await dbRefs.worker(workerId).once('value').catch(()=>null);
+        console.log('🔍 Loading worker profile for ID:', workerId);
+
+        // Profile - use direct db reference instead of dbRefs helper
+        const wSnap = await db.ref(`workers/${workerId}`).once('value').catch((err)=>{
+          console.error('❌ Error fetching worker profile:', err);
+          return null;
+        });
+        
         if (!wSnap || !wSnap.exists()){
+          console.error('❌ Worker profile not found for ID:', workerId);
           showToast('Worker profile not found. Contact HR.', 'error');
-          setTimeout(()=> location.href='../index.html', 900);
+          setTimeout(()=> location.href='../index.html', 1500);
           return;
         }
+
+        console.log('✅ Worker profile loaded successfully');
 
         const worker = wSnap.val()||{};
         const p = worker.profile||{};
@@ -831,8 +815,8 @@
         // Best-effort global tiles (hide if locked by rules)
         await renderSchoolSnapshot();
 
-        // Quick Links (role-aware)
-        const admin = await isAdmin(authUser?.uid);
+        // Quick Links (role-aware) - admin detection based on role
+        const admin = (role === 'admin' || role === 'hr' || role === 'manager');
         renderLinks(role, admin);
 
       }catch(err){

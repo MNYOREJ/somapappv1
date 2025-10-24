@@ -277,6 +277,28 @@
       box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1);
       position: relative;
       overflow: hidden;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    
+    .role-card.disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+      border-color: #e2e8f0;
+    }
+    
+    .role-card.enabled {
+      cursor: pointer;
+      transform: scale(1.02);
+      box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.2);
+    }
+    
+    .role-card.enabled:hover {
+      transform: scale(1.05);
+      box-shadow: 0 12px 30px -5px rgba(0, 0, 0, 0.3);
     }
     
     .role-card::before {
@@ -491,13 +513,49 @@
       </div>
     </div>
 
-    <!-- ROLE-SPECIFIC CARD -->
-    <div class="card" id="myRoleSection" style="display:none; border: 3px solid #f59e0b; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.05));">
-      <div class="card-header" style="text-align: center; padding: 20px;">
-        <h2 class="card-title" style="color: #f59e0b; font-size: 1.8rem; margin-bottom: 8px;">🎯 Your Work Hub · Jukumu Lako</h2>
-        <p class="card-subtitle" style="font-size: 1.1rem; color: #92400e;">Click below to access your specialized work area</p>
+    <!-- SCHOOL STATISTICS -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">School Statistics · Takwimu za Shule</h2>
+        <p class="card-subtitle">Current school overview and attendance</p>
       </div>
-      <div id="myRoleGrid"></div>
+      <div class="kpi-grid" id="schoolStatsGrid">
+        <div class="kpi-card success">
+          <div class="kpi-label">Total Workers</div>
+          <div class="kpi-value" id="totalWorkers">—</div>
+        </div>
+        <div class="kpi-card success">
+          <div class="kpi-label">Total Students</div>
+          <div class="kpi-value" id="totalStudents">—</div>
+        </div>
+        <div class="kpi-card success">
+          <div class="kpi-label">Workers Present</div>
+          <div class="kpi-value" id="workersPresent">—</div>
+        </div>
+        <div class="kpi-card success">
+          <div class="kpi-label">Students Present</div>
+          <div class="kpi-value" id="studentsPresent">—</div>
+        </div>
+        <div class="kpi-card warning">
+          <div class="kpi-label">Workers Absent</div>
+          <div class="kpi-value" id="workersAbsent">—</div>
+        </div>
+        <div class="kpi-card warning">
+          <div class="kpi-label">Students Absent</div>
+          <div class="kpi-value" id="studentsAbsent">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROLE-SPECIFIC HUBS -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Work Hubs · Bwalo la Kazi</h2>
+        <p class="card-subtitle">Access your specialized work area based on your role</p>
+      </div>
+      <div class="dashboard-grid" id="hubsGrid">
+        <!-- Hub cards will be dynamically generated based on role -->
+      </div>
     </div>
 
     <!-- PERSONAL KPIs -->
@@ -593,11 +651,10 @@
 
     /* ==============================
        UI REFS
-       ============================== */
+    ============================== */
     const greetEl   = document.getElementById('helloName');
     const roleChip  = document.getElementById('roleChip');
-    const myRoleSection = document.getElementById('myRoleSection');
-    const myRoleGrid    = document.getElementById('myRoleGrid');
+    const hubsGrid = document.getElementById('hubsGrid');
     const linksGrid = document.getElementById('linksGrid');
     const schoolKpi = document.getElementById('schoolKpiGrid');
 
@@ -747,34 +804,16 @@
         // Status
         const active = (p.active!==false);
 
-        // ALWAYS show responsibility card - FORCE DISPLAY
-        console.log('Calling renderMyRoleCard with role:', role);
-        renderMyRoleCard(role);
-        
-        // FORCE SHOW ROLE SECTION - ALWAYS VISIBLE
-        console.log('🚨 FORCING ROLE SECTION TO BE VISIBLE');
-        myRoleSection.style.display = 'block';
-        
-        // If no role detected, show debug info
-        if (!role || role === 'undefined' || role === '') {
-          console.log('No role detected, showing debug info');
-          myRoleGrid.innerHTML = `
-            <div style="text-align: center; padding: 20px; background: #fee2e2; border-radius: 8px; color: #991b1b;">
-              <h3>🔍 Debug Info - Role Not Detected</h3>
-              <p><strong>Profile role:</strong> ${p.role || 'undefined'}</p>
-              <p><strong>Worker role:</strong> ${worker.role || 'undefined'}</p>
-              <p><strong>LocalStorage role:</strong> ${localStorage.getItem('role') || 'undefined'}</p>
-              <p><strong>Full profile:</p>
-              <pre style="font-size: 12px; text-align: left;">${JSON.stringify(p, null, 2)}</pre>
-              <p><strong>Full worker:</p>
-              <pre style="font-size: 12px; text-align: left;">${JSON.stringify(worker, null, 2)}</pre>
-            </div>
-          `;
-        }
+        // Render role-based hubs
+        console.log('Calling renderRoleHubs with role:', role);
+        renderRoleHubs(role);
 
         // Personal KPIs (reads only own trees -> allowed by rules)
         await renderSelfKpis(workerId);
 
+        // Load school statistics
+        await renderSchoolStatistics();
+        
         // Best-effort global tiles (hide if locked by rules)
         await renderSchoolSnapshot();
 
@@ -810,139 +849,225 @@
     }
 
     /* ==============================
-       YOUR RESPONSIBILITY CARD
-       ============================== */
-    function renderMyRoleCard(role){
-      console.log('renderMyRoleCard called with role:', role);
-      console.log('myRoleSection element:', myRoleSection);
-      console.log('myRoleGrid element:', myRoleGrid);
+       ROLE-BASED HUBS SYSTEM
+    ============================== */
+    function renderRoleHubs(role){
+      console.log('renderRoleHubs called with role:', role);
       
-      const roleMap = {
+      const hubMap = {
         cook:        { 
-          title:'Kitchen Hub · Bwalo',      
+          title:'COOKS HUB · Bwalo la Wapishi',      
           sub:'Manage daily kitchen operations, food reports, and inventory',        
           href:'workerscooks.html',
           icon:'🍳',
-          color:'#f59e0b'
+          color:'#f59e0b',
+          roles: ['cook']
         },
         guard:       { 
-          title:'Security Hub · Ulinzi',    
+          title:'MLINZI HUB · Bwalo la Walinzi',    
           sub:'Monitor security, handover procedures, and asset management',           
           href:'workersmlinzi.html',
           icon:'🛡️',
-          color:'#ef4444'
+          color:'#ef4444',
+          roles: ['guard']
         },
         cleaner:     { 
-          title:'Cleaning Hub · Usafi',     
+          title:'MSAFI HUB · Bwalo la Wasafi',     
           sub:'Daily cleaning checklist and supply management',        
           href:'workersmsafi.html',
           icon:'🧹',
-          color:'#10b981'
+          color:'#10b981',
+          roles: ['cleaner']
         },
         storekeeper: { 
-          title:'Store Hub · Ghala',  
+          title:'STORE HUB · Bwalo la Ghala',  
           sub:'Inventory management and stock tracking',              
           href:'workersstorekeeper.html',
           icon:'📦',
-          color:'#8b5cf6'
+          color:'#8b5cf6',
+          roles: ['storekeeper']
         },
         driver:      { 
-          title:'Transport Hub · Usafiri',  
+          title:'TRANSPORT HUB · Bwalo la Usafiri',  
           sub:'Vehicle management and route planning',             
           href:'../transport.html',
           icon:'🚗',
-          color:'#06b6d4'
+          color:'#06b6d4',
+          roles: ['driver']
         },
         teacher:     { 
-          title:'Tasks Hub · Kazi',         
+          title:'TASKS HUB · Bwalo la Kazi',         
           sub:'Daily teaching tasks and assignments',                
           href:'workertasks.html',
           icon:'📚',
-          color:'#3b82f6'
+          color:'#3b82f6',
+          roles: ['teacher']
         },
         accountant:  { 
-          title:'Payroll Hub · Malipo',     
+          title:'PAYROLL HUB · Bwalo la Malipo',     
           sub:'Salary processing and financial management',             
           href:'workerspayroll_admin.html',
           icon:'💰',
-          color:'#10b981'
+          color:'#10b981',
+          roles: ['accountant', 'admin', 'hr', 'manager']
         },
         manager:     { 
-          title:'Approvals Hub · Uthibitisho', 
+          title:'APPROVALS HUB · Bwalo la Uthibitisho', 
           sub:'Review and approve requests and incidents',       
           href:'workersapprovals_admin.html',
           icon:'✅',
-          color:'#f59e0b'
+          color:'#f59e0b',
+          roles: ['manager', 'admin', 'hr']
         },
         hr:          { 
-          title:'Admission Hub · Kuajiri',  
+          title:'ADMISSION HUB · Bwalo la Kuajiri',  
           sub:'Employee registration and documentation',             
           href:'workersadmission.html',
           icon:'👥',
-          color:'#8b5cf6'
+          color:'#8b5cf6',
+          roles: ['hr', 'admin', 'manager']
         },
         academic:    { 
-          title:'Performance Hub · Utendaji', 
+          title:'PERFORMANCE HUB · Bwalo la Utendaji', 
           sub:'Performance tracking and analytics',           
           href:'workersperformance.html',
           icon:'📊',
-          color:'#3b82f6'
+          color:'#3b82f6',
+          roles: ['academic', 'admin', 'hr', 'manager']
         },
         admin:       { 
-          title:'Admin Hub · Msimamizi',    
+          title:'ADMIN HUB · Bwalo la Msimamizi',    
           sub:'System administration and controls',                
           href:'workersapprovals_admin.html',
           icon:'⚙️',
-          color:'#6b7280'
+          color:'#6b7280',
+          roles: ['admin']
         }
       };
 
-      myRoleGrid.innerHTML = '';
-      const cfg = roleMap[role];
-      console.log('Role config found:', cfg);
+      hubsGrid.innerHTML = '';
       
-      if (!cfg){ 
-        console.log('No role config found, showing cook card for testing');
-        // FORCE SHOW COOK CARD FOR TESTING
-        const testCfg = roleMap['cook'];
-        const roleCard = document.createElement('div');
-        roleCard.className = 'role-card';
-        roleCard.style.borderColor = testCfg.color;
-        roleCard.style.background = `linear-gradient(135deg, ${testCfg.color}15, ${testCfg.color}25)`;
-        roleCard.innerHTML = `
-          <div class="role-icon" style="color: ${testCfg.color}; font-size: 4rem; margin-bottom: 20px;">${testCfg.icon}</div>
-          <div class="role-title" style="font-size: 1.5rem; font-weight: 700; color: ${testCfg.color}; margin-bottom: 12px;">${testCfg.title} (TEST MODE)</div>
-          <div class="role-description" style="font-size: 1rem; margin-bottom: 24px;">${testCfg.sub}</div>
-          <a href="${testCfg.href}" class="btn btn-primary" style="background: ${testCfg.color}; padding: 12px 24px; font-size: 1rem; font-weight: 600;">
-            🚀 Open Hub · Fungua
-          </a>
-        `;
-        myRoleGrid.appendChild(roleCard);
-        return;
-      }
-      
-      console.log('Showing role section for role:', role);
-      myRoleSection.style.display='block';
+      // Show all hub cards but make only the user's role clickable
+      Object.entries(hubMap).forEach(([key, hub]) => {
+        const hubCard = document.createElement('div');
+        hubCard.className = 'role-card';
+        
+        // Check if user can access this hub
+        const canAccess = hub.roles.includes(role);
+        
+        if (canAccess) {
+          // User's role - make it clickable and highlighted
+          hubCard.classList.add('enabled');
+          hubCard.style.borderColor = hub.color;
+          hubCard.style.background = `linear-gradient(135deg, ${hub.color}15, ${hub.color}25)`;
+          
+          hubCard.innerHTML = `
+            <div class="role-icon" style="color: ${hub.color}; font-size: 4rem; margin-bottom: 20px;">${hub.icon}</div>
+            <div class="role-title" style="font-size: 1.5rem; font-weight: 700; color: ${hub.color}; margin-bottom: 12px;">${hub.title}</div>
+            <div class="role-description" style="font-size: 1rem; margin-bottom: 24px;">${hub.sub}</div>
+            <a href="${hub.href}" class="btn btn-primary" style="background: ${hub.color}; padding: 12px 24px; font-size: 1rem; font-weight: 600;">
+              🚀 Open Hub · Fungua
+            </a>
+          `;
+          
+          hubCard.addEventListener('click', () => {
+            window.location.href = hub.href;
+          });
+        } else {
+          // Other roles - show but disabled
+          hubCard.classList.add('disabled');
+          
+          hubCard.innerHTML = `
+            <div class="role-icon" style="color: #94a3b8; font-size: 4rem; margin-bottom: 20px;">${hub.icon}</div>
+            <div class="role-title" style="font-size: 1.5rem; font-weight: 700; color: #64748b; margin-bottom: 12px;">${hub.title}</div>
+            <div class="role-description" style="font-size: 1rem; margin-bottom: 24px; color: #94a3b8;">Access restricted to ${hub.roles.join(', ')} only</div>
+            <div class="btn btn-secondary" style="background: #94a3b8; padding: 12px 24px; font-size: 1rem; font-weight: 600; cursor: not-allowed;">
+              🔒 Access Restricted
+            </div>
+          `;
+        }
+        
+        hubsGrid.appendChild(hubCard);
+      });
+    }
 
-      const roleCard = document.createElement('div');
-      roleCard.className = 'role-card';
-      roleCard.style.borderColor = cfg.color;
-      roleCard.style.background = `linear-gradient(135deg, ${cfg.color}15, ${cfg.color}25)`;
-      roleCard.innerHTML = `
-        <div class="role-icon" style="color: ${cfg.color}; font-size: 4rem; margin-bottom: 20px;">${cfg.icon}</div>
-        <div class="role-title" style="font-size: 1.5rem; font-weight: 700; color: ${cfg.color}; margin-bottom: 12px;">${cfg.title}</div>
-        <div class="role-description" style="font-size: 1rem; margin-bottom: 24px;">${cfg.sub}</div>
-        <a href="${cfg.href}" class="btn btn-primary" style="background: ${cfg.color}; padding: 12px 24px; font-size: 1rem; font-weight: 600;">
-          🚀 Open Hub · Fungua
-        </a>
-      `;
-      
-      myRoleGrid.appendChild(roleCard);
+    /* ==============================
+       SCHOOL STATISTICS
+    ============================== */
+    async function renderSchoolStatistics(){
+      try {
+        const ymd = todayYMD();
+        const mm = yyyymm(new Date());
+        const dayKey = ymd.replace(/-/g,'');
+
+        const [workersSnap, studentsSnap, attendanceSnap, studentAttendanceSnap] = await Promise.all([
+          db.ref('workers').once('value').catch(()=>null),
+          db.ref('students').once('value').catch(()=>null),
+          db.ref('attendance').once('value').catch(()=>null),
+          db.ref(`attendance_students/${dayKey}`).once('value').catch(()=>null)
+        ]);
+
+        // Total workers
+        const workers = workersSnap?.val() || {};
+        const totalWorkers = Object.values(workers).filter(w => w?.profile?.active !== false).length;
+        document.getElementById('totalWorkers').textContent = totalWorkers;
+
+        // Total students
+        const students = studentsSnap?.val() || {};
+        const totalStudents = Object.keys(students).length;
+        document.getElementById('totalStudents').textContent = totalStudents;
+
+        // Workers present today
+        let workersPresent = 0;
+        let workersAbsent = 0;
+        if (attendanceSnap?.exists()) {
+          const attendance = attendanceSnap.val() || {};
+          Object.values(attendance).forEach(byMonth => {
+            const rec = byMonth?.[mm]?.[dayKey];
+            if (rec?.checkInTs) workersPresent++;
+          });
+          workersAbsent = totalWorkers - workersPresent;
+        }
+        document.getElementById('workersPresent').textContent = workersPresent;
+        document.getElementById('workersAbsent').textContent = workersAbsent;
+
+        // Students present today
+        let studentsPresent = 0;
+        let studentsAbsent = 0;
+        if (studentAttendanceSnap?.exists()) {
+          const studentAttendance = studentAttendanceSnap.val() || {};
+          Object.values(studentAttendance).forEach(classAttendance => {
+            if (typeof classAttendance === 'object') {
+              Object.values(classAttendance).forEach(record => {
+                if (record?.present === true) studentsPresent++;
+              });
+            }
+          });
+          studentsAbsent = totalStudents - studentsPresent;
+        }
+        document.getElementById('studentsPresent').textContent = studentsPresent;
+        document.getElementById('studentsAbsent').textContent = studentsAbsent;
+
+        // Update card colors based on attendance
+        const workersPresentEl = document.getElementById('workersPresent').parentElement;
+        const workersAbsentEl = document.getElementById('workersAbsent').parentElement;
+        const studentsPresentEl = document.getElementById('studentsPresent').parentElement;
+        const studentsAbsentEl = document.getElementById('studentsAbsent').parentElement;
+
+        workersPresentEl.className = `kpi-card ${workersPresent > 0 ? 'success' : 'danger'}`;
+        workersAbsentEl.className = `kpi-card ${workersAbsent > 0 ? 'warning' : 'success'}`;
+        studentsPresentEl.className = `kpi-card ${studentsPresent > 0 ? 'success' : 'danger'}`;
+        studentsAbsentEl.className = `kpi-card ${studentsAbsent > 0 ? 'warning' : 'success'}`;
+
+      } catch (error) {
+        console.error('Error loading school statistics:', error);
+        showToast('Failed to load school statistics', 'error');
+      }
     }
 
     /* ==============================
        PERSONAL KPIs (OWN TREES)
-       ============================== */
+    ============================== */
     async function renderSelfKpis(workerId){
       const ymd = todayYMD(); const mm = yyyymm(new Date()); const dayKey = ymd.replace(/-/g,'');
 

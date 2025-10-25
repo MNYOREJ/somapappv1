@@ -534,13 +534,6 @@
     console.log('🚀 Contract page module loading...');
     
     import {
-      ensureAnonymousAuth,
-      getLinkedWorkerId,
-      dbRefs,
-      toast,
-      localTs
-    } from './modules/workers_helpers.js';
-    import { 
       defaultContractLanguage, 
       templateKeyForRole, 
       generateContractPdf,
@@ -550,46 +543,50 @@
 
     console.log('✅ Modules imported successfully');
 
+    const db = firebase.database();
     let workerId = null;
     let workerProfile = null;
     let contract = null;
     let selectedLanguage = 'en';
     let signatureFile = null;
 
-    ensureAnonymousAuth()
-      .then(init)
-      .catch(err => {
-        console.error('❌ Auth error:', err);
-        toast(err.message || 'Error', 'error');
-        setTimeout(() => window.location.href = '../index.html', 3000);
-      });
+    // Start loading immediately - no auth check needed since index.html already handled it
+    init();
 
     async function init() {
       try {
-        console.log('🔍 Getting worker ID...');
-        workerId = await getLinkedWorkerId();
+        console.log('🔍 Getting worker ID from localStorage...');
+        console.log('📦 localStorage contents:', {
+          workerId: localStorage.getItem('workerId'),
+          role: localStorage.getItem('role'),
+          fullNameUpper: localStorage.getItem('fullNameUpper')
+        });
+        
+        // Get workerId directly from localStorage (same as workersdashboard.html)
+        workerId = localStorage.getItem('workerId');
         console.log('Worker ID:', workerId);
         
-        if (!workerId) {
-          toast('Ingia tena. | Please sign in again.', 'error');
+      if (!workerId) {
+          console.error('❌ No workerId in localStorage');
+          showToast('Ingia tena. | Please sign in again.', 'error');
           setTimeout(() => window.location.href = '../index.html', 3000);
-          return;
-        }
+        return;
+      }
 
-        console.log('📡 Fetching worker profile...');
-        const snap = await dbRefs.worker(workerId).once('value');
+        console.log('📡 Fetching worker profile from /workers/' + workerId);
+        const snap = await db.ref(`workers/${workerId}`).once('value');
         
-        if (!snap.exists()) {
-          console.error('❌ Worker profile not found');
-          toast('Profile haipo. | Profile not found.', 'error');
-          return;
-        }
+      if (!snap.exists()) {
+          console.error('❌ Worker profile not found for ID:', workerId);
+          showToast('Profile haipo. | Profile not found.', 'error');
+        return;
+      }
         
-        const data = snap.val();
+      const data = snap.val();
         console.log('✅ Worker data loaded:', data);
         
-        workerProfile = data.profile;
-        contract = data.contract || {};
+      workerProfile = data.profile;
+      contract = data.contract || {};
         
         console.log('Profile:', workerProfile);
         console.log('Contract:', contract);
@@ -597,13 +594,13 @@
         selectedLanguage = contract.language || defaultContractLanguage(workerProfile.role);
         console.log('Selected language:', selectedLanguage);
         
-        render();
+      render();
         setupEventListeners();
         
         console.log('✅ Page rendered successfully');
       } catch (err) {
         console.error('❌ Error in init():', err);
-        toast('Kosa limejitokeza | An error occurred: ' + err.message, 'error');
+        showToast('Kosa limejitokeza | An error occurred: ' + err.message, 'error');
       }
     }
 
@@ -775,7 +772,7 @@
 
     async function acceptContract() {
       if (!signatureFile) {
-        toast('Chagua picha ya sahihi kwanza! | Please select signature image first!', 'error');
+        showToast('Chagua picha ya sahihi kwanza! | Please select signature image first!', 'error');
         return;
       }
 
@@ -790,15 +787,23 @@
           signatureFile: signatureFile
         });
 
+        // Update contract in database
+        await db.ref(`workers/${workerId}/contract`).update({
+          accepted: true,
+          acceptedTs: Date.now(),
+          contractPdfUrl: url,
+          language: selectedLanguage
+        });
+
         contract = {
           ...contract,
           accepted: true,
-          acceptedTs: localTs(),
+          acceptedTs: Date.now(),
           contractPdfUrl: url,
           language: selectedLanguage
         };
 
-        toast('Hongera! Mkataba umehifadhiwa. | Congratulations! Contract has been saved.', 'success');
+        showToast('Hongera! Mkataba umehifadhiwa. | Congratulations! Contract has been saved.', 'success');
         
         setTimeout(() => {
         render();
@@ -806,25 +811,11 @@
 
       } catch (err) {
         console.error(err);
-        toast(err.message || 'Imeshindikana | Failed', 'error');
+        showToast(err.message || 'Imeshindikana | Failed', 'error');
         btn.disabled = false;
         btn.innerHTML = '✅ Nakubali / I Agree & Sign Contract';
       }
     }
-
-    // Export toast function to global scope for easy access
-    window.toast = (message, type = 'info') => {
-      const toastEl = document.createElement('div');
-      toastEl.className = `toast ${type}`;
-      toastEl.textContent = message;
-      document.body.appendChild(toastEl);
-      
-      setTimeout(() => toastEl.classList.add('show'), 100);
-      setTimeout(() => {
-        toastEl.classList.remove('show');
-        setTimeout(() => toastEl.remove(), 300);
-      }, 4000);
-    };
   </script>
 </body>
 </html>

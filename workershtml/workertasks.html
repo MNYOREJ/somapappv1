@@ -224,10 +224,44 @@
       color: white;
     }
 
-    .class-subject-grid {
+    .class-mapping-card {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .class-mapping-card h4 {
+      color: white;
+      margin-bottom: 12px;
+      font-size: 1.1rem;
+    }
+
+    .remove-class-btn {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(239, 68, 68, 0.8);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+    }
+
+    .remove-class-btn:hover {
+      background: rgba(239, 68, 68, 1);
+      transform: scale(1.05);
+    }
+
+    .subjects-checkbox-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
       margin-top: 12px;
     }
 
@@ -236,8 +270,8 @@
       align-items: center;
       gap: 8px;
       background: rgba(255, 255, 255, 0.1);
-      padding: 12px;
-      border-radius: 10px;
+      padding: 10px;
+      border-radius: 8px;
       cursor: pointer;
       transition: all 0.3s ease;
       border: 1px solid transparent;
@@ -249,9 +283,15 @@
     }
 
     .checkbox-item input[type="checkbox"] {
-      width: 20px;
-      height: 20px;
+      width: 18px;
+      height: 18px;
       cursor: pointer;
+    }
+
+    .checkbox-item label {
+      cursor: pointer;
+      margin: 0;
+      font-size: 0.9rem;
     }
 
     .btn {
@@ -510,10 +550,10 @@
     <!-- Setup Section (shown only on first visit) -->
     <div class="setup-section" id="setupSection">
       <h2>🎓 Welcome! Let's Set Up Your Profile</h2>
-      <p>Please select your role, classes, and subjects to personalize your dashboard.</p>
+      <p>Please select your role, then add each class you teach with the specific subjects you teach in that class.</p>
 
       <div class="form-group">
-        <label>Type of Teacher</label>
+        <label>Type of Teacher *</label>
         <select id="teacherTypeSelect">
           <option value="">-- Select Your Role --</option>
           <option value="Head Teacher">Head Teacher</option>
@@ -523,17 +563,22 @@
         </select>
       </div>
 
-      <div class="form-group">
-        <label>Classes You Teach</label>
-        <div class="class-subject-grid" id="classesGrid"></div>
+      <div class="form-group" style="margin-top: 24px;">
+        <label>Add Classes & Subjects You Teach</label>
+        <p style="color: rgba(255,255,255,0.7); font-size: 0.9rem; margin-top: 8px;">
+          Click "Add Class" to specify each class you teach and select the subjects you teach in that class.
+        </p>
+        
+        <div id="classSubjectMappings" style="margin-top: 16px;">
+          <!-- Dynamic class-subject cards will be added here -->
+        </div>
+
+        <button type="button" class="btn btn-secondary" id="addClassBtn" style="margin-top: 16px;">
+          ➕ Add Another Class
+        </button>
       </div>
 
-      <div class="form-group" id="subjectsSection" style="display:none;">
-        <label>Subjects You Teach</label>
-        <div class="class-subject-grid" id="subjectsGrid"></div>
-      </div>
-
-      <button class="btn btn-primary" id="saveSetupBtn">
+      <button class="btn btn-primary" id="saveSetupBtn" style="margin-top: 24px;">
         💾 Save & Continue to Dashboard
       </button>
     </div>
@@ -653,9 +698,8 @@
     const setupSection = document.getElementById('setupSection');
     const mainDashboard = document.getElementById('mainDashboard');
     const teacherTypeSelect = document.getElementById('teacherTypeSelect');
-    const classesGrid = document.getElementById('classesGrid');
-    const subjectsSection = document.getElementById('subjectsSection');
-    const subjectsGrid = document.getElementById('subjectsGrid');
+    const classSubjectMappings = document.getElementById('classSubjectMappings');
+    const addClassBtn = document.getElementById('addClassBtn');
     const saveSetupBtn = document.getElementById('saveSetupBtn');
     const teacherName = document.getElementById('teacherName');
     const teacherRole = document.getElementById('teacherRole');
@@ -663,6 +707,8 @@
     const dateLabel = document.getElementById('dateLabel');
     const managementHubCard = document.getElementById('managementHubCard');
     const openManagementHub = document.getElementById('openManagementHub');
+
+    let classSubjectMap = []; // Array of {class: 'Class 1', subjects: ['Math', 'English']}
 
     // Toast function
     function toast(message, type = 'info') {
@@ -684,91 +730,158 @@
 
     // Initialize date
     dateLabel.textContent = new Date().toLocaleDateString('en-US', {
-      timeZone: 'Africa/Nairobi',
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-
-    // Render classes checkboxes
-    function renderClasses() {
-      classesGrid.innerHTML = '';
-      ALL_CLASSES.forEach(className => {
-        const item = document.createElement('div');
-        item.className = 'checkbox-item';
-        item.innerHTML = `
-          <input type="checkbox" id="class-${className}" value="${className}">
-          <label for="class-${className}" style="cursor: pointer; margin: 0;">${className}</label>
-        `;
-        classesGrid.appendChild(item);
-        
-        // Add listener to update subjects
-        item.querySelector('input').addEventListener('change', updateSubjects);
+        timeZone: 'Africa/Nairobi',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
       });
+
+    // Add class mapping
+    function addClassMapping(existingClass = null, existingSubjects = []) {
+      const cardIndex = classSubjectMap.length;
+      const card = document.createElement('div');
+      card.className = 'class-mapping-card';
+      card.dataset.index = cardIndex;
+
+      const classOptions = ALL_CLASSES.map(c => 
+        `<option value="${c}" ${c === existingClass ? 'selected' : ''}>${c}</option>`
+      ).join('');
+
+      card.innerHTML = `
+        <button type="button" class="remove-class-btn" onclick="removeClassMapping(${cardIndex})">🗑️ Remove</button>
+        <h4>📚 Class & Subjects</h4>
+        <div class="form-group">
+          <label>Select Class *</label>
+          <select class="class-select" data-index="${cardIndex}">
+            <option value="">-- Select Class --</option>
+            ${classOptions}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Select Subjects You Teach in This Class *</label>
+          <div class="subjects-checkbox-grid" id="subjects-grid-${cardIndex}">
+            <!-- Subjects will be populated when class is selected -->
+          </div>
+        </div>
+      `;
+
+      classSubjectMappings.appendChild(card);
+
+      // Add entry to map
+      classSubjectMap.push({
+        class: existingClass || '',
+        subjects: existingSubjects || []
+      });
+
+      // Listen for class selection
+      const classSelect = card.querySelector('.class-select');
+      classSelect.addEventListener('change', (e) => {
+        updateSubjectsForClass(cardIndex, e.target.value);
+      });
+
+      // If editing existing, populate subjects
+      if (existingClass) {
+        updateSubjectsForClass(cardIndex, existingClass, existingSubjects);
+      }
     }
 
-    // Update subjects based on selected classes
-    function updateSubjects() {
-      const selectedClasses = Array.from(document.querySelectorAll('#classesGrid input:checked'))
-        .map(cb => cb.value);
+    // Remove class mapping
+    window.removeClassMapping = function(index) {
+      const card = document.querySelector(`[data-index="${index}"]`);
+      if (card) {
+        card.remove();
+        classSubjectMap[index] = null; // Mark as deleted
+      }
+    };
 
-      if (selectedClasses.length === 0) {
-        subjectsSection.style.display = 'none';
+    // Update subjects for a specific class
+    function updateSubjectsForClass(cardIndex, className, preselectedSubjects = []) {
+      const subjectsGrid = document.getElementById(`subjects-grid-${cardIndex}`);
+      if (!subjectsGrid) return;
+
+      const subjects = SUBJECTS_BY_CLASS[className] || [];
+      
+      if (subjects.length === 0) {
+        subjectsGrid.innerHTML = '<p style="color: rgba(255,255,255,0.6); font-size: 0.9rem;">Please select a class first</p>';
         return;
       }
 
-      // Collect all unique subjects from selected classes
-      const subjectsSet = new Set();
-      selectedClasses.forEach(className => {
-        (SUBJECTS_BY_CLASS[className] || []).forEach(subject => subjectsSet.add(subject));
-      });
-
-      const subjects = Array.from(subjectsSet).sort();
-
-      // Render subjects
       subjectsGrid.innerHTML = '';
       subjects.forEach(subject => {
+        const isChecked = preselectedSubjects.includes(subject);
         const item = document.createElement('div');
         item.className = 'checkbox-item';
         item.innerHTML = `
-          <input type="checkbox" id="subject-${subject}" value="${subject}">
-          <label for="subject-${subject}" style="cursor: pointer; margin: 0;">${subject}</label>
+          <input type="checkbox" id="subject-${cardIndex}-${subject}" value="${subject}" ${isChecked ? 'checked' : ''}>
+          <label for="subject-${cardIndex}-${subject}">${subject}</label>
         `;
         subjectsGrid.appendChild(item);
+
+        // Update map when checkbox changes
+        item.querySelector('input').addEventListener('change', (e) => {
+          updateClassSubjectMap(cardIndex, className);
+        });
       });
 
-      subjectsSection.style.display = 'block';
+      // Update the class in the map
+      if (classSubjectMap[cardIndex]) {
+        classSubjectMap[cardIndex].class = className;
+        updateClassSubjectMap(cardIndex, className);
+      }
     }
+
+    // Update the class-subject map when checkboxes change
+    function updateClassSubjectMap(cardIndex, className) {
+      const subjectsGrid = document.getElementById(`subjects-grid-${cardIndex}`);
+      if (!subjectsGrid) return;
+
+      const selectedSubjects = Array.from(subjectsGrid.querySelectorAll('input:checked'))
+        .map(cb => cb.value);
+
+      if (classSubjectMap[cardIndex]) {
+        classSubjectMap[cardIndex].class = className;
+        classSubjectMap[cardIndex].subjects = selectedSubjects;
+      }
+    }
+
+    // Add class button
+    addClassBtn.addEventListener('click', () => {
+      addClassMapping();
+    });
+
+    // Start with one empty class mapping
+    addClassMapping();
 
     // Save setup
     saveSetupBtn.addEventListener('click', async () => {
       const teacherType = teacherTypeSelect.value;
-      const selectedClasses = Array.from(document.querySelectorAll('#classesGrid input:checked'))
-        .map(cb => cb.value);
-      const selectedSubjects = Array.from(document.querySelectorAll('#subjectsGrid input:checked'))
-        .map(cb => cb.value);
 
       if (!teacherType) {
         toast('Please select your teacher type', 'warning');
         return;
       }
 
-      if (selectedClasses.length === 0) {
-        toast('Please select at least one class', 'warning');
+      // Filter out removed/null entries and validate
+      const validMappings = classSubjectMap.filter(mapping => {
+        return mapping !== null && mapping.class && mapping.subjects && mapping.subjects.length > 0;
+      });
+
+      if (validMappings.length === 0) {
+        toast('Please add at least one class with subjects', 'warning');
         return;
       }
 
-      if (selectedSubjects.length === 0) {
-        toast('Please select at least one subject', 'warning');
-        return;
-      }
+      // Extract unique classes and subjects
+      const allClasses = [...new Set(validMappings.map(m => m.class))];
+      const allSubjects = [...new Set(validMappings.flatMap(m => m.subjects))];
 
       // Save configuration to Firebase
       const config = {
         teacherType,
-        classes: selectedClasses,
-        subjects: selectedSubjects,
+        classSubjectMappings: validMappings, // Store the full mapping
+        classes: allClasses,                  // For quick reference
+        subjects: allSubjects,                // For quick reference
         setupCompleted: true,
         setupDate: localTs()
       };
@@ -776,7 +889,7 @@
       try {
         await firebase.database().ref(`teachers_config/${currentWorkerId}`).set(config);
         teacherConfig = config;
-        toast('Profile saved successfully!', 'success');
+        toast('Profile saved successfully! Welcome to your dashboard!', 'success');
         
         // Update UI
         teacherRole.textContent = teacherType;
@@ -789,7 +902,7 @@
         loadDashboard();
       } catch (error) {
         console.error('Error saving config:', error);
-        toast('Failed to save configuration', 'error');
+        toast('Failed to save configuration. Please try again.', 'error');
       }
     });
 
@@ -865,15 +978,37 @@
       userAvatar.textContent = initials.toUpperCase();
 
       // Check if setup is complete
-      if (configSnap.exists()) {
+      if (configSnap.exists() && configSnap.val().setupCompleted) {
         teacherConfig = configSnap.val();
         teacherRole.textContent = teacherConfig.teacherType;
         setupSection.classList.add('hidden');
         mainDashboard.classList.remove('hidden');
         loadDashboard();
+      } else if (configSnap.exists()) {
+        // Has partial config, pre-populate the form
+        teacherConfig = configSnap.val();
+        teacherTypeSelect.value = teacherConfig.teacherType || '';
+        
+        // Clear the default class mapping
+        classSubjectMappings.innerHTML = '';
+        classSubjectMap = [];
+        
+        // Load existing mappings
+        if (teacherConfig.classSubjectMappings && teacherConfig.classSubjectMappings.length > 0) {
+          teacherConfig.classSubjectMappings.forEach(mapping => {
+            addClassMapping(mapping.class, mapping.subjects);
+          });
+        } else {
+          // Add one empty mapping
+          addClassMapping();
+        }
+        
+        setupSection.classList.remove('hidden');
+        mainDashboard.classList.add('hidden');
       } else {
-        // Show setup
-        renderClasses();
+        // First time - show setup with one empty class mapping (already added in initialization)
+        setupSection.classList.remove('hidden');
+        mainDashboard.classList.add('hidden');
       }
     }
 

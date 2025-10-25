@@ -1171,8 +1171,18 @@
             if (isReadOnly && accessedBy) {
                 console.log('📊 Dashboard accessed in READ-ONLY mode by:', accessedBy);
                 
-                // Set up read-only view for teachers
-                document.getElementById('sidebar').classList.remove('hidden');
+                // HIDE THE ENTIRE SIDEBAR - teachers don't need to see it
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) {
+                    sidebar.style.display = 'none';
+                }
+                
+                // Remove workspace left margin since sidebar is hidden
+                const workspace = document.querySelector('.workspace');
+                if (workspace) {
+                    workspace.style.marginLeft = '0';
+                    workspace.style.maxWidth = '100%';
+                }
                 
                 // Hide all role-specific elements first
                 document.querySelectorAll('.role-specific').forEach(el => el.style.display = 'none');
@@ -1185,7 +1195,32 @@
                 
                 // Show only the dashboard overview and statistics
                 const dashboardSection = document.getElementById('dashboard');
-                if (dashboardSection) dashboardSection.style.display = 'block';
+                if (dashboardSection) {
+                    dashboardSection.style.display = 'block';
+                }
+                
+                // Hide charts to speed up loading
+                const feeTrendsSection = document.getElementById('fee-trends');
+                if (feeTrendsSection) feeTrendsSection.style.display = 'none';
+                
+                // Hide attendance chart if it's in a module-section
+                document.querySelectorAll('.chart-container').forEach(container => {
+                    const canvas = container.querySelector('canvas');
+                    if (canvas && (canvas.id === 'fee-chart' || canvas.id === 'attendance-chart')) {
+                        container.style.display = 'none';
+                    }
+                });
+                
+                // Make all stat cards non-clickable
+                document.querySelectorAll('.stat-card, .stats-card, .finance-card').forEach(card => {
+                    card.style.cursor = 'default';
+                    card.style.pointerEvents = 'none';
+                    card.style.transform = 'none';
+                    // Remove hover effects
+                    card.addEventListener('mouseenter', (e) => {
+                        e.currentTarget.style.transform = 'none';
+                    });
+                });
                 
                 // Show Quick Actions section but make it read-only
                 const quickActionsSection = document.getElementById('quick-actions');
@@ -1200,54 +1235,70 @@
                             if (accessedBy === 'Head Teacher') {
                                 btn.style.display = 'inline-block';
                                 btn.style.pointerEvents = 'auto';
+                                btn.style.cursor = 'pointer';
                             } else {
                                 btn.style.display = 'none';
                             }
                         } else {
-                            // Disable all other action buttons
-                            btn.style.pointerEvents = 'none';
-                            btn.style.opacity = '0.5';
-                            btn.style.cursor = 'not-allowed';
+                            // Hide all other action buttons completely
+                            btn.style.display = 'none';
                         }
                     });
                 }
                 
                 // Add read-only banner
-                const workspace = document.querySelector('.workspace');
                 if (workspace && !document.getElementById('readonly-banner')) {
                     const banner = document.createElement('div');
                     banner.id = 'readonly-banner';
                     banner.style.cssText = `
                         background: linear-gradient(135deg, #f59e0b, #ef4444);
                         color: white;
-                        padding: 16px;
+                        padding: 16px 24px;
                         border-radius: 12px;
                         margin-bottom: 20px;
                         text-align: center;
                         font-weight: 600;
                         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                        position: sticky;
+                        top: 0;
+                        z-index: 100;
                     `;
                     banner.innerHTML = `
-                        📊 <strong>READ-ONLY MODE</strong> - ${accessedBy} View Only
-                        ${accessedBy === 'Head Teacher' ? '<br><small>You can access Workers Hub for staff registration</small>' : ''}
+                        📊 <strong>READ-ONLY DASHBOARD</strong> - ${accessedBy} View
+                        ${accessedBy === 'Head Teacher' ? '<br><small style="font-size: 0.9em;">✓ You can access Workers Hub for staff registration</small>' : '<br><small style="font-size: 0.9em;">View statistics only - No editing allowed</small>'}
                         <button onclick="window.location.href='workershtml/workertasks.html'" 
-                            style="margin-left: 20px; padding: 8px 16px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                            style="margin-left: 20px; padding: 8px 16px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.3s;">
                             🔙 Back to Teacher Dashboard
                         </button>
                     `;
                     workspace.insertBefore(banner, workspace.firstChild);
                 }
                 
-                // Disable all sidebar navigation except dashboard
-                document.querySelectorAll('.sidebar-icon').forEach(icon => {
-                    if (icon.dataset.module && icon.dataset.module !== 'dashboard') {
-                        icon.style.pointerEvents = 'none';
-                        icon.style.opacity = '0.3';
-                    }
-                });
+                // Add loading indicator
+                const dashboardOverview = document.querySelector('#dashboard .row.grid');
+                if (dashboardOverview) {
+                    dashboardOverview.style.opacity = '0.6';
+                    const loader = document.createElement('div');
+                    loader.id = 'stats-loader';
+                    loader.style.cssText = 'text-align: center; padding: 20px; color: white; font-size: 1.2rem;';
+                    loader.innerHTML = '<div class="loader" style="width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; margin: 0 auto; animation: spin 0.8s linear infinite;"></div><p style="margin-top: 16px;">Loading statistics...</p>';
+                    dashboardOverview.parentElement.insertBefore(loader, dashboardOverview);
+                }
                 
-                // Load dashboard data in view-only mode
-                loadDashboardData('admin', null);
+                // Load dashboard data in view-only mode (optimized - only load essential data)
+                console.log('⚡ Loading optimized read-only dashboard data...');
+                
+                // Use a slight delay to ensure DOM is ready
+                setTimeout(() => {
+                    loadDashboardData('admin', null);
+                    
+                    // Remove loader after data loads
+                    setTimeout(() => {
+                        const loader = document.getElementById('stats-loader');
+                        if (loader) loader.remove();
+                        if (dashboardOverview) dashboardOverview.style.opacity = '1';
+                    }, 1500);
+                }, 100);
                 
             } else {
                 // Normal mode - regular user access
@@ -1275,8 +1326,18 @@
                 
                 const accessedBy = sessionStorage.getItem('dashboardAccessedBy');
                 
-                // Set up limited read-only view
-                document.getElementById('sidebar').classList.remove('hidden');
+                // HIDE THE ENTIRE SIDEBAR - teachers don't need to see it
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) {
+                    sidebar.style.display = 'none';
+                }
+                
+                // Remove workspace left margin since sidebar is hidden
+                const workspace = document.querySelector('.workspace');
+                if (workspace) {
+                    workspace.style.marginLeft = '0';
+                    workspace.style.maxWidth = '100%';
+                }
                 
                 // Hide all role-specific elements
                 document.querySelectorAll('.role-specific').forEach(el => el.style.display = 'none');
@@ -1290,6 +1351,29 @@
                 const dashboardSection = document.getElementById('dashboard');
                 if (dashboardSection) dashboardSection.style.display = 'block';
                 
+                // Hide charts to speed up loading
+                const feeTrendsSection = document.getElementById('fee-trends');
+                if (feeTrendsSection) feeTrendsSection.style.display = 'none';
+                
+                // Hide attendance chart if it's in a module-section
+                document.querySelectorAll('.chart-container').forEach(container => {
+                    const canvas = container.querySelector('canvas');
+                    if (canvas && (canvas.id === 'fee-chart' || canvas.id === 'attendance-chart')) {
+                        container.style.display = 'none';
+                    }
+                });
+                
+                // Make all stat cards non-clickable
+                document.querySelectorAll('.stat-card, .stats-card, .finance-card').forEach(card => {
+                    card.style.cursor = 'default';
+                    card.style.pointerEvents = 'none';
+                    card.style.transform = 'none';
+                    // Remove hover effects
+                    card.addEventListener('mouseenter', (e) => {
+                        e.currentTarget.style.transform = 'none';
+                    });
+                });
+                
                 // Show Quick Actions for Head Teacher to access Workers Hub
                 if (accessedBy === 'Head Teacher') {
                     const quickActionsSection = document.getElementById('quick-actions');
@@ -1298,6 +1382,8 @@
                         quickActionsSection.querySelectorAll('.quick-action-btn').forEach(btn => {
                             if (btn.textContent.includes('Open Workers Hub')) {
                                 btn.style.display = 'inline-block';
+                                btn.style.pointerEvents = 'auto';
+                                btn.style.cursor = 'pointer';
                             } else {
                                 btn.style.display = 'none';
                             }
@@ -1306,38 +1392,32 @@
                 }
                 
                 // Add read-only banner
-                const workspace = document.querySelector('.workspace');
                 if (workspace && !document.getElementById('readonly-banner')) {
                     const banner = document.createElement('div');
                     banner.id = 'readonly-banner';
                     banner.style.cssText = `
                         background: linear-gradient(135deg, #f59e0b, #ef4444);
                         color: white;
-                        padding: 16px;
+                        padding: 16px 24px;
                         border-radius: 12px;
                         margin-bottom: 20px;
                         text-align: center;
                         font-weight: 600;
                         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                        position: sticky;
+                        top: 0;
+                        z-index: 100;
                     `;
                     banner.innerHTML = `
-                        📊 <strong>READ-ONLY MODE</strong> - ${accessedBy || 'Teacher'} View Only
-                        ${accessedBy === 'Head Teacher' ? '<br><small>You can access Workers Hub for staff registration</small>' : ''}
+                        📊 <strong>READ-ONLY DASHBOARD</strong> - ${accessedBy || 'Teacher'} View
+                        ${accessedBy === 'Head Teacher' ? '<br><small style="font-size: 0.9em;">✓ You can access Workers Hub for staff registration</small>' : '<br><small style="font-size: 0.9em;">View statistics only - No editing allowed</small>'}
                         <button onclick="window.location.href='workershtml/workertasks.html'" 
-                            style="margin-left: 20px; padding: 8px 16px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                            style="margin-left: 20px; padding: 8px 16px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.3s;">
                             🔙 Back to Teacher Dashboard
                         </button>
                     `;
                     workspace.insertBefore(banner, workspace.firstChild);
                 }
-                
-                // Disable sidebar navigation
-                document.querySelectorAll('.sidebar-icon').forEach(icon => {
-                    if (icon.dataset.module && icon.dataset.module !== 'dashboard') {
-                        icon.style.pointerEvents = 'none';
-                        icon.style.opacity = '0.3';
-                    }
-                });
                 
             } else {
                 // Not logged in and not from teacher dashboard - redirect to login

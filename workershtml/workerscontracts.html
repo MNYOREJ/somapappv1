@@ -9,7 +9,37 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-  <script src="../firebase/firebase-config.js"></script>
+  
+  <script>
+    // Firebase Configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+      console.log('✅ Firebase initialized');
+    }
+    
+    // Global toast function for early errors
+    window.showToast = (message, type = 'info') => {
+      const toastEl = document.createElement('div');
+      toastEl.className = `toast ${type}`;
+      toastEl.textContent = message;
+      document.body.appendChild(toastEl);
+      
+      setTimeout(() => toastEl.classList.add('show'), 100);
+      setTimeout(() => {
+        toastEl.classList.remove('show');
+        setTimeout(() => toastEl.remove(), 300);
+      }, 4000);
+    };
+  </script>
   
   <style>
     :root {
@@ -501,20 +531,24 @@
   </main>
 
   <script type="module">
+    console.log('🚀 Contract page module loading...');
+    
     import {
       ensureAnonymousAuth,
       getLinkedWorkerId,
       dbRefs,
       toast,
       localTs
-    } from '../modules/workers_helpers.js';
+    } from './modules/workers_helpers.js';
     import { 
       defaultContractLanguage, 
       templateKeyForRole, 
       generateContractPdf,
       calculateSalaryBreakdown,
       buildContractHtml
-    } from '../modules/workers_contracts.js';
+    } from './modules/workers_contracts.js';
+
+    console.log('✅ Modules imported successfully');
 
     let workerId = null;
     let workerProfile = null;
@@ -525,32 +559,52 @@
     ensureAnonymousAuth()
       .then(init)
       .catch(err => {
+        console.error('❌ Auth error:', err);
         toast(err.message || 'Error', 'error');
         setTimeout(() => window.location.href = '../index.html', 3000);
       });
 
     async function init() {
-      workerId = await getLinkedWorkerId();
-      if (!workerId) {
-        toast('Ingia tena. | Please sign in again.', 'error');
-        setTimeout(() => window.location.href = '../index.html', 3000);
-        return;
-      }
+      try {
+        console.log('🔍 Getting worker ID...');
+        workerId = await getLinkedWorkerId();
+        console.log('Worker ID:', workerId);
+        
+        if (!workerId) {
+          toast('Ingia tena. | Please sign in again.', 'error');
+          setTimeout(() => window.location.href = '../index.html', 3000);
+          return;
+        }
 
-      const snap = await dbRefs.worker(workerId).once('value');
-      if (!snap.exists()) {
-        toast('Profile haipo. | Profile not found.', 'error');
-        return;
+        console.log('📡 Fetching worker profile...');
+        const snap = await dbRefs.worker(workerId).once('value');
+        
+        if (!snap.exists()) {
+          console.error('❌ Worker profile not found');
+          toast('Profile haipo. | Profile not found.', 'error');
+          return;
+        }
+        
+        const data = snap.val();
+        console.log('✅ Worker data loaded:', data);
+        
+        workerProfile = data.profile;
+        contract = data.contract || {};
+        
+        console.log('Profile:', workerProfile);
+        console.log('Contract:', contract);
+        
+        selectedLanguage = contract.language || defaultContractLanguage(workerProfile.role);
+        console.log('Selected language:', selectedLanguage);
+        
+        render();
+        setupEventListeners();
+        
+        console.log('✅ Page rendered successfully');
+      } catch (err) {
+        console.error('❌ Error in init():', err);
+        toast('Kosa limejitokeza | An error occurred: ' + err.message, 'error');
       }
-      
-      const data = snap.val();
-      workerProfile = data.profile;
-      contract = data.contract || {};
-      
-      selectedLanguage = contract.language || defaultContractLanguage(workerProfile.role);
-      
-      render();
-      setupEventListeners();
     }
 
     function render() {
@@ -747,7 +801,7 @@
         toast('Hongera! Mkataba umehifadhiwa. | Congratulations! Contract has been saved.', 'success');
         
         setTimeout(() => {
-          render();
+        render();
         }, 1000);
 
       } catch (err) {

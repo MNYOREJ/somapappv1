@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logbooks | SoMAp Teacher Dashboard</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(circle at 30% 40%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+        radial-gradient(circle at 70% 70%, rgba(162, 155, 254, 0.3) 0%, transparent 50%);
+      animation: bgPulse 20s ease infinite;
+      z-index: -1;
+    }
+
+    @keyframes bgPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      padding: 24px 32px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #fff 0%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+
+    .btn-back {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-back:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #f093fb, #667eea);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(240, 147, 251, 0.4);
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+    }
+
+    .teacher-info {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .info-label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .info-value {
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .quick-log-section {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2));
+      border: 2px solid rgba(16, 185, 129, 0.5);
+      backdrop-filter: blur(20px);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .quick-log-section h3 {
+      font-size: 1.4rem;
+      margin-bottom: 16px;
+      color: white;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .form-group select,
+    .form-group input,
+    .form-group textarea {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      color: white;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .form-group select:focus,
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #f093fb;
+      background: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 0 4px rgba(240, 147, 251, 0.2);
+    }
+
+    .form-group select option {
+      background: #5a67d8;
+      color: white;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 80px;
+      font-family: inherit;
+    }
+
+    .controls {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .logs-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .log-card {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 24px;
+      transition: all 0.3s ease;
+    }
+
+    .log-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      border-color: #f093fb;
+    }
+
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 16px;
+      gap: 16px;
+    }
+
+    .log-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .log-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .meta-tag {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .log-details {
+      color: rgba(255, 255, 255, 0.85);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+
+    .log-details p {
+      margin-bottom: 8px;
+    }
+
+    .log-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      border: 2px dashed rgba(255, 255, 255, 0.2);
+    }
+
+    .empty-state h3 {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+    }
+
+    .toast {
+      background: rgba(16, 185, 129, 0.95);
+      backdrop-filter: blur(10px);
+      color: white;
+      padding: 16px 20px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      transform: translateX(400px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 500;
+    }
+
+    .toast.show {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    .toast.success { background: rgba(16, 185, 129, 0.95); }
+    .toast.error { background: rgba(239, 68, 68, 0.95); }
+    .toast.warning { background: rgba(245, 158, 11, 0.95); }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      .header {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .controls-grid,
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .log-header {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toast-container" id="toastContainer"></div>
+
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>📚 Teaching Logbooks</h1>
+        <p class="header-subtitle">Daily teaching logs and progress tracking</p>
+      </div>
+      <a href="../workertasks.html" class="btn btn-back">
+        ← Back to Dashboard
+      </a>
+    </div>
+
+    <div class="teacher-info">
+      <div class="info-item">
+        <span class="info-label">Teacher Name</span>
+        <span class="info-value" id="teacherName">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Teacher Type</span>
+        <span class="info-value" id="teacherType">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Total Logs</span>
+        <span class="info-value" id="totalLogs">0</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Today's Date</span>
+        <span class="info-value" id="currentDate">Loading...</span>
+      </div>
+    </div>
+
+    <!-- Quick Log Entry -->
+    <div class="quick-log-section">
+      <h3>✍️ Quick Log Entry (Today's Lesson)</h3>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label>Class *</label>
+          <select id="logClass" required>
+            <option value="">Select Class</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Subject *</label>
+          <select id="logSubject" required>
+            <option value="">Select Subject</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Period / Time *</label>
+          <input type="time" id="logTime" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Total Students in Class *</label>
+          <input type="number" id="totalStudents" min="1" placeholder="e.g., 30" required>
+        </div>
+        <div class="form-group">
+          <label>Students Present *</label>
+          <input type="number" id="studentsPresent" min="0" placeholder="e.g., 28" required>
+        </div>
+        <div class="form-group">
+          <label>Duration (minutes) *</label>
+          <input type="number" id="logDuration" min="30" max="180" placeholder="e.g., 45" required>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Topic Taught *</label>
+        <input type="text" id="logTopic" placeholder="What topic did you teach today?" required>
+      </div>
+
+      <div class="form-group">
+        <label>Lesson Summary *</label>
+        <textarea id="logSummary" placeholder="Briefly describe what was taught and activities done..." required></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Homework Given</label>
+          <input type="text" id="logHomework" placeholder="Describe homework assignment (if any)">
+        </div>
+        <div class="form-group">
+          <label>Progress / Completion (%)</label>
+          <input type="number" id="logProgress" min="0" max="100" placeholder="e.g., 80">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Challenges / Issues Faced</label>
+        <textarea id="logChallenges" placeholder="Any difficulties, disruptions, or challenges during the lesson?"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Remarks / Observations</label>
+        <textarea id="logRemarks" placeholder="Any additional observations or notes..."></textarea>
+      </div>
+
+      <button class="btn btn-success" id="saveLogBtn">
+        💾 Save Today's Log
+      </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="controls">
+      <h4 style="margin-bottom: 16px; color: white;">Filter Past Logs</h4>
+      <div class="controls-grid">
+        <div class="form-group">
+          <label>Filter by Class</label>
+          <select id="filterClass">
+            <option value="">All Classes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Filter by Subject</label>
+          <select id="filterSubject">
+            <option value="">All Subjects</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Filter by Date Range</label>
+          <select id="filterDateRange">
+            <option value="7">Last 7 Days</option>
+            <option value="14">Last 14 Days</option>
+            <option value="30">Last 30 Days</option>
+            <option value="0">All Time</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs List -->
+    <div id="logsList">
+      <div class="empty-state">
+        <h3>📓 No Logs Yet</h3>
+        <p>Fill in the quick log form above to record today's lesson!</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let workerId = null;
+    let teacherConfig = null;
+    let logs = {};
+
+    const teacherName = document.getElementById('teacherName');
+    const teacherType = document.getElementById('teacherType');
+    const currentDate = document.getElementById('currentDate');
+    const totalLogs = document.getElementById('totalLogs');
+    const saveLogBtn = document.getElementById('saveLogBtn');
+    const logsList = document.getElementById('logsList');
+    const filterClass = document.getElementById('filterClass');
+    const filterSubject = document.getElementById('filterSubject');
+    const filterDateRange = document.getElementById('filterDateRange');
+
+    function toast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toastEl = document.createElement('div');
+      toastEl.className = `toast ${type}`;
+      toastEl.innerHTML = `
+        <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : '⚠️'}</span>
+        <span>${message}</span>
+      `;
+      container.appendChild(toastEl);
+      setTimeout(() => toastEl.classList.add('show'), 100);
+      setTimeout(() => {
+        toastEl.classList.remove('show');
+        setTimeout(() => toastEl.remove(), 300);
+      }, 3000);
+    }
+
+    // Set today's date
+    const today = new Date();
+    currentDate.textContent = today.toLocaleDateString('en-US', {
+      timeZone: 'Africa/Nairobi',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    // Set default time to current time
+    const now = new Date();
+    document.getElementById('logTime').value = 
+      String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+
+    workerId = localStorage.getItem('workerId');
+    if (!workerId) {
+      toast('Please login first', 'error');
+      setTimeout(() => window.location.href = '../../index.html', 2000);
+    }
+
+    async function loadTeacherConfig() {
+      try {
+        const configSnap = await db.ref(`teachers_config/${workerId}`).once('value');
+        const workerSnap = await db.ref(`workers/${workerId}/profile`).once('value');
+        
+        if (!configSnap.exists()) {
+          toast('Please complete your teacher profile setup first', 'warning');
+          setTimeout(() => window.location.href = '../workertasks.html', 2000);
+          return;
+        }
+
+        teacherConfig = configSnap.val();
+        const profile = workerSnap.val();
+
+        const fullName = profile.fullNameUpper || 
+          [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(' ').toUpperCase();
+        teacherName.textContent = fullName;
+        teacherType.textContent = teacherConfig.teacherType;
+
+        populateSelects();
+        loadLogs();
+      } catch (error) {
+        console.error('Error loading config:', error);
+        toast('Error loading teacher configuration', 'error');
+      }
+    }
+
+    function populateSelects() {
+      teacherConfig.classes.forEach(className => {
+        filterClass.add(new Option(className, className));
+        document.getElementById('logClass').add(new Option(className, className));
+      });
+
+      teacherConfig.subjects.forEach(subject => {
+        filterSubject.add(new Option(subject, subject));
+        document.getElementById('logSubject').add(new Option(subject, subject));
+      });
+    }
+
+    async function loadLogs() {
+      try {
+        const snap = await db.ref(`teaching_logs/${workerId}`).once('value');
+        logs = snap.val() || {};
+        totalLogs.textContent = Object.keys(logs).length;
+        renderLogs();
+      } catch (error) {
+        console.error('Error loading logs:', error);
+        toast('Error loading logs', 'error');
+      }
+    }
+
+    function renderLogs() {
+      const selectedClass = filterClass.value;
+      const selectedSubject = filterSubject.value;
+      const dayRange = parseInt(filterDateRange.value);
+
+      const cutoffTime = dayRange > 0 ? Date.now() - (dayRange * 24 * 60 * 60 * 1000) : 0;
+
+      let filtered = Object.entries(logs).filter(([id, log]) => {
+        if (selectedClass && log.class !== selectedClass) return false;
+        if (selectedSubject && log.subject !== selectedSubject) return false;
+        if (dayRange > 0 && log.timestamp < cutoffTime) return false;
+        return true;
+      });
+
+      filtered.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+
+      if (filtered.length === 0) {
+        logsList.innerHTML = `
+          <div class="empty-state">
+            <h3>📓 No Logs Found</h3>
+            <p>Record your first log or adjust your filters</p>
+          </div>
+        `;
+        return;
+      }
+
+      logsList.innerHTML = filtered.map(([id, log]) => {
+        const logDate = new Date(log.timestamp);
+        const dateStr = logDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+        
+        return `
+        <div class="log-card">
+          <div class="log-header">
+            <div>
+              <div class="log-title">${log.topic}</div>
+              <div class="log-meta">
+                <span class="meta-tag">📚 ${log.class}</span>
+                <span class="meta-tag">📖 ${log.subject}</span>
+                <span class="meta-tag">📅 ${dateStr}</span>
+                <span class="meta-tag">🕐 ${log.time}</span>
+                <span class="meta-tag">👥 ${log.studentsPresent}/${log.totalStudents}</span>
+                ${log.progress ? `<span class="meta-tag">📊 ${log.progress}% Complete</span>` : ''}
+              </div>
+            </div>
+          </div>
+          <div class="log-details">
+            <p><strong>📝 Summary:</strong> ${log.summary}</p>
+            ${log.homework ? `<p><strong>📋 Homework:</strong> ${log.homework}</p>` : ''}
+            ${log.challenges ? `<p><strong>⚠️ Challenges:</strong> ${log.challenges}</p>` : ''}
+            ${log.remarks ? `<p><strong>💭 Remarks:</strong> ${log.remarks}</p>` : ''}
+            <p style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 8px;">
+              Duration: ${log.duration} minutes
+            </p>
+          </div>
+          <div class="log-actions">
+            <button class="btn btn-secondary" onclick="deleteLog('${id}')">🗑️ Delete</button>
+          </div>
+        </div>
+      `}).join('');
+    }
+
+    window.deleteLog = async function(logId) {
+      if (!confirm('Are you sure you want to delete this log entry?')) return;
+
+      try {
+        await db.ref(`teaching_logs/${workerId}/${logId}`).remove();
+        delete logs[logId];
+        toast('Log deleted successfully', 'success');
+        renderLogs();
+        totalLogs.textContent = Object.keys(logs).length;
+      } catch (error) {
+        console.error('Error deleting log:', error);
+        toast('Error deleting log', 'error');
+      }
+    };
+
+    saveLogBtn.addEventListener('click', async () => {
+      const logClass = document.getElementById('logClass').value;
+      const logSubject = document.getElementById('logSubject').value;
+      const logTime = document.getElementById('logTime').value;
+      const totalStudentsVal = document.getElementById('totalStudents').value;
+      const studentsPresentVal = document.getElementById('studentsPresent').value;
+      const logDuration = document.getElementById('logDuration').value;
+      const logTopic = document.getElementById('logTopic').value;
+      const logSummary = document.getElementById('logSummary').value;
+
+      if (!logClass || !logSubject || !logTime || !totalStudentsVal || !studentsPresentVal || !logDuration || !logTopic || !logSummary) {
+        toast('Please fill in all required fields', 'warning');
+        return;
+      }
+
+      const logData = {
+        class: logClass,
+        subject: logSubject,
+        time: logTime,
+        totalStudents: parseInt(totalStudentsVal),
+        studentsPresent: parseInt(studentsPresentVal),
+        duration: parseInt(logDuration),
+        topic: logTopic,
+        summary: logSummary,
+        homework: document.getElementById('logHomework').value,
+        progress: parseInt(document.getElementById('logProgress').value) || 0,
+        challenges: document.getElementById('logChallenges').value,
+        remarks: document.getElementById('logRemarks').value,
+        timestamp: Date.now(),
+        teacherName: teacherName.textContent,
+        date: new Date().toISOString().split('T')[0]
+      };
+
+      try {
+        const newRef = db.ref(`teaching_logs/${workerId}`).push();
+        await newRef.set(logData);
+        logs[newRef.key] = logData;
+        toast('Log saved successfully!', 'success');
+
+        // Clear form
+        document.getElementById('logClass').value = '';
+        document.getElementById('logSubject').value = '';
+        document.getElementById('totalStudents').value = '';
+        document.getElementById('studentsPresent').value = '';
+        document.getElementById('logDuration').value = '';
+        document.getElementById('logTopic').value = '';
+        document.getElementById('logSummary').value = '';
+        document.getElementById('logHomework').value = '';
+        document.getElementById('logProgress').value = '';
+        document.getElementById('logChallenges').value = '';
+        document.getElementById('logRemarks').value = '';
+
+        totalLogs.textContent = Object.keys(logs).length;
+        renderLogs();
+      } catch (error) {
+        console.error('Error saving log:', error);
+        toast('Error saving log', 'error');
+      }
+    });
+
+    filterClass.addEventListener('change', renderLogs);
+    filterSubject.addEventListener('change', renderLogs);
+    filterDateRange.addEventListener('change', renderLogs);
+
+    loadTeacherConfig();
+  </script>
+</body>
+</html>
+

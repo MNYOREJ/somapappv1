@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Class Journal | SoMAp Teacher Dashboard</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(circle at 30% 40%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+        radial-gradient(circle at 70% 70%, rgba(162, 155, 254, 0.3) 0%, transparent 50%);
+      animation: bgPulse 20s ease infinite;
+      z-index: -1;
+    }
+
+    @keyframes bgPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      padding: 24px 32px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #fff 0%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+
+    .btn-back {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-back:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #f093fb, #667eea);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(240, 147, 251, 0.4);
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+    }
+
+    .teacher-info {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .info-label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .info-value {
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .journal-entry-section {
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.2), rgba(102, 126, 234, 0.2));
+      border: 2px solid rgba(124, 58, 237, 0.5);
+      backdrop-filter: blur(20px);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+
+    .journal-entry-section h3 {
+      font-size: 1.5rem;
+      margin-bottom: 16px;
+      color: white;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .form-group select,
+    .form-group input,
+    .form-group textarea {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      color: white;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .form-group select:focus,
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #f093fb;
+      background: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 0 4px rgba(240, 147, 251, 0.2);
+    }
+
+    .form-group select option {
+      background: #5a67d8;
+      color: white;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 100px;
+      font-family: inherit;
+    }
+
+    .attendance-section {
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .attendance-section h4 {
+      color: white;
+      margin-bottom: 12px;
+    }
+
+    .attendance-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+    }
+
+    .attendance-item {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 12px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .attendance-item input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+
+    .controls {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .journals-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .journal-card {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 24px;
+      transition: all 0.3s ease;
+    }
+
+    .journal-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      border-color: #f093fb;
+    }
+
+    .journal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 16px;
+      gap: 16px;
+    }
+
+    .journal-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .journal-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .meta-tag {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .journal-details {
+      color: rgba(255, 255, 255, 0.85);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+
+    .journal-details p {
+      margin-bottom: 8px;
+    }
+
+    .journal-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      border: 2px dashed rgba(255, 255, 255, 0.2);
+    }
+
+    .empty-state h3 {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+    }
+
+    .toast {
+      background: rgba(16, 185, 129, 0.95);
+      backdrop-filter: blur(10px);
+      color: white;
+      padding: 16px 20px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      transform: translateX(400px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 500;
+    }
+
+    .toast.show {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    .toast.success { background: rgba(16, 185, 129, 0.95); }
+    .toast.error { background: rgba(239, 68, 68, 0.95); }
+    .toast.warning { background: rgba(245, 158, 11, 0.95); }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      .header {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .controls-grid,
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .journal-header {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toast-container" id="toastContainer"></div>
+
+  <div class="container">
+    <div class="header">
+      <div>
+        <h1>📖 Class Journal</h1>
+        <p class="header-subtitle">Record class activities, attendance, and daily observations</p>
+      </div>
+      <a href="../workertasks.html" class="btn btn-back">
+        ← Back to Dashboard
+      </a>
+    </div>
+
+    <div class="teacher-info">
+      <div class="info-item">
+        <span class="info-label">Teacher Name</span>
+        <span class="info-value" id="teacherName">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Teacher Type</span>
+        <span class="info-value" id="teacherType">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Total Entries</span>
+        <span class="info-value" id="totalEntries">0</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Today's Date</span>
+        <span class="info-value" id="currentDate">Loading...</span>
+      </div>
+    </div>
+
+    <!-- Journal Entry Form -->
+    <div class="journal-entry-section">
+      <h3>✍️ New Class Journal Entry</h3>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label>Class *</label>
+          <select id="journalClass" required>
+            <option value="">Select Class</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Date *</label>
+          <input type="date" id="journalDate" required>
+        </div>
+        <div class="form-group">
+          <label>Day of Week</label>
+          <input type="text" id="dayOfWeek" readonly style="background: rgba(255,255,255,0.05);">
+        </div>
+      </div>
+
+      <div class="attendance-section">
+        <h4>📊 Class Attendance</h4>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Total Students Enrolled *</label>
+            <input type="number" id="totalEnrolled" min="1" placeholder="e.g., 30" required>
+          </div>
+          <div class="form-group">
+            <label>Students Present *</label>
+            <input type="number" id="studentsPresent" min="0" placeholder="e.g., 28" required>
+          </div>
+          <div class="form-group">
+            <label>Students Absent *</label>
+            <input type="number" id="studentsAbsent" min="0" readonly style="background: rgba(255,255,255,0.05);">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Absent Students (Names)</label>
+          <textarea id="absentNames" placeholder="List names of absent students (optional)"></textarea>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>General Class Behavior / Mood *</label>
+        <select id="classMood" required>
+          <option value="">Select overall mood</option>
+          <option value="Excellent">😊 Excellent - Very attentive and engaged</option>
+          <option value="Good">🙂 Good - Generally cooperative</option>
+          <option value="Fair">😐 Fair - Some distractions</option>
+          <option value="Challenging">😕 Challenging - Difficult to manage</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Subjects / Topics Covered Today *</label>
+        <textarea id="topicsCovered" placeholder="List all subjects and topics taught today..." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Key Activities & Events *</label>
+        <textarea id="keyActivities" placeholder="Describe main activities, class discussions, group work, presentations, etc." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Student Performance / Progress</label>
+        <textarea id="studentProgress" placeholder="General observations about how students are performing..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Behavioral Issues / Incidents</label>
+        <textarea id="behavioralIssues" placeholder="Any disciplinary issues, conflicts, or notable behaviors to track..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Outstanding Students / Achievements</label>
+        <textarea id="achievements" placeholder="Students who performed exceptionally well, showed improvement, or deserve recognition..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Homework / Assignments Given</label>
+        <textarea id="homeworkGiven" placeholder="List homework assignments given to the class..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Resources / Materials Used</label>
+        <textarea id="materialsUsed" placeholder="Textbooks, charts, videos, supplies, etc."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Challenges / Issues Faced</label>
+        <textarea id="challenges" placeholder="Any difficulties with lesson delivery, resources, time management, etc."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Notes / Reminders for Tomorrow</label>
+        <textarea id="reminders" placeholder="Things to follow up on, materials to prepare, students to check on, etc."></textarea>
+      </div>
+
+      <button class="btn btn-success" id="saveJournalBtn">
+        💾 Save Journal Entry
+      </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="controls">
+      <h4 style="margin-bottom: 16px; color: white;">Filter Journal Entries</h4>
+      <div class="controls-grid">
+        <div class="form-group">
+          <label>Filter by Class</label>
+          <select id="filterClass">
+            <option value="">All Classes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Filter by Date Range</label>
+          <select id="filterDateRange">
+            <option value="7">Last 7 Days</option>
+            <option value="14">Last 14 Days</option>
+            <option value="30">Last 30 Days</option>
+            <option value="0">All Time</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Journals List -->
+    <div id="journalsList">
+      <div class="empty-state">
+        <h3>📓 No Journal Entries Yet</h3>
+        <p>Fill in the form above to record your first class journal entry!</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let workerId = null;
+    let teacherConfig = null;
+    let journals = {};
+
+    const teacherName = document.getElementById('teacherName');
+    const teacherType = document.getElementById('teacherType');
+    const currentDate = document.getElementById('currentDate');
+    const totalEntries = document.getElementById('totalEntries');
+    const saveJournalBtn = document.getElementById('saveJournalBtn');
+    const journalsList = document.getElementById('journalsList');
+    const filterClass = document.getElementById('filterClass');
+    const filterDateRange = document.getElementById('filterDateRange');
+
+    function toast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toastEl = document.createElement('div');
+      toastEl.className = `toast ${type}`;
+      toastEl.innerHTML = `
+        <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : '⚠️'}</span>
+        <span>${message}</span>
+      `;
+      container.appendChild(toastEl);
+      setTimeout(() => toastEl.classList.add('show'), 100);
+      setTimeout(() => {
+        toastEl.classList.remove('show');
+        setTimeout(() => toastEl.remove(), 300);
+      }, 3000);
+    }
+
+    // Set dates
+    const today = new Date();
+    currentDate.textContent = today.toLocaleDateString('en-US', {
+      timeZone: 'Africa/Nairobi',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    const journalDateInput = document.getElementById('journalDate');
+    journalDateInput.value = today.toISOString().split('T')[0];
+
+    // Update day of week when date changes
+    journalDateInput.addEventListener('change', () => {
+      const selectedDate = new Date(journalDateInput.value + 'T00:00:00');
+      const dayOfWeek = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
+      document.getElementById('dayOfWeek').value = dayOfWeek;
+    });
+    
+    // Set initial day of week
+    document.getElementById('dayOfWeek').value = today.toLocaleDateString('en-US', { weekday: 'long' });
+
+    // Calculate absent students
+    document.getElementById('totalEnrolled').addEventListener('input', calculateAbsent);
+    document.getElementById('studentsPresent').addEventListener('input', calculateAbsent);
+
+    function calculateAbsent() {
+      const total = parseInt(document.getElementById('totalEnrolled').value) || 0;
+      const present = parseInt(document.getElementById('studentsPresent').value) || 0;
+      document.getElementById('studentsAbsent').value = Math.max(0, total - present);
+    }
+
+    workerId = localStorage.getItem('workerId');
+    if (!workerId) {
+      toast('Please login first', 'error');
+      setTimeout(() => window.location.href = '../../index.html', 2000);
+    }
+
+    async function loadTeacherConfig() {
+      try {
+        const configSnap = await db.ref(`teachers_config/${workerId}`).once('value');
+        const workerSnap = await db.ref(`workers/${workerId}/profile`).once('value');
+        
+        if (!configSnap.exists()) {
+          toast('Please complete your teacher profile setup first', 'warning');
+          setTimeout(() => window.location.href = '../workertasks.html', 2000);
+          return;
+        }
+
+        teacherConfig = configSnap.val();
+        const profile = workerSnap.val();
+
+        const fullName = profile.fullNameUpper || 
+          [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(' ').toUpperCase();
+        teacherName.textContent = fullName;
+        teacherType.textContent = teacherConfig.teacherType;
+
+        populateSelects();
+        loadJournals();
+      } catch (error) {
+        console.error('Error loading config:', error);
+        toast('Error loading teacher configuration', 'error');
+      }
+    }
+
+    function populateSelects() {
+      teacherConfig.classes.forEach(className => {
+        filterClass.add(new Option(className, className));
+        document.getElementById('journalClass').add(new Option(className, className));
+      });
+    }
+
+    async function loadJournals() {
+      try {
+        const snap = await db.ref(`class_journals/${workerId}`).once('value');
+        journals = snap.val() || {};
+        totalEntries.textContent = Object.keys(journals).length;
+        renderJournals();
+      } catch (error) {
+        console.error('Error loading journals:', error);
+        toast('Error loading journals', 'error');
+      }
+    }
+
+    function renderJournals() {
+      const selectedClass = filterClass.value;
+      const dayRange = parseInt(filterDateRange.value);
+
+      const cutoffTime = dayRange > 0 ? Date.now() - (dayRange * 24 * 60 * 60 * 1000) : 0;
+
+      let filtered = Object.entries(journals).filter(([id, journal]) => {
+        if (selectedClass && journal.class !== selectedClass) return false;
+        if (dayRange > 0 && journal.timestamp < cutoffTime) return false;
+        return true;
+      });
+
+      filtered.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+
+      if (filtered.length === 0) {
+        journalsList.innerHTML = `
+          <div class="empty-state">
+            <h3>📓 No Journal Entries Found</h3>
+            <p>Record your first journal entry or adjust your filters</p>
+          </div>
+        `;
+        return;
+      }
+
+      journalsList.innerHTML = filtered.map(([id, journal]) => {
+        const entryDate = new Date(journal.timestamp);
+        const dateStr = entryDate.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        
+        return `
+        <div class="journal-card">
+          <div class="journal-header">
+            <div>
+              <div class="journal-title">${journal.class} - ${journal.date}</div>
+              <div class="journal-meta">
+                <span class="meta-tag">📅 ${dateStr}</span>
+                <span class="meta-tag">👥 ${journal.studentsPresent}/${journal.totalEnrolled} Present</span>
+                <span class="meta-tag">${journal.classMood}</span>
+              </div>
+            </div>
+          </div>
+          <div class="journal-details">
+            <p><strong>📚 Topics Covered:</strong> ${journal.topicsCovered}</p>
+            <p><strong>🎯 Key Activities:</strong> ${journal.keyActivities}</p>
+            ${journal.studentProgress ? `<p><strong>📈 Progress:</strong> ${journal.studentProgress}</p>` : ''}
+            ${journal.behavioralIssues ? `<p><strong>⚠️ Issues:</strong> ${journal.behavioralIssues}</p>` : ''}
+            ${journal.achievements ? `<p><strong>⭐ Achievements:</strong> ${journal.achievements}</p>` : ''}
+            ${journal.absentNames ? `<p><strong>📋 Absent:</strong> ${journal.absentNames}</p>` : ''}
+            ${journal.reminders ? `<p><strong>💭 Reminders:</strong> ${journal.reminders}</p>` : ''}
+          </div>
+          <div class="journal-actions">
+            <button class="btn btn-secondary" onclick="deleteJournal('${id}')">🗑️ Delete</button>
+          </div>
+        </div>
+      `}).join('');
+    }
+
+    window.deleteJournal = async function(journalId) {
+      if (!confirm('Are you sure you want to delete this journal entry?')) return;
+
+      try {
+        await db.ref(`class_journals/${workerId}/${journalId}`).remove();
+        delete journals[journalId];
+        toast('Journal entry deleted successfully', 'success');
+        renderJournals();
+        totalEntries.textContent = Object.keys(journals).length;
+      } catch (error) {
+        console.error('Error deleting journal:', error);
+        toast('Error deleting journal', 'error');
+      }
+    };
+
+    saveJournalBtn.addEventListener('click', async () => {
+      const journalClass = document.getElementById('journalClass').value;
+      const journalDate = document.getElementById('journalDate').value;
+      const totalEnrolled = document.getElementById('totalEnrolled').value;
+      const studentsPresent = document.getElementById('studentsPresent').value;
+      const classMood = document.getElementById('classMood').value;
+      const topicsCovered = document.getElementById('topicsCovered').value;
+      const keyActivities = document.getElementById('keyActivities').value;
+
+      if (!journalClass || !journalDate || !totalEnrolled || !studentsPresent || !classMood || !topicsCovered || !keyActivities) {
+        toast('Please fill in all required fields', 'warning');
+        return;
+      }
+
+      const journalData = {
+        class: journalClass,
+        date: journalDate,
+        dayOfWeek: document.getElementById('dayOfWeek').value,
+        totalEnrolled: parseInt(totalEnrolled),
+        studentsPresent: parseInt(studentsPresent),
+        studentsAbsent: parseInt(document.getElementById('studentsAbsent').value),
+        absentNames: document.getElementById('absentNames').value,
+        classMood,
+        topicsCovered,
+        keyActivities,
+        studentProgress: document.getElementById('studentProgress').value,
+        behavioralIssues: document.getElementById('behavioralIssues').value,
+        achievements: document.getElementById('achievements').value,
+        homeworkGiven: document.getElementById('homeworkGiven').value,
+        materialsUsed: document.getElementById('materialsUsed').value,
+        challenges: document.getElementById('challenges').value,
+        reminders: document.getElementById('reminders').value,
+        timestamp: Date.now(),
+        teacherName: teacherName.textContent
+      };
+
+      try {
+        const newRef = db.ref(`class_journals/${workerId}`).push();
+        await newRef.set(journalData);
+        journals[newRef.key] = journalData;
+        toast('Journal entry saved successfully!', 'success');
+
+        // Clear form
+        document.getElementById('journalClass').value = '';
+        document.getElementById('totalEnrolled').value = '';
+        document.getElementById('studentsPresent').value = '';
+        document.getElementById('studentsAbsent').value = '';
+        document.getElementById('absentNames').value = '';
+        document.getElementById('classMood').value = '';
+        document.getElementById('topicsCovered').value = '';
+        document.getElementById('keyActivities').value = '';
+        document.getElementById('studentProgress').value = '';
+        document.getElementById('behavioralIssues').value = '';
+        document.getElementById('achievements').value = '';
+        document.getElementById('homeworkGiven').value = '';
+        document.getElementById('materialsUsed').value = '';
+        document.getElementById('challenges').value = '';
+        document.getElementById('reminders').value = '';
+
+        totalEntries.textContent = Object.keys(journals).length;
+        renderJournals();
+      } catch (error) {
+        console.error('Error saving journal:', error);
+        toast('Error saving journal', 'error');
+      }
+    });
+
+    filterClass.addEventListener('change', renderJournals);
+    filterDateRange.addEventListener('change', renderJournals);
+
+    loadTeacherConfig();
+  </script>
+</body>
+</html>
+

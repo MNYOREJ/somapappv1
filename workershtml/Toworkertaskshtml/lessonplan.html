@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lesson Plans | SoMAp Teacher Dashboard</title>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(circle at 30% 40%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+        radial-gradient(circle at 70% 70%, rgba(162, 155, 254, 0.3) 0%, transparent 50%);
+      animation: bgPulse 20s ease infinite;
+      z-index: -1;
+    }
+
+    @keyframes bgPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      padding: 24px 32px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #fff 0%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header-subtitle {
+      color: rgba(255, 255, 255, 0.7);
+      margin-top: 4px;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+    }
+
+    .btn-back {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-back:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #f093fb, #667eea);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(240, 147, 251, 0.4);
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+
+    .btn-success:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+    }
+
+    /* Info Section */
+    .teacher-info {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .info-label {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .info-value {
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    /* Controls */
+    .controls {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .form-group select,
+    .form-group input,
+    .form-group textarea {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      color: white;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .form-group select:focus,
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #f093fb;
+      background: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 0 4px rgba(240, 147, 251, 0.2);
+    }
+
+    .form-group select option {
+      background: #5a67d8;
+      color: white;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 100px;
+      font-family: inherit;
+    }
+
+    /* Lesson Plan Form */
+    .lesson-form {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+
+    .lesson-form h3 {
+      font-size: 1.5rem;
+      margin-bottom: 20px;
+      color: white;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* Lesson Plans List */
+    .plans-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .plan-card {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 24px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+
+    .plan-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      border-color: #f093fb;
+    }
+
+    .plan-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 16px;
+      gap: 16px;
+    }
+
+    .plan-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .plan-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .meta-tag {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .plan-details {
+      color: rgba(255, 255, 255, 0.8);
+      line-height: 1.6;
+      margin-top: 12px;
+    }
+
+    .plan-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      border: 2px dashed rgba(255, 255, 255, 0.2);
+    }
+
+    .empty-state h3 {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+
+    .empty-state p {
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 20px;
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+    }
+
+    .toast {
+      background: rgba(16, 185, 129, 0.95);
+      backdrop-filter: blur(10px);
+      color: white;
+      padding: 16px 20px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      transform: translateX(400px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 500;
+    }
+
+    .toast.show {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    .toast.success { background: rgba(16, 185, 129, 0.95); }
+    .toast.error { background: rgba(239, 68, 68, 0.95); }
+    .toast.warning { background: rgba(245, 158, 11, 0.95); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .header {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .controls-grid,
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .plan-header {
+        flex-direction: column;
+      }
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="toast-container" id="toastContainer"></div>
+
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div>
+        <h1>📝 Lesson Plans</h1>
+        <p class="header-subtitle">Create and manage your lesson plans</p>
+      </div>
+      <a href="../workertasks.html" class="btn btn-back">
+        ← Back to Dashboard
+      </a>
+    </div>
+
+    <!-- Teacher Info -->
+    <div class="teacher-info" id="teacherInfo">
+      <div class="info-item">
+        <span class="info-label">Teacher Name</span>
+        <span class="info-value" id="teacherName">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Teacher Type</span>
+        <span class="info-value" id="teacherType">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Total Plans</span>
+        <span class="info-value" id="totalPlans">0</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Date</span>
+        <span class="info-value" id="currentDate">Loading...</span>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="controls-grid">
+        <div class="form-group">
+          <label>Filter by Class</label>
+          <select id="filterClass">
+            <option value="">All Classes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Filter by Subject</label>
+          <select id="filterSubject">
+            <option value="">All Subjects</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Filter by Term</label>
+          <select id="filterTerm">
+            <option value="">All Terms</option>
+            <option value="Term 1">Term 1</option>
+            <option value="Term 2">Term 2</option>
+            <option value="Term 3">Term 3</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="newPlanBtn">
+        ✨ Create New Lesson Plan
+      </button>
+    </div>
+
+    <!-- Lesson Plan Form (hidden by default) -->
+    <div class="lesson-form hidden" id="lessonForm">
+      <h3>✍️ New Lesson Plan</h3>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label>Class *</label>
+          <select id="planClass" required>
+            <option value="">Select Class</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Subject *</label>
+          <select id="planSubject" required>
+            <option value="">Select Subject</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Term *</label>
+          <select id="planTerm" required>
+            <option value="Term 1">Term 1</option>
+            <option value="Term 2">Term 2</option>
+            <option value="Term 3">Term 3</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Week Number *</label>
+          <input type="number" id="planWeek" min="1" max="16" placeholder="e.g., 1" required>
+        </div>
+        <div class="form-group">
+          <label>Lesson Date *</label>
+          <input type="date" id="planDate" required>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Total Students in Class *</label>
+          <input type="number" id="totalStudents" min="1" placeholder="e.g., 30" required>
+        </div>
+        <div class="form-group">
+          <label>Students Present Today *</label>
+          <input type="number" id="studentsPresent" min="0" placeholder="e.g., 28" required>
+        </div>
+        <div class="form-group">
+          <label>Duration (minutes) *</label>
+          <input type="number" id="planDuration" min="30" max="180" placeholder="e.g., 45" required>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Topic / Theme *</label>
+        <input type="text" id="planTopic" placeholder="e.g., Addition and Subtraction" required>
+      </div>
+
+      <div class="form-group">
+        <label>Learning Objectives *</label>
+        <textarea id="planObjectives" placeholder="What should students learn by the end of this lesson?" required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Introduction / Set Induction *</label>
+        <textarea id="planIntro" placeholder="How will you introduce the topic and capture students' attention?" required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Main Activities / Lesson Development *</label>
+        <textarea id="planActivities" placeholder="Describe the main teaching and learning activities..." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Teaching Resources / Materials</label>
+        <textarea id="planResources" placeholder="Charts, textbooks, videos, manipulatives, etc."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Assessment / Evaluation Method *</label>
+        <textarea id="planAssessment" placeholder="How will you assess if students understood the lesson?" required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Conclusion / Summary *</label>
+        <textarea id="planConclusion" placeholder="How will you wrap up the lesson?" required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Homework / Assignment</label>
+        <textarea id="planHomework" placeholder="Any homework or follow-up tasks?"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Reflection / Notes</label>
+        <textarea id="planReflection" placeholder="Post-lesson reflections, what went well, areas for improvement..."></textarea>
+      </div>
+
+      <div style="display: flex; gap: 12px; margin-top: 24px;">
+        <button class="btn btn-success" id="savePlanBtn">💾 Save Lesson Plan</button>
+        <button class="btn btn-secondary" id="cancelPlanBtn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Lesson Plans List -->
+    <div id="plansList">
+      <div class="empty-state">
+        <h3>📚 No Lesson Plans Yet</h3>
+        <p>Click "Create New Lesson Plan" to get started!</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // State
+    let workerId = null;
+    let teacherConfig = null;
+    let lessonPlans = {};
+    let editingPlanId = null;
+
+    // UI Elements
+    const teacherName = document.getElementById('teacherName');
+    const teacherType = document.getElementById('teacherType');
+    const currentDate = document.getElementById('currentDate');
+    const totalPlans = document.getElementById('totalPlans');
+    const filterClass = document.getElementById('filterClass');
+    const filterSubject = document.getElementById('filterSubject');
+    const filterTerm = document.getElementById('filterTerm');
+    const newPlanBtn = document.getElementById('newPlanBtn');
+    const lessonForm = document.getElementById('lessonForm');
+    const cancelPlanBtn = document.getElementById('cancelPlanBtn');
+    const savePlanBtn = document.getElementById('savePlanBtn');
+    const plansList = document.getElementById('plansList');
+    const planClass = document.getElementById('planClass');
+    const planSubject = document.getElementById('planSubject');
+
+    // Toast
+    function toast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toastEl = document.createElement('div');
+      toastEl.className = `toast ${type}`;
+      toastEl.innerHTML = `
+        <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : '⚠️'}</span>
+        <span>${message}</span>
+      `;
+      container.appendChild(toastEl);
+      setTimeout(() => toastEl.classList.add('show'), 100);
+      setTimeout(() => {
+        toastEl.classList.remove('show');
+        setTimeout(() => toastEl.remove(), 300);
+      }, 3000);
+    }
+
+    // Initialize Date
+    currentDate.textContent = new Date().toLocaleDateString('en-US', {
+      timeZone: 'Africa/Nairobi',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    // Get worker ID from localStorage
+    workerId = localStorage.getItem('workerId');
+    if (!workerId) {
+      toast('Please login first', 'error');
+      setTimeout(() => window.location.href = '../../index.html', 2000);
+    }
+
+    // Load teacher config
+    async function loadTeacherConfig() {
+      try {
+        const configSnap = await db.ref(`teachers_config/${workerId}`).once('value');
+        const workerSnap = await db.ref(`workers/${workerId}/profile`).once('value');
+        
+        if (!configSnap.exists()) {
+          toast('Please complete your teacher profile setup first', 'warning');
+          setTimeout(() => window.location.href = '../workertasks.html', 2000);
+          return;
+        }
+
+        teacherConfig = configSnap.val();
+        const profile = workerSnap.val();
+
+        // Update UI
+        const fullName = profile.fullNameUpper || 
+          [profile.firstName, profile.middleName, profile.lastName].filter(Boolean).join(' ').toUpperCase();
+        teacherName.textContent = fullName;
+        teacherType.textContent = teacherConfig.teacherType;
+
+        // Populate filters and form selects
+        populateSelects();
+
+        // Load lesson plans
+        loadLessonPlans();
+      } catch (error) {
+        console.error('Error loading config:', error);
+        toast('Error loading teacher configuration', 'error');
+      }
+    }
+
+    // Populate select dropdowns
+    function populateSelects() {
+      // Classes
+      teacherConfig.classes.forEach(className => {
+        const opt1 = new Option(className, className);
+        const opt2 = new Option(className, className);
+        filterClass.add(opt1);
+        planClass.add(opt2);
+      });
+
+      // Subjects
+      teacherConfig.subjects.forEach(subject => {
+        const opt1 = new Option(subject, subject);
+        const opt2 = new Option(subject, subject);
+        filterSubject.add(opt1);
+        planSubject.add(opt2);
+      });
+    }
+
+    // Load lesson plans
+    async function loadLessonPlans() {
+      try {
+        const snap = await db.ref(`lesson_plans/${workerId}`).once('value');
+        lessonPlans = snap.val() || {};
+        
+        totalPlans.textContent = Object.keys(lessonPlans).length;
+        renderPlans();
+      } catch (error) {
+        console.error('Error loading plans:', error);
+        toast('Error loading lesson plans', 'error');
+      }
+    }
+
+    // Render plans
+    function renderPlans() {
+      const selectedClass = filterClass.value;
+      const selectedSubject = filterSubject.value;
+      const selectedTerm = filterTerm.value;
+
+      let filtered = Object.entries(lessonPlans).filter(([id, plan]) => {
+        if (selectedClass && plan.class !== selectedClass) return false;
+        if (selectedSubject && plan.subject !== selectedSubject) return false;
+        if (selectedTerm && plan.term !== selectedTerm) return false;
+        return true;
+      });
+
+      // Sort by date (newest first)
+      filtered.sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+
+      if (filtered.length === 0) {
+        plansList.innerHTML = `
+          <div class="empty-state">
+            <h3>📚 No Lesson Plans Found</h3>
+            <p>Create your first lesson plan or adjust your filters</p>
+          </div>
+        `;
+        return;
+      }
+
+      plansList.innerHTML = filtered.map(([id, plan]) => `
+        <div class="plan-card">
+          <div class="plan-header">
+            <div>
+              <div class="plan-title">${plan.topic}</div>
+              <div class="plan-meta">
+                <span class="meta-tag">📚 ${plan.class}</span>
+                <span class="meta-tag">📖 ${plan.subject}</span>
+                <span class="meta-tag">📅 ${plan.term} - Week ${plan.week}</span>
+                <span class="meta-tag">📆 ${plan.date}</span>
+              </div>
+            </div>
+          </div>
+          <div class="plan-details">
+            <p><strong>Objectives:</strong> ${plan.objectives}</p>
+            <p><strong>Students:</strong> ${plan.studentsPresent}/${plan.totalStudents} present | <strong>Duration:</strong> ${plan.duration} mins</p>
+          </div>
+          <div class="plan-actions">
+            <button class="btn btn-primary" onclick="viewPlan('${id}')">👁️ View Full Plan</button>
+            <button class="btn btn-secondary" onclick="editPlan('${id}')">✏️ Edit</button>
+            <button class="btn btn-secondary" onclick="deletePlan('${id}')">🗑️ Delete</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // View plan (full details in alert for now - you can make a modal)
+    window.viewPlan = function(planId) {
+      const plan = lessonPlans[planId];
+      if (!plan) return;
+
+      const details = `
+📝 LESSON PLAN
+
+Class: ${plan.class}
+Subject: ${plan.subject}
+Term: ${plan.term} - Week ${plan.week}
+Date: ${plan.date}
+Duration: ${plan.duration} minutes
+Students: ${plan.studentsPresent}/${plan.totalStudents} present
+
+📌 TOPIC: ${plan.topic}
+
+🎯 LEARNING OBJECTIVES:
+${plan.objectives}
+
+🌟 INTRODUCTION:
+${plan.intro}
+
+📚 MAIN ACTIVITIES:
+${plan.activities}
+
+🛠️ RESOURCES:
+${plan.resources || 'N/A'}
+
+✅ ASSESSMENT:
+${plan.assessment}
+
+📝 CONCLUSION:
+${plan.conclusion}
+
+📋 HOMEWORK:
+${plan.homework || 'N/A'}
+
+💭 REFLECTION:
+${plan.reflection || 'N/A'}
+      `;
+
+      alert(details);
+    };
+
+    // Edit plan
+    window.editPlan = function(planId) {
+      const plan = lessonPlans[planId];
+      if (!plan) return;
+
+      editingPlanId = planId;
+
+      // Populate form
+      document.getElementById('planClass').value = plan.class;
+      document.getElementById('planSubject').value = plan.subject;
+      document.getElementById('planTerm').value = plan.term;
+      document.getElementById('planWeek').value = plan.week;
+      document.getElementById('planDate').value = plan.date;
+      document.getElementById('totalStudents').value = plan.totalStudents;
+      document.getElementById('studentsPresent').value = plan.studentsPresent;
+      document.getElementById('planDuration').value = plan.duration;
+      document.getElementById('planTopic').value = plan.topic;
+      document.getElementById('planObjectives').value = plan.objectives;
+      document.getElementById('planIntro').value = plan.intro;
+      document.getElementById('planActivities').value = plan.activities;
+      document.getElementById('planResources').value = plan.resources || '';
+      document.getElementById('planAssessment').value = plan.assessment;
+      document.getElementById('planConclusion').value = plan.conclusion;
+      document.getElementById('planHomework').value = plan.homework || '';
+      document.getElementById('planReflection').value = plan.reflection || '';
+
+      lessonForm.classList.remove('hidden');
+      lessonForm.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    // Delete plan
+    window.deletePlan = async function(planId) {
+      if (!confirm('Are you sure you want to delete this lesson plan?')) return;
+
+      try {
+        await db.ref(`lesson_plans/${workerId}/${planId}`).remove();
+        delete lessonPlans[planId];
+        toast('Lesson plan deleted successfully', 'success');
+        renderPlans();
+        totalPlans.textContent = Object.keys(lessonPlans).length;
+      } catch (error) {
+        console.error('Error deleting plan:', error);
+        toast('Error deleting lesson plan', 'error');
+      }
+    };
+
+    // New plan button
+    newPlanBtn.addEventListener('click', () => {
+      editingPlanId = null;
+      document.querySelectorAll('#lessonForm input, #lessonForm textarea, #lessonForm select').forEach(el => {
+        if (el.type === 'number') el.value = '';
+        else if (el.type === 'date') el.value = '';
+        else if (el.tagName === 'TEXTAREA') el.value = '';
+        else if (el.tagName === 'SELECT') el.selectedIndex = 0;
+        else el.value = '';
+      });
+      lessonForm.classList.remove('hidden');
+      lessonForm.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // Cancel button
+    cancelPlanBtn.addEventListener('click', () => {
+      lessonForm.classList.add('hidden');
+      editingPlanId = null;
+    });
+
+    // Save plan
+    savePlanBtn.addEventListener('click', async () => {
+      // Validate
+      const required = ['planClass', 'planSubject', 'planTerm', 'planWeek', 'planDate', 
+                       'totalStudents', 'studentsPresent', 'planDuration', 'planTopic', 
+                       'planObjectives', 'planIntro', 'planActivities', 'planAssessment', 'planConclusion'];
+      
+      for (const id of required) {
+        const el = document.getElementById(id);
+        if (!el.value.trim()) {
+          toast(`Please fill in: ${el.previousElementSibling.textContent}`, 'warning');
+          el.focus();
+          return;
+        }
+      }
+
+      const planData = {
+        class: document.getElementById('planClass').value,
+        subject: document.getElementById('planSubject').value,
+        term: document.getElementById('planTerm').value,
+        week: parseInt(document.getElementById('planWeek').value),
+        date: document.getElementById('planDate').value,
+        totalStudents: parseInt(document.getElementById('totalStudents').value),
+        studentsPresent: parseInt(document.getElementById('studentsPresent').value),
+        duration: parseInt(document.getElementById('planDuration').value),
+        topic: document.getElementById('planTopic').value,
+        objectives: document.getElementById('planObjectives').value,
+        intro: document.getElementById('planIntro').value,
+        activities: document.getElementById('planActivities').value,
+        resources: document.getElementById('planResources').value,
+        assessment: document.getElementById('planAssessment').value,
+        conclusion: document.getElementById('planConclusion').value,
+        homework: document.getElementById('planHomework').value,
+        reflection: document.getElementById('planReflection').value
+      };
+
+      try {
+        if (editingPlanId) {
+          // Update existing
+          planData.updatedAt = Date.now();
+          await db.ref(`lesson_plans/${workerId}/${editingPlanId}`).update(planData);
+          lessonPlans[editingPlanId] = { ...lessonPlans[editingPlanId], ...planData };
+          toast('Lesson plan updated successfully!', 'success');
+        } else {
+          // Create new
+          planData.createdAt = Date.now();
+          planData.teacherName = teacherName.textContent;
+          const newRef = db.ref(`lesson_plans/${workerId}`).push();
+          await newRef.set(planData);
+          lessonPlans[newRef.key] = planData;
+          toast('Lesson plan created successfully!', 'success');
+        }
+
+        lessonForm.classList.add('hidden');
+        editingPlanId = null;
+        totalPlans.textContent = Object.keys(lessonPlans).length;
+        renderPlans();
+      } catch (error) {
+        console.error('Error saving plan:', error);
+        toast('Error saving lesson plan', 'error');
+      }
+    });
+
+    // Filter listeners
+    filterClass.addEventListener('change', renderPlans);
+    filterSubject.addEventListener('change', renderPlans);
+    filterTerm.addEventListener('change', renderPlans);
+
+    // Initialize
+    loadTeacherConfig();
+  </script>
+</body>
+</html>
+

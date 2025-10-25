@@ -1163,20 +1163,186 @@
     auth.onAuthStateChanged(user => {
         if (user) {
             const role = localStorage.getItem('role') || 'admin';
-            document.getElementById('sidebar').classList.remove('hidden');
-            document.querySelectorAll('.role-specific').forEach(el => el.style.display = 'none');
-            document.querySelectorAll(`.role-specific.${role}-only`).forEach(el => el.style.display = 'block');
-            const gradShortcut = document.getElementById('graduationShortcut');
-            if (gradShortcut) {
-                gradShortcut.style.display = GRAD_EMAILS.has(user.email.toLowerCase()) ? 'flex' : 'none';
-            }
-            loadDashboardData(role, getClassFromEmail(user.email));
-            if (role === 'parent') {
-                const phone = localStorage.getItem('parentPhone');
-                if (phone) loadParentData(phone);
+            
+            // Check if accessed from Teacher Dashboard (workertasks.html) in read-only mode
+            const isReadOnly = sessionStorage.getItem('dashboardReadOnly') === 'true';
+            const accessedBy = sessionStorage.getItem('dashboardAccessedBy');
+            
+            if (isReadOnly && accessedBy) {
+                console.log('📊 Dashboard accessed in READ-ONLY mode by:', accessedBy);
+                
+                // Set up read-only view for teachers
+                document.getElementById('sidebar').classList.remove('hidden');
+                
+                // Hide all role-specific elements first
+                document.querySelectorAll('.role-specific').forEach(el => el.style.display = 'none');
+                
+                // Show only stats and overview sections (no editing capabilities)
+                document.querySelectorAll('.module-section').forEach(section => {
+                    // Hide all sections by default
+                    section.style.display = 'none';
+                });
+                
+                // Show only the dashboard overview and statistics
+                const dashboardSection = document.getElementById('dashboard');
+                if (dashboardSection) dashboardSection.style.display = 'block';
+                
+                // Show Quick Actions section but make it read-only
+                const quickActionsSection = document.getElementById('quick-actions');
+                if (quickActionsSection) {
+                    quickActionsSection.style.display = 'block';
+                    
+                    // Disable all quick action buttons except for specific ones
+                    quickActionsSection.querySelectorAll('.quick-action-btn').forEach(btn => {
+                        // Check if it's the Workers Hub button
+                        if (btn.textContent.includes('Open Workers Hub')) {
+                            // Only show Workers Hub for Head Teacher
+                            if (accessedBy === 'Head Teacher') {
+                                btn.style.display = 'inline-block';
+                                btn.style.pointerEvents = 'auto';
+                            } else {
+                                btn.style.display = 'none';
+                            }
+                        } else {
+                            // Disable all other action buttons
+                            btn.style.pointerEvents = 'none';
+                            btn.style.opacity = '0.5';
+                            btn.style.cursor = 'not-allowed';
+                        }
+                    });
+                }
+                
+                // Add read-only banner
+                const workspace = document.querySelector('.workspace');
+                if (workspace && !document.getElementById('readonly-banner')) {
+                    const banner = document.createElement('div');
+                    banner.id = 'readonly-banner';
+                    banner.style.cssText = `
+                        background: linear-gradient(135deg, #f59e0b, #ef4444);
+                        color: white;
+                        padding: 16px;
+                        border-radius: 12px;
+                        margin-bottom: 20px;
+                        text-align: center;
+                        font-weight: 600;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                    `;
+                    banner.innerHTML = `
+                        📊 <strong>READ-ONLY MODE</strong> - ${accessedBy} View Only
+                        ${accessedBy === 'Head Teacher' ? '<br><small>You can access Workers Hub for staff registration</small>' : ''}
+                        <button onclick="window.location.href='workershtml/workertasks.html'" 
+                            style="margin-left: 20px; padding: 8px 16px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                            🔙 Back to Teacher Dashboard
+                        </button>
+                    `;
+                    workspace.insertBefore(banner, workspace.firstChild);
+                }
+                
+                // Disable all sidebar navigation except dashboard
+                document.querySelectorAll('.sidebar-icon').forEach(icon => {
+                    if (icon.dataset.module && icon.dataset.module !== 'dashboard') {
+                        icon.style.pointerEvents = 'none';
+                        icon.style.opacity = '0.3';
+                    }
+                });
+                
+                // Load dashboard data in view-only mode
+                loadDashboardData('admin', null);
+                
+            } else {
+                // Normal mode - regular user access
+                document.getElementById('sidebar').classList.remove('hidden');
+                document.querySelectorAll('.role-specific').forEach(el => el.style.display = 'none');
+                document.querySelectorAll(`.role-specific.${role}-only`).forEach(el => el.style.display = 'block');
+                const gradShortcut = document.getElementById('graduationShortcut');
+                if (gradShortcut) {
+                    gradShortcut.style.display = GRAD_EMAILS.has(user.email.toLowerCase()) ? 'flex' : 'none';
+                }
+                loadDashboardData(role, getClassFromEmail(user.email));
+                if (role === 'parent') {
+                    const phone = localStorage.getItem('parentPhone');
+                    if (phone) loadParentData(phone);
+                }
             }
         } else {
-            window.location.href = 'index.html';
+            // Check if accessed from teacher dashboard with workerId
+            const workerId = localStorage.getItem('workerId');
+            const isReadOnly = sessionStorage.getItem('dashboardReadOnly') === 'true';
+            
+            if (workerId && isReadOnly) {
+                // Teacher accessing - don't redirect, use anonymous access for viewing
+                console.log('👨‍🏫 Teacher viewing dashboard in read-only mode');
+                
+                const accessedBy = sessionStorage.getItem('dashboardAccessedBy');
+                
+                // Set up limited read-only view
+                document.getElementById('sidebar').classList.remove('hidden');
+                
+                // Hide all role-specific elements
+                document.querySelectorAll('.role-specific').forEach(el => el.style.display = 'none');
+                
+                // Hide all sections except dashboard overview
+                document.querySelectorAll('.module-section').forEach(section => {
+                    section.style.display = 'none';
+                });
+                
+                // Show only the main dashboard
+                const dashboardSection = document.getElementById('dashboard');
+                if (dashboardSection) dashboardSection.style.display = 'block';
+                
+                // Show Quick Actions for Head Teacher to access Workers Hub
+                if (accessedBy === 'Head Teacher') {
+                    const quickActionsSection = document.getElementById('quick-actions');
+                    if (quickActionsSection) {
+                        quickActionsSection.style.display = 'block';
+                        quickActionsSection.querySelectorAll('.quick-action-btn').forEach(btn => {
+                            if (btn.textContent.includes('Open Workers Hub')) {
+                                btn.style.display = 'inline-block';
+                            } else {
+                                btn.style.display = 'none';
+                            }
+                        });
+                    }
+                }
+                
+                // Add read-only banner
+                const workspace = document.querySelector('.workspace');
+                if (workspace && !document.getElementById('readonly-banner')) {
+                    const banner = document.createElement('div');
+                    banner.id = 'readonly-banner';
+                    banner.style.cssText = `
+                        background: linear-gradient(135deg, #f59e0b, #ef4444);
+                        color: white;
+                        padding: 16px;
+                        border-radius: 12px;
+                        margin-bottom: 20px;
+                        text-align: center;
+                        font-weight: 600;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                    `;
+                    banner.innerHTML = `
+                        📊 <strong>READ-ONLY MODE</strong> - ${accessedBy || 'Teacher'} View Only
+                        ${accessedBy === 'Head Teacher' ? '<br><small>You can access Workers Hub for staff registration</small>' : ''}
+                        <button onclick="window.location.href='workershtml/workertasks.html'" 
+                            style="margin-left: 20px; padding: 8px 16px; background: white; color: #ef4444; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">
+                            🔙 Back to Teacher Dashboard
+                        </button>
+                    `;
+                    workspace.insertBefore(banner, workspace.firstChild);
+                }
+                
+                // Disable sidebar navigation
+                document.querySelectorAll('.sidebar-icon').forEach(icon => {
+                    if (icon.dataset.module && icon.dataset.module !== 'dashboard') {
+                        icon.style.pointerEvents = 'none';
+                        icon.style.opacity = '0.3';
+                    }
+                });
+                
+            } else {
+                // Not logged in and not from teacher dashboard - redirect to login
+                window.location.href = 'index.html';
+            }
         }
     });
     // Sidebar Clicks

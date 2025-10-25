@@ -671,17 +671,21 @@
     </div>
   </div>
 
-  <script type="module">
+  <script>
     console.log('Script loading...');
     
-    import {
-      ensureAnonymousAuth,
-      getLinkedWorkerId,
-      dbRefs,
-      todayYMD,
-      localTs,
-      toast as helperToast
-    } from './modules/workers_helpers.js';
+    // Simple helper functions (no imports needed!)
+    function todayYMD() {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function localTs() {
+      return Date.now();
+    }
 
     // Classes and Subjects Configuration
     const SUBJECTS_BY_CLASS = {
@@ -965,7 +969,8 @@
     async function loadTodayTasks() {
       try {
         const today = todayYMD();
-        const snap = await dbRefs.tasksDay(currentWorkerId, today).once('value');
+        const db = firebase.database();
+        const snap = await db.ref(`tasks/${currentWorkerId}/${today.replace(/-/g, '')}`).once('value');
         const tasks = snap.val() || {};
         const pendingTasks = Object.values(tasks).filter(task => !task.completedTs).length;
         document.getElementById('todayTasks').textContent = pendingTasks;
@@ -986,26 +991,30 @@
     }
 
     // Initialize
-    async function setup(user) {
+    async function setup() {
       console.log('Setup function started');
       
       try {
-        currentWorkerId = await getLinkedWorkerId();
-        console.log('Worker ID:', currentWorkerId);
+        // Get workerId directly from localStorage (set during login)
+        currentWorkerId = localStorage.getItem('workerId');
+        console.log('Worker ID from localStorage:', currentWorkerId);
         
         if (!currentWorkerId) {
-          toast('No worker link found. Redirecting to login...', 'error');
+          console.error('No workerId in localStorage');
+          toast('Please login first. Redirecting...', 'warning');
           setTimeout(() => window.location.href = '../index.html', 2000);
-        return;
-      }
+          return;
+        }
 
+        // Load worker profile and config
+        const db = firebase.database();
         const [profileSnap, configSnap] = await Promise.all([
-          dbRefs.worker(currentWorkerId).once('value'),
-          firebase.database().ref(`teachers_config/${currentWorkerId}`).once('value')
+          db.ref(`workers/${currentWorkerId}/profile`).once('value'),
+          db.ref(`teachers_config/${currentWorkerId}`).once('value')
         ]);
 
         console.log('Profile and config loaded');
-        workerProfile = profileSnap.val().profile;
+        workerProfile = profileSnap.val();
       
       // Update UI with worker info
       const fullName = workerProfile.fullNameUpper || 
@@ -1065,13 +1074,14 @@
       }
     }
 
-    // Start app
-    ensureAnonymousAuth()
-      .then(setup)
-      .catch(err => {
-        toast(err.message || 'Authentication error', 'error');
-        setTimeout(() => window.location.href = '../index.html', 2000);
+    // Start app when page loads
+    window.addEventListener('DOMContentLoaded', () => {
+      console.log('DOM loaded, starting setup...');
+      setup().catch(err => {
+        console.error('Setup error:', err);
+        toast(err.message || 'Error loading dashboard', 'error');
       });
+    });
   </script>
 </body>
 </html>

@@ -9,7 +9,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
-  <script src="../firebase/firebase-config.js"></script>
+  <script src="../firebase.js"></script>
 
   <style>
     /* ===================================
@@ -318,14 +318,28 @@
       box-shadow: 0 6px 20px rgba(240, 147, 251, 0.4);
     }
 
+    .btn-primary:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 10px rgba(240, 147, 251, 0.3);
+    }
+
     .btn-secondary {
       background: rgba(255, 255, 255, 0.2);
       color: white;
       border: 1px solid rgba(255, 255, 255, 0.3);
+      cursor: pointer;
+      position: relative;
+      z-index: 10;
     }
 
     .btn-secondary:hover {
       background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary:active {
+      transform: translateY(0);
+      background: rgba(255, 255, 255, 0.4);
     }
 
     /* Dashboard Cards Grid */
@@ -658,6 +672,8 @@
   </div>
 
   <script type="module">
+    console.log('Script loading...');
+    
     import {
       ensureAnonymousAuth,
       getLinkedWorkerId,
@@ -665,7 +681,7 @@
       todayYMD,
       localTs,
       toast as helperToast
-    } from '../modules/workers_helpers.js';
+    } from './modules/workers_helpers.js';
 
     // Classes and Subjects Configuration
     const SUBJECTS_BY_CLASS = {
@@ -845,16 +861,34 @@
       }
     }
 
-    // Add class button
-    addClassBtn.addEventListener('click', () => {
-      addClassMapping();
-    });
+    // Add class button - with error handling
+    if (addClassBtn) {
+      console.log('✅ Add Class button found, attaching event listener');
+      addClassBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('🖱️ Add Class button clicked');
+        try {
+          addClassMapping();
+          toast('Class card added! Select the class and subjects.', 'info');
+        } catch (error) {
+          console.error('❌ Error adding class:', error);
+          toast('Error adding class. Please refresh the page.', 'error');
+        }
+      });
+    } else {
+      console.error('❌ Add Class button not found!');
+    }
 
-    // Start with one empty class mapping
-    addClassMapping();
-
-    // Save setup
-    saveSetupBtn.addEventListener('click', async () => {
+    // Save setup - with error handling
+    if (saveSetupBtn) {
+      console.log('✅ Save button found, attaching event listener');
+      saveSetupBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('🖱️ Save button clicked');
+      
+      try {
       const teacherType = teacherTypeSelect.value;
 
       if (!teacherType) {
@@ -886,7 +920,6 @@
         setupDate: localTs()
       };
 
-      try {
         await firebase.database().ref(`teachers_config/${currentWorkerId}`).set(config);
         teacherConfig = config;
         toast('Profile saved successfully! Welcome to your dashboard!', 'success');
@@ -901,10 +934,13 @@
         // Load dashboard data
         loadDashboard();
       } catch (error) {
-        console.error('Error saving config:', error);
+        console.error('❌ Error in save handler:', error);
         toast('Failed to save configuration. Please try again.', 'error');
       }
-    });
+      });
+    } else {
+      console.error('❌ Save button not found!');
+    }
 
     // Load dashboard
     function loadDashboard() {
@@ -951,19 +987,25 @@
 
     // Initialize
     async function setup(user) {
-      currentWorkerId = await getLinkedWorkerId();
-      if (!currentWorkerId) {
-        toast('No worker link found. Redirecting to login...', 'error');
-        setTimeout(() => window.location.href = '../index.html', 2000);
+      console.log('Setup function started');
+      
+      try {
+        currentWorkerId = await getLinkedWorkerId();
+        console.log('Worker ID:', currentWorkerId);
+        
+        if (!currentWorkerId) {
+          toast('No worker link found. Redirecting to login...', 'error');
+          setTimeout(() => window.location.href = '../index.html', 2000);
         return;
       }
 
-      const [profileSnap, configSnap] = await Promise.all([
-        dbRefs.worker(currentWorkerId).once('value'),
-        firebase.database().ref(`teachers_config/${currentWorkerId}`).once('value')
-      ]);
+        const [profileSnap, configSnap] = await Promise.all([
+          dbRefs.worker(currentWorkerId).once('value'),
+          firebase.database().ref(`teachers_config/${currentWorkerId}`).once('value')
+        ]);
 
-      workerProfile = profileSnap.val().profile;
+        console.log('Profile and config loaded');
+        workerProfile = profileSnap.val().profile;
       
       // Update UI with worker info
       const fullName = workerProfile.fullNameUpper || 
@@ -977,38 +1019,49 @@
                       (workerProfile.lastName || 'T').charAt(0);
       userAvatar.textContent = initials.toUpperCase();
 
-      // Check if setup is complete
-      if (configSnap.exists() && configSnap.val().setupCompleted) {
-        teacherConfig = configSnap.val();
-        teacherRole.textContent = teacherConfig.teacherType;
-        setupSection.classList.add('hidden');
-        mainDashboard.classList.remove('hidden');
-        loadDashboard();
-      } else if (configSnap.exists()) {
-        // Has partial config, pre-populate the form
-        teacherConfig = configSnap.val();
-        teacherTypeSelect.value = teacherConfig.teacherType || '';
-        
-        // Clear the default class mapping
-        classSubjectMappings.innerHTML = '';
-        classSubjectMap = [];
-        
-        // Load existing mappings
-        if (teacherConfig.classSubjectMappings && teacherConfig.classSubjectMappings.length > 0) {
-          teacherConfig.classSubjectMappings.forEach(mapping => {
-            addClassMapping(mapping.class, mapping.subjects);
-          });
+        // Check if setup is complete
+        if (configSnap.exists() && configSnap.val().setupCompleted) {
+          // User has completed setup - go straight to dashboard
+          console.log('Setup completed, loading dashboard');
+          teacherConfig = configSnap.val();
+          teacherRole.textContent = teacherConfig.teacherType;
+          setupSection.classList.add('hidden');
+          mainDashboard.classList.remove('hidden');
+          loadDashboard();
+        } else if (configSnap.exists() && !configSnap.val().setupCompleted) {
+          // Has partial config, pre-populate the form
+          console.log('Partial config found, pre-populating');
+          teacherConfig = configSnap.val();
+          teacherTypeSelect.value = teacherConfig.teacherType || '';
+          
+          // Clear any existing class mappings
+          classSubjectMappings.innerHTML = '';
+          classSubjectMap = [];
+          
+          // Load existing mappings
+          if (teacherConfig.classSubjectMappings && teacherConfig.classSubjectMappings.length > 0) {
+            teacherConfig.classSubjectMappings.forEach(mapping => {
+              addClassMapping(mapping.class, mapping.subjects);
+            });
+          } else {
+            // Add one empty mapping
+            addClassMapping();
+          }
+          
+          setupSection.classList.remove('hidden');
+          mainDashboard.classList.add('hidden');
         } else {
-          // Add one empty mapping
+          // First time - show setup and add one empty class mapping
+          console.log('First time setup');
+          classSubjectMappings.innerHTML = '';
+          classSubjectMap = [];
           addClassMapping();
+          setupSection.classList.remove('hidden');
+          mainDashboard.classList.add('hidden');
         }
-        
-        setupSection.classList.remove('hidden');
-        mainDashboard.classList.add('hidden');
-      } else {
-        // First time - show setup with one empty class mapping (already added in initialization)
-        setupSection.classList.remove('hidden');
-        mainDashboard.classList.add('hidden');
+      } catch (error) {
+        console.error('Error in setup:', error);
+        toast('Error loading profile. Please refresh the page.', 'error');
       }
     }
 

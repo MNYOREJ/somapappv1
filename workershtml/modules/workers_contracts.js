@@ -618,29 +618,64 @@ function buildSimpleContractHtml({ fullName, roleLabel, baseSalary, salary, othe
 </div>`;
 }
 
-export async function generateContractPdf(workerId, profile, { language, templateKey, signatureFile = null, onProgress = null }) {
-  // Progress callback helper
+/**
+ * FAST acceptance: Just save signature as data URL and mark as accepted
+ * PDF generation happens on-demand when user wants to download
+ */
+export async function quickAcceptContract(workerId, profile, { language, templateKey, signatureFile = null, onProgress = null }) {
+  const progress = (step, message) => {
+    console.log(`[Contract Accept] ${step}: ${message}`);
+    if (onProgress) onProgress(step, message);
+  };
+  
+  // Step 1: Convert signature to data URL (instant, no upload)
+  progress('1/2', '✍️ Inaweka sahihi... | Processing signature...');
+  let signatureDataUrl = '';
+  if (signatureFile) {
+    signatureDataUrl = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.readAsDataURL(signatureFile);
+    });
+  }
+  
+  // Step 2: Save acceptance to database (instant)
+  progress('2/2', '✅ Inahifadhi... | Saving acceptance...');
+  const lang = language || defaultContractLanguage(profile.role);
+  
+  await dbRefs.workerContract(workerId).update({
+    language: lang,
+    templateKey: templateKey || templateKeyForRole(profile.role),
+    accepted: true,
+    acceptedTs: localTs(),
+    signatureDataUrl: signatureDataUrl,
+    contractPdfUrl: '', // Will be generated on-demand
+    pdfGenerationStatus: 'pending' // Track PDF generation status
+  });
+
+  progress('✅', '🎉 Imekamilika! | Accepted!');
+  return { success: true, signatureDataUrl };
+}
+
+/**
+ * Generate PDF on-demand (when user clicks download)
+ * This happens in background and can be slow
+ */
+export async function generateContractPdf(workerId, profile, { language, signatureDataUrl = '', onProgress = null }) {
   const progress = (step, message) => {
     console.log(`[Contract PDF] ${step}: ${message}`);
     if (onProgress) onProgress(step, message);
   };
   
   // Step 1: Load html2pdf library (if needed)
-  progress('1/4', '📚 Loading PDF library...');
+  progress('1/3', '📚 Loading PDF library...');
   await ensureHtml2Pdf();
   
-  // Step 2: Upload signature
-  let signatureUrl = '';
-  if (signatureFile) {
-    progress('2/4', '📤 Inapakia sahihi... | Uploading signature...');
-    signatureUrl = await uploadFileToStorage(signatureFile, `contracts/${workerId}/signature_${Date.now()}`);
-  }
-  
-  // Step 3: Generate PDF from HTML
-  progress('3/4', '📄 Inatengeneza PDF... | Generating PDF (this may take 10-30 seconds)...');
+  // Step 2: Generate PDF from HTML
+  progress('2/3', '📄 Generating PDF...');
   
   const lang = language || defaultContractLanguage(profile.role);
-  const html = buildContractHtml(profile, { language: lang, signatureUrl });
+  const html = buildContractHtml(profile, { language: lang, signatureUrl: signatureDataUrl });
 
   const wrapper = document.createElement('div');
   wrapper.style.position = 'fixed';
@@ -650,43 +685,42 @@ export async function generateContractPdf(workerId, profile, { language, templat
 
   const fileName = `${profile.fullNameUpper || workerId}-contract-${lang}.pdf`;
   
-  // Optimized settings - lower scale for faster generation
+  // Ultra-optimized settings for speed
   const pdfBlob = await window.html2pdf().set({
-    margin: 8,
+    margin: 6,
     filename: fileName,
     html2canvas: { 
-      scale: 1.5,  // Reduced from 2 for faster generation
+      scale: 1.2,  // Further reduced for speed
       useCORS: true,
-      logging: false  // Disable logging for performance
+      logging: false,
+      removeContainer: true
     },
     jsPDF: { 
       unit: 'mm', 
       format: 'a4', 
       orientation: 'portrait',
-      compress: true  // Enable compression
-    }
+      compress: true
+    },
+    pagebreak: { mode: 'avoid-all' }
   }).from(wrapper).toPdf().output('blob');
 
   wrapper.remove();
 
-  // Step 4: Upload PDF to Firebase Storage
-  progress('4/4', '☁️ Inahifadhi kwenye Cloud... | Uploading to cloud...');
+  // Step 3: Upload PDF to Firebase Storage
+  progress('3/3', '☁️ Uploading PDF...');
   
   const storageRef = firebase.storage().ref(`contracts/${workerId}/${fileName}`);
   await storageRef.put(pdfBlob, { contentType: 'application/pdf' });
   const downloadUrl = await storageRef.getDownloadURL();
 
-  // Update contract in database
+  // Update contract in database with PDF URL
   await dbRefs.workerContract(workerId).update({
-    language: lang,
-    templateKey: templateKey || templateKeyForRole(profile.role),
-    accepted: true,
-    acceptedTs: localTs(),
     contractPdfUrl: downloadUrl,
-    signatureUrl: signatureUrl || ''
+    pdfGenerationStatus: 'completed',
+    pdfGeneratedTs: localTs()
   });
 
-  progress('✅', 'Imekamilika! | Complete!');
+  progress('✅', 'PDF Ready!');
   return downloadUrl;
 }
 

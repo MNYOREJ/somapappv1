@@ -553,6 +553,7 @@
     import {
       defaultContractLanguage, 
       templateKeyForRole, 
+      quickAcceptContract,
       generateContractPdf,
       calculateSalaryBreakdown,
       buildContractHtml
@@ -688,7 +689,7 @@
     function renderContract() {
       const html = buildContractHtml(workerProfile, { 
         language: selectedLanguage, 
-        signatureUrl: contract.signatureUrl || '' 
+        signatureUrl: contract.signatureDataUrl || contract.signatureUrl || '' 
       });
       document.getElementById('contractViewer').innerHTML = html;
     }
@@ -698,16 +699,45 @@
       const signatureSection = document.getElementById('signatureSection');
 
       if (contract.accepted) {
-        // Already accepted - show download button
+        // Already accepted
         signatureSection.style.display = 'none';
-        actions.innerHTML = `
-          <a href="${contract.contractPdfUrl}" target="_blank" class="btn btn-success">
-            📥 Pakua PDF | Download Contract PDF
-          </a>
-          <a href="workersdashboard.html" class="btn btn-secondary">
-            🏠 Rudi Nyumbani | Back to Dashboard
-          </a>
-        `;
+        
+        // Check if PDF is ready or still being generated
+        const pdfReady = contract.contractPdfUrl && contract.contractPdfUrl.length > 0;
+        const pdfStatus = contract.pdfGenerationStatus || 'completed';
+        
+        if (pdfReady) {
+          // PDF is ready - show download button
+          actions.innerHTML = `
+            <a href="${contract.contractPdfUrl}" target="_blank" class="btn btn-success">
+              📥 Pakua PDF | Download Contract PDF
+            </a>
+            <a href="workersdashboard.html" class="btn btn-secondary">
+              🏠 Rudi Nyumbani | Back to Dashboard
+            </a>
+          `;
+        } else {
+          // Accepted but PDF not generated yet - show generate button
+          actions.innerHTML = `
+            <button class="btn btn-primary" id="generatePdfBtn">
+              📄 Tengeneza PDF | Generate PDF Download
+            </button>
+            <a href="workersdashboard.html" class="btn btn-secondary">
+              🏠 Rudi Nyumbani | Back to Dashboard
+            </a>
+            <p style="margin: 16px 0 0; color: var(--info); font-size: 0.875rem;">
+              ✅ Mkataba umekubaliwa! | Contract accepted! Click above to generate downloadable PDF.
+            </p>
+          `;
+          
+          // Setup PDF generation button
+          setTimeout(() => {
+            const generateBtn = document.getElementById('generatePdfBtn');
+            if (generateBtn) {
+              generateBtn.onclick = generatePdfNow;
+            }
+          }, 100);
+        }
       } else {
         // Not accepted - show signature upload and accept button
         signatureSection.style.display = 'block';
@@ -797,48 +827,69 @@
       btn.disabled = true;
       
       try {
-        // Step 1: Upload signature
-        btn.innerHTML = '<span class="loading-spinner"></span> 1/3: Inapakia sahihi... | Uploading signature...';
-        showToast('📤 Step 1/3: Uploading signature...', 'info');
-        
-        const url = await generateContractPdf(workerId, workerProfile, {
+        // Use FAST acceptance - no PDF generation, just save signature and acceptance
+        const result = await quickAcceptContract(workerId, workerProfile, {
           language: selectedLanguage,
           templateKey: templateKeyForRole(workerProfile.role),
           signatureFile: signatureFile,
           onProgress: (step, message) => {
-            btn.innerHTML = `<span class="loading-spinner"></span> ${step}: ${message}`;
+            btn.innerHTML = `<span class="loading-spinner"></span> ${step}`;
             showToast(message, 'info');
           }
         });
 
-        // Final step: Update database
-        btn.innerHTML = '<span class="loading-spinner"></span> Inahifadhi... | Saving...';
-        await db.ref(`workers/${workerId}/contract`).update({
-          accepted: true,
-          acceptedTs: Date.now(),
-          contractPdfUrl: url,
-          language: selectedLanguage
-        });
+        // Refresh contract data from database
+        const snap = await db.ref(`workers/${workerId}/contract`).once('value');
+        contract = snap.val() || {};
 
-        contract = {
-          ...contract,
-          accepted: true,
-          acceptedTs: Date.now(),
-          contractPdfUrl: url,
-          language: selectedLanguage
-        };
-
-        showToast('✅ Hongera! Mkataba umehifadhiwa. | Contract saved successfully!', 'success');
+        showToast('🎉 Hongera! Mkataba umekubaliwa! | Contract accepted successfully!', 'success');
         
         setTimeout(() => {
-        render();
-        }, 1000);
+          render();
+        }, 500);
 
       } catch (err) {
-        console.error('❌ Contract generation error:', err);
-        showToast(err.message || 'Imeshindikana | Failed to generate contract', 'error');
+        console.error('❌ Contract acceptance error:', err);
+        showToast(err.message || 'Imeshindikana | Failed to accept contract', 'error');
         btn.disabled = false;
         btn.innerHTML = '✅ Nakubali / I Agree & Sign Contract';
+      }
+    }
+
+    async function generatePdfNow() {
+      const btn = document.getElementById('generatePdfBtn');
+      if (!btn) return;
+      
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading-spinner"></span> Inatengeneza PDF...';
+      
+      try {
+        showToast('📄 Inaanza kutengeneza PDF... | Starting PDF generation...', 'info');
+        
+        const url = await generateContractPdf(workerId, workerProfile, {
+          language: selectedLanguage,
+          signatureDataUrl: contract.signatureDataUrl || '',
+          onProgress: (step, message) => {
+            btn.innerHTML = `<span class="loading-spinner"></span> ${step}`;
+            showToast(message, 'info');
+          }
+        });
+
+        // Refresh contract data
+        const snap = await db.ref(`workers/${workerId}/contract`).once('value');
+        contract = snap.val() || {};
+
+        showToast('✅ PDF iko tayari! | PDF is ready for download!', 'success');
+        
+        setTimeout(() => {
+          render();
+        }, 500);
+
+      } catch (err) {
+        console.error('❌ PDF generation error:', err);
+        showToast(err.message || 'Imeshindikana kutengeneza PDF | Failed to generate PDF', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '📄 Tengeneza PDF | Generate PDF Download';
       }
     }
   </script>

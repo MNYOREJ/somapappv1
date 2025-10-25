@@ -618,14 +618,26 @@ function buildSimpleContractHtml({ fullName, roleLabel, baseSalary, salary, othe
 </div>`;
 }
 
-export async function generateContractPdf(workerId, profile, { language, templateKey, signatureFile = null }) {
+export async function generateContractPdf(workerId, profile, { language, templateKey, signatureFile = null, onProgress = null }) {
+  // Progress callback helper
+  const progress = (step, message) => {
+    console.log(`[Contract PDF] ${step}: ${message}`);
+    if (onProgress) onProgress(step, message);
+  };
+  
+  // Step 1: Load html2pdf library (if needed)
+  progress('1/4', '📚 Loading PDF library...');
   await ensureHtml2Pdf();
   
+  // Step 2: Upload signature
   let signatureUrl = '';
   if (signatureFile) {
-    // Upload signature to Cloudinary
+    progress('2/4', '📤 Inapakia sahihi... | Uploading signature...');
     signatureUrl = await uploadFileToStorage(signatureFile, `contracts/${workerId}/signature_${Date.now()}`);
   }
+  
+  // Step 3: Generate PDF from HTML
+  progress('3/4', '📄 Inatengeneza PDF... | Generating PDF (this may take 10-30 seconds)...');
   
   const lang = language || defaultContractLanguage(profile.role);
   const html = buildContractHtml(profile, { language: lang, signatureUrl });
@@ -637,15 +649,29 @@ export async function generateContractPdf(workerId, profile, { language, templat
   document.body.appendChild(wrapper);
 
   const fileName = `${profile.fullNameUpper || workerId}-contract-${lang}.pdf`;
+  
+  // Optimized settings - lower scale for faster generation
   const pdfBlob = await window.html2pdf().set({
-    margin: 10,
+    margin: 8,
     filename: fileName,
-    html2canvas: { scale: 2 },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    html2canvas: { 
+      scale: 1.5,  // Reduced from 2 for faster generation
+      useCORS: true,
+      logging: false  // Disable logging for performance
+    },
+    jsPDF: { 
+      unit: 'mm', 
+      format: 'a4', 
+      orientation: 'portrait',
+      compress: true  // Enable compression
+    }
   }).from(wrapper).toPdf().output('blob');
 
   wrapper.remove();
 
+  // Step 4: Upload PDF to Firebase Storage
+  progress('4/4', '☁️ Inahifadhi kwenye Cloud... | Uploading to cloud...');
+  
   const storageRef = firebase.storage().ref(`contracts/${workerId}/${fileName}`);
   await storageRef.put(pdfBlob, { contentType: 'application/pdf' });
   const downloadUrl = await storageRef.getDownloadURL();
@@ -660,6 +686,7 @@ export async function generateContractPdf(workerId, profile, { language, templat
     signatureUrl: signatureUrl || ''
   });
 
+  progress('✅', 'Imekamilika! | Complete!');
   return downloadUrl;
 }
 

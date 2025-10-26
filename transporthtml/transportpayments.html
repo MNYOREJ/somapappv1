@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Payments · Approvals</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
+      <section class="card">
+        <div class="flex space center">
+          <div>
+            <h2 style="margin:0;">Transport Fee Claims</h2>
+            <small id="claimsSummary" class="muted"></small>
+          </div>
+          <div class="chip-group">
+            <button class="btn" data-tab="PENDING">Pending</button>
+            <button class="btn secondary" data-tab="APPROVED">Approved</button>
+            <button class="btn secondary" data-tab="REJECTED">Rejected</button>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <input id="searchInput" placeholder="Search student / tran" />
+          <select id="monthFilter">
+            <option value="">All months</option>
+          </select>
+        </div>
+        <table class="table mt-2">
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Month</th>
+              <th>Amount</th>
+              <th>Payment</th>
+              <th>TRAN</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="claimsBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden">Nothing to review here.</div>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script src="../modules/transport_pricing.js"></script>
+    <script>
+      const MONTH_NAMES = [
+        "",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+
+      const toast = document.getElementById("toast");
+      const claimsBody = document.getElementById("claimsBody");
+      const emptyState = document.getElementById("emptyState");
+      const summaryEl = document.getElementById("claimsSummary");
+      const searchInput = document.getElementById("searchInput");
+      const monthFilter = document.getElementById("monthFilter");
+
+      const state = {
+        user: null,
+        role: null,
+        context: TransportContext.getContext(),
+        claims: [],
+        currentTab: "PENDING",
+      };
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function canReview() {
+        return ["admin", "transport_officer"].includes(state.role);
+      }
+
+      function initFilters() {
+        monthFilter.innerHTML = `<option value="">All months</option>`;
+        for (let m = 1; m <= 12; m += 1) {
+          const option = document.createElement("option");
+          option.value = String(m);
+          option.textContent = MONTH_NAMES[m];
+          if (m === state.context.month) option.selected = true;
+          monthFilter.appendChild(option);
+        }
+
+        searchInput.addEventListener("input", renderTable);
+        monthFilter.addEventListener("change", renderTable);
+
+        document.querySelectorAll("button[data-tab]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            document.querySelectorAll("button[data-tab]").forEach((b) =>
+              b.classList.add("secondary")
+            );
+            btn.classList.remove("secondary");
+            state.currentTab = btn.dataset.tab;
+            renderTable();
+          });
+        });
+      }
+
+      function formatStatus(claim) {
+        const duplicate = claim.duplicateFlag ? '<span class="chip bad">DUP</span>' : "";
+        return `<span class="chip ${
+          claim.status === "APPROVED"
+            ? "ok"
+            : claim.status === "REJECTED"
+            ? "bad"
+            : "warn"
+        }">${claim.status}</span> ${duplicate}`;
+      }
+
+      const { expectedForMonth, MONTH_MULTIPLIERS } = TransportPricing;
+
+      async function approveClaim(claimId) {
+        const claim = state.claims.find((c) => c.id === claimId);
+        if (!claim) return;
+        try {
+          const enrollmentSnap = await firebase
+            .database()
+            .ref(TransportHelpers.paths.enrollment(claim.studentId))
+            .get();
+          const enrollment = enrollmentSnap.val() || {};
+          const amStop = enrollment.amStop || claim.amStop || "";
+          const pmStop = enrollment.pmStop || claim.pmStop || "";
+          const expected = expectedForMonth(amStop, pmStop, Number(claim.month));
+          const multiplier = MONTH_MULTIPLIERS[Number(claim.month)] || 1;
+          const ledgerPath = TransportHelpers.paths.ledgerMonth(
+            claim.studentId,
+            claim.year,
+            claim.month
+          );
+          const ledgerRef = firebase.database().ref(ledgerPath);
+          await ledgerRef.transaction((current) => {
+            const existing = current || {};
+            const paid = Number(existing.paid || 0) + Number(claim.amount || 0);
+            const balance = Math.max(expected - paid, 0);
+            return {
+              ...existing,
+              expected,
+              multiplier,
+              amStop,
+              pmStop,
+              paid,
+              balance,
+              updatedAt: Date.now(),
+            };
+          });
+
+          await firebase.database().ref(TransportHelpers.paths.claim(claim.id)).update({
+            status: "APPROVED",
+            checkedBy: state.user.uid,
+            checkedAt: Date.now(),
+            expectedAtApproval: expected,
+          });
+
+          showToast("Claim approved");
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to approve claim", "bad");
+        }
+      }
+
+      async function rejectClaim(claimId) {
+        const reason = prompt("Why is this claim rejected?");
+        if (reason === null) return;
+        try {
+          await firebase.database().ref(TransportHelpers.paths.claim(claimId)).update({
+            status: "REJECTED",
+            checkedBy: state.user.uid,
+            checkedAt: Date.now(),
+            rejectReason: reason,
+          });
+          showToast("Claim rejected");
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to reject claim", "bad");
+        }
+      }
+
+      function actionButtons(claim) {
+        if (!canReview() || claim.status !== "PENDING") {
+          return "";
+        }
+        return `
+          <div class="table-actions">
+            <button class="btn" data-approve="${claim.id}">Approve</button>
+            <button class="btn danger" data-reject="${claim.id}">Reject</button>
+          </div>
+        `;
+      }
+
+      function renderTable() {
+        const tabClaims = state.claims.filter(
+          (claim) => claim.status === state.currentTab
+        );
+        const query = searchInput.value.toLowerCase();
+        const month = monthFilter.value;
+
+        const filtered = tabClaims.filter((claim) => {
+          const matchesSearch =
+            !query ||
+            (claim.studentName || "").toLowerCase().includes(query) ||
+            (claim.studentId || "").toLowerCase().includes(query) ||
+            (claim.tranNum || "").toLowerCase().includes(query);
+          const matchesMonth = !month || String(claim.month) === month;
+          return matchesSearch && matchesMonth;
+        });
+
+        summaryEl.textContent = `${filtered.length} ${state.currentTab.toLowerCase()} claim(s)`;
+
+        if (!filtered.length) {
+          claimsBody.innerHTML = "";
+          emptyState.classList.remove("hidden");
+          return;
+        }
+        emptyState.classList.add("hidden");
+
+        claimsBody.innerHTML = filtered
+          .map(
+            (claim) => `
+            <tr>
+              <td>
+                ${claim.studentName || "Unknown"}<br/>
+                <small class="muted">${claim.studentId || ""}</small>
+              </td>
+              <td>${MONTH_NAMES[Number(claim.month)] || claim.month} ${claim.year}</td>
+              <td>${TransportHelpers.fmtTZS(claim.amount || 0)}</td>
+              <td>
+                ${claim.payMode || "—"}<br/>
+                <small class="muted">${claim.bankName || ""} ${claim.agent || ""}</small>
+              </td>
+              <td>
+                ${claim.tranNum || "—"}<br/>
+                <small class="muted">${claim.tranDate || ""}</small>
+              </td>
+              <td>${formatStatus(claim)}</td>
+              <td>${actionButtons(claim)}</td>
+            </tr>
+          `
+          )
+          .join("");
+
+        claimsBody.querySelectorAll("button[data-approve]").forEach((btn) => {
+          btn.addEventListener("click", () => approveClaim(btn.dataset.approve));
+        });
+        claimsBody.querySelectorAll("button[data-reject]").forEach((btn) => {
+          btn.addEventListener("click", () => rejectClaim(btn.dataset.reject));
+        });
+      }
+
+      function subscribeClaims() {
+        firebase
+          .database()
+          .ref("transport_payments_claims")
+          .on(
+            "value",
+            (snapshot) => {
+              const all = [];
+              snapshot.forEach((child) => {
+                const value = child.val() || {};
+                if (value.school && value.school !== state.context.school) return;
+                if (value.year && Number(value.year) !== Number(state.context.year))
+                  return;
+                all.push({ id: child.key, ...value });
+              });
+              state.claims = all;
+              renderTable();
+            },
+            (err) => {
+              console.error(err);
+              showToast("Failed to load claims", "bad");
+            }
+          );
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in first", "bad");
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              const role = snapshot.val();
+              state.role = role || "guest";
+              if (!canReview()) {
+                document.body.innerHTML =
+                  '<div class="alert red" style="margin:2rem;">No permission to manage transport payments.</div>';
+                return;
+              }
+              subscribeClaims();
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          renderTable();
+        }
+      );
+      initFilters();
+      ensureAuth();
+    </script>
+  </body>
+</html>

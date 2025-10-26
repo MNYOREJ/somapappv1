@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Operations · Windows & Toggles</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:960px; margin:0 auto;">
+      <section class="card">
+        <h2>Tracking Toggles</h2>
+        <div class="flex center" style="gap:1.5rem; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:0.5rem;">
+            <input type="checkbox" id="enabledToggle" />
+            Auto tracking enabled
+          </label>
+          <div>
+            <span class="chip muted" id="statusChip">Loading…</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card mt-2">
+        <h2>Active Days</h2>
+        <div id="daysGrid" class="row"></div>
+      </section>
+
+      <section class="card mt-2">
+        <h2>Tracking Windows (Africa/Tanzania)</h2>
+        <div class="grid two" id="windowsGrid"></div>
+        <button class="btn mt-2" id="addWindowBtn" type="button">Add Window</button>
+      </section>
+
+      <section class="card mt-2">
+        <h2>Km Per Litre per Vehicle</h2>
+        <div class="flex" style="flex-wrap:wrap; gap:0.75rem;">
+          <div style="flex:1 1 220px;">
+            <label for="vehicleIdInput">Vehicle ID</label>
+            <input id="vehicleIdInput" placeholder="mzee_yasin" />
+          </div>
+          <div style="flex:1 1 160px;">
+            <label for="kmPerLitreInput">Km / Litre</label>
+            <input id="kmPerLitreInput" type="number" step="0.1" value="8" />
+          </div>
+          <button class="btn" type="button" id="addKmplBtn">Add/Update</button>
+        </div>
+        <table class="table mt-2">
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>Kmpl</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="kmplTable"></tbody>
+        </table>
+      </section>
+
+      <div class="flex mt-3" style="justify-content:flex-end;">
+        <button class="btn" id="saveBtn" type="button">Save Settings</button>
+      </div>
+
+      <div id="toast" class="toast hidden"></div>
+    </main>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const days = [
+        { value: 0, label: "Sun" },
+        { value: 1, label: "Mon" },
+        { value: 2, label: "Tue" },
+        { value: 3, label: "Wed" },
+        { value: 4, label: "Thu" },
+        { value: 5, label: "Fri" },
+        { value: 6, label: "Sat" },
+      ];
+
+      const defaultWindows = [
+        { start: "04:00", end: "10:00" },
+        { start: "14:00", end: "22:00" },
+      ];
+
+      const state = {
+        activeDays: [1, 2, 3, 4, 5],
+        windows: [...defaultWindows],
+        kmpl: {},
+        enabled: false,
+      };
+
+      const daysGrid = document.getElementById("daysGrid");
+      const windowsGrid = document.getElementById("windowsGrid");
+      const kmplTable = document.getElementById("kmplTable");
+      const toast = document.getElementById("toast");
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function renderDays() {
+        daysGrid.innerHTML = "";
+        days.forEach((day) => {
+          const id = `day-${day.value}`;
+          const wrapper = document.createElement("label");
+          wrapper.style.display = "flex";
+          wrapper.style.alignItems = "center";
+          wrapper.style.gap = "0.45rem";
+          wrapper.innerHTML = `
+            <input type="checkbox" id="${id}" ${state.activeDays.includes(day.value) ? "checked" : ""} />
+            ${day.label}
+          `;
+          wrapper.querySelector("input").addEventListener("change", (event) => {
+            if (event.target.checked) {
+              if (!state.activeDays.includes(day.value)) {
+                state.activeDays.push(day.value);
+              }
+            } else {
+              state.activeDays = state.activeDays.filter((d) => d !== day.value);
+            }
+          });
+          daysGrid.appendChild(wrapper);
+        });
+      }
+
+      function renderWindows() {
+        windowsGrid.innerHTML = "";
+        state.windows.forEach((window, index) => {
+          const block = document.createElement("div");
+          block.className = "card";
+          block.innerHTML = `
+            <h3 style="margin-top:0;">Window ${index + 1}</h3>
+            <label>Start time</label>
+            <input type="time" value="${window.start || "00:00"}" data-index="${index}" data-key="start" />
+            <label class="mt-1">End time</label>
+            <input type="time" value="${window.end || "23:59"}" data-index="${index}" data-key="end" />
+            <button class="btn secondary mt-2" data-remove="${index}">Remove</button>
+          `;
+          block.querySelectorAll('input[type="time"]').forEach((input) => {
+            input.addEventListener("change", () => {
+              const idx = Number(input.dataset.index);
+              const key = input.dataset.key;
+              state.windows[idx][key] = input.value;
+            });
+          });
+          block
+            .querySelector("button[data-remove]")
+            .addEventListener("click", () => {
+              state.windows.splice(index, 1);
+              if (!state.windows.length) {
+                state.windows = [...defaultWindows];
+              }
+              renderWindows();
+            });
+          windowsGrid.appendChild(block);
+        });
+      }
+
+      function renderKmplTable() {
+        const entries = Object.entries(state.kmpl);
+        if (!entries.length) {
+          kmplTable.innerHTML = `<tr><td colspan="3" class="muted">Add vehicle efficiency to help fuel checks.</td></tr>`;
+          return;
+        }
+        kmplTable.innerHTML = entries
+          .map(
+            ([vehicle, kmpl]) => `
+          <tr>
+            <td>${vehicle}</td>
+            <td>${kmpl}</td>
+            <td><button class="btn secondary" data-remove="${vehicle}">Remove</button></td>
+          </tr>
+        `
+          )
+          .join("");
+
+        kmplTable.querySelectorAll("button[data-remove]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const vehicle = btn.dataset.remove;
+            delete state.kmpl[vehicle];
+            renderKmplTable();
+          });
+        });
+      }
+
+      document
+        .getElementById("addWindowBtn")
+        .addEventListener("click", () => {
+          state.windows.push({ start: "05:00", end: "09:00" });
+          renderWindows();
+        });
+
+      document.getElementById("addKmplBtn").addEventListener("click", () => {
+        const vehicleId = TransportHelpers.slug(
+          document.getElementById("vehicleIdInput").value
+        );
+        const kmpl = Number(document.getElementById("kmPerLitreInput").value);
+        if (!vehicleId || !Number.isFinite(kmpl) || kmpl <= 0) {
+          showToast("Provide vehicle ID and km/l value", "bad");
+          return;
+        }
+        state.kmpl[vehicleId] = kmpl;
+        renderKmplTable();
+        document.getElementById("vehicleIdInput").value = "";
+      });
+
+      document.getElementById("saveBtn").addEventListener("click", async () => {
+        const payload = {
+          enabled: document.getElementById("enabledToggle").checked,
+          activeDays: state.activeDays.sort(),
+          windows: state.windows,
+          kmPerLitreByVehicle: state.kmpl,
+          updatedAt: Date.now(),
+        };
+        try {
+          await firebase
+            .database()
+            .ref(TransportHelpers.paths.transportSettings())
+            .set(payload);
+          showToast("Transport settings saved");
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to save settings", "bad");
+        }
+      });
+
+      function updateStatusChip() {
+        const now = new Date();
+        const tzNow = new Date(
+          now.toLocaleString("en-US", { timeZone: "Africa/Nairobi" })
+        );
+        const minutes = tzNow.getHours() * 60 + tzNow.getMinutes();
+        const day = tzNow.getDay();
+        const inDay = state.activeDays.includes(day);
+        const inWindow = state.windows.some((window) => {
+          const [startH, startM] = (window.start || "00:00").split(":").map(Number);
+          const [endH, endM] = (window.end || "23:59").split(":").map(Number);
+          const startTotal = startH * 60 + startM;
+          const endTotal = endH * 60 + endM;
+          if (endTotal < startTotal) {
+            return minutes >= startTotal || minutes <= endTotal;
+          }
+          return minutes >= startTotal && minutes <= endTotal;
+        });
+        const chip = document.getElementById("statusChip");
+        if (!state.enabled) {
+          chip.className = "chip muted";
+          chip.textContent = "Paused";
+        } else if (inDay && inWindow) {
+          chip.className = "chip ok";
+          chip.textContent = "Live window";
+        } else {
+          chip.className = "chip warn";
+          chip.textContent = "Outside window";
+        }
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in first", "bad");
+            return;
+          }
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              const role = snapshot.val();
+              if (!["admin", "transport_officer"].includes(role)) {
+                showToast("Hakuna ruhusa", "bad");
+                document.body.innerHTML =
+                  '<div class="alert red" style="margin:1.5rem;">No permission.</div>';
+                return;
+              }
+              loadSettings();
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      function loadSettings() {
+        firebase
+          .database()
+          .ref(TransportHelpers.paths.transportSettings())
+          .once("value")
+          .then((snapshot) => {
+            const data = snapshot.val() || {};
+            state.enabled = Boolean(data.enabled);
+            state.activeDays = Array.isArray(data.activeDays)
+              ? data.activeDays
+              : state.activeDays;
+            state.windows =
+              Array.isArray(data.windows) && data.windows.length
+                ? data.windows
+                : defaultWindows;
+            state.kmpl = data.kmPerLitreByVehicle || {};
+
+            document.getElementById("enabledToggle").checked = state.enabled;
+            renderDays();
+            renderWindows();
+            renderKmplTable();
+            updateStatusChip();
+          })
+          .catch((err) => {
+            console.error(err);
+            showToast("Failed to load settings", "bad");
+          });
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        () => {}
+      );
+      renderDays();
+      renderWindows();
+      renderKmplTable();
+      ensureAuth();
+      setInterval(updateStatusChip, 60000);
+    </script>
+  </body>
+</html>

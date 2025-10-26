@@ -1,0 +1,21 @@
+# SoMAp Transport Hub Notes
+
+- All Transport UI lives in this folder. Keep filenames prefixed with `transport`.
+- Shared styles → `css/transport.css`. Shared helpers → `modules/`.
+- Every page loads Firebase compat v9.6.10 and `TransportContext` to expose the year/month/day selectors.
+- Data layout (RTDB):
+  - `transport/{school}/{year}/buses|routes|stops|drivers|trips`
+  - `transport_enrollments/{studentId}` → student allocations
+  - `transport_ledgers/{studentId}/{year}/{month}` → finance ledger
+  - `fuel_requests`, `maintenance_requests`, `transport_payments_claims`
+  - `boarding_events/{YMD}/{vehicleId}/{tripId}/scans[]`
+- Driver tracking script → `modules/transportauto_tracker.js` (wired on `transportdriver/transporthub.html`).
+- Parent push helpers → `modules/fcm_client.js`, service worker `firebase-messaging-sw.js`.
+- Simulation tool → `scripts/transportsimulate-driver.html`.
+- Entry points:
+  - Admin start card (`dashboard.html`) → `transporthtml/transport.html`
+  - Teacher sidebar (`staff.html`) → `transporthtml/transport.html`
+  - Driver quick link (`workersdashboard.html`) → `transporthtml/transportdriver/transporthub.html`
+  - Parent quick action (`parent.html`) → `transporthtml/parent/transporthub.html`
+- Empty state rule: if selected year has no RTDB node, pages render a friendly message instead of errors.
+- Default timezone for scheduling: Africa/Nairobi (same as Tanzania).

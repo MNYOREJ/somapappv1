@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Reports & Exports</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
+      <section class="row" id="summaryRow"></section>
+      <section class="card mt-2">
+        <div class="flex space center">
+          <h2 style="margin:0;">Monthly breakdown ${year}</h2>
+          <button class="btn" id="downloadBtn" type="button">Download CSV</button>
+        </div>
+        <table class="table mt-2">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Expected</th>
+              <th>Paid</th>
+              <th>Balance</th>
+              <th>Students Paid</th>
+            </tr>
+          </thead>
+          <tbody id="reportBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden"></div>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const summaryRow = document.getElementById("summaryRow");
+      const reportBody = document.getElementById("reportBody");
+      const emptyState = document.getElementById("emptyState");
+      const downloadBtn = document.getElementById("downloadBtn");
+
+      const state = {
+        user: null,
+        role: null,
+        context: TransportContext.getContext(),
+        monthly: [],
+      };
+
+      const MONTH_NAMES = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function canView() {
+        return ["admin", "transport_officer", "finance"].includes(state.role);
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in to view reports", "bad");
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              state.role = snapshot.val() || "guest";
+              if (!canView()) {
+                document.body.innerHTML =
+                  '<div class="alert red" style="margin:2rem;">No permission for transport reports.</div>';
+                return;
+              }
+              loadReports();
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      function loadReports() {
+        firebase
+          .database()
+          .ref("transport_ledgers")
+          .once("value")
+          .then((snapshot) => {
+            const totals = Array.from({ length: 12 }, () => ({
+              expected: 0,
+              paid: 0,
+              balance: 0,
+              students: 0,
+            }));
+            snapshot.forEach((studentSnap) => {
+              const years = studentSnap.val() || {};
+              const yearNode = years[state.context.year];
+              if (!yearNode) return;
+              Object.keys(yearNode).forEach((monthKey) => {
+                const monthIndex = Number(monthKey) - 1;
+                if (monthIndex < 0 || monthIndex > 11) return;
+                const entry = yearNode[monthKey];
+                totals[monthIndex].expected += Number(entry.expected || 0);
+                totals[monthIndex].paid += Number(entry.paid || 0);
+                totals[monthIndex].balance += Number(entry.balance || 0);
+                if (entry.paid && Number(entry.paid) > 0) {
+                  totals[monthIndex].students += 1;
+                }
+              });
+            });
+            state.monthly = totals;
+            render();
+          })
+          .catch((err) => {
+            console.error(err);
+            showToast("Failed to load reports", "bad");
+          });
+      }
+
+      function render() {
+        const allZero = state.monthly.every(
+          (row) => !row.expected && !row.paid && !row.balance
+        );
+        if (allZero) {
+          emptyState.textContent = `No data yet for ${state.context.year}.`;
+          emptyState.classList.remove("hidden");
+        } else {
+          emptyState.classList.add("hidden");
+        }
+
+        reportBody.innerHTML = state.monthly
+          .map(
+            (row, index) => `
+            <tr>
+              <td>${MONTH_NAMES[index]}</td>
+              <td>${TransportHelpers.fmtTZS(row.expected)}</td>
+              <td>${TransportHelpers.fmtTZS(row.paid)}</td>
+              <td>${TransportHelpers.fmtTZS(row.balance)}</td>
+              <td>${row.students}</td>
+            </tr>
+          `
+          )
+          .join("");
+
+        const totals = state.monthly.reduce(
+          (acc, row) => {
+            acc.expected += row.expected;
+            acc.paid += row.paid;
+            acc.balance += row.balance;
+            acc.students += row.students;
+            return acc;
+          },
+          { expected: 0, paid: 0, balance: 0, students: 0 }
+        );
+
+        summaryRow.innerHTML = `
+          <article class="card" style="flex:1 1 220px;">
+            <h2>Year Expected</h2>
+            <p class="bold" style="font-size:1.6rem;">${TransportHelpers.fmtTZS(
+              totals.expected
+            )}</p>
+          </article>
+          <article class="card" style="flex:1 1 220px;">
+            <h2>Year Paid</h2>
+            <p class="bold" style="font-size:1.6rem;">${TransportHelpers.fmtTZS(
+              totals.paid
+            )}</p>
+          </article>
+          <article class="card" style="flex:1 1 220px;">
+            <h2>Outstanding</h2>
+            <p class="bold" style="font-size:1.6rem;">${TransportHelpers.fmtTZS(
+              totals.balance
+            )}</p>
+          </article>
+          <article class="card" style="flex:1 1 220px;">
+            <h2>Students Paid</h2>
+            <p class="bold" style="font-size:1.6rem;">${totals.students}</p>
+          </article>
+        `;
+      }
+
+      function downloadCsv() {
+        const headers = ["Month", "Expected", "Paid", "Balance", "StudentsPaid"];
+        const rows = state.monthly.map((row, index) => [
+          MONTH_NAMES[index],
+          row.expected,
+          row.paid,
+          row.balance,
+          row.students,
+        ]);
+        rows.unshift(headers);
+        const csv = rows.map((r) => r.join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `transport-report-${state.context.school}-${state.context.year}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      downloadBtn.addEventListener("click", downloadCsv);
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          loadReports();
+        }
+      );
+      ensureAuth();
+    </script>
+  </body>
+</html>

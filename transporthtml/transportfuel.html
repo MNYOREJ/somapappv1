@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Fuel · Review Desk</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
+      <section class="card">
+        <div class="flex space center">
+          <div>
+            <h2 style="margin:0;">Fuel Requests</h2>
+            <small class="muted" id="summary"></small>
+          </div>
+          <div class="chip-group">
+            <button class="btn" data-tab="PENDING">Pending</button>
+            <button class="btn secondary" data-tab="APPROVED">Approved</button>
+            <button class="btn secondary" data-tab="REJECTED">Rejected</button>
+          </div>
+        </div>
+        <table class="table mt-2">
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>Litres</th>
+              <th>Odo / Distance</th>
+              <th>Flags</th>
+              <th>Reason</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="fuelBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden">No requests in this list.</div>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const fuelBody = document.getElementById("fuelBody");
+      const emptyState = document.getElementById("emptyState");
+      const summary = document.getElementById("summary");
+
+      const state = {
+        user: null,
+        role: null,
+        context: TransportContext.getContext(),
+        requests: [],
+        currentTab: "PENDING",
+      };
+
+      function canReview() {
+        return ["admin", "transport_officer"].includes(state.role);
+      }
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      document.querySelectorAll("button[data-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll("button[data-tab]").forEach((b) =>
+            b.classList.add("secondary")
+          );
+          btn.classList.remove("secondary");
+          state.currentTab = btn.dataset.tab;
+          renderTable();
+        });
+      });
+
+      function flagChips(req) {
+        const chips = [];
+        if (req.overMaxLitres) chips.push('<span class="chip bad">Over Max</span>');
+        if (req.missingDistance) chips.push('<span class="chip warn">No Distance</span>');
+        if (req.manualOverride) chips.push('<span class="chip warn">Override</span>');
+        return chips.join(" ") || '<span class="chip ok">OK</span>';
+      }
+
+      function actionButtons(req) {
+        if (!canReview() || req.status !== "PENDING") return "";
+        return `
+          <div class="table-actions">
+            <button class="btn" data-approve="${req.id}">Approve</button>
+            <button class="btn danger" data-reject="${req.id}">Reject</button>
+          </div>
+        `;
+      }
+
+      async function approveRequest(reqId) {
+        const request = state.requests.find((r) => r.id === reqId);
+        if (!request) return;
+        const ledgerRef = firebase
+          .database()
+          .ref(`${TransportHelpers.paths.fuelLedger(request.vehicleId)}/entries`)
+          .push();
+        const monthKey = `${request.year || state.context.year}-${String(
+          request.month || state.context.month
+        ).padStart(2, "0")}`;
+        try {
+          await ledgerRef.set({
+            requestId: request.id,
+            litres: Number(request.litresRequested || 0),
+            odoKm: Number(request.odoKm || 0),
+            reason: request.reason || "",
+            createdAt: Date.now(),
+            approvedBy: state.user.uid,
+          });
+          await firebase
+            .database()
+            .ref(
+              `${TransportHelpers.paths.fuelLedger(request.vehicleId)}/monthlyTotals/${monthKey}`
+            )
+            .transaction((current) => {
+              const litres = Number(request.litresRequested || 0);
+              const spent = Number(request.estimatedCost || 0);
+              const existing = current || { litres: 0, spend: 0 };
+              return {
+                litres: Number(existing.litres || 0) + litres,
+                spend: Number(existing.spend || 0) + spent,
+                updatedAt: Date.now(),
+              };
+            });
+
+          await firebase.database().ref(TransportHelpers.paths.fuelRequest(reqId)).update({
+            status: "APPROVED",
+            reviewedBy: state.user.uid,
+            reviewedAt: Date.now(),
+          });
+
+          showToast("Fuel request approved");
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to approve request", "bad");
+        }
+      }
+
+      async function rejectRequest(reqId) {
+        const reason = prompt("Rejection reason?");
+        if (reason === null) return;
+        try {
+          await firebase.database().ref(TransportHelpers.paths.fuelRequest(reqId)).update({
+            status: "REJECTED",
+            reviewedBy: state.user.uid,
+            reviewedAt: Date.now(),
+            rejectReason: reason,
+          });
+          showToast("Fuel request rejected");
+        } catch (err) {
+          console.error(err);
+          showToast("Failed to reject request", "bad");
+        }
+      }
+
+      function renderTable() {
+        const list = state.requests.filter((req) => req.status === state.currentTab);
+        summary.textContent = `${list.length} ${state.currentTab.toLowerCase()} request(s)`;
+
+        if (!list.length) {
+          emptyState.classList.remove("hidden");
+          fuelBody.innerHTML = "";
+          return;
+        }
+        emptyState.classList.add("hidden");
+
+        fuelBody.innerHTML = list
+          .map(
+            (req) => `
+            <tr>
+              <td>
+                ${req.vehicleId || "—"}<br/>
+                <small class="muted">Driver: ${req.driverName || req.driverUid || "—"}</small>
+              </td>
+              <td>${req.litresRequested || 0} L<br/><small class="muted">${TransportHelpers.fmtTZS(req.estimatedCost || 0)}</small></td>
+              <td>${req.odoKm || "—"} km<br/><small class="muted">${req.periodKm ? `${req.periodKm} km window` : ""}</small></td>
+              <td>${flagChips(req)}</td>
+              <td>${req.reason || "—"}</td>
+              <td>${actionButtons(req)}</td>
+            </tr>
+          `
+          )
+          .join("");
+
+        fuelBody.querySelectorAll("button[data-approve]").forEach((btn) => {
+          btn.addEventListener("click", () => approveRequest(btn.dataset.approve));
+        });
+        fuelBody.querySelectorAll("button[data-reject]").forEach((btn) => {
+          btn.addEventListener("click", () => rejectRequest(btn.dataset.reject));
+        });
+      }
+
+      function subscribeRequests() {
+        firebase
+          .database()
+          .ref("fuel_requests")
+          .on(
+            "value",
+            (snapshot) => {
+              const rows = [];
+              snapshot.forEach((child) => {
+                const value = child.val() || {};
+                if (value.school && value.school !== state.context.school) return;
+                rows.push({ id: child.key, ...value });
+              });
+              state.requests = rows;
+              renderTable();
+            },
+            (err) => {
+              console.error(err);
+              showToast("Failed to load fuel requests", "bad");
+            }
+          );
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in first", "bad");
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              state.role = snapshot.val() || "guest";
+              if (!canReview()) {
+                document.body.innerHTML =
+                  '<div class="alert red" style="margin:2rem;">No permission to review fuel.</div>';
+                return;
+              }
+              subscribeRequests();
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          renderTable();
+        }
+      );
+      ensureAuth();
+    </script>
+  </body>
+</html>

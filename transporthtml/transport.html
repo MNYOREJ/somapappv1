@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SoMAp Transport Hub · Dashboard</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding: 1.5rem; max-width: 1200px; margin: 0 auto;">
+      <section class="row" id="startCards"></section>
+      <section class="row mt-2" id="kpiRow"></section>
+      <section class="mt-3" id="alerts"></section>
+    </main>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const startCardsEl = document.getElementById("startCards");
+      const kpiRowEl = document.getElementById("kpiRow");
+      const alertsEl = document.getElementById("alerts");
+
+      const subscriptions = [];
+
+      function clearSubscriptions() {
+        subscriptions.forEach((unsub) => unsub && unsub());
+        subscriptions.length = 0;
+      }
+
+      function ensureAuth(callback) {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            alertsEl.innerHTML =
+              '<div class="alert red">Sign in to view Transport Hub.</div>';
+            return;
+          }
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              const role = snapshot.val();
+              if (!["admin", "transport_officer"].includes(role)) {
+                alertsEl.innerHTML =
+                  '<div class="alert red">Hakuna ruhusa ya kuingia hapa.</div>';
+                return;
+              }
+              callback(user, role);
+            })
+            .catch((err) => {
+              console.error(err);
+              alertsEl.innerHTML =
+                '<div class="alert red">Unable to verify permissions.</div>';
+            });
+        });
+      }
+
+      function renderStartCards(ctx) {
+        const cards = [
+          {
+            title: "Operations & Toggles",
+            description: "Windows, active days, km-per-litre controls",
+            href: "transportops.html",
+          },
+          {
+            title: "Payments Queue",
+            description: "Approve transport fee claims and ledgers",
+            href: "transportpayments.html",
+          },
+          {
+            title: "Fuel Requests",
+            description: "Review, approve & flag fuel usage",
+            href: "transportfuel.html",
+          },
+          {
+            title: "Maintenance Desk",
+            description: "Repairs, parts history and approvals",
+            href: "transportmaintenance.html",
+          },
+          {
+            title: "Boarding Gate",
+            description: "No Pay · No Board control centre",
+            href: "transportboard.html",
+          },
+          {
+            title: "Vehicle Registry",
+            description: "Fleet, owners, insurance expiries",
+            href: "transportbuses.html",
+          },
+          {
+            title: "Reports & Exports",
+            description: "Monthly KPIs and CSV/PDF exports",
+            href: "transportreports.html",
+          },
+        ];
+
+        startCardsEl.innerHTML = cards
+          .map(
+            (card) => `
+            <article class="card" style="flex: 1 1 300px;">
+              <h2>${card.title}</h2>
+              <p class="muted">${card.description}</p>
+              <a class="btn" href="${card.href}?school=${ctx.school}&year=${ctx.year}">
+                Open
+              </a>
+            </article>
+          `
+          )
+          .join("");
+      }
+
+      function renderKpis(ctx) {
+        const cards = [
+          {
+            id: "enrollments",
+            label: "Students on Transport",
+            value: "—",
+          },
+          {
+            id: "monthExpected",
+            label: `Expected ${ctx.year}-${String(ctx.month).padStart(2, "0")}`,
+            value: "—",
+          },
+          {
+            id: "monthPaid",
+            label: "Paid This Month",
+            value: "—",
+          },
+          {
+            id: "pendingClaims",
+            label: "Pending Claims",
+            value: "—",
+          },
+          {
+            id: "pendingFuel",
+            label: "Pending Fuel",
+            value: "—",
+          },
+          {
+            id: "pendingMaint",
+            label: "Pending Maintenance",
+            value: "—",
+          },
+        ];
+
+        kpiRowEl.innerHTML = cards
+          .map(
+            (card) => `
+          <article class="card" style="flex: 1 1 180px;">
+            <h2>${card.label}</h2>
+            <p id="kpi-${card.id}" class="bold" style="font-size:1.6rem;">${card.value}</p>
+          </article>
+        `
+          )
+          .join("");
+      }
+
+      function sumLedgers(ledgers) {
+        let expected = 0;
+        let paid = 0;
+        Object.values(ledgers || {}).forEach((studentYear) => {
+          const months = studentYear || {};
+          Object.values(months).forEach((month) => {
+            expected += Number(month.expected || 0);
+            paid += Number(month.paid || 0);
+          });
+        });
+        return { expected, paid };
+      }
+
+      function subscribeKpis(ctx) {
+        clearSubscriptions();
+
+        const enrollRef = firebase.database().ref("transport_enrollments");
+        const enrollSub = enrollRef.on(
+          "value",
+          (snapshot) => {
+            let count = 0;
+            snapshot.forEach((child) => {
+              const entry = child.val();
+              if (!entry) return;
+              if (entry.school && entry.school !== ctx.school) return;
+              if (entry.year && Number(entry.year) !== Number(ctx.year)) return;
+              count += 1;
+            });
+            document.getElementById("kpi-enrollments").textContent = count;
+          },
+          (err) => console.error(err)
+        );
+        subscriptions.push(() => enrollRef.off("value", enrollSub));
+
+        const ledgerRef = firebase.database().ref("transport_ledgers");
+        const ledgerSub = ledgerRef.on(
+          "value",
+          (snapshot) => {
+            let expected = 0;
+            let paid = 0;
+            snapshot.forEach((studentSnap) => {
+              const years = studentSnap.val() || {};
+              const yearNode = years[ctx.year];
+              if (!yearNode) return;
+              const monthNode = yearNode[ctx.month];
+              if (monthNode) {
+                expected += Number(monthNode.expected || 0);
+                paid += Number(monthNode.paid || 0);
+              }
+            });
+            document.getElementById("kpi-monthExpected").textContent =
+              TransportHelpers.fmtTZS(expected);
+            document.getElementById("kpi-monthPaid").textContent =
+              TransportHelpers.fmtTZS(paid);
+          },
+          (err) => console.error(err)
+        );
+        subscriptions.push(() => ledgerRef.off("value", ledgerSub));
+
+        const claimsRef = firebase
+          .database()
+          .ref("transport_payments_claims")
+          .orderByChild("status")
+          .equalTo("PENDING");
+        const claimsSub = claimsRef.on(
+          "value",
+          (snapshot) => {
+            let count = 0;
+            snapshot.forEach((child) => {
+              const val = child.val();
+              if (!val) return;
+              if (val.school && val.school !== ctx.school) return;
+              if (val.year && Number(val.year) !== Number(ctx.year)) return;
+              count += 1;
+            });
+            document.getElementById("kpi-pendingClaims").textContent = count;
+          },
+          (err) => console.error(err)
+        );
+        subscriptions.push(() => claimsRef.off("value", claimsSub));
+
+        const fuelRef = firebase
+          .database()
+          .ref("fuel_requests")
+          .orderByChild("status")
+          .equalTo("PENDING");
+        const fuelSub = fuelRef.on(
+          "value",
+          (snapshot) => {
+            let count = 0;
+            snapshot.forEach((child) => {
+              const val = child.val();
+              if (!val) return;
+              if (val.school && val.school !== ctx.school) return;
+              if (val.year && Number(val.year) !== Number(ctx.year)) return;
+              count += 1;
+            });
+            document.getElementById("kpi-pendingFuel").textContent = count;
+          },
+          (err) => console.error(err)
+        );
+        subscriptions.push(() => fuelRef.off("value", fuelSub));
+
+        const maintRef = firebase
+          .database()
+          .ref("maintenance_requests")
+          .orderByChild("status")
+          .equalTo("PENDING");
+        const maintSub = maintRef.on(
+          "value",
+          (snapshot) => {
+            let count = 0;
+            snapshot.forEach((child) => {
+              const val = child.val();
+              if (!val) return;
+              if (val.school && val.school !== ctx.school) return;
+              if (val.year && Number(val.year) !== Number(ctx.year)) return;
+              count += 1;
+            });
+            document.getElementById("kpi-pendingMaint").textContent = count;
+          },
+          (err) => console.error(err)
+        );
+        subscriptions.push(() => maintRef.off("value", maintSub));
+      }
+
+      function handleContextChange(ctx) {
+        renderStartCards(ctx);
+        renderKpis(ctx);
+        subscribeKpis(ctx);
+        alertsEl.innerHTML = "";
+      }
+
+      ensureAuth(() => {
+        const ctx = TransportContext.getContext();
+        renderStartCards(ctx);
+        renderKpis(ctx);
+        TransportContext.attachContextSelectors(
+          document.getElementById("contextBar"),
+          (updated) => handleContextChange(updated)
+        );
+        handleContextChange(ctx);
+      });
+    </script>
+  </body>
+</html>

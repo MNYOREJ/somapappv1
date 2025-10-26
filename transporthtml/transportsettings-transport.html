@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Settings · RBAC & Toggles</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:900px; margin:0 auto;">
+      <section class="card">
+        <h2>Role permissions snapshot</h2>
+        <p class="muted">Control who can access each Transport module. (Read-only preview — manage via Firebase console for now.)</p>
+        <div id="rolesList" class="mt-2"></div>
+        <div id="emptyState" class="empty hidden"></div>
+      </section>
+    </main>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const rolesList = document.getElementById("rolesList");
+      const emptyState = document.getElementById("emptyState");
+
+      function renderRoles(data) {
+        rolesList.innerHTML = "";
+        if (!data || !Object.keys(data).length) {
+          emptyState.textContent = "No transport settings found yet.";
+          emptyState.classList.remove("hidden");
+          return;
+        }
+        emptyState.classList.add("hidden");
+        if (data.roles) {
+          const card = document.createElement("div");
+          card.className = "card mt-2";
+          card.innerHTML = `<h3 style="margin-top:0;">Role matrix</h3>`;
+          const table = document.createElement("table");
+          table.className = "table";
+          table.innerHTML = `
+            <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+            <tbody>
+              ${Object.entries(data.roles)
+                .map(
+                  ([role, perms]) => `
+                    <tr>
+                      <td>${role}</td>
+                      <td>${Array.isArray(perms) ? perms.join(", ") : JSON.stringify(perms)}</td>
+                    </tr>
+                  `
+                )
+                .join("")}
+            </tbody>
+          `;
+          card.appendChild(table);
+          rolesList.appendChild(card);
+        }
+        const misc = document.createElement("div");
+        misc.className = "card mt-2";
+        misc.innerHTML = `
+          <h3 style="margin-top:0;">Tracking windows</h3>
+          <p class="muted">Enabled: ${data.enabled ? "Yes" : "No"}</p>
+          <p class="muted">Active days: ${(data.activeDays || []).join(", ") || "—"}</p>
+          <p class="muted">Windows: ${(data.windows || [])
+            .map((w) => `${w.start || "00:00"}–${w.end || "23:59"}`)
+            .join(", ") || "—"}</p>
+        `;
+        rolesList.appendChild(misc);
+      }
+
+      function loadSettings() {
+        firebase
+          .database()
+          .ref(TransportHelpers.paths.transportSettings())
+          .once("value")
+          .then((snapshot) => renderRoles(snapshot.val()))
+          .catch((err) => {
+            console.error(err);
+            emptyState.textContent = "Failed to load settings.";
+            emptyState.classList.remove("hidden");
+          });
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        () => loadSettings()
+      );
+      loadSettings();
+    </script>
+  </body>
+</html>

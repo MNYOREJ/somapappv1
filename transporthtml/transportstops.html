@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Stops · Tariffs & GPS</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
+      <section class="card">
+        <div class="flex space center">
+          <h2 style="margin:0;">Stops master list</h2>
+          <button class="btn" id="refreshBtn" type="button">Refresh</button>
+        </div>
+        <table class="table mt-2">
+          <thead>
+            <tr>
+              <th>Stop</th>
+              <th>Band</th>
+              <th>Coordinates</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="stopsBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden"></div>
+      </section>
+    </main>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const stopsBody = document.getElementById("stopsBody");
+      const emptyState = document.getElementById("emptyState");
+      const state = {
+        context: TransportContext.getContext(),
+        unsubscribe: null,
+      };
+
+      function renderStops(stops) {
+        if (!stops.length) {
+          emptyState.textContent = `No stops captured for ${state.context.year}.`;
+          emptyState.classList.remove("hidden");
+          stopsBody.innerHTML = "";
+          return;
+        }
+        emptyState.classList.add("hidden");
+        stopsBody.innerHTML = stops
+          .map((stop) => {
+            const coord =
+              stop.lat && stop.lng
+                ? `${Number(stop.lat).toFixed(5)}, ${Number(stop.lng).toFixed(5)}`
+                : "—";
+            return `
+              <tr>
+                <td>${stop.name || stop.id || "Stop"}</td>
+                <td>${stop.band || stop.fareBand || "—"}</td>
+                <td>${coord}</td>
+                <td><span class="chip ${stop.active === false ? "warn" : "ok"}">${
+              stop.active === false ? "Inactive" : "Active"
+            }</span></td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function subscribeStops() {
+        if (state.unsubscribe) state.unsubscribe();
+        const path = `transport/${state.context.school}/${state.context.year}/stops`;
+        const ref = firebase.database().ref(path);
+        const listener = ref.on(
+          "value",
+          (snapshot) => {
+            const rows = [];
+            snapshot.forEach((child) => rows.push({ id: child.key, ...(child.val() || {}) }));
+            renderStops(rows);
+          },
+          (err) => {
+            console.error(err);
+            emptyState.textContent = "Failed to load stops.";
+            emptyState.classList.remove("hidden");
+          }
+        );
+        state.unsubscribe = () => ref.off("value", listener);
+      }
+
+      document.getElementById("refreshBtn").addEventListener("click", subscribeStops);
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          subscribeStops();
+        }
+      );
+      subscribeStops();
+    </script>
+  </body>
+</html>

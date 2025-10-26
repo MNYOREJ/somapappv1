@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Notifications · Delay alerts</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:900px; margin:0 auto;">
+      <section class="card">
+        <h2>Notification templates</h2>
+        <p class="muted">These templates power SMS/FCM alerts. Edit text to keep parents informed.</p>
+        <div id="templatesList" class="mt-2"></div>
+        <div id="emptyState" class="empty hidden"></div>
+      </section>
+    </main>
+
+    <script src="../modules/transport_context.js"></script>
+    <script src="../modules/transport_helpers.js"></script>
+    <script>
+      const templatesList = document.getElementById("templatesList");
+      const emptyState = document.getElementById("emptyState");
+      const state = {
+        context: TransportContext.getContext(),
+      };
+
+      function createTemplateCard(key, template) {
+        const div = document.createElement("div");
+        div.className = "card mt-2";
+        div.innerHTML = `
+          <h3 style="margin-top:0;">${template.title || key}</h3>
+          <p class="muted">${template.body || "No template body provided."}</p>
+          <div class="muted text-sm">Channel: ${template.channel || "push"}</div>
+        `;
+        return div;
+      }
+
+      function loadTemplates() {
+        const path = `transport_notifications/${state.context.school}/${state.context.year}`;
+        firebase
+          .database()
+          .ref(path)
+          .once("value")
+          .then((snapshot) => {
+            templatesList.innerHTML = "";
+            if (!snapshot.exists()) {
+              emptyState.textContent = `No notification templates for ${state.context.year}.`;
+              emptyState.classList.remove("hidden");
+              return;
+            }
+            emptyState.classList.add("hidden");
+            snapshot.forEach((child) => {
+              templatesList.appendChild(createTemplateCard(child.key, child.val() || {}));
+            });
+          })
+          .catch((err) => {
+            console.error(err);
+            emptyState.textContent = "Failed to load templates.";
+            emptyState.classList.remove("hidden");
+          });
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          loadTemplates();
+        }
+      );
+      loadTemplates();
+    </script>
+  </body>
+</html>

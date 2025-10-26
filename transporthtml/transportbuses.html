@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Vehicles · Registry & Insurance</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1200px; margin:0 auto;">
+      <section class="row" id="kpiRow"></section>
+      <section id="alerts" class="mt-2"></section>
+      <div class="flex space center mt-2">
+        <h2 style="margin:0;">Vehicle Registry · Bwalo la Usafiri</h2>
+        <button class="btn" id="addVehicleBtn" type="button">+ Add Vehicle</button>
+      </div>
+      <section class="card mt-2">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Plate</th>
+              <th>Owner</th>
+              <th>Capacity</th>
+              <th>Insurance</th>
+              <th>Permit</th>
+              <th>Status</th>
+              <th>Route</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="vehiclesBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden">
+          No vehicles recorded for this school/year.<br />
+          Tap “Add Vehicle” to begin.
+        </div>
+      </section>
+    </main>
+
+    <div id="vehicleModal" class="modal hidden">
+      <div class="modal-content">
+        <div class="flex space center">
+          <h2 id="modalTitle">Add Vehicle</h2>
+          <button class="btn secondary" id="closeModalBtn" type="button">
+            Close
+          </button>
+        </div>
+        <div id="modalAlert" class="alert red hidden"></div>
+        <form id="vehicleForm" class="grid two" autocomplete="off">
+          <section class="card">
+            <h3>Vehicle Core</h3>
+            <label for="plateInput">Plate / Registration</label>
+            <input id="plateInput" required />
+            <label class="mt-1" for="modelInput">Make & Model</label>
+            <input id="modelInput" />
+            <label class="mt-1" for="capacityInput">Capacity</label>
+            <input id="capacityInput" type="number" min="1" />
+            <label class="mt-1" for="colorInput">Colour / Notes</label>
+            <input id="colorInput" />
+            <label class="mt-1" for="statusSelect">Status</label>
+            <select id="statusSelect">
+              <option value="active">Active</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <label class="mt-1" for="routeInput">Assigned Route ID</label>
+            <input id="routeInput" placeholder="route_am_01" />
+          </section>
+
+          <section class="card">
+            <h3>Ownership</h3>
+            <label for="ownerNameInput">Owner Name</label>
+            <input id="ownerNameInput" required />
+            <label class="mt-1" for="ownerPhoneInput">Owner Phone</label>
+            <input id="ownerPhoneInput" required />
+            <label class="mt-1" for="ownerNotesInput">Owner Notes</label>
+            <textarea id="ownerNotesInput" rows="3"></textarea>
+            <label class="mt-1" for="driverUidInput">Assigned Driver UID</label>
+            <input id="driverUidInput" placeholder="driver uid" />
+          </section>
+
+          <section class="card">
+            <h3>Insurance</h3>
+            <label for="providerInput">Provider</label>
+            <input id="providerInput" />
+            <label class="mt-1" for="policyInput">Policy Number</label>
+            <input id="policyInput" />
+            <label class="mt-1" for="expiryInput">Expiry Date</label>
+            <input id="expiryInput" type="date" />
+            <label class="mt-1">Insurance Photo</label>
+            <input id="insuranceFile" type="file" accept="image/*" capture="environment" />
+            <img id="insurancePreview" alt="" style="width:100%; max-height:220px; object-fit:contain; margin-top:0.5rem; display:none;" />
+          </section>
+
+          <section class="card">
+            <h3>Permits & Inspection</h3>
+            <label for="permitExpiryInput">Road Permit Expiry</label>
+            <input id="permitExpiryInput" type="date" />
+            <label class="mt-1">Permit Photo</label>
+            <input id="permitFile" type="file" accept="image/*" capture="environment" />
+            <img id="permitPreview" alt="" style="width:100%; max-height:220px; object-fit:contain; margin-top:0.5rem; display:none;" />
+            <label class="mt-1" for="inspectionExpiryInput">Inspection Expiry</label>
+            <input id="inspectionExpiryInput" type="date" />
+            <label class="mt-1">Inspection Photo</label>
+            <input id="inspectionFile" type="file" accept="image/*" capture="environment" />
+            <img id="inspectionPreview" alt="" style="width:100%; max-height:220px; object-fit:contain; margin-top:0.5rem; display:none;" />
+          </section>
+        </form>
+
+        <div class="flex mt-2" style="justify-content:flex-end;">
+          <a id="assignRouteLink" class="btn secondary hidden" target="_blank" rel="noopener">Assign this bus to a route →</a>
+          <button class="btn" id="saveVehicleBtn" type="button">Save Vehicle</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const vehiclesBody = document.getElementById("vehiclesBody");
+      const emptyState = document.getElementById("emptyState");
+      const alertsEl = document.getElementById("alerts");
+      const kpiRow = document.getElementById("kpiRow");
+      const modal = document.getElementById("vehicleModal");
+      const modalAlert = document.getElementById("modalAlert");
+
+      const formEls = {
+        plate: document.getElementById("plateInput"),
+        model: document.getElementById("modelInput"),
+        capacity: document.getElementById("capacityInput"),
+        color: document.getElementById("colorInput"),
+        status: document.getElementById("statusSelect"),
+        route: document.getElementById("routeInput"),
+        ownerName: document.getElementById("ownerNameInput"),
+        ownerPhone: document.getElementById("ownerPhoneInput"),
+        ownerNotes: document.getElementById("ownerNotesInput"),
+        driverUid: document.getElementById("driverUidInput"),
+        provider: document.getElementById("providerInput"),
+        policy: document.getElementById("policyInput"),
+        expiry: document.getElementById("expiryInput"),
+        insuranceFile: document.getElementById("insuranceFile"),
+        insurancePreview: document.getElementById("insurancePreview"),
+        permitExpiry: document.getElementById("permitExpiryInput"),
+        permitFile: document.getElementById("permitFile"),
+        permitPreview: document.getElementById("permitPreview"),
+        inspectionExpiry: document.getElementById("inspectionExpiryInput"),
+        inspectionFile: document.getElementById("inspectionFile"),
+        inspectionPreview: document.getElementById("inspectionPreview"),
+      };
+
+      const state = {
+        user: null,
+        role: null,
+        context: TransportContext.getContext(),
+        vehicles: [],
+        unsubscribe: null,
+        currentId: null,
+        uploads: {},
+      };
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function chipForExpiry(dateStr) {
+        if (!dateStr) {
+          return '<span class="chip warn">Missing</span>';
+        }
+        const today = new Date();
+        const tzToday = new Date(
+          today.toLocaleString("en-US", { timeZone: "Africa/Nairobi" })
+        );
+        const expiry = new Date(dateStr);
+        const diff = expiry - tzToday;
+        if (Number.isNaN(expiry.getTime())) {
+          return '<span class="chip warn">Invalid date</span>';
+        }
+        if (diff < 0) {
+          return `<span class="chip bad">EXPIRED ${dateStr}</span>`;
+        }
+        const daysRemaining = Math.ceil(diff / (1000 * 60 * 60 * 24));
+        if (daysRemaining <= 30) {
+          return `<span class="chip warn">Expiring ${dateStr}</span>`;
+        }
+        return `<span class="chip ok">OK ${dateStr}</span>`;
+      }
+
+      function renderKpis() {
+        const totalActive = state.vehicles.filter((v) => v.status === "active").length;
+        const maintenance = state.vehicles.filter(
+          (v) => v.status === "maintenance"
+        ).length;
+        const expired = state.vehicles.filter((v) => {
+          if (!v.insuranceExpiry) return false;
+          return new Date(v.insuranceExpiry) < new Date();
+        }).length;
+        const expiringSoon = state.vehicles.filter((v) => {
+          if (!v.insuranceExpiry) return false;
+          const diff = new Date(v.insuranceExpiry) - new Date();
+          return diff >= 0 && diff <= 30 * 24 * 60 * 60 * 1000;
+        }).length;
+
+        const cards = [
+          { label: "Active Vehicles", value: totalActive },
+          { label: "In Maintenance", value: maintenance },
+          { label: "Expired Insurance", value: expired },
+          { label: "Expiring Soon", value: expiringSoon },
+        ];
+
+        kpiRow.innerHTML = cards
+          .map(
+            (card) => `
+          <article class="card" style="flex:1 1 220px;">
+            <h2>${card.label}</h2>
+            <p class="bold" style="font-size:1.5rem;">${card.value}</p>
+          </article>
+        `
+          )
+          .join("");
+      }
+
+      function renderAlerts() {
+        const expired = state.vehicles.filter((v) => {
+          if (!v.insuranceExpiry) return false;
+          return new Date(v.insuranceExpiry) < new Date();
+        });
+        const expiring = state.vehicles.filter((v) => {
+          if (!v.insuranceExpiry) return false;
+          const diff = new Date(v.insuranceExpiry) - new Date();
+          return diff >= 0 && diff <= 30 * 24 * 60 * 60 * 1000;
+        });
+
+        const alerts = [];
+        if (expired.length) {
+          alerts.push(
+            `<div class="alert red">🚨 EXPIRED insurance: ${expired
+              .map((v) => v.plate || v.id)
+              .join(", ")}. GO AND RENEW INSURANCE.</div>`
+          );
+        }
+        if (expiring.length) {
+          alerts.push(
+            `<div class="alert amber">⚠️ Insurance expiring soon: ${expiring
+              .map((v) => v.plate || v.id)
+              .join(", ")}.</div>`
+          );
+        }
+        alertsEl.innerHTML = alerts.join("") || "";
+      }
+
+      function canEdit() {
+        return ["admin", "transport_officer"].includes(state.role);
+      }
+
+      function renderTable() {
+        if (!state.vehicles.length) {
+          emptyState.classList.remove("hidden");
+          vehiclesBody.innerHTML = "";
+          return;
+        }
+        emptyState.classList.add("hidden");
+
+        vehiclesBody.innerHTML = state.vehicles
+          .map((vehicle) => {
+            const actions = [];
+            const routeUrl = `transportroutes.html?busId=${vehicle.id}&school=${state.context.school}&year=${state.context.year}`;
+            if (canEdit()) {
+              actions.push(
+                `<button class="btn secondary" data-edit="${vehicle.id}">View / Edit</button>`
+              );
+            }
+            actions.push(
+              `<a class="btn" href="${routeUrl}" target="_blank" rel="noopener">Route</a>`
+            );
+            return `
+              <tr>
+                <td>${vehicle.plate || "—"}</td>
+                <td>
+                  ${vehicle.ownerName || "—"}<br/>
+                  <small class="muted">${vehicle.ownerPhone || ""}</small>
+                </td>
+                <td>${vehicle.capacity || "—"}</td>
+                <td>${chipForExpiry(vehicle.insuranceExpiry)}</td>
+                <td>${chipForExpiry(vehicle.roadPermitExpiry)}</td>
+                <td><span class="chip ${
+                  vehicle.status === "active"
+                    ? "ok"
+                    : vehicle.status === "maintenance"
+                    ? "warn"
+                    : "bad"
+                }">${vehicle.status || "—"}</span></td>
+                <td>${vehicle.assignedRouteId || "—"}</td>
+                <td class="table-actions">${actions.join(" ")}</td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        vehiclesBody.querySelectorAll("button[data-edit]").forEach((btn) => {
+          btn.addEventListener("click", () => openModal(btn.dataset.edit));
+        });
+      }
+
+      function resetForm() {
+        modalAlert.classList.add("hidden");
+        modalAlert.textContent = "";
+        document.getElementById("vehicleForm").reset();
+        formEls.insurancePreview.style.display = "none";
+        formEls.permitPreview.style.display = "none";
+        formEls.inspectionPreview.style.display = "none";
+        document.getElementById("assignRouteLink").classList.add("hidden");
+        state.uploads = {};
+        state.currentId = null;
+      }
+
+      function openModal(id = null) {
+        resetForm();
+        if (id) {
+          const vehicle = state.vehicles.find((v) => v.id === id);
+          if (!vehicle) return;
+          state.currentId = id;
+          document.getElementById("modalTitle").textContent = `Edit ${vehicle.plate}`;
+          formEls.plate.value = vehicle.plate || "";
+          formEls.model.value = vehicle.makeModel || "";
+          formEls.capacity.value = vehicle.capacity || "";
+          formEls.color.value = vehicle.color || "";
+          formEls.status.value = vehicle.status || "active";
+          formEls.route.value = vehicle.assignedRouteId || "";
+          formEls.ownerName.value = vehicle.ownerName || "";
+          formEls.ownerPhone.value = vehicle.ownerPhone || "";
+          formEls.ownerNotes.value = vehicle.ownerNotes || "";
+          formEls.driverUid.value = vehicle.assignedDriverUid || "";
+          formEls.provider.value = vehicle.insuranceProvider || "";
+          formEls.policy.value = vehicle.insurancePolicyNo || "";
+          formEls.expiry.value = vehicle.insuranceExpiry || "";
+          formEls.permitExpiry.value = vehicle.roadPermitExpiry || "";
+          formEls.inspectionExpiry.value = vehicle.inspectionExpiry || "";
+
+          if (vehicle.insurancePhotoUrl) {
+            formEls.insurancePreview.src = vehicle.insurancePhotoUrl;
+            formEls.insurancePreview.style.display = "block";
+          }
+          if (vehicle.roadPermitPhotoUrl) {
+            formEls.permitPreview.src = vehicle.roadPermitPhotoUrl;
+            formEls.permitPreview.style.display = "block";
+          }
+          if (vehicle.inspectionPhotoUrl) {
+            formEls.inspectionPreview.src = vehicle.inspectionPhotoUrl;
+            formEls.inspectionPreview.style.display = "block";
+          }
+
+          const routeLink = document.getElementById("assignRouteLink");
+          routeLink.href = `transportroutes.html?busId=${id}&school=${state.context.school}&year=${state.context.year}`;
+          routeLink.classList.remove("hidden");
+
+          if (
+            vehicle.insuranceExpiry &&
+            new Date(vehicle.insuranceExpiry) < new Date()
+          ) {
+            modalAlert.textContent =
+              "INSURANCE EXPIRED — GO AND RENEW INSURANCE BEFORE SERVICE.";
+            modalAlert.classList.remove("hidden");
+          }
+        } else {
+          document.getElementById("modalTitle").textContent = "Add Vehicle";
+        }
+        if (!canEdit()) {
+          document.getElementById("saveVehicleBtn").disabled = true;
+        } else {
+          document.getElementById("saveVehicleBtn").disabled = false;
+        }
+        modal.classList.remove("hidden");
+      }
+
+      function closeModal() {
+        modal.classList.add("hidden");
+      }
+
+      document.getElementById("addVehicleBtn").addEventListener("click", () => {
+        if (!canEdit()) {
+          showToast("No permission to add vehicles", "bad");
+          return;
+        }
+        openModal();
+      });
+      document.getElementById("closeModalBtn").addEventListener("click", closeModal);
+
+      function listenToUploads() {
+        [
+          ["insuranceFile", "insurancePreview"],
+          ["permitFile", "permitPreview"],
+          ["inspectionFile", "inspectionPreview"],
+        ].forEach(([fileKey, previewKey]) => {
+          formEls[fileKey].addEventListener("change", (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              formEls[previewKey].src = e.target.result;
+              formEls[previewKey].style.display = "block";
+            };
+            reader.readAsDataURL(file);
+            state.uploads[fileKey] = file;
+          });
+        });
+      }
+
+      async function uploadIfNeeded(school, year, busId) {
+        const uploads = {};
+        for (const [key, file] of Object.entries(state.uploads)) {
+          if (!file) continue;
+          const storageRef = firebase
+            .storage()
+            .ref(
+              `transport/${school}/${year}/buses/${busId}/${key}-${Date.now()}-${file.name}`
+            );
+          await storageRef.put(file);
+          uploads[key] = await storageRef.getDownloadURL();
+        }
+        return uploads;
+      }
+
+      function collectFormData() {
+        return {
+          plate: formEls.plate.value.trim(),
+          makeModel: formEls.model.value.trim(),
+          capacity: Number(formEls.capacity.value) || null,
+          color: formEls.color.value.trim(),
+          status: formEls.status.value,
+          assignedRouteId: formEls.route.value.trim() || null,
+          ownerName: formEls.ownerName.value.trim(),
+          ownerPhone: formEls.ownerPhone.value.trim(),
+          ownerNotes: formEls.ownerNotes.value.trim(),
+          assignedDriverUid: formEls.driverUid.value.trim() || null,
+          insuranceProvider: formEls.provider.value.trim(),
+          insurancePolicyNo: formEls.policy.value.trim(),
+          insuranceExpiry: formEls.expiry.value || null,
+          roadPermitExpiry: formEls.permitExpiry.value || null,
+          inspectionExpiry: formEls.inspectionExpiry.value || null,
+        };
+      }
+
+      document.getElementById("saveVehicleBtn").addEventListener("click", async () => {
+        if (!canEdit()) {
+          showToast("No permission to edit", "bad");
+          return;
+        }
+
+        const data = collectFormData();
+        if (!data.plate || !data.ownerName || !data.ownerPhone) {
+          modalAlert.textContent = "Plate, owner name and phone are required.";
+          modalAlert.classList.remove("hidden");
+          return;
+        }
+
+        const isNew = !state.currentId;
+        const dbPath = `transport/${state.context.school}/${state.context.year}/buses`;
+        const ref = isNew
+          ? firebase.database().ref(dbPath).push()
+          : firebase.database().ref(`${dbPath}/${state.currentId}`);
+        const busId = isNew ? ref.key : state.currentId;
+
+        try {
+          const uploads = await uploadIfNeeded(
+            state.context.school,
+            state.context.year,
+            busId
+          );
+          const payload = {
+            ...data,
+            insurancePhotoUrl:
+              uploads.insuranceFile ||
+              (state.currentId
+                ? state.vehicles.find((v) => v.id === state.currentId)
+                    ?.insurancePhotoUrl || null
+                : null),
+            roadPermitPhotoUrl:
+              uploads.permitFile ||
+              (state.currentId
+                ? state.vehicles.find((v) => v.id === state.currentId)
+                    ?.roadPermitPhotoUrl || null
+                : null),
+            inspectionPhotoUrl:
+              uploads.inspectionFile ||
+              (state.currentId
+                ? state.vehicles.find((v) => v.id === state.currentId)
+                    ?.inspectionPhotoUrl || null
+                : null),
+            updatedAt: Date.now(),
+            updatedBy: state.user.uid,
+          };
+
+          if (isNew) {
+            payload.createdAt = Date.now();
+            payload.createdBy = state.user.uid;
+          }
+          if (uploads.insuranceFile) {
+            payload.insuranceLastUpdatedAt = Date.now();
+            payload.insuranceLastUpdatedBy = state.user.uid;
+          }
+
+          await ref.set(payload);
+          showToast("Vehicle saved");
+          closeModal();
+        } catch (err) {
+          console.error(err);
+          modalAlert.textContent = "Failed to save vehicle.";
+          modalAlert.classList.remove("hidden");
+        }
+      });
+
+      function subscribeVehicles() {
+        if (state.unsubscribe) state.unsubscribe();
+        const path = `transport/${state.context.school}/${state.context.year}/buses`;
+        const ref = firebase.database().ref(path);
+        const listener = ref.on(
+          "value",
+          (snapshot) => {
+            const vehicles = [];
+            snapshot.forEach((child) => {
+              const value = child.val() || {};
+              vehicles.push({ id: child.key, ...value });
+            });
+            if (state.role === "driver") {
+              state.vehicles = vehicles.filter(
+                (v) => v.assignedDriverUid === state.user.uid
+              );
+            } else {
+              state.vehicles = vehicles;
+            }
+            renderKpis();
+            renderAlerts();
+            renderTable();
+            document.getElementById("addVehicleBtn").style.display = canEdit()
+              ? "inline-flex"
+              : "none";
+          },
+          (err) => {
+            console.error(err);
+            showToast("Failed to load vehicles", "bad");
+          }
+        );
+        state.unsubscribe = () => ref.off("value", listener);
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in first", "bad");
+            vehiclesBody.innerHTML =
+              '<tr><td colspan="8">Please sign in to view vehicles.</td></tr>';
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              const role = snapshot.val();
+              state.role = role || "guest";
+              if (!["admin", "transport_officer", "driver"].includes(state.role)) {
+                document.body.innerHTML =
+                  '<div class="alert red" style="margin:2rem;">No permission to view transport vehicles.</div>';
+                return;
+              }
+              subscribeVehicles();
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          subscribeVehicles();
+        }
+      );
+
+      listenToUploads();
+      ensureAuth();
+    </script>
+  </body>
+</html>

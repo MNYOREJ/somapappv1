@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parent Transport Hub</title>
+    <link rel="stylesheet" href="../../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:900px; margin:0 auto;">
+      <section id="welcome" class="card">
+        <h2>Transport Hub kwa Wazazi</h2>
+        <p class="muted">Fuatilia basi la mwanao na malipo ya mwezi.</p>
+      </section>
+      <section class="row mt-2">
+        <article class="card" style="flex:1 1 260px;">
+          <h2>Track Bus</h2>
+          <p class="muted">Ramani ya basi, ETA na taarifa za safari.</p>
+          <a class="btn" href="transporttrack_bus.html">Open map</a>
+        </article>
+        <article class="card" style="flex:1 1 260px;">
+          <h2>Transport Finance</h2>
+          <p class="muted">Malipo ya kila mwezi, madai na salio.</p>
+          <a class="btn" href="transportfinance_hub.html">Open finance</a>
+        </article>
+      </section>
+      <section class="card mt-2" id="childInfo"></section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../../modules/transport_helpers.js"></script>
+    <script src="../../modules/transport_context.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const childInfo = document.getElementById("childInfo");
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in to continue");
+            childInfo.innerHTML =
+              '<div class="muted">Please sign in to view transport hub.</div>';
+            return;
+          }
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              const role = snapshot.val();
+              if (role !== "parent") {
+                childInfo.innerHTML =
+                  '<div class="alert red">Only parents can open this page.</div>';
+                return;
+              }
+              loadParent(user.uid);
+            })
+            .catch((err) => {
+              console.error(err);
+              childInfo.innerHTML =
+                '<div class="alert red">Failed to load account.</div>';
+            });
+        });
+      }
+
+      function loadParent(uid) {
+        firebase
+          .database()
+          .ref(TransportHelpers.paths.parent(uid))
+          .on(
+            "value",
+            (snapshot) => {
+              const data = snapshot.val() || {};
+              const vehicle = data.childVehicle || "—";
+              const studentName = data.childName || "Mtoto";
+              childInfo.innerHTML = `
+                <h2>${studentName}</h2>
+                <p>
+                  Vehicle: <strong>${vehicle}</strong><br/>
+                  Stop: ${data.stop?.name || "Set your stop in map tab"}<br/>
+                  Payment status: ${data.paymentStatus || "—"}
+                </p>
+              `;
+            },
+            (err) => {
+              console.error(err);
+              childInfo.innerHTML =
+                '<div class="alert red">Failed to fetch transport data.</div>';
+            }
+          );
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        () => {}
+      );
+      ensureAuth();
+    </script>
+  </body>
+</html>

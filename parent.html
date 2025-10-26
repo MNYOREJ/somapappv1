@@ -400,6 +400,7 @@
             <button class="btn" id="quickGenerateId"><i class="fas fa-id-card-clip mr-2"></i>Generate ID</button>
             <button class="btn-ghost" id="quickReportCard"><i class="fas fa-file-pdf mr-2"></i>Open Current Report Card</button>
             <button class="btn-ghost" id="quickFees"><i class="fas fa-coins mr-2"></i>View Fees Info</button>
+            <button class="btn-ghost hidden" id="quickTransport"><i class="fas fa-bus mr-2"></i>Open Transport Hub</button>
             <button class="btn-ghost" id="viewMarketSmall"><i class="fas fa-basket-shopping mr-2"></i>Open Market</button>
           </div>
         </article>
@@ -487,6 +488,7 @@
   const quickGenerateId = q('#quickGenerateId');
   const quickReportCard = q('#quickReportCard');
   const quickFees = q('#quickFees');
+  const quickTransport = q('#quickTransport');
   const openMarketTop = q('#openMarketTop');
   const viewMarketSmall = q('#viewMarketSmall');
 
@@ -563,6 +565,7 @@
     await loadGraduationSummary(adm, classLevel);
     await loadAttendanceForStudent(currentStudent.admissionNumber);
     await loadScoresForStudent(currentStudent.admissionNumber);
+    await checkTransportAccess(adm);
 
     renderAttendanceChart();
     renderScoresChart();
@@ -654,6 +657,35 @@
     if (statReceiptMeta)  statReceiptMeta.textContent  = lastTs
       ? ('Last: ' + new Date(lastTs).toLocaleDateString())
       : 'No receipts yet';
+  }
+
+  async function checkTransportAccess(studentId){
+    if (!quickTransport) return;
+    quickTransport.classList.add('hidden');
+    try{
+      const primaryKey = sanitizeKey(studentId);
+      let exists = false;
+      if (primaryKey){
+        const directSnap = await db.ref(`transport_enrollments/${primaryKey}`).once('value');
+        exists = directSnap.exists();
+      }
+      if (!exists){
+        const querySnap = await db.ref('transport_enrollments').orderByChild('studentId').equalTo(studentId).once('value');
+        exists = querySnap.exists();
+      }
+      if (exists){
+        quickTransport.classList.remove('hidden');
+        if (!quickTransport.dataset.bound){
+          quickTransport.dataset.bound = '1';
+          quickTransport.addEventListener('click', ()=>{
+            const url = `transporthtml/parent/transporthub.html?student=${encodeURIComponent(studentId)}`;
+            window.location.href = url;
+          });
+        }
+      }
+    }catch(err){
+      console.warn('transport enrolment lookup failed', err);
+    }
   }
 
   async function loadGraduationSummary(admNo, classLevel) {

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Track Bus · Parent View</title>
+    <link rel="stylesheet" href="../../css/transport.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-messaging-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1rem;">
+      <section class="card">
+        <div class="flex space center">
+          <div>
+            <h2 style="margin:0;">Ramani ya basi</h2>
+            <small class="muted" id="busInfo">Loading…</small>
+          </div>
+          <div class="chip warn" id="statusChip">Waiting</div>
+        </div>
+        <div class="flex mt-2" style="gap:0.75rem; flex-wrap:wrap;">
+          <button class="btn" id="useLocationBtn" type="button">
+            Tumia Eneo Langu (GPS)
+          </button>
+          <button class="btn secondary" id="enablePushBtn" type="button">
+            Enable push alerts
+          </button>
+        </div>
+      </section>
+      <section class="card mt-2" style="padding:0;">
+        <div id="map"></div>
+      </section>
+      <section class="card mt-2" id="etaCard"></section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../../modules/transport_helpers.js"></script>
+    <script src="../../modules/transport_context.js"></script>
+    <script src="../../modules/parent_view.js"></script>
+    <script src="../../modules/fcm_client.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const busInfo = document.getElementById("busInfo");
+      const statusChip = document.getElementById("statusChip");
+      const etaCard = document.getElementById("etaCard");
+      const contextBar = document.getElementById("contextBar");
+
+      let map;
+      let busMarker;
+      let stopMarker;
+      let unsubscribe = null;
+      let parentProfile = null;
+      let pendingReminderId = null;
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function ensureMap() {
+        if (map) return;
+        map = L.map("map").setView([-3.3869, 36.683], 13);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "&copy; OpenStreetMap",
+        }).addTo(map);
+      }
+
+      function updateStatus(latest) {
+        if (!latest) {
+          statusChip.className = "chip warn";
+          statusChip.textContent = "No data yet";
+          return;
+        }
+        const chip = ParentView.statusChip(latest.ts, latest.status);
+        statusChip.className = `chip ${chip.tone}`;
+        statusChip.textContent = chip.text;
+      }
+
+      function updateMap(latest) {
+        ensureMap();
+        if (!latest) return;
+        if (!busMarker) {
+          busMarker = L.marker([latest.lat, latest.lng]).addTo(map);
+        } else {
+          busMarker.setLatLng([latest.lat, latest.lng]);
+        }
+        busMarker.bindPopup("Bus position").openPopup();
+        if (!stopMarker && parentProfile?.stop) {
+          stopMarker = L.marker([parentProfile.stop.lat, parentProfile.stop.lng], {
+            icon: L.icon({
+              iconUrl:
+                "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+              iconAnchor: [12, 41],
+            }),
+          })
+            .addTo(map)
+            .bindPopup("Your stop");
+        }
+        map.panTo([latest.lat, latest.lng]);
+      }
+
+      function updateEta(latest) {
+        if (!latest || !parentProfile?.stop) {
+          etaCard.innerHTML =
+            '<div class="muted">Set your stop to get ETA. <br/>Weka kituo chako (Set your stop) ili uone ETA sahihi.</div>';
+          return;
+        }
+        const distanceKm = ParentView.computeHaversineKm(
+          latest.lat,
+          latest.lng,
+          parentProfile.stop.lat,
+          parentProfile.stop.lng
+        );
+        const etaMinutes = ParentView.etaMinutes(distanceKm);
+        etaCard.innerHTML = `
+          <h2>ETA ≈ ${etaMinutes} dakika</h2>
+          <p>Umbali: ${(distanceKm * 1000).toFixed(0)} m · Stop: ${parentProfile.stop.name || "Unnamed"}</p>
+        `;
+        scheduleReminder(etaMinutes);
+      }
+
+      function scheduleReminder(etaMinutes) {
+        if (pendingReminderId) {
+          clearTimeout(pendingReminderId);
+        }
+        if (etaMinutes < 1 || etaMinutes > 15) return;
+        pendingReminderId = setTimeout(() => {
+          showToast(`🚍 Basi ~${etaMinutes} dakika kufika ${parentProfile.stop?.name || ""}`);
+        }, 2 * 60 * 1000);
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged(async (user) => {
+          if (!user) {
+            showToast("Sign in to track");
+            return;
+          }
+          const roleSnap = await firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get();
+          if (roleSnap.val() !== "parent") {
+            showToast("Parent account required");
+            return;
+          }
+          subscribeParent(user.uid);
+        });
+      }
+
+      async function subscribeParent(uid) {
+        firebase
+          .database()
+          .ref(TransportHelpers.paths.parent(uid))
+          .on(
+            "value",
+            (snapshot) => {
+              parentProfile = snapshot.val() || {};
+              busInfo.textContent = `Vehicle ${parentProfile.childVehicle || "—"}`;
+              if (stopMarker && parentProfile?.stop) {
+                stopMarker.setLatLng([
+                  parentProfile.stop.lat,
+                  parentProfile.stop.lng,
+                ]);
+              } else if (parentProfile?.stop && map) {
+                stopMarker = L.marker(
+                  [parentProfile.stop.lat, parentProfile.stop.lng],
+                  {
+                    icon: L.icon({
+                      iconUrl:
+                        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+                      iconAnchor: [12, 41],
+                    }),
+                  }
+                )
+                  .addTo(map)
+                  .bindPopup("Your stop");
+              }
+              attachBus(parentProfile.childVehicle);
+            },
+            (err) => {
+              console.error(err);
+              showToast("Failed to load profile");
+            }
+          );
+      }
+
+      function attachBus(vehicleId) {
+        if (unsubscribe) unsubscribe();
+        if (!vehicleId) {
+          updateStatus(null);
+          etaCard.innerHTML = '<div class="muted">No vehicle assigned yet.</div>';
+          return;
+        }
+        unsubscribe = ParentView.attachBusLatest(vehicleId, (latest) => {
+          updateStatus(latest);
+          updateMap(latest);
+          updateEta(latest);
+        });
+      }
+
+      document.getElementById("useLocationBtn").addEventListener("click", () => {
+        if (!navigator.geolocation) {
+          showToast("Geolocation not supported");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              await ParentView.saveParentStop(firebase.auth().currentUser.uid, {
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+                name: "Home stop",
+              });
+              showToast("Stop saved");
+            } catch (err) {
+              console.error(err);
+              showToast("Failed to save stop");
+            }
+          },
+          (err) => {
+            console.error(err);
+            showToast("Location blocked");
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      });
+
+      document.getElementById("enablePushBtn").addEventListener("click", async () => {
+        try {
+          const uid = firebase.auth().currentUser?.uid;
+          if (!uid) {
+            showToast("Sign in first");
+            return;
+          }
+          await FCMClient.initFCMForParent(uid);
+          showToast("Push notifications enabled");
+        } catch (err) {
+          console.error(err);
+          showToast(err.message || "Failed to enable push");
+        }
+      });
+
+      TransportContext.attachContextSelectors(contextBar, () => {});
+      ensureMap();
+      ensureAuth();
+    </script>
+  </body>
+</html>

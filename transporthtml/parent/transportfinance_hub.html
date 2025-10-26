@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Finance · Parent</title>
+    <link rel="stylesheet" href="../../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1000px; margin:0 auto;">
+      <section class="card">
+        <h2>Transport schedule ${new Date().getFullYear()}</h2>
+        <div class="table-responsive">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Multiplier</th>
+                <th>Expected</th>
+              </tr>
+            </thead>
+            <tbody id="scheduleBody"></tbody>
+          </table>
+          <div class="bold mt-1" id="scheduleTotals"></div>
+        </div>
+      </section>
+
+      <section class="card mt-2">
+        <h2>Make Payment Claim</h2>
+        <form id="claimForm" class="grid two">
+          <div>
+            <label for="monthSelect">Month</label>
+            <select id="monthSelect"></select>
+          </div>
+          <div>
+            <label for="yearInput">Year</label>
+            <input id="yearInput" type="number" />
+          </div>
+          <div>
+            <label for="amountInput">Amount paid</label>
+            <input id="amountInput" type="number" min="0" />
+          </div>
+          <div>
+            <label for="payModeInput">Payment mode</label>
+            <input id="payModeInput" placeholder="bank / simu / cash" />
+          </div>
+          <div>
+            <label for="bankInput">Bank / Provider</label>
+            <input id="bankInput" />
+          </div>
+          <div>
+            <label for="agentInput">Agent / Branch</label>
+            <input id="agentInput" />
+          </div>
+          <div>
+            <label for="tranNumInput">TRAN number</label>
+            <input id="tranNumInput" required />
+          </div>
+          <div>
+            <label for="tranDateInput">Transaction date</label>
+            <input id="tranDateInput" type="date" />
+          </div>
+          <div>
+            <label for="phoneInput">Phone</label>
+            <input id="phoneInput" />
+          </div>
+          <div>
+            <label for="descriptionInput">Description</label>
+            <textarea id="descriptionInput" rows="3"></textarea>
+          </div>
+          <div class="grid two" style="grid-column: span 2;">
+            <div>
+              <label for="evidenceInput">Receipt photo (optional)</label>
+              <input id="evidenceInput" type="file" accept="image/*" capture="environment" />
+            </div>
+            <img id="evidencePreview" alt="" style="display:none; max-height:160px; object-fit:contain;" />
+          </div>
+          <div style="grid-column: span 2; text-align:right;">
+            <button class="btn" type="submit">Submit claim</button>
+          </div>
+        </form>
+        <div id="formError" class="alert red hidden"></div>
+      </section>
+
+      <section class="card mt-2">
+        <h2>Claim History</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Amount</th>
+              <th>Tran</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="claimsBody"></tbody>
+        </table>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../../modules/transport_helpers.js"></script>
+    <script src="../../modules/transport_context.js"></script>
+    <script src="../../modules/transport_pricing.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const formError = document.getElementById("formError");
+      const scheduleBody = document.getElementById("scheduleBody");
+      const scheduleTotals = document.getElementById("scheduleTotals");
+      const claimsBody = document.getElementById("claimsBody");
+
+      const refs = {
+        month: document.getElementById("monthSelect"),
+        year: document.getElementById("yearInput"),
+        amount: document.getElementById("amountInput"),
+        payMode: document.getElementById("payModeInput"),
+        bank: document.getElementById("bankInput"),
+        agent: document.getElementById("agentInput"),
+        tranNum: document.getElementById("tranNumInput"),
+        tranDate: document.getElementById("tranDateInput"),
+        phone: document.getElementById("phoneInput"),
+        description: document.getElementById("descriptionInput"),
+        evidence: document.getElementById("evidenceInput"),
+        evidencePreview: document.getElementById("evidencePreview"),
+        form: document.getElementById("claimForm"),
+      };
+
+      const state = {
+        user: null,
+        role: null,
+        parent: null,
+        context: TransportContext.getContext(),
+        claims: [],
+      };
+
+      const MONTH_NAMES = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in to continue", "bad");
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              const role = snapshot.val();
+              if (role !== "parent") {
+                showToast("Only parents can open this page", "bad");
+                return;
+              }
+              loadParent(user.uid);
+              loadClaims(user.uid);
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      function loadParent(uid) {
+        firebase
+          .database()
+          .ref(TransportHelpers.paths.parent(uid))
+          .on(
+            "value",
+            (snapshot) => {
+              state.parent = snapshot.val() || {};
+              renderSchedule();
+            },
+            (err) => {
+              console.error(err);
+              showToast("Failed to load profile", "bad");
+            }
+          );
+      }
+
+      function renderSchedule() {
+        if (!state.parent) return;
+        refs.year.value = state.context.year;
+        refs.month.innerHTML = MONTH_NAMES.map(
+          (name, index) =>
+            `<option value="${index + 1}" ${
+              index + 1 === state.context.month ? "selected" : ""
+            }>${name}</option>`
+        ).join("");
+        const schedule = TransportPricing.scheduleForYear(
+          state.context.year,
+          state.parent.amStop,
+          state.parent.pmStop
+        );
+        scheduleBody.innerHTML = schedule.months
+          .map(
+            (month) => `
+              <tr>
+                <td>${month.month}</td>
+                <td>${month.multiplier}</td>
+                <td>${TransportHelpers.fmtTZS(month.expected)}</td>
+              </tr>
+            `
+          )
+          .join("");
+        scheduleTotals.textContent = `Total expected ${TransportHelpers.fmtTZS(
+          schedule.totals.expected
+        )}`;
+      }
+
+      refs.evidence.addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          refs.evidencePreview.src = e.target.result;
+          refs.evidencePreview.style.display = "block";
+        };
+        reader.readAsDataURL(file);
+      });
+
+      async function uploadEvidence(claimId) {
+        const file = refs.evidence.files[0];
+        if (!file) return null;
+        const ref = firebase
+          .storage()
+          .ref(`transport_claims/${state.user.uid}/${claimId}-${file.name}`);
+        await ref.put(file);
+        return ref.getDownloadURL();
+      }
+
+      refs.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        formError.classList.add("hidden");
+        try {
+          const tranNum = refs.tranNum.value.trim();
+          const meta = {
+            byUid: state.user.uid,
+            claimId: null,
+          };
+          await TransportHelpers.reserveTranOrFail(tranNum, meta);
+          const claimsRef = firebase.database().ref("transport_payments_claims").push();
+          const claimId = claimsRef.key;
+          meta.claimId = claimId;
+          const payload = {
+            id: claimId,
+            parentUid: state.user.uid,
+            studentId: state.parent?.childId || state.parent?.studentId || "",
+            studentName: state.parent?.childName || "",
+            vehicleId: state.parent?.childVehicle || "",
+            month: Number(refs.month.value),
+            year: Number(refs.year.value),
+            amount: Number(refs.amount.value || 0),
+            payMode: refs.payMode.value.trim(),
+            bankName: refs.bank.value.trim(),
+            agent: refs.agent.value.trim(),
+            tranNum,
+            tranDate: refs.tranDate.value,
+            phone: refs.phone.value.trim(),
+            description: refs.description.value.trim(),
+            status: "PENDING",
+            school: state.parent?.school || state.context.school,
+            createdAt: Date.now(),
+          };
+
+          const evidenceUrl = await uploadEvidence(claimId);
+          if (evidenceUrl) payload.evidenceImgUrl = evidenceUrl;
+
+          await claimsRef.set(payload);
+          showToast("Claim submitted");
+          refs.form.reset();
+          refs.evidencePreview.style.display = "none";
+        } catch (err) {
+          console.error(err);
+          if (err.code === "DUPLICATE_TRAN") {
+            formError.textContent =
+              "TRAN number already used — tafadhali kagua na ujaribu tena.";
+          } else {
+            formError.textContent = "Failed to submit claim.";
+          }
+          formError.classList.remove("hidden");
+        }
+      });
+
+      function loadClaims(uid) {
+        firebase
+          .database()
+          .ref("transport_payments_claims")
+          .orderByChild("parentUid")
+          .equalTo(uid)
+          .on(
+            "value",
+            (snapshot) => {
+              const list = [];
+              snapshot.forEach((child) => {
+                list.push(child.val());
+              });
+              state.claims = list.sort((a, b) => b.createdAt - a.createdAt);
+              renderClaims();
+            },
+            (err) => {
+              console.error(err);
+              showToast("Failed to load claims", "bad");
+            }
+          );
+      }
+
+      function renderClaims() {
+        if (!state.claims.length) {
+          claimsBody.innerHTML =
+            '<tr><td colspan="4" class="muted">No claims yet.</td></tr>';
+          return;
+        }
+        claimsBody.innerHTML = state.claims
+          .map(
+            (claim) => `
+              <tr>
+                <td>${MONTH_NAMES[Number(claim.month) - 1] || claim.month} ${
+              claim.year
+            }</td>
+                <td>${TransportHelpers.fmtTZS(claim.amount || 0)}</td>
+                <td>${claim.tranNum}</td>
+                <td><span class="chip ${
+                  claim.status === "APPROVED"
+                    ? "ok"
+                    : claim.status === "REJECTED"
+                    ? "bad"
+                    : "warn"
+                }">${claim.status}</span></td>
+              </tr>
+            `
+          )
+          .join("");
+      }
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          renderSchedule();
+        }
+      );
+      ensureAuth();
+    </script>
+  </body>
+</html>

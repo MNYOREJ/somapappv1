@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Boarding Gate · No Pay No Board</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1024px; margin:0 auto;">
+      <section class="card">
+        <h2>No Pay · No Board gate</h2>
+        <div class="grid two">
+          <div>
+            <label for="vehicleSelect">Vehicle</label>
+            <select id="vehicleSelect"></select>
+          </div>
+          <div>
+            <label for="tripSelect">Trip</label>
+            <select id="tripSelect">
+              <option value="AM">Morning (AM)</option>
+              <option value="PM">Afternoon (PM)</option>
+              <option value="EXTRA">Extra trip</option>
+            </select>
+          </div>
+        </div>
+        <label class="mt-2" for="searchInput">Search student or admission no</label>
+        <input id="searchInput" placeholder="Type at least 2 letters" />
+        <div id="results" class="card mt-1" style="max-height:220px; overflow:auto;"></div>
+      </section>
+
+      <section id="decisionCard" class="card mt-2 hidden"></section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const resultsEl = document.getElementById("results");
+      const decisionCard = document.getElementById("decisionCard");
+      const vehicleSelect = document.getElementById("vehicleSelect");
+      const tripSelect = document.getElementById("tripSelect");
+      const searchInput = document.getElementById("searchInput");
+
+      const state = {
+        user: null,
+        role: null,
+        context: TransportContext.getContext(),
+        enrollments: [],
+        selected: null,
+        buses: [],
+      };
+
+      function showToast(message, tone = "ok") {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function canUseGate() {
+        return ["admin", "transport_officer", "gate_officer"].includes(state.role);
+      }
+
+      function loadBuses() {
+        const path = `transport/${state.context.school}/${state.context.year}/buses`;
+        firebase
+          .database()
+          .ref(path)
+          .once("value")
+          .then((snapshot) => {
+            const items = [];
+            snapshot.forEach((child) => {
+              items.push({ id: child.key, ...(child.val() || {}) });
+            });
+            state.buses = items;
+            vehicleSelect.innerHTML = items
+              .map(
+                (bus) =>
+                  `<option value="${bus.id}">${bus.plate || bus.id}</option>`
+              )
+              .join("");
+          });
+      }
+
+      function loadEnrollments() {
+        firebase
+          .database()
+          .ref("transport_enrollments")
+          .once("value")
+          .then((snapshot) => {
+            const list = [];
+            snapshot.forEach((child) => {
+              const value = child.val() || {};
+              if (value.school && value.school !== state.context.school) return;
+              if (value.year && Number(value.year) !== Number(state.context.year))
+                return;
+              list.push({ id: child.key, ...value });
+            });
+            state.enrollments = list;
+          })
+          .catch((err) => {
+            console.error(err);
+            showToast("Failed to load enrollments", "bad");
+          });
+      }
+
+      function renderResults(query) {
+        if (!query || query.length < 2) {
+          resultsEl.innerHTML =
+            '<div class="muted">Type at least 2 characters to search.</div>';
+          return;
+        }
+        const hits = state.enrollments.filter((en) => {
+          const str =
+            `${en.studentName || ""} ${en.studentId || ""} ${en.admissionNo || ""}`.toLowerCase();
+          return str.includes(query.toLowerCase());
+        });
+        if (!hits.length) {
+          resultsEl.innerHTML = '<div class="muted">No matches.</div>';
+          return;
+        }
+        resultsEl.innerHTML = hits
+          .map(
+            (en) => `
+              <div class="card" data-student="${en.studentId}" style="margin-bottom:0.5rem; cursor:pointer;">
+                <strong>${en.studentName || "Unknown"}</strong><br/>
+                <small>${en.studentId || ""} · ${en.route || ""}</small>
+              </div>
+            `
+          )
+          .join("");
+        resultsEl.querySelectorAll("[data-student]").forEach((el) => {
+          el.addEventListener("click", () => {
+            const studentId = el.dataset.student;
+            const selected = state.enrollments.find((en) => en.studentId === studentId);
+            state.selected = selected;
+            fetchLedger(selected);
+          });
+        });
+      }
+
+      function fetchLedger(enrollment) {
+        if (!enrollment) return;
+        const path = TransportHelpers.paths.ledgerMonth(
+          enrollment.studentId,
+          state.context.year,
+          state.context.month
+        );
+        firebase
+          .database()
+          .ref(path)
+          .once("value")
+          .then((snapshot) => {
+            const ledger = snapshot.val() || {};
+            const balance = Number(ledger.balance ?? (ledger.expected || 0) - (ledger.paid || 0));
+            const allowed = balance <= 0;
+            renderDecision(enrollment, ledger, balance, allowed);
+          })
+          .catch((err) => {
+            console.error(err);
+            showToast("Failed to load ledger", "bad");
+          });
+      }
+
+      function renderDecision(enrollment, ledger, balance, allowed) {
+        decisionCard.classList.remove("hidden");
+        if (allowed) {
+          decisionCard.innerHTML = `
+            <div class="alert ok" style="background:rgba(22,163,74,0.12); color:#065f46;">
+              AMERUHUSIWA · balance ${TransportHelpers.fmtTZS(0)}
+            </div>
+            <p><strong>${enrollment.studentName}</strong><br/>Vehicle: ${
+              enrollment.vehicleId || "—"
+            } · Stop: ${enrollment.amStop || enrollment.pmStop || "—"}</p>
+            <button class="btn" id="markBoardedBtn">Mark as boarded</button>
+          `;
+          document.getElementById("markBoardedBtn").addEventListener("click", () =>
+            logBoarding(enrollment, true, "OK")
+          );
+        } else {
+          decisionCard.innerHTML = `
+            <div class="alert red">
+              HAKURUHUSIWA KUPANDA — MALIPO HAYAJAKAMILIKA<br/>
+              Balance: ${TransportHelpers.fmtTZS(balance)}
+            </div>
+            <button class="btn danger" id="overrideBtn">Override boarding</button>
+          `;
+          document.getElementById("overrideBtn").addEventListener("click", () => {
+            const reason = prompt("Why override? (will be logged)");
+            if (reason === null) return;
+            logBoarding(enrollment, false, reason || "OVERRIDE");
+          });
+        }
+      }
+
+      function logBoarding(enrollment, allowed, reason) {
+        const vehicleId =
+          vehicleSelect.value || enrollment.vehicleId || state.buses[0]?.id || "unknown";
+        const tripId = tripSelect.value || "AM";
+        const ymd = TransportHelpers.todayYMD();
+        const path = TransportHelpers.paths.boardingDayVehicleTrip(
+          ymd,
+          vehicleId,
+          tripId
+        );
+        firebase
+          .database()
+          .ref(`${path}/scans`)
+          .push({
+            studentId: enrollment.studentId,
+            studentName: enrollment.studentName || "",
+            allowed,
+            reason,
+            by: state.user.uid,
+            ts: Date.now(),
+          })
+          .then(() => {
+            showToast(allowed ? "Boarding recorded" : "Override logged");
+          })
+          .catch((err) => {
+            console.error(err);
+            showToast("Failed to log boarding", "bad");
+          });
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in first", "bad");
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}/role`)
+            .get()
+            .then((snapshot) => {
+              state.role = snapshot.val() || "guest";
+              if (!canUseGate()) {
+                document.body.innerHTML =
+                  '<div class="alert red" style="margin:2rem;">No permission for boarding gate.</div>';
+                return;
+              }
+              loadBuses();
+              loadEnrollments();
+            })
+            .catch((err) => {
+              console.error(err);
+              showToast("Failed to verify user", "bad");
+            });
+        });
+      }
+
+      searchInput.addEventListener("input", () => renderResults(searchInput.value));
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          loadBuses();
+          loadEnrollments();
+          decisionCard.classList.add("hidden");
+          resultsEl.innerHTML = "";
+        }
+      );
+      ensureAuth();
+    </script>
+  </body>
+</html>

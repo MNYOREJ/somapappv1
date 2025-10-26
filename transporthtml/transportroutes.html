@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Transport Routes · AM & PM runs</title>
+    <link rel="stylesheet" href="../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
+      <section class="card">
+        <div class="flex space center">
+          <h2 style="margin:0;">Route planner</h2>
+          <button class="btn" id="refreshBtn" type="button">Refresh</button>
+        </div>
+        <table class="table mt-2">
+          <thead>
+            <tr>
+              <th>Route</th>
+              <th>AM Stops</th>
+              <th>PM Stops</th>
+              <th>Fare Band</th>
+              <th>Assigned Bus</th>
+            </tr>
+          </thead>
+          <tbody id="routesBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty hidden"></div>
+      </section>
+    </main>
+
+    <script src="../modules/transport_helpers.js"></script>
+    <script src="../modules/transport_context.js"></script>
+    <script>
+      const routesBody = document.getElementById("routesBody");
+      const emptyState = document.getElementById("emptyState");
+      const state = {
+        context: TransportContext.getContext(),
+        unsubscribe: null,
+      };
+
+      function renderRoutes(routes) {
+        if (!routes.length) {
+          emptyState.textContent = `No routes captured for ${state.context.year}.`;
+          emptyState.classList.remove("hidden");
+          routesBody.innerHTML = "";
+          return;
+        }
+        emptyState.classList.add("hidden");
+        routesBody.innerHTML = routes
+          .map((route) => {
+            const amStops = Array.isArray(route.amStops) ? route.amStops.join(", ") : route.amStops || "—";
+            const pmStops = Array.isArray(route.pmStops) ? route.pmStops.join(", ") : route.pmStops || "—";
+            return `
+              <tr>
+                <td>
+                  ${route.name || route.id || "Route"}
+                  <div class="muted text-sm">${route.description || ""}</div>
+                </td>
+                <td>${amStops}</td>
+                <td>${pmStops}</td>
+                <td>${route.fareBand || "—"}</td>
+                <td>${route.vehicleId || "—"}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function subscribeRoutes() {
+        if (state.unsubscribe) state.unsubscribe();
+        const path = `transport/${state.context.school}/${state.context.year}/routes`;
+        const ref = firebase.database().ref(path);
+        const listener = ref.on(
+          "value",
+          (snapshot) => {
+            const rows = [];
+            snapshot.forEach((child) => {
+              rows.push({ id: child.key, ...(child.val() || {}) });
+            });
+            renderRoutes(rows);
+          },
+          (err) => {
+            console.error(err);
+            emptyState.textContent = "Failed to load routes.";
+            emptyState.classList.remove("hidden");
+          }
+        );
+        state.unsubscribe = () => ref.off("value", listener);
+      }
+
+      document.getElementById("refreshBtn").addEventListener("click", subscribeRoutes);
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => {
+          state.context = ctx;
+          subscribeRoutes();
+        }
+      );
+      subscribeRoutes();
+    </script>
+  </body>
+</html>

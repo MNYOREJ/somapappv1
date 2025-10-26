@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Driver Fuel Request</title>
+    <link rel="stylesheet" href="../../css/transport.css" />
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+        authDomain: "somaptestt.firebaseapp.com",
+        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+        projectId: "somaptestt",
+        storageBucket: "somaptestt.appspot.com",
+        messagingSenderId: "105526245138",
+        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      };
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    </script>
+  </head>
+  <body>
+    <div id="contextBar" class="bar"></div>
+    <main style="padding:1.5rem; max-width:720px; margin:0 auto;">
+      <section class="card">
+        <h2>Fuel request</h2>
+        <p class="muted">Jaza takwimu zote kwa usahihi. Mfumo utaweka bendera kama mafuta ni mengi kuliko safari.</p>
+        <form id="fuelForm" class="grid two mt-1">
+          <div>
+            <label>Vehicle</label>
+            <input id="vehicleInput" readonly />
+          </div>
+          <div>
+            <label>Date</label>
+            <input id="dateInput" type="date" />
+          </div>
+          <div>
+            <label>Odometer (km)</label>
+            <input id="odoInput" type="number" />
+          </div>
+          <div>
+            <label>Distance since last fill (km)</label>
+            <input id="periodInput" type="number" />
+          </div>
+          <div>
+            <label>Litres requested</label>
+            <input id="litresInput" type="number" />
+          </div>
+          <div>
+            <label>Reason</label>
+            <textarea id="reasonInput" rows="3"></textarea>
+          </div>
+          <div style="grid-column: span 2; text-align:right;">
+            <button class="btn" type="submit">Submit</button>
+          </div>
+        </form>
+        <div id="formError" class="alert red hidden"></div>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="../../modules/transport_helpers.js"></script>
+    <script src="../../modules/transport_context.js"></script>
+    <script>
+      const toast = document.getElementById("toast");
+      const formError = document.getElementById("formError");
+      const vehicleInput = document.getElementById("vehicleInput");
+
+      const refs = {
+        form: document.getElementById("fuelForm"),
+        date: document.getElementById("dateInput"),
+        odo: document.getElementById("odoInput"),
+        period: document.getElementById("periodInput"),
+        litres: document.getElementById("litresInput"),
+        reason: document.getElementById("reasonInput"),
+      };
+
+      const state = {
+        user: null,
+        profile: null,
+        vehicleId: null,
+        context: TransportContext.getContext(),
+      };
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.remove("hidden");
+        setTimeout(() => toast.classList.add("hidden"), 3200);
+      }
+
+      function ensureAuth() {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (!user) {
+            showToast("Sign in first");
+            return;
+          }
+          state.user = user;
+          firebase
+            .database()
+            .ref(`users/${user.uid}`)
+            .once("value")
+            .then((snapshot) => {
+              const profile = snapshot.val() || {};
+              if (profile.role !== "driver") {
+                showToast("Driver role required", "bad");
+                refs.form.classList.add("hidden");
+                return;
+              }
+              state.profile = profile;
+              resolveVehicle();
+            });
+        });
+      }
+
+      async function resolveVehicle() {
+        const path = TransportHelpers.paths.deviceVehicle(state.user.uid);
+        const snapshot = await firebase.database().ref(path).get();
+        state.vehicleId =
+          snapshot.val() ||
+          localStorage.getItem("somap_vehicleId") ||
+          "";
+        if (!state.vehicleId) {
+          vehicleInput.value = "assign via hub";
+          showToast("No vehicle ID mapped. Use driver hub assign link.");
+        } else {
+          vehicleInput.value = state.vehicleId;
+        }
+        refs.date.value = new Date().toISOString().slice(0, 10);
+      }
+
+      refs.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        formError.classList.add("hidden");
+        if (!state.vehicleId) {
+          formError.textContent = "Vehicle missing.";
+          formError.classList.remove("hidden");
+          return;
+        }
+        try {
+          const litres = Number(refs.litres.value || 0);
+          const period = Number(refs.period.value || 0);
+          const kmPerLitreDefault = 8;
+          const expected = TransportHelpers.expectedMaxLitres(
+            period,
+            kmPerLitreDefault
+          );
+          const overMaxLitres = litres > expected && expected > 0;
+          const requestRef = firebase.database().ref("fuel_requests").push();
+          await requestRef.set({
+            vehicleId: state.vehicleId,
+            driverUid: state.user.uid,
+            driverName: state.profile?.name || "",
+            odoKm: Number(refs.odo.value || 0),
+            periodKm: period,
+            litresRequested: litres,
+            reason: refs.reason.value.trim(),
+            date: refs.date.value,
+            school: state.profile?.school || state.context.school,
+            year: state.context.year,
+            month: state.context.month,
+            status: "PENDING",
+            overMaxLitres,
+            missingDistance: period <= 0,
+            createdAt: Date.now(),
+          });
+          showToast("Fuel request sent");
+          refs.form.reset();
+          resolveVehicle();
+        } catch (err) {
+          console.error(err);
+          formError.textContent = "Failed to submit request.";
+          formError.classList.remove("hidden");
+        }
+      });
+
+      TransportContext.attachContextSelectors(
+        document.getElementById("contextBar"),
+        (ctx) => (state.context = ctx)
+      );
+      ensureAuth();
+    </script>
+  </body>
+</html>

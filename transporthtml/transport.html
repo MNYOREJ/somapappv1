@@ -32,6 +32,7 @@
       <section class="mt-3" id="alerts"></section>
     </main>
 
+    <script src="../modules/transport_roles.js"></script>
     <script src="../modules/transport_helpers.js"></script>
     <script src="../modules/transport_context.js"></script>
     <script>
@@ -40,6 +41,20 @@
       const alertsEl = document.getElementById("alerts");
 
       const subscriptions = [];
+      let totalStudentsCount = 0;
+      let transportEnrolledCount = 0;
+
+      function updateStudentKpiDisplay() {
+        const target = document.getElementById("kpi-enrollments");
+        if (!target) return;
+        if (transportEnrolledCount) {
+          target.textContent = `${transportEnrolledCount} / ${totalStudentsCount}`;
+          target.title = "Transport students / Total students";
+        } else {
+          target.textContent = totalStudentsCount;
+          target.title = "Total students";
+        }
+      }
 
       function clearSubscriptions() {
         subscriptions.forEach((unsub) => unsub && unsub());
@@ -58,11 +73,11 @@
             .ref(`users/${user.uid}/role`)
             .get()
             .then((snapshot) => {
-              const role = snapshot.val();
-              if (!["admin", "transport_officer"].includes(role)) {
+              const roleRaw = snapshot.val();
+              const role = TransportRoles.normalize(roleRaw);
+              if (!TransportRoles.canViewTransport(role)) {
                 alertsEl.innerHTML =
-                  '<div class="alert red">Hakuna ruhusa ya kuingia hapa.</div>';
-                return;
+                  '<div class="alert warn">Hakuna ruhusa ya kuingia hapa kwa akaunti hii. Wasiliana na msimamizi wa SoMAp ili kupewa haki za moduli ya usafiri.</div>';
               }
               callback(user, role);
             })
@@ -189,6 +204,20 @@
 
       function subscribeKpis(ctx) {
         clearSubscriptions();
+        totalStudentsCount = 0;
+        transportEnrolledCount = 0;
+        updateStudentKpiDisplay();
+
+        const studentsRef = firebase.database().ref("students");
+        const studentsSub = studentsRef.on(
+          "value",
+          (snapshot) => {
+            totalStudentsCount = snapshot.exists() ? snapshot.numChildren() : 0;
+            updateStudentKpiDisplay();
+          },
+          (err) => console.error(err)
+        );
+        subscriptions.push(() => studentsRef.off("value", studentsSub));
 
         const enrollRef = firebase.database().ref("transport_enrollments");
         const enrollSub = enrollRef.on(
@@ -202,7 +231,8 @@
               if (entry.year && Number(entry.year) !== Number(ctx.year)) return;
               count += 1;
             });
-            document.getElementById("kpi-enrollments").textContent = count;
+            transportEnrolledCount = count;
+            updateStudentKpiDisplay();
           },
           (err) => console.error(err)
         );

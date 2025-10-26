@@ -3,12 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Transport Payments · Approvals</title>
-    <link rel="stylesheet" href="../css/transport.css" />
+    <title>Transport Payments · Management & Debt Tracking</title>
+    <link rel="stylesheet" href="./css/transport_dark.css" />
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
@@ -23,329 +24,811 @@
     </script>
   </head>
   <body>
-    <div id="contextBar" class="bar"></div>
-    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
-      <section class="card">
-        <div class="flex space center">
-          <div>
-            <h2 style="margin:0;">Transport Fee Claims</h2>
-            <small id="claimsSummary" class="muted"></small>
-          </div>
-          <div class="chip-group">
-            <button class="btn" data-tab="PENDING">Pending</button>
-            <button class="btn secondary" data-tab="APPROVED">Approved</button>
-            <button class="btn secondary" data-tab="REJECTED">Rejected</button>
-          </div>
+    <div id="contextBar" class="bar">
+      <div>
+        <h1>💰 Transport Payments & Debt Management</h1>
+        <small>Comprehensive payment tracking and debt monitoring</small>
+      </div>
+      <div class="context-selectors">
+        <div class="date-time-display">
+          <span class="label">Payment Due Date</span>
+          <span class="value" id="dueDate">27th of current month</span>
         </div>
-        <div class="filter-bar">
-          <input id="searchInput" placeholder="Search student / tran" />
-          <select id="monthFilter">
-            <option value="">All months</option>
+        <div>
+          <label style="margin-bottom: 0.25rem; font-size: 0.75rem;">Academic Year</label>
+          <select id="yearSelect" style="min-width: 100px; padding: 0.5rem;">
+            <option value="2024">2024</option>
+            <option value="2025">2025</option>
+            <option value="2026">2026</option>
+            <option value="2027">2027</option>
+            <option value="2028">2028</option>
+            <option value="2029">2029</option>
           </select>
         </div>
-        <table class="table mt-2">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Month</th>
-              <th>Amount</th>
-              <th>Payment</th>
-              <th>TRAN</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="claimsBody"></tbody>
-        </table>
-        <div id="emptyState" class="empty hidden">Nothing to review here.</div>
+        <a href="transport.html" class="btn secondary">← Back to Dashboard</a>
+      </div>
+    </div>
+
+    <main>
+      <!-- Financial Overview KPIs -->
+      <section class="row">
+        <article class="card stat-card">
+          <div class="stat-label">Total Expected (This Month)</div>
+          <div class="stat-value" id="totalExpected">—</div>
+          <div class="stat-label" style="font-size: 0.75rem; margin-top: 0.5rem;" id="monthLabel"></div>
+        </article>
+        
+        <article class="card stat-card">
+          <div class="stat-label">Total Collected</div>
+          <div class="stat-value" id="totalCollected" style="color: var(--accent-success);">—</div>
+          <div class="stat-label" style="font-size: 0.75rem; margin-top: 0.5rem;">All transport payments</div>
+        </article>
+        
+        <article class="card stat-card">
+          <div class="stat-label">Total Transport Debt</div>
+          <div class="stat-value" id="totalDebt" style="color: var(--accent-danger);">—</div>
+          <div class="stat-label" style="font-size: 0.75rem; margin-top: 0.5rem;">Unpaid amounts</div>
+        </article>
+        
+        <article class="card stat-card">
+          <div class="stat-label">Total Expenses</div>
+          <div class="stat-value" id="totalExpenses">—</div>
+          <div class="stat-label" style="font-size: 0.75rem; margin-top: 0.5rem;">Fuel + Maintenance</div>
+        </article>
+        
+        <article class="card stat-card">
+          <div class="stat-label">Net Balance</div>
+          <div class="stat-value" id="netBalance">—</div>
+          <div class="stat-label" style="font-size: 0.75rem; margin-top: 0.5rem;">Collected - Expenses</div>
+        </article>
+      </section>
+
+      <!-- Critical Alerts -->
+      <section id="criticalAlerts" class="mt-3"></section>
+
+      <!-- Students on Transport - Payment Tracking -->
+      <section class="card mt-3">
+        <div class="flex space center mb-2">
+          <div>
+            <h2 style="margin: 0;">Students on Transport - Payment Registry</h2>
+            <small id="paymentSummary" class="muted"></small>
+          </div>
+          <div class="flex">
+            <button class="btn secondary" onclick="toggleDebtorsOnly()">
+              <span id="debtorsBtnText">Show Debtors Only</span>
+            </button>
+            <button class="btn success" onclick="exportToExcel()">📥 Export Excel</button>
+            <button class="btn" onclick="refreshData()">🔄 Refresh</button>
+          </div>
+        </div>
+
+        <div class="filter-bar">
+          <select id="classFilter">
+            <option value="">All Classes</option>
+            <option>Baby Class</option>
+            <option>Middle Class</option>
+            <option>Pre Unit Class</option>
+            <option>Class 1</option>
+            <option>Class 2</option>
+            <option>Class 3</option>
+            <option>Class 4</option>
+            <option>Class 5</option>
+            <option>Class 6</option>
+            <option>Class 7</option>
+          </select>
+          <input id="searchInput" type="text" placeholder="Search student..." style="max-width: 300px;" />
+          <select id="statusFilter">
+            <option value="">All Status</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partially Paid</option>
+            <option value="unpaid">Unpaid (DEBT)</option>
+          </select>
+        </div>
+
+        <div style="overflow-x: auto; margin-top: 1.5rem;">
+          <table class="table" id="paymentsTable">
+            <thead>
+              <tr>
+                <th>Admission No</th>
+                <th>Full Name</th>
+                <th>Class</th>
+                <th>Date Registered</th>
+                <th>Parent Contact</th>
+                <th>School Fee Total</th>
+                <th>School Fee Paid</th>
+                <th>School Debt</th>
+                <th>Debt Till (School)</th>
+                <th>Route (Morning)</th>
+                <th>Route (Evening)</th>
+                <th>Monthly Transport Fee</th>
+                <th>Transport Paid</th>
+                <th>Transport Debt</th>
+                <th>Unpaid Months</th>
+                <th>Total Combined Debt</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="paymentsBody">
+              <!-- Populated by JavaScript -->
+            </tbody>
+          </table>
+          <div id="emptyState" class="empty hidden">No students found on transport</div>
+        </div>
+      </section>
+
+      <!-- Expenses Tracking -->
+      <section class="card mt-3">
+        <h2>Transport Expenses Tracker</h2>
+        <p class="muted mb-2">Track all transport-related expenses including fuel, maintenance, repairs, etc.</p>
+
+        <div class="grid two" style="margin-bottom: 1.5rem;">
+          <div class="card">
+            <h3 style="margin-top: 0;">Quick Stats</h3>
+            <div style="display: grid; gap: 0.75rem;">
+              <div style="display: flex; justify-content: space-between;">
+                <span>Fuel Expenses:</span>
+                <span id="fuelExpenses" style="font-weight: 600;">—</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>Maintenance Expenses:</span>
+                <span id="maintenanceExpenses" style="font-weight: 600;">—</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>Other Expenses:</span>
+                <span id="otherExpenses" style="font-weight: 600;">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-top: 0;">Add New Expense</h3>
+            <div style="display: grid; gap: 0.75rem;">
+              <select id="expenseCategory">
+                <option value="">Select Category</option>
+                <option value="FUEL">Fuel</option>
+                <option value="MAINTENANCE">Maintenance</option>
+                <option value="REPAIRS">Repairs</option>
+                <option value="INSURANCE">Insurance</option>
+                <option value="PERMITS">Permits</option>
+                <option value="SALARIES">Driver Salaries</option>
+                <option value="OTHER">Other</option>
+              </select>
+              <input id="expenseAmount" type="number" min="1" placeholder="Amount (TZS)" />
+              <input id="expenseDescription" type="text" placeholder="Description" />
+              <button class="btn success" onclick="addExpense()">💾 Add Expense</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="overflow-x: auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Added By</th>
+              </tr>
+            </thead>
+            <tbody id="expensesBody">
+              <!-- Populated by JavaScript -->
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
+
+    <!-- Record Payment Modal -->
+    <div id="paymentModal" class="modal hidden">
+      <div class="modal-content">
+        <div class="flex space center mb-2">
+          <h2 style="margin: 0;">Record Transport Payment</h2>
+          <button class="btn secondary" onclick="closePaymentModal()">Close</button>
+        </div>
+
+        <div id="paymentAlert" class="alert hidden"></div>
+
+        <div style="margin-bottom: 1.5rem; padding: 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
+          <h3 style="margin: 0 0 0.5rem 0; font-size: 1rem;">Student Information</h3>
+          <div id="paymentStudentInfo"></div>
+        </div>
+
+        <div class="grid two">
+          <div>
+            <label for="paymentMonth">Payment Month</label>
+            <select id="paymentMonth" required>
+              <option value="">Select Month</option>
+              <option value="1">January</option>
+              <option value="2">February</option>
+              <option value="3">March</option>
+              <option value="4">April</option>
+              <option value="5">May</option>
+              <option value="6">June</option>
+              <option value="7">July</option>
+              <option value="8">August</option>
+              <option value="9">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="paymentAmount">Amount Paid (TZS)</label>
+            <input id="paymentAmount" type="number" min="1" required />
+          </div>
+
+          <div>
+            <label for="paymentMethod">Payment Method</label>
+            <select id="paymentMethod">
+              <option>Cash</option>
+              <option>M-Pesa</option>
+              <option>Airtel Money</option>
+              <option>TigoPesa</option>
+              <option>Bank Transfer</option>
+              <option>Cheque</option>
+              <option>Other</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="paymentReference">Reference/Transaction No</label>
+            <input id="paymentReference" type="text" placeholder="Optional" />
+          </div>
+        </div>
+
+        <div class="mt-2">
+          <label for="paymentNotes">Notes (Optional)</label>
+          <textarea id="paymentNotes" rows="3" placeholder="Any additional notes..."></textarea>
+        </div>
+
+        <div class="flex mt-2" style="justify-content: flex-end; gap: 1rem;">
+          <button class="btn secondary" onclick="closePaymentModal()">Cancel</button>
+          <button class="btn success" onclick="savePayment()">💾 Save Payment</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast hidden"></div>
 
-    <script src="../modules/transport_roles.js"></script>
-    <script src="../modules/transport_helpers.js"></script>
-    <script src="../modules/transport_context.js"></script>
-    <script src="../modules/transport_pricing.js"></script>
+    <script src="./modules/transport_roles.js"></script>
+    <script src="./modules/transport_helpers.js"></script>
+    <script src="./modules/transport_pricing.js"></script>
     <script>
-      const MONTH_NAMES = [
-        "",
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-      ];
-
-      const toast = document.getElementById("toast");
-      const claimsBody = document.getElementById("claimsBody");
-      const emptyState = document.getElementById("emptyState");
-      const summaryEl = document.getElementById("claimsSummary");
-      const searchInput = document.getElementById("searchInput");
-      const monthFilter = document.getElementById("monthFilter");
-
+      // Global State
       const state = {
         user: null,
         role: null,
-        context: TransportContext.getContext(),
-        claims: [],
-        currentTab: "PENDING",
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+        school: "SoMAp",
+        students: {},
+        transportEnrollments: {},
+        financeData: {},
+        transportPayments: {},
+        expenses: {},
+        showDebtorsOnly: false,
+        currentPaymentStudentId: null,
       };
 
+      const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const MONTH_MULTIPLIERS = TransportPricing.MONTH_MULTIPLIERS;
+
+      const toast = document.getElementById("toast");
+      const yearSelect = document.getElementById("yearSelect");
+      const classFilter = document.getElementById("classFilter");
+      const searchInput = document.getElementById("searchInput");
+      const statusFilter = document.getElementById("statusFilter");
+      const paymentsBody = document.getElementById("paymentsBody");
+
+      // Utility Functions
       function showToast(message, tone = "ok") {
         toast.textContent = message;
         toast.classList.remove("hidden");
-        toast.style.background = tone === "bad" ? "#dc2626" : "#1f2937";
-        setTimeout(() => toast.classList.add("hidden"), 3200);
+        toast.style.background = tone === "bad" ? "#ef4444" : "#10b981";
+        setTimeout(() => toast.classList.add("hidden"), 3500);
       }
 
-      function canReview() {
-        return TransportRoles.isAdmin(state.role);
+      function formatCurrency(amount) {
+        return new Intl.NumberFormat('en-TZ', { style: 'currency', currency: 'TZS', minimumFractionDigits: 0 }).format(amount || 0);
       }
 
-      function initFilters() {
-        monthFilter.innerHTML = `<option value="">All months</option>`;
-        for (let m = 1; m <= 12; m += 1) {
-          const option = document.createElement("option");
-          option.value = String(m);
-          option.textContent = MONTH_NAMES[m];
-          if (m === state.context.month) option.selected = true;
-          monthFilter.appendChild(option);
+      function formatDate(timestamp) {
+        if (!timestamp) return 'N/A';
+        const date = new Date(timestamp);
+        return date.toLocaleDateString('en-GB');
+      }
+
+      // Calculate school debt till
+      function calculateDebtTill(student) {
+        // This matches the finance.html logic
+        const feePerYear = Number(student.feePerYear) || 0;
+        const payments = student.payments || {};
+        const totalPaid = Object.values(payments).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        
+        // Simple calculation - in real app, this would match finance.html installment logic
+        const debt = Math.max(0, feePerYear - totalPaid);
+        return debt > 0 ? `Inst ${Math.min(6, Math.ceil(debt / (feePerYear / 6)))}` : '—';
+      }
+
+      // Calculate transport payment status
+      function calculateTransportStatus(enrollment, payments) {
+        const amStop = enrollment.amStop || '';
+        const pmStop = enrollment.pmStop || '';
+        
+        let totalExpected = 0;
+        let totalPaid = 0;
+        const unpaidMonths = [];
+        
+        // Calculate for each month
+        for (let month = 1; month <= 12; month++) {
+          const monthlyExpected = TransportPricing.expectedForMonth(amStop, pmStop, month);
+          totalExpected += monthlyExpected;
+          
+          const monthPayments = payments.filter(p => p.month === month);
+          const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          totalPaid += monthPaid;
+          
+          if (monthPaid < monthlyExpected && monthlyExpected > 0) {
+            unpaidMonths.push(MONTH_NAMES[month]);
+          }
         }
-
-        searchInput.addEventListener("input", renderTable);
-        monthFilter.addEventListener("change", renderTable);
-
-        document.querySelectorAll("button[data-tab]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            document.querySelectorAll("button[data-tab]").forEach((b) =>
-              b.classList.add("secondary")
-            );
-            btn.classList.remove("secondary");
-            state.currentTab = btn.dataset.tab;
-            renderTable();
-          });
-        });
+        
+        const debt = Math.max(0, totalExpected - totalPaid);
+        
+        return {
+          totalExpected,
+          totalPaid,
+          debt,
+          unpaidMonths: unpaidMonths.join(', ') || '—',
+          monthlyFee: TransportPricing.expectedForMonth(amStop, pmStop, state.month),
+        };
       }
 
-      function formatStatus(claim) {
-        const duplicate = claim.duplicateFlag ? '<span class="chip bad">DUP</span>' : "";
-        return `<span class="chip ${
-          claim.status === "APPROVED"
-            ? "ok"
-            : claim.status === "REJECTED"
-            ? "bad"
-            : "warn"
-        }">${claim.status}</span> ${duplicate}`;
-      }
+      // Render KPIs
+      function renderKPIs() {
+        let totalExpected = 0;
+        let totalCollected = 0;
+        let totalDebt = 0;
 
-      const { expectedForMonth, MONTH_MULTIPLIERS } = TransportPricing;
-
-      async function approveClaim(claimId) {
-        const claim = state.claims.find((c) => c.id === claimId);
-        if (!claim) return;
-        try {
-          const enrollmentSnap = await firebase
-            .database()
-            .ref(TransportHelpers.paths.enrollment(claim.studentId))
-            .get();
-          const enrollment = enrollmentSnap.val() || {};
-          const amStop = enrollment.amStop || claim.amStop || "";
-          const pmStop = enrollment.pmStop || claim.pmStop || "";
-          const expected = expectedForMonth(amStop, pmStop, Number(claim.month));
-          const multiplier = MONTH_MULTIPLIERS[Number(claim.month)] || 1;
-          const ledgerPath = TransportHelpers.paths.ledgerMonth(
-            claim.studentId,
-            claim.year,
-            claim.month
-          );
-          const ledgerRef = firebase.database().ref(ledgerPath);
-          await ledgerRef.transaction((current) => {
-            const existing = current || {};
-            const paid = Number(existing.paid || 0) + Number(claim.amount || 0);
-            const balance = Math.max(expected - paid, 0);
-            return {
-              ...existing,
-              expected,
-              multiplier,
-              amStop,
-              pmStop,
-              paid,
-              balance,
-              updatedAt: Date.now(),
-            };
-          });
-
-          await firebase.database().ref(TransportHelpers.paths.claim(claim.id)).update({
-            status: "APPROVED",
-            checkedBy: state.user.uid,
-            checkedAt: Date.now(),
-            expectedAtApproval: expected,
-          });
-
-          showToast("Claim approved");
-        } catch (err) {
-          console.error(err);
-          showToast("Failed to approve claim", "bad");
-        }
-      }
-
-      async function rejectClaim(claimId) {
-        const reason = prompt("Why is this claim rejected?");
-        if (reason === null) return;
-        try {
-          await firebase.database().ref(TransportHelpers.paths.claim(claimId)).update({
-            status: "REJECTED",
-            checkedBy: state.user.uid,
-            checkedAt: Date.now(),
-            rejectReason: reason,
-          });
-          showToast("Claim rejected");
-        } catch (err) {
-          console.error(err);
-          showToast("Failed to reject claim", "bad");
-        }
-      }
-
-      function actionButtons(claim) {
-        if (!canReview() || claim.status !== "PENDING") {
-          return "";
-        }
-        return `
-          <div class="table-actions">
-            <button class="btn" data-approve="${claim.id}">Approve</button>
-            <button class="btn danger" data-reject="${claim.id}">Reject</button>
-          </div>
-        `;
-      }
-
-      function renderTable() {
-        const tabClaims = state.claims.filter(
-          (claim) => claim.status === state.currentTab
-        );
-        const query = searchInput.value.toLowerCase();
-        const month = monthFilter.value;
-
-        const filtered = tabClaims.filter((claim) => {
-          const matchesSearch =
-            !query ||
-            (claim.studentName || "").toLowerCase().includes(query) ||
-            (claim.studentId || "").toLowerCase().includes(query) ||
-            (claim.tranNum || "").toLowerCase().includes(query);
-          const matchesMonth = !month || String(claim.month) === month;
-          return matchesSearch && matchesMonth;
+        Object.entries(state.transportEnrollments).forEach(([studentId, enrollment]) => {
+          const payments = Object.values(state.transportPayments[studentId] || {});
+          const status = calculateTransportStatus(enrollment, payments);
+          
+          totalExpected += status.monthlyFee;
+          totalCollected += status.totalPaid;
+          totalDebt += status.debt;
         });
 
-        summaryEl.textContent = `${filtered.length} ${state.currentTab.toLowerCase()} claim(s)`;
+        // Calculate expenses
+        const expensesArray = Object.values(state.expenses);
+        const totalExpenses = expensesArray.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
+        const fuelExp = expensesArray.filter(e => e.category === 'FUEL').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        const maintExp = expensesArray.filter(e => e.category === 'MAINTENANCE' || e.category === 'REPAIRS').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        const otherExp = totalExpenses - fuelExp - maintExp;
 
-        if (!filtered.length) {
-          claimsBody.innerHTML = "";
-          emptyState.classList.remove("hidden");
+        document.getElementById('totalExpected').textContent = formatCurrency(totalExpected);
+        document.getElementById('totalCollected').textContent = formatCurrency(totalCollected);
+        document.getElementById('totalDebt').textContent = formatCurrency(totalDebt);
+        document.getElementById('totalExpenses').textContent = formatCurrency(totalExpenses);
+        document.getElementById('netBalance').textContent = formatCurrency(totalCollected - totalExpenses);
+        document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
+
+        document.getElementById('fuelExpenses').textContent = formatCurrency(fuelExp);
+        document.getElementById('maintenanceExpenses').textContent = formatCurrency(maintExp);
+        document.getElementById('otherExpenses').textContent = formatCurrency(otherExp);
+
+        // Critical alerts for unpaid students
+        const criticalDebtors = Object.entries(state.transportEnrollments)
+          .filter(([studentId, enrollment]) => {
+            const payments = Object.values(state.transportPayments[studentId] || {});
+            const status = calculateTransportStatus(enrollment, payments);
+            return status.debt > 0;
+          })
+          .length;
+
+        if (criticalDebtors > 0) {
+          document.getElementById('criticalAlerts').innerHTML = `
+            <div class="alert red" style="animation: pulse 2s infinite;">
+              <strong>⚠️ ALERT:</strong> ${criticalDebtors} student(s) have unpaid transport fees. 
+              Payment deadline is the 27th of each month for the following month.
+            </div>
+          `;
+        } else {
+          document.getElementById('criticalAlerts').innerHTML = '';
+        }
+      }
+
+      // Render payments table
+      function renderPaymentsTable() {
+        const filterClass = classFilter.value;
+        const searchTerm = searchInput.value.toLowerCase();
+        const filterStatus = statusFilter.value;
+
+        const filtered = Object.entries(state.transportEnrollments).filter(([studentId, enrollment]) => {
+          const student = state.students[studentId];
+          if (!student) return false;
+
+          const matchesClass = !filterClass || student.classLevel === filterClass;
+          const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.toLowerCase();
+          const matchesSearch = !searchTerm || 
+            fullName.includes(searchTerm) || 
+            (student.admissionNumber || '').toLowerCase().includes(searchTerm);
+
+          const payments = Object.values(state.transportPayments[studentId] || {});
+          const status = calculateTransportStatus(enrollment, payments);
+          
+          let matchesStatus = true;
+          if (filterStatus === 'paid') matchesStatus = status.debt === 0;
+          if (filterStatus === 'partial') matchesStatus = status.debt > 0 && status.totalPaid > 0;
+          if (filterStatus === 'unpaid') matchesStatus = status.totalPaid === 0;
+
+          const matchesDebtFilter = !state.showDebtorsOnly || status.debt > 0;
+
+          return matchesClass && matchesSearch && matchesStatus && matchesDebtFilter;
+        });
+
+        if (filtered.length === 0) {
+          paymentsBody.innerHTML = '';
+          document.getElementById('emptyState').classList.remove('hidden');
+          document.getElementById('paymentSummary').textContent = '0 students found';
           return;
         }
-        emptyState.classList.add("hidden");
 
-        claimsBody.innerHTML = filtered
-          .map(
-            (claim) => `
-            <tr>
-              <td>
-                ${claim.studentName || "Unknown"}<br/>
-                <small class="muted">${claim.studentId || ""}</small>
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('paymentSummary').textContent = `${filtered.length} student(s) on transport`;
+
+        // Sort by debt (highest first)
+        filtered.sort((a, b) => {
+          const paymentsA = Object.values(state.transportPayments[a[0]] || {});
+          const paymentsB = Object.values(state.transportPayments[b[0]] || {});
+          const statusA = calculateTransportStatus(a[1], paymentsA);
+          const statusB = calculateTransportStatus(b[1], paymentsB);
+          return statusB.debt - statusA.debt;
+        });
+
+        paymentsBody.innerHTML = filtered.map(([studentId, enrollment]) => {
+          const student = state.students[studentId];
+          const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+          
+          const payments = Object.values(state.transportPayments[studentId] || {});
+          const transportStatus = calculateTransportStatus(enrollment, payments);
+          
+          // School finance data
+          const feePerYear = Number(student.feePerYear) || 0;
+          const schoolPayments = student.payments || {};
+          const schoolPaid = Object.values(schoolPayments).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          const schoolDebt = Math.max(0, feePerYear - schoolPaid);
+          const debtTill = calculateDebtTill(student);
+          
+          // Combined debt
+          const combinedDebt = schoolDebt + transportStatus.debt;
+          
+          // Critical status - red background if has debt
+          const isDebtor = transportStatus.debt > 0 || schoolDebt > 0;
+          const rowClass = isDebtor ? 'style="background: rgba(239, 68, 68, 0.15); font-weight: 600;"' : '';
+          
+          const debtWarning = isDebtor ? '<span style="color: var(--accent-danger); font-weight: 800; font-size: 0.75rem;">⚠️ USIMCHUKUE ANADAIWA</span>' : '';
+          
+          return `
+            <tr ${rowClass}>
+              <td>${student.admissionNumber || 'N/A'}</td>
+              <td>${fullName}${debtWarning ? '<br>' + debtWarning : ''}</td>
+              <td>${student.classLevel || 'N/A'}</td>
+              <td>${formatDate(student.timestamp || student.createdAt)}</td>
+              <td>${student.primaryParentContact || 'N/A'}</td>
+              <td>${formatCurrency(feePerYear)}</td>
+              <td>${formatCurrency(schoolPaid)}</td>
+              <td style="color: ${schoolDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">
+                ${formatCurrency(schoolDebt)}
               </td>
-              <td>${MONTH_NAMES[Number(claim.month)] || claim.month} ${claim.year}</td>
-              <td>${TransportHelpers.fmtTZS(claim.amount || 0)}</td>
-              <td>
-                ${claim.payMode || "—"}<br/>
-                <small class="muted">${claim.bankName || ""} ${claim.agent || ""}</small>
+              <td>${debtTill}</td>
+              <td>${enrollment.amStop || '—'}</td>
+              <td>${enrollment.pmStop || '—'}</td>
+              <td>${formatCurrency(transportStatus.monthlyFee)}</td>
+              <td style="color: var(--accent-success);">${formatCurrency(transportStatus.totalPaid)}</td>
+              <td style="color: ${transportStatus.debt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">
+                ${formatCurrency(transportStatus.debt)}
               </td>
-              <td>
-                ${claim.tranNum || "—"}<br/>
-                <small class="muted">${claim.tranDate || ""}</small>
+              <td style="font-size: 0.75rem;">${transportStatus.unpaidMonths}</td>
+              <td style="color: ${combinedDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'}; font-weight: 700;">
+                ${formatCurrency(combinedDebt)}
               </td>
-              <td>${formatStatus(claim)}</td>
-              <td>${actionButtons(claim)}</td>
+              <td class="table-actions">
+                <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
+                <button class="btn secondary" onclick="viewPaymentHistory('${studentId}')">📋 History</button>
+              </td>
             </tr>
-          `
-          )
-          .join("");
-
-        claimsBody.querySelectorAll("button[data-approve]").forEach((btn) => {
-          btn.addEventListener("click", () => approveClaim(btn.dataset.approve));
-        });
-        claimsBody.querySelectorAll("button[data-reject]").forEach((btn) => {
-          btn.addEventListener("click", () => rejectClaim(btn.dataset.reject));
-        });
+          `;
+        }).join('');
       }
 
-      function subscribeClaims() {
-        firebase
-          .database()
-          .ref("transport_payments_claims")
-          .on(
-            "value",
-            (snapshot) => {
-              const all = [];
-              snapshot.forEach((child) => {
-                const value = child.val() || {};
-                if (value.school && value.school !== state.context.school) return;
-                if (value.year && Number(value.year) !== Number(state.context.year))
-                  return;
-                all.push({ id: child.key, ...value });
-              });
-              state.claims = all;
-              renderTable();
-            },
-            (err) => {
-              console.error(err);
-              showToast("Failed to load claims", "bad");
-            }
-          );
+      // Toggle debtors only
+      function toggleDebtorsOnly() {
+        state.showDebtorsOnly = !state.showDebtorsOnly;
+        document.getElementById('debtorsBtnText').textContent = state.showDebtorsOnly ? 'Show All' : 'Show Debtors Only';
+        renderPaymentsTable();
       }
 
-      function ensureAuth() {
-        firebase.auth().onAuthStateChanged((user) => {
-          if (!user) {
-            showToast("Sign in first", "bad");
-            return;
-          }
-          state.user = user;
-          firebase
-            .database()
-            .ref(`users/${user.uid}/role`)
-            .get()
-            .then((snapshot) => {
-              const role = snapshot.val();
-          state.role = TransportRoles.normalize(role) || "guest";
-          if (!canReview()) {
-            document.body.innerHTML =
-              '<div class="alert red" style="margin:2rem;">No permission to manage transport payments.</div>';
-            return;
-          }
-              subscribeClaims();
-            })
-            .catch((err) => {
-              console.error(err);
-              showToast("Failed to verify user", "bad");
-            });
-        });
+      // Open payment modal
+      function openPaymentModal(studentId) {
+        state.currentPaymentStudentId = studentId;
+        const student = state.students[studentId];
+        const enrollment = state.transportEnrollments[studentId];
+        
+        if (!student || !enrollment) return;
+        
+        const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+        const payments = Object.values(state.transportPayments[studentId] || {});
+        const status = calculateTransportStatus(enrollment, payments);
+        
+        document.getElementById('paymentStudentInfo').innerHTML = `
+          <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
+            <div><strong>Name:</strong> ${fullName}</div>
+            <div><strong>Admission No:</strong> ${student.admissionNumber}</div>
+            <div><strong>Class:</strong> ${student.classLevel}</div>
+            <div><strong>Monthly Fee:</strong> ${formatCurrency(status.monthlyFee)}</div>
+            <div><strong>Total Debt:</strong> <span style="color: var(--accent-danger);">${formatCurrency(status.debt)}</span></div>
+            <div><strong>Unpaid Months:</strong> ${status.unpaidMonths}</div>
+          </div>
+        `;
+        
+        // Set current month as default
+        document.getElementById('paymentMonth').value = state.month;
+        document.getElementById('paymentAmount').value = status.monthlyFee;
+        
+        document.getElementById('paymentModal').classList.remove('hidden');
       }
 
-      TransportContext.attachContextSelectors(
-        document.getElementById("contextBar"),
-        (ctx) => {
-          state.context = ctx;
-          renderTable();
+      function closePaymentModal() {
+        document.getElementById('paymentModal').classList.add('hidden');
+        document.getElementById('paymentAlert').classList.add('hidden');
+        state.currentPaymentStudentId = null;
+      }
+
+      // Save payment
+      async function savePayment() {
+        const studentId = state.currentPaymentStudentId;
+        const month = parseInt(document.getElementById('paymentMonth').value);
+        const amount = parseFloat(document.getElementById('paymentAmount').value);
+        const method = document.getElementById('paymentMethod').value;
+        const reference = document.getElementById('paymentReference').value;
+        const notes = document.getElementById('paymentNotes').value;
+        
+        if (!month || !amount || amount <= 0) {
+          showToast('Please fill in all required fields', 'bad');
+          return;
         }
-      );
-      initFilters();
-      ensureAuth();
+        
+        try {
+          const payment = {
+            studentId,
+            month,
+            year: state.year,
+            amount,
+            method,
+            reference,
+            notes,
+            timestamp: Date.now(),
+            recordedBy: state.user.uid,
+          };
+          
+          await firebase.database()
+            .ref(`transport_payments/${studentId}`)
+            .push(payment);
+          
+          showToast('Payment recorded successfully!');
+          closePaymentModal();
+          loadAllData();
+        } catch (error) {
+          console.error('Error saving payment:', error);
+          showToast('Failed to save payment', 'bad');
+        }
+      }
+
+      // View payment history
+      function viewPaymentHistory(studentId) {
+        const student = state.students[studentId];
+        const payments = Object.values(state.transportPayments[studentId] || {})
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        
+        const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+        
+        let html = `<h3>${fullName} - Payment History</h3><table class="table mt-2"><thead><tr><th>Date</th><th>Month</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody>`;
+        
+        if (payments.length === 0) {
+          html += '<tr><td colspan="5" style="text-align: center; padding: 2rem;">No payments recorded</td></tr>';
+        } else {
+          payments.forEach(p => {
+            html += `<tr>
+              <td>${formatDate(p.timestamp)}</td>
+              <td>${MONTH_NAMES[p.month] || 'N/A'}</td>
+              <td>${formatCurrency(p.amount)}</td>
+              <td>${p.method || '—'}</td>
+              <td>${p.reference || '—'}</td>
+            </tr>`;
+          });
+        }
+        
+        html += '</tbody></table>';
+        
+        alert(html); // In a real app, this would be a modal
+      }
+
+      // Add expense
+      async function addExpense() {
+        const category = document.getElementById('expenseCategory').value;
+        const amount = parseFloat(document.getElementById('expenseAmount').value);
+        const description = document.getElementById('expenseDescription').value;
+        
+        if (!category || !amount || amount <= 0 || !description) {
+          showToast('Please fill in all fields', 'bad');
+          return;
+        }
+        
+        try {
+          const expense = {
+            category,
+            amount,
+            description,
+            timestamp: Date.now(),
+            addedBy: state.user.uid,
+            year: state.year,
+          };
+          
+          await firebase.database().ref('transport_expenses').push(expense);
+          
+          showToast('Expense added successfully!');
+          document.getElementById('expenseCategory').value = '';
+          document.getElementById('expenseAmount').value = '';
+          document.getElementById('expenseDescription').value = '';
+          loadAllData();
+        } catch (error) {
+          console.error('Error adding expense:', error);
+          showToast('Failed to add expense', 'bad');
+        }
+      }
+
+      // Render expenses table
+      function renderExpensesTable() {
+        const expensesBody = document.getElementById('expensesBody');
+        const expenses = Object.values(state.expenses)
+          .filter(exp => exp.year == state.year)
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        
+        if (expenses.length === 0) {
+          expensesBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 2rem;">No expenses recorded</td></tr>';
+          return;
+        }
+        
+        expensesBody.innerHTML = expenses.map(exp => `
+          <tr>
+            <td>${formatDate(exp.timestamp)}</td>
+            <td><span class="chip ${exp.category === 'FUEL' ? 'warn' : exp.category === 'MAINTENANCE' ? 'info' : 'ok'}">${exp.category}</span></td>
+            <td>${exp.description}</td>
+            <td>${formatCurrency(exp.amount)}</td>
+            <td>${exp.addedBy || '—'}</td>
+          </tr>
+        `).join('');
+      }
+
+      // Export to Excel
+      function exportToExcel() {
+        const data = Object.entries(state.transportEnrollments).map(([studentId, enrollment]) => {
+          const student = state.students[studentId];
+          const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+          
+          const payments = Object.values(state.transportPayments[studentId] || {});
+          const transportStatus = calculateTransportStatus(enrollment, payments);
+          
+          const feePerYear = Number(student.feePerYear) || 0;
+          const schoolPayments = student.payments || {};
+          const schoolPaid = Object.values(schoolPayments).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          const schoolDebt = Math.max(0, feePerYear - schoolPaid);
+          
+          return {
+            'Admission No': student.admissionNumber,
+            'Full Name': fullName,
+            'Class': student.classLevel,
+            'Parent Contact': student.primaryParentContact,
+            'School Fee Total': feePerYear,
+            'School Fee Paid': schoolPaid,
+            'School Debt': schoolDebt,
+            'Morning Route': enrollment.amStop || '—',
+            'Evening Route': enrollment.pmStop || '—',
+            'Monthly Transport Fee': transportStatus.monthlyFee,
+            'Transport Paid': transportStatus.totalPaid,
+            'Transport Debt': transportStatus.debt,
+            'Unpaid Months': transportStatus.unpaidMonths,
+            'Total Combined Debt': schoolDebt + transportStatus.debt,
+          };
+        });
+        
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Transport Payments');
+        XLSX.writeFile(wb, `transport_payments_${state.year}.xlsx`);
+        showToast('Export successful!');
+      }
+
+      // Load all data
+      async function loadAllData() {
+        try {
+          // Load students
+          const studentsSnap = await firebase.database().ref('students').once('value');
+          state.students = studentsSnap.val() || {};
+
+          // Load transport enrollments
+          const enrollSnap = await firebase.database().ref('transport_enrollments').once('value');
+          state.transportEnrollments = enrollSnap.val() || {};
+
+          // Load transport payments
+          const paymentsSnap = await firebase.database().ref('transport_payments').once('value');
+          state.transportPayments = paymentsSnap.val() || {};
+
+          // Load expenses
+          const expensesSnap = await firebase.database().ref('transport_expenses').once('value');
+          state.expenses = expensesSnap.val() || {};
+
+          renderKPIs();
+          renderPaymentsTable();
+          renderExpensesTable();
+        } catch (error) {
+          console.error('Error loading data:', error);
+          showToast('Error loading data', 'bad');
+        }
+      }
+
+      function refreshData() {
+        showToast('Refreshing data...');
+        loadAllData();
+      }
+
+      // Event listeners
+      yearSelect.value = state.year;
+      yearSelect.addEventListener('change', (e) => {
+        state.year = parseInt(e.target.value);
+        loadAllData();
+      });
+
+      classFilter.addEventListener('change', renderPaymentsTable);
+      searchInput.addEventListener('input', renderPaymentsTable);
+      statusFilter.addEventListener('change', renderPaymentsTable);
+
+      // Update due date display
+      const today = new Date();
+      const dueDay = 27;
+      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+      document.getElementById('dueDate').textContent = `${dueDay}th ${MONTH_NAMES[nextMonth.getMonth() + 1]} ${nextMonth.getFullYear()}`;
+
+      // Auth and initialization
+      firebase.auth().onAuthStateChanged((user) => {
+        if (!user) {
+          alert('Please sign in to access this page');
+          window.location.href = 'transport.html';
+          return;
+        }
+        
+        state.user = user;
+        
+        firebase.database().ref(`users/${user.uid}/role`).get()
+          .then((snapshot) => {
+            state.role = TransportRoles.normalize(snapshot.val());
+            
+            if (!TransportRoles.isAdmin(state.role)) {
+              alert('Access denied. Admin privileges required.');
+              window.location.href = 'transport.html';
+              return;
+            }
+            
+            loadAllData();
+          })
+          .catch((err) => {
+            console.error(err);
+            alert('Error verifying permissions');
+          });
+      });
     </script>
   </body>
 </html>

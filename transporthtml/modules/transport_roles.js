@@ -23,18 +23,36 @@
 
   function normalize(role) {
     if (role === null || role === undefined) return "";
-    return String(role).trim().toLowerCase();
+    return String(role)
+      .trim()
+      .toLowerCase()
+      .replace(/[\s\-\/\\]+/g, "_")
+      .replace(/[^a-z0-9_]/g, "")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "");
   }
 
   function isAdmin(role) {
     const norm = normalize(role);
     if (!norm) return true; // default to allow legacy admin accounts
-    return ADMIN_ROLES.has(norm);
+    if (ADMIN_ROLES.has(norm)) return true;
+    if (
+      norm.includes("admin") ||
+      norm.includes("owner") ||
+      norm.includes("director") ||
+      norm.includes("principal")
+    ) {
+      return true;
+    }
+    return false;
   }
 
   function isStaff(role) {
     const norm = normalize(role);
-    return STAFF_ROLES.has(norm) || isAdmin(norm);
+    if (!norm) return true;
+    if (STAFF_ROLES.has(norm)) return true;
+    if (norm.includes("teacher") || norm.includes("staff")) return true;
+    return isAdmin(norm);
   }
 
   function canViewTransport(role) {

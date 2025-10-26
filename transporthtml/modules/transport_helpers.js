@@ -17,13 +17,12 @@
 
   function todayYMD(tz = "Africa/Nairobi") {
     const now = new Date();
-    const parts = new Intl.DateTimeFormat("en-CA", {
+    return new Intl.DateTimeFormat("en-CA", {
       timeZone: tz,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
     }).format(now);
-    return parts;
   }
 
   const paths = {
@@ -32,6 +31,7 @@
     deviceVehicle: (uid) => `devices/${uid}/vehicleId`,
     parent: (uid) => `parents/${uid}`,
     student: (studentId) => `students/${studentId}`,
+    studentsRoot: () => "students",
     enrollment: (studentId) => `transport_enrollments/${studentId}`,
     claim: (claimId) => `transport_payments_claims/${claimId}`,
     paymentReservation: (tranNum) => `payment_reservations/${slug(tranNum)}`,
@@ -50,8 +50,8 @@
     if (!normalized) {
       throw new Error("INVALID_TRAN");
     }
-    const ref = firebase.database().ref(paths.paymentReservation(normalized));
 
+    const ref = firebase.database().ref(paths.paymentReservation(normalized));
     const result = await ref.transaction((current) => {
       if (current) {
         return; // abort
@@ -83,16 +83,25 @@
 
   function computeHaversineKm(lat1, lng1, lat2, lng2) {
     const toRad = (deg) => (deg * Math.PI) / 180;
-    const φ1 = toRad(lat1);
-    const φ2 = toRad(lat2);
-    const Δφ = toRad(lat2 - lat1);
-    const Δλ = toRad(lng2 - lng1);
+    const lat1Num = Number(lat1) || 0;
+    const lat2Num = Number(lat2) || 0;
+    const lng1Num = Number(lng1) || 0;
+    const lng2Num = Number(lng2) || 0;
+
+    const lat1Rad = toRad(lat1Num);
+    const lat2Rad = toRad(lat2Num);
+    const deltaLat = toRad(lat2Num - lat1Num);
+    const deltaLng = toRad(lng2Num - lng1Num);
+
+    const sinDeltaLat = Math.sin(deltaLat / 2);
+    const sinDeltaLng = Math.sin(deltaLng / 2);
 
     const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return RADIUS_EARTH_KM * c;
+      sinDeltaLat * sinDeltaLat +
+      Math.cos(lat1Rad) * Math.cos(lat2Rad) * sinDeltaLng * sinDeltaLng;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+    const distance = RADIUS_EARTH_KM * c;
+    return Number.isFinite(distance) ? distance : 0;
   }
 
   window.TransportHelpers = {

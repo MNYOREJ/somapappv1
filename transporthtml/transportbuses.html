@@ -51,7 +51,12 @@
 
     <main style="padding:1.5rem; max-width:1400px; margin:0 auto;">
       <!-- KPI Cards Row -->
-      <section class="row" id="kpiRow"></section>
+      <section class="row" id="kpiRow">
+        <article class="card stat-card">
+          <div class="stat-label">Loading...</div>
+          <div class="stat-value">⏳</div>
+        </article>
+      </section>
 
       <!-- Alerts Section -->
       <section id="alerts" class="mt-2"></section>
@@ -681,13 +686,23 @@
       // Reset Form
       function resetForm() {
         modalAlert.classList.add("hidden");
+        modalAlert.classList.remove("red");
         modalAlert.textContent = "";
-        document.getElementById("vehicleForm").reset();
+        
+        const form = document.getElementById("vehicleForm");
+        if (form) form.reset();
+        
         document.getElementById("insurancePreview").style.display = "none";
         document.getElementById("permitPreview").style.display = "none";
         document.getElementById("inspectionPreview").style.display = "none";
         document.getElementById("contractSection").style.display = "none";
         document.getElementById("routesContainer").innerHTML = "";
+        
+        // Reset file input requirements for new vehicle
+        document.getElementById("insuranceFile").required = true;
+        document.getElementById("permitFile").required = true;
+        document.getElementById("inspectionFile").required = true;
+        
         addRouteCard(); // Add one default route card
         state.uploads = {};
         state.currentId = null;
@@ -1081,7 +1096,11 @@
           renderAlerts();
           renderTable();
           
-          document.getElementById("addVehicleBtn").style.display = canEdit() ? "inline-flex" : "none";
+          // Update button visibility based on permissions
+          const addBtn = document.getElementById("addVehicleBtn");
+          if (addBtn) {
+            addBtn.style.display = canEdit() ? "inline-flex" : "none";
+          }
         }, (err) => {
           console.error(err);
           showToast("Failed to load vehicles", "bad");
@@ -1094,6 +1113,7 @@
           if (!user) {
             showToast("Sign in first", "bad");
             vehiclesBody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 2rem;">Please sign in to view vehicles.</td></tr>';
+            document.getElementById("addVehicleBtn").style.display = "none";
             return;
           }
           
@@ -1101,22 +1121,37 @@
           
           firebase.database().ref(`users/${user.uid}/role`).get()
             .then((snapshot) => {
-              const role = TransportRoles.normalize(snapshot.val());
+              const roleRaw = snapshot.val();
+              const role = TransportRoles.normalize(roleRaw);
               state.role = role || "guest";
               
-              if (!(TransportRoles.isAdmin(role) || role === "driver")) {
-                document.body.innerHTML = '<div class="alert red" style="margin:2rem;">⛔ No permission to view transport vehicles.</div>';
+              console.log('User role loaded:', state.role, 'Raw:', roleRaw);
+              
+              if (!(TransportRoles.isAdmin(role) || role === "driver" || role === "transport_officer")) {
+                alertsEl.innerHTML = '<div class="alert red">⛔ No permission to view transport vehicles. Your role: ' + (role || 'none') + '</div>';
+                document.getElementById("addVehicleBtn").style.display = "none";
                 return;
+              }
+              
+              // Show/hide add button based on edit permissions
+              const addBtn = document.getElementById("addVehicleBtn");
+              if (addBtn) {
+                addBtn.style.display = canEdit() ? "inline-flex" : "none";
               }
               
               // Load drivers then subscribe to vehicles
               loadDrivers().then(() => {
+                subscribeVehicles();
+              }).catch((err) => {
+                console.error('Error loading drivers:', err);
+                // Continue even if drivers fail to load
                 subscribeVehicles();
               });
             })
             .catch((err) => {
               console.error(err);
               showToast("Failed to verify user", "bad");
+              document.getElementById("addVehicleBtn").style.display = "none";
             });
         });
       }

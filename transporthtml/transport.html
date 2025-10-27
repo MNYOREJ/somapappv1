@@ -266,12 +266,12 @@
         </div>
 
         <div class="card mt-2" id="vehicleAssignSection" style="display: none;">
-          <h3 style="margin-top: 0;">Vehicle Assignment</h3>
+          <h3 style="margin-top: 0;">🚐 Vehicle & Driver Assignment</h3>
           <div id="vehicleInfo" style="padding: 1rem; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.2);">
-            <p style="margin: 0; font-size: 0.875rem; color: var(--text-secondary);">
-              Vehicle and driver will be automatically assigned based on the route.
+            <p style="margin: 0 0 1rem 0; font-size: 0.875rem; color: var(--text-secondary);">
+              Vehicle and driver are automatically assigned based on the selected route(s).
             </p>
-            <div id="autoAssignInfo" class="mt-2"></div>
+            <div id="autoAssignInfo"></div>
           </div>
         </div>
 
@@ -298,8 +298,10 @@
         students: {},
         vehicles: {},
         transportEnrollments: {},
+        transportPayments: {},
         financeData: {},
         currentAssignStudentId: null,
+        drivers: [],
       };
 
       const toast = document.getElementById("toast");
@@ -377,11 +379,14 @@
           const monthlyFee = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
           expectedThisMonth += monthlyFee;
 
-          // Check if paid (would come from ledger)
-          const ledger = enrollment.ledger || {};
-          const monthLedger = ledger[state.year]?.[state.month] || {};
-          paidThisMonth += monthLedger.paid || 0;
-          totalDebt += Math.max(0, monthlyFee - (monthLedger.paid || 0));
+          // Get actual payments from transport_payments for this student and month
+          const studentPayments = state.transportPayments[studentId] || {};
+          const monthPayments = Object.values(studentPayments).filter(payment => 
+            payment.month === state.month && payment.year === state.year
+          );
+          const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          paidThisMonth += monthPaid;
+          totalDebt += Math.max(0, monthlyFee - monthPaid);
         });
 
         const cards = [
@@ -656,11 +661,12 @@
       assignMorningDrop.addEventListener('change', calculateFare);
       assignEveningDrop.addEventListener('change', calculateFare);
 
-      // Calculate and display fare
+      // Calculate and display fare with vehicle/driver info
       function calculateFare() {
         const period = assignPeriod.value;
         if (!period) {
           document.getElementById('farePreview').style.display = 'none';
+          document.getElementById('vehicleAssignSection').style.display = 'none';
           return;
         }
 
@@ -695,7 +701,60 @@
         document.getElementById('fareBreakdown').innerHTML = breakdown;
         document.getElementById('totalFareDisplay').textContent = formatCurrency(baseFee);
         document.getElementById('farePreview').style.display = 'block';
+
+        // Show vehicle and driver assignment
+        updateVehicleDriverInfo(morningRoute, eveningRoute);
         document.getElementById('vehicleAssignSection').style.display = 'block';
+      }
+
+      // Update vehicle and driver information based on selected routes
+      function updateVehicleDriverInfo(morningRoute, eveningRoute) {
+        const routes = [morningRoute, eveningRoute].filter(r => r);
+        if (routes.length === 0) {
+          document.getElementById('autoAssignInfo').innerHTML = '<p style="margin: 0; color: var(--text-muted);">No routes selected</p>';
+          return;
+        }
+
+        let vehicleDriverInfo = '<div style="display: grid; gap: 1rem;">';
+
+        routes.forEach(route => {
+          // Find vehicle(s) assigned to this route
+          const vehiclesForRoute = Object.values(state.vehicles).filter(v => {
+            const assignedRoutes = v.assignedRoutes || [];
+            return assignedRoutes.some(r => r.toLowerCase() === route.toLowerCase());
+          });
+
+          if (vehiclesForRoute.length > 0) {
+            vehiclesForRoute.forEach(vehicle => {
+              const driver = state.drivers.find(d => d.id === vehicle.assignedDriverUid);
+              const driverName = driver ? driver.fullName : 'Driver not assigned';
+              const driverPhone = driver ? driver.phone : '';
+
+              vehicleDriverInfo += `
+                <div style="background: rgba(255, 255, 255, 0.05); padding: 1rem; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3);">
+                  <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
+                    <div><strong>Route:</strong> ${route}</div>
+                    <div><strong>🚐 Vehicle:</strong> ${vehicle.plate} (${vehicle.makeModel || 'N/A'})</div>
+                    <div><strong>👨‍✈️ Driver:</strong> ${driverName}${driverPhone ? ` (${driverPhone})` : ''}</div>
+                    <div><strong>Capacity:</strong> ${vehicle.capacity || 'N/A'} seats</div>
+                  </div>
+                </div>
+              `;
+            });
+          } else {
+            vehicleDriverInfo += `
+              <div style="background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3);">
+                <div style="font-size: 0.875rem;">
+                  <strong>Route:</strong> ${route}<br/>
+                  <span style="color: var(--accent-danger);">⚠️ No vehicle assigned to this route yet. Please assign a vehicle in Vehicle Registry.</span>
+                </div>
+              </div>
+            `;
+          }
+        });
+
+        vehicleDriverInfo += '</div>';
+        document.getElementById('autoAssignInfo').innerHTML = vehicleDriverInfo;
       }
 
       // Save transport assignment
@@ -756,11 +815,34 @@
           const enrollSnap = await firebase.database().ref('transport_enrollments').once('value');
           state.transportEnrollments = enrollSnap.val() || {};
 
+          // Load transport payments
+          const paymentsSnap = await firebase.database().ref('transport_payments').once('value');
+          state.transportPayments = paymentsSnap.val() || {};
+
           // Load vehicles
           const vehiclesSnap = await firebase.database()
             .ref(`transport/${state.school}/${state.year}/buses`)
             .once('value');
           state.vehicles = vehiclesSnap.val() || {};
+
+          // Load drivers from workers database
+          const workersSnap = await firebase.database().ref('workers').once('value');
+          state.drivers = [];
+          if (workersSnap.exists()) {
+            workersSnap.forEach(workerSnap => {
+              const worker = workerSnap.val();
+              if (worker.profile && worker.profile.role === 'driver' && worker.profile.active !== false) {
+                state.drivers.push({
+                  id: workerSnap.key,
+                  fullName: worker.profile.fullNameUpper || `${worker.profile.firstName} ${worker.profile.middleName} ${worker.profile.lastName}`,
+                  phone: worker.profile.phone,
+                  firstName: worker.profile.firstName,
+                  middleName: worker.profile.middleName,
+                  lastName: worker.profile.lastName
+                });
+              }
+            });
+          }
 
           // Store finance data from students for debt tracking
           Object.entries(state.students).forEach(([id, student]) => {

@@ -64,7 +64,10 @@
       <!-- Header with Add Button -->
       <div class="flex space center mt-3">
         <h2 style="margin:0;">Vehicle Registry</h2>
-        <button class="btn success" id="addVehicleBtn" type="button" style="display: none;">+ Add Vehicle</button>
+        <div id="addVehicleBtnContainer">
+          <span id="loadingPermissions" style="color: var(--accent-info); font-size: 0.875rem;">Checking permissions...</span>
+          <button class="btn success" id="addVehicleBtn" type="button" style="display: none;">+ Add Vehicle</button>
+        </div>
       </div>
 
       <!-- Vehicles Table -->
@@ -496,7 +499,8 @@
       }
 
       function canEdit() {
-        return ["admin", "transport_officer"].includes(state.role);
+        // Allow admin roles and transport officers to edit
+        return TransportRoles.isAdmin(state.role) || state.role === "transport_officer";
       }
 
       // Render Table
@@ -1117,6 +1121,8 @@
           if (!user) {
             showToast("Sign in first", "bad");
             vehiclesBody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 2rem;">Please sign in to view vehicles.</td></tr>';
+            const loadingMsg = document.getElementById("loadingPermissions");
+            if (loadingMsg) loadingMsg.style.display = "none";
             const addBtn = document.getElementById("addVehicleBtn");
             if (addBtn) addBtn.style.display = "none";
             return;
@@ -1131,21 +1137,31 @@
               state.role = role || "guest";
               
               console.log('User role loaded:', state.role, 'Raw:', roleRaw);
+              console.log('Is Admin?', TransportRoles.isAdmin(state.role));
+              console.log('Can Edit?', canEdit());
               
               if (!(TransportRoles.isAdmin(role) || role === "driver" || role === "transport_officer")) {
                 alertsEl.innerHTML = '<div class="alert red">⛔ No permission to view transport vehicles. Your role: ' + (role || 'none') + '</div>';
+                const loadingMsg = document.getElementById("loadingPermissions");
+                if (loadingMsg) loadingMsg.style.display = "none";
                 const addBtn = document.getElementById("addVehicleBtn");
                 if (addBtn) addBtn.style.display = "none";
                 return;
               }
+              
+              // Hide loading indicator
+              const loadingMsg = document.getElementById("loadingPermissions");
+              if (loadingMsg) loadingMsg.style.display = "none";
               
               // Show/hide add button based on edit permissions immediately
               const addBtn = document.getElementById("addVehicleBtn");
               if (addBtn) {
                 if (canEdit()) {
                   addBtn.style.display = "inline-flex";
+                  console.log('✅ Add Vehicle button shown - user has edit permissions');
                 } else {
                   addBtn.style.display = "none";
+                  console.log('❌ Add Vehicle button hidden - user lacks edit permissions');
                 }
               }
               
@@ -1161,6 +1177,8 @@
             .catch((err) => {
               console.error(err);
               showToast("Failed to verify user", "bad");
+              const loadingMsg = document.getElementById("loadingPermissions");
+              if (loadingMsg) loadingMsg.style.display = "none";
               const addBtn = document.getElementById("addVehicleBtn");
               if (addBtn) addBtn.style.display = "none";
             });

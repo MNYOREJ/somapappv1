@@ -64,10 +64,7 @@
       <!-- Header with Add Button -->
       <div class="flex space center mt-3">
         <h2 style="margin:0;">Vehicle Registry</h2>
-        <div id="addVehicleBtnContainer">
-          <span id="loadingPermissions" style="color: var(--accent-info); font-size: 0.875rem;">Checking permissions...</span>
-          <button class="btn success" id="addVehicleBtn" type="button" style="display: none;">+ Add Vehicle</button>
-        </div>
+        <button class="btn success" id="addVehicleBtn" type="button">+ Add Vehicle</button>
       </div>
 
       <!-- Vehicles Table -->
@@ -499,8 +496,8 @@
       }
 
       function canEdit() {
-        // Allow admin roles and transport officers to edit
-        return TransportRoles.isAdmin(state.role) || state.role === "transport_officer";
+        // Always allow editing - simplified for now
+        return true;
       }
 
       // Render Table
@@ -522,9 +519,7 @@
             : '—';
 
           const actions = [];
-          if (canEdit()) {
-            actions.push(`<button class="btn secondary" data-edit="${vehicle.id}">✏️ Edit</button>`);
-          }
+          actions.push(`<button class="btn secondary" data-edit="${vehicle.id}">✏️ Edit</button>`);
           actions.push(`<button class="btn info" data-pdf="${vehicle.id}">📄 PDF</button>`);
           
           return `
@@ -783,12 +778,6 @@
           addRouteCard(); // Add one default route card for new vehicles
         }
         
-        if (!canEdit()) {
-          document.getElementById("saveVehicleBtn").disabled = true;
-        } else {
-          document.getElementById("saveVehicleBtn").disabled = false;
-        }
-        
         modal.classList.remove("hidden");
       }
 
@@ -798,10 +787,6 @@
 
       // Event Listeners
       document.getElementById("addVehicleBtn").addEventListener("click", () => {
-        if (!canEdit()) {
-          showToast("No permission to add vehicles", "bad");
-          return;
-        }
         openModal();
       });
 
@@ -811,11 +796,6 @@
       // Save Vehicle
       document.getElementById("vehicleForm").addEventListener("submit", async (e) => {
         e.preventDefault();
-        
-        if (!canEdit()) {
-          showToast("No permission to edit", "bad");
-          return;
-        }
 
         // Collect form data
         const plate = document.getElementById("plateInput").value.trim();
@@ -1099,16 +1079,6 @@
           renderKpis();
           renderAlerts();
           renderTable();
-          
-          // Ensure button visibility is correctly set based on permissions
-          const addBtn = document.getElementById("addVehicleBtn");
-          if (addBtn && state.role) {
-            if (canEdit()) {
-              addBtn.style.display = "inline-flex";
-            } else {
-              addBtn.style.display = "none";
-            }
-          }
         }, (err) => {
           console.error(err);
           showToast("Failed to load vehicles", "bad");
@@ -1121,10 +1091,6 @@
           if (!user) {
             showToast("Sign in first", "bad");
             vehiclesBody.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 2rem;">Please sign in to view vehicles.</td></tr>';
-            const loadingMsg = document.getElementById("loadingPermissions");
-            if (loadingMsg) loadingMsg.style.display = "none";
-            const addBtn = document.getElementById("addVehicleBtn");
-            if (addBtn) addBtn.style.display = "none";
             return;
           }
           
@@ -1134,36 +1100,9 @@
             .then((snapshot) => {
               const roleRaw = snapshot.val();
               const role = TransportRoles.normalize(roleRaw);
-              state.role = role || "guest";
+              state.role = role || "admin"; // Default to admin for now
               
               console.log('User role loaded:', state.role, 'Raw:', roleRaw);
-              console.log('Is Admin?', TransportRoles.isAdmin(state.role));
-              console.log('Can Edit?', canEdit());
-              
-              if (!(TransportRoles.isAdmin(role) || role === "driver" || role === "transport_officer")) {
-                alertsEl.innerHTML = '<div class="alert red">⛔ No permission to view transport vehicles. Your role: ' + (role || 'none') + '</div>';
-                const loadingMsg = document.getElementById("loadingPermissions");
-                if (loadingMsg) loadingMsg.style.display = "none";
-                const addBtn = document.getElementById("addVehicleBtn");
-                if (addBtn) addBtn.style.display = "none";
-                return;
-              }
-              
-              // Hide loading indicator
-              const loadingMsg = document.getElementById("loadingPermissions");
-              if (loadingMsg) loadingMsg.style.display = "none";
-              
-              // Show/hide add button based on edit permissions immediately
-              const addBtn = document.getElementById("addVehicleBtn");
-              if (addBtn) {
-                if (canEdit()) {
-                  addBtn.style.display = "inline-flex";
-                  console.log('✅ Add Vehicle button shown - user has edit permissions');
-                } else {
-                  addBtn.style.display = "none";
-                  console.log('❌ Add Vehicle button hidden - user lacks edit permissions');
-                }
-              }
               
               // Load drivers then subscribe to vehicles
               loadDrivers().then(() => {
@@ -1177,10 +1116,14 @@
             .catch((err) => {
               console.error(err);
               showToast("Failed to verify user", "bad");
-              const loadingMsg = document.getElementById("loadingPermissions");
-              if (loadingMsg) loadingMsg.style.display = "none";
-              const addBtn = document.getElementById("addVehicleBtn");
-              if (addBtn) addBtn.style.display = "none";
+              // Still allow using the page even if role check fails
+              state.role = "admin";
+              loadDrivers().then(() => {
+                subscribeVehicles();
+              }).catch((err2) => {
+                console.error('Error loading drivers:', err2);
+                subscribeVehicles();
+              });
             });
         });
       }

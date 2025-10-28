@@ -330,6 +330,12 @@
         setTimeout(() => toast.classList.add("hidden"), 3500);
       }
 
+      function resolveRecorder() {
+        if (state.user && state.user.email) return state.user.email;
+        if (state.user && state.user.uid) return state.user.uid;
+        return "unknown";
+      }
+
       function formatCurrency(amount) {
         return new Intl.NumberFormat('en-TZ', { style: 'currency', currency: 'TZS', minimumFractionDigits: 0 }).format(amount || 0);
       }
@@ -602,23 +608,63 @@
         }
         
         try {
-          const payment = {
-            studentId,
-            month,
-            year: state.year,
-            amount,
-            method,
-            reference,
+          const student = state.students[studentId];
+          const enrollment = state.transportEnrollments[studentId];
+          if (!student || !enrollment) throw new Error('Student transport enrollment not found.');
+          const payments = Object.values(state.transportPayments[studentId] || {});
+          const status = calculateTransportStatus(enrollment, payments);
+          const recorder = resolveRecorder();
+          const timestamp = Date.now();
+          const pendingRef = firebase.database().ref('approvalsPending').push();
+          const monthName = MONTH_NAMES[month] || `Month ${month}`;
+          const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim();
+          const totalRequired = Number(status.totalExpected || 0);
+          const totalPaidBefore = Number(status.totalPaid || 0);
+          const newBalance = Math.max(0, totalRequired - Math.min(totalRequired, totalPaidBefore + amount));
+
+          await pendingRef.set({
+            approvalId: pendingRef.key,
+            sourceModule: 'transport',
+            studentAdm: student.admissionNumber || studentId,
+            studentName: fullName || (student.admissionNumber || studentId),
+            className: student.classLevel || '',
+            parentContact: student.primaryParentContact || student.primaryContact || student.guardianPhone || '--',
+            amountPaidNow: amount,
+            paymentMethod: method,
+            paymentReferenceCode: reference || 'N/A',
+            datePaid: timestamp,
+            recordedBy: recorder,
+            status: 'pending',
             notes,
-            timestamp: Date.now(),
-            recordedBy: state.user.uid,
-          };
-          
-          await firebase.database()
-            .ref(`transport_payments/${studentId}`)
-            .push(payment);
-          
-          showToast('Payment recorded successfully!');
+            totalRequired,
+            totalPaidBefore,
+            newBalanceAfterThis: newBalance,
+            createdAt: firebase.database.ServerValue.TIMESTAMP,
+            modulePayload: {
+              studentKey: studentId,
+              payment: {
+                studentId,
+                month,
+                year: state.year,
+                amount,
+                method,
+                reference,
+                notes,
+                timestamp,
+                recordedBy: recorder,
+              },
+              breakdown: [
+                { label: 'Month', value: monthName },
+                { label: 'Year', value: state.year },
+                { label: 'Route', value: `${enrollment.amStop || '--'} / ${enrollment.pmStop || '--'}` },
+                { label: 'Expected (Year)', value: formatCurrency(status.totalExpected) },
+                { label: 'Paid Before', value: formatCurrency(status.totalPaid) },
+                { label: 'Debt Before', value: formatCurrency(status.debt) },
+              ],
+            },
+          });
+
+          showToast('Payment pending admin approval.', 'ok');
           closePaymentModal();
           loadAllData();
         } catch (error) {

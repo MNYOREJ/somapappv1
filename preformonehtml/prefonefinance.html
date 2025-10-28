@@ -240,6 +240,10 @@
           </select>
         </div>
         <div>
+          <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Reference Code</label>
+          <input id="paymentReference" type="text" class="px-4 py-3 text-sm" placeholder="MPESA/Bank/Receipt code" />
+        </div>
+        <div>
           <label class="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">Collector (who received)</label>
           <input id="paymentCollector" type="text" class="px-4 py-3 text-sm" placeholder="e.g., Faith / Mr. Mussa" />
         </div>
@@ -746,6 +750,7 @@
       e.preventDefault();
       const amount = Number(document.getElementById('paymentAmount').value);
       const method = document.getElementById('paymentMethod').value;
+      const reference = (document.getElementById('paymentReference').value || '').trim();
       const note = document.getElementById('paymentNote').value;
       const date = document.getElementById('paymentDate').value;
       const collector = document.getElementById('paymentCollector').value;
@@ -759,9 +764,58 @@
 
       try{
         const base = await detectPrefoneBase();
-        await db.ref(`${base}/students/${selectedAdm}/payments`).push({ amount, method, note, date, collector });
-        await db.ref(`${base}/students/${selectedAdm}`).update({ updatedAt: Date.now() });
-        Swal.fire('Success','Payment added','success');
+        const studentSnap = await db.ref(`${base}/students/${selectedAdm}`).once('value');
+        const student = studentSnap.val() || {};
+        const totalRequired = Number(student.totalFee || student.required || row?.totalFee || 0);
+        const totalPaidBefore = row ? Number(row.paid || 0) : Object.values(student.payments || {}).reduce((sum,p)=>sum+Number(p.amount||0),0);
+        const newBalance = Math.max(0, totalRequired - Math.min(totalRequired, totalPaidBefore + amount));
+        const fullName = row?.name || `${student.firstName || student.firstname || ''} ${student.lastName || student.lastname || ''}`.trim() || selectedAdm;
+        const parentContact = row?.contact || student.parentContact || student.parentPhone || student.guardianPhone || student.phone || '--';
+        let recordedBy = 'unknown';
+        try{
+          if(window.currentUserEmail) recordedBy = window.currentUserEmail;
+          else if(firebase.auth){
+            const user = firebase.auth().currentUser;
+            if(user && user.email) recordedBy = user.email;
+          }
+        }catch(_){}
+        if(!recordedBy || recordedBy === 'unknown') recordedBy = collector || 'unknown';
+        const timestamp = date ? new Date(date).getTime() : Date.now();
+
+        const pendingRef = db.ref('approvalsPending').push();
+        await pendingRef.set({
+          approvalId: pendingRef.key,
+          sourceModule: 'prefonefinance',
+          studentAdm: selectedAdm,
+          studentName: fullName,
+          className: student.classLevel || student.class || student.grade || '',
+          parentContact,
+          amountPaidNow: amount,
+          paymentMethod: method,
+          paymentReferenceCode: reference || 'N/A',
+          datePaid: timestamp,
+          recordedBy,
+          status: 'pending',
+          notes: note,
+          totalRequired,
+          totalPaidBefore,
+          newBalanceAfterThis: newBalance,
+          createdAt: firebase.database.ServerValue.TIMESTAMP,
+          modulePayload: {
+            basePath: base,
+            admission: selectedAdm,
+            payment: { amount, method, note, date, collector, reference, recordedBy, timestamp },
+            breakdown: [
+              { label: 'Collector', value: collector || 'Not set' },
+              { label: 'Received On', value: date ? formatLocalDate(date) : new Date(timestamp).toLocaleDateString('en-GB') },
+              { label: 'Fee (Year)', value: fmt(totalRequired) },
+              { label: 'Paid Before', value: fmt(totalPaidBefore) },
+              { label: 'Balance After Approval', value: fmt(newBalance) },
+            ],
+          },
+        });
+
+        Swal.fire('Submitted','Payment sent to admin for approval.','success');
         closeModal('paymentModal');
         e.target.reset();
         await loadFinance(base);

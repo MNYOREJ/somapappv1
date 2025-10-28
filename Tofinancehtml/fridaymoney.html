@@ -986,23 +986,78 @@
 
       async function saveAttendance(studentId, attendance, payment, closeModal = false) {
         try {
-          const payload = {
+          const now = Date.now();
+          const recorderEmail = state.currentUser?.email || state.currentUser?.uid || "unknown";
+          const basePayload = {
             attendance,
             payment,
-            recordedBy: state.currentUser ? state.currentUser.uid : "system",
-            timestamp: Date.now()
+            recordedBy: recorderEmail,
+            timestamp: now
           };
-          await db.ref(`fridayMoney/${state.selectedFridayId}/${studentId}`).set(payload);
+
+          if (payment === "paid") {
+            const summary = state.studentSummaries[studentId];
+            const student = state.students[studentId] || {};
+            const totalPaidBefore = summary ? Number(summary.totalPaidAmount || 0) : 0;
+            const totalExpected = summary ? Number(summary.totalPaidAmount || 0) + Number(summary.amountDue || 0) : COST_PER_FRIDAY;
+            const amountNow = COST_PER_FRIDAY;
+            const newBalance = Math.max(0, (summary ? Number(summary.amountDue || 0) : COST_PER_FRIDAY) - amountNow);
+            const fullName = summary?.fullName || `${student.firstName || ""} ${student.middleName || ""} ${student.lastName || ""}`.replace(/\s+/g, " ").trim() || studentId;
+            const parentContact = summary?.contact || student.primaryParentContact || student.parentContact || student.parentPhone || "--";
+
+            const pendingRef = firebase.database().ref("approvalsPending").push();
+            await pendingRef.set({
+              approvalId: pendingRef.key,
+              sourceModule: "fridaymoney",
+              studentAdm: summary?.admission || student.admissionNumber || studentId,
+              studentName: fullName,
+              className: summary?.classLevel || student.classLevel || student.class || "",
+              parentContact,
+              amountPaidNow: amountNow,
+              paymentMethod: "Cash",
+              paymentReferenceCode: "N/A",
+              datePaid: now,
+              recordedBy: recorderEmail,
+              status: "pending",
+              notes: "",
+              totalRequired: totalExpected,
+              totalPaidBefore,
+              newBalanceAfterThis: newBalance,
+              createdAt: firebase.database.ServerValue.TIMESTAMP,
+              modulePayload: {
+                fridayId: state.selectedFridayId,
+                studentId,
+                entryUpdate: {
+                  attendance,
+                  payment: "paid",
+                  recordedBy: recorderEmail,
+                  timestamp: now,
+                  pendingApproval: null
+                },
+                breakdown: [
+                  { label: "Friday", value: state.selectedFridayId },
+                  { label: "Attendance", value: attendance },
+                  { label: "Amount", value: formatCurrency(amountNow) }
+                ],
+              },
+            });
+
+            basePayload.payment = "pending-admin";
+            basePayload.pendingApproval = true;
+          }
+
+          await db.ref(`fridayMoney/${state.selectedFridayId}/${studentId}`).set(basePayload);
           addAudit(`Recorded ${attendance}/${payment} for ${studentId}`);
           if (!state.fridayMoney[state.selectedFridayId]) state.fridayMoney[state.selectedFridayId] = {};
-          state.fridayMoney[state.selectedFridayId][studentId] = payload;
+          state.fridayMoney[state.selectedFridayId][studentId] = basePayload;
           refreshDerivedData();
           renderAll();
           dom.quickEntryForm.reset();
           if (closeModal) {
             closeAttendanceModal();
           }
-          alert("Record saved successfully.");
+          const msg = payment === "paid" ? "Marked as pending admin approval." : "Record saved successfully.";
+          alert(msg);
         } catch (err) {
           console.error("Unable to save attendance", err);
           alert("Failed to save record. Check your internet connection.");

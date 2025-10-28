@@ -199,6 +199,10 @@
             </select>
           </div>
           <div>
+            <label class="text-sm text-gray-600">Reference Code (MPesa / Receipt / Bank)</label>
+            <input id="paymentReference" type="text" class="w-full p-2 border rounded" placeholder="e.g. MPESA1ABC23" />
+          </div>
+          <div>
             <label class="text-sm text-gray-600">Note (optional)</label>
             <input id="paymentNote" type="text" class="w-full p-2 border rounded" />
           </div>
@@ -794,11 +798,29 @@
   }
   function closeDetailsModalFn() { detailsModal.style.display = 'none'; detailsContent.innerHTML = ''; }
 
+  function resolveRecorderEmail() {
+    if (window.currentUserEmail) return window.currentUserEmail;
+    try {
+      if (window.sessionStorage) {
+        const stored = sessionStorage.getItem('somapUserEmail') || sessionStorage.getItem('userEmail');
+        if (stored) return stored;
+      }
+    } catch (_) {}
+    try {
+      if (firebase.auth) {
+        const user = firebase.auth().currentUser;
+        if (user && user.email) return user.email;
+      }
+    } catch (_) {}
+    return 'unknown';
+  }
+
   paymentForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const studentId = studentSelect.value;
     const amount = Number(document.getElementById('paymentAmount').value || 0);
     const method = document.getElementById('paymentMethod').value || 'Cash';
+    const reference = (document.getElementById('paymentReference').value || '').trim();
     const note = document.getElementById('paymentNote').value || '';
     if (!studentId) return alert('Choose a student');
     if (amount <= 0) return alert('Enter a valid amount');
@@ -807,9 +829,56 @@
       const snap = await studentRef.once('value');
       const student = snap.val();
       if (!student) throw new Error('Student not found');
-      const payment = { amount: Math.round(amount), method, note, timestamp: Date.now() };
-      await studentRef.child('payments').push(payment);
-      alert('Payment recorded successfully.');
+
+      const fin = computeStudentFinancials(student);
+      const totalRequired = Number(fin.feePerYear || 0);
+      const totalPaidBefore = Number(fin.paidAmount || 0);
+      const newBalance = Math.max(0, totalRequired - Math.min(totalRequired, totalPaidBefore + amount));
+      const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim();
+      const recorder = resolveRecorderEmail();
+      const timestamp = Date.now();
+      const parentContact = student.primaryParentContact || student.parentPhone || student.guardianPhone || student.emergencyPhone || '--';
+
+      const pendingRef = db.ref('approvalsPending').push();
+      await pendingRef.set({
+        approvalId: pendingRef.key,
+        sourceModule: 'finance',
+        studentAdm: student.admissionNumber || studentId,
+        studentName: fullName || (student.admissionNumber || studentId),
+        className: student.classLevel || '',
+        parentContact,
+        amountPaidNow: Math.round(amount),
+        paymentMethod: method,
+        paymentReferenceCode: reference || 'N/A',
+        datePaid: timestamp,
+        recordedBy: recorder,
+        status: 'pending',
+        notes: note,
+        totalRequired,
+        totalPaidBefore,
+        newBalanceAfterThis: newBalance,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        modulePayload: {
+          studentKey: studentId,
+          payment: {
+            amount: Math.round(amount),
+            method,
+            note,
+            timestamp,
+            recordedBy: recorder,
+            referenceCode: reference || null,
+          },
+          breakdown: [
+            { label: 'Plan', value: student.paymentPlan || '--' },
+            { label: 'Fee (Year)', value: `TSh ${fmt(totalRequired)}` },
+            { label: 'Paid Before', value: `TSh ${fmt(totalPaidBefore)}` },
+            { label: 'Balance After Approval', value: `TSh ${fmt(newBalance)}` },
+          ],
+        },
+      });
+
+      alert('Payment sent for admin approval. Student will update once approved.');
+      paymentForm.reset();
       closePaymentModalFn();
       await loadStudents();
     } catch (err) {

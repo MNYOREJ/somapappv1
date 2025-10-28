@@ -775,6 +775,7 @@
     const admissionNo = sanitizeKey(data.get('admissionNo'));
     const amount = Number(data.get('amount') || 0);
     const method = toStr(data.get('method') || 'Cash');
+    const reference = toStr(data.get('reference') || '');
     const note = toStr(data.get('note') || '');
 
     if (!admissionNo) {
@@ -787,10 +788,10 @@
     }
 
     setBusy('#paymentSubmit', true);
-    recordPayment({ admissionNo, amount, method, note })
+    recordPayment({ admissionNo, amount, method, note, reference })
       .then(() => {
         form.reset();
-        showToast('Graduation payment captured.');
+        showToast('Payment sent to admin for approval.');
       })
       .catch((err) => {
         console.error(err);
@@ -799,57 +800,58 @@
       .finally(() => setBusy('#paymentSubmit', false));
   }
 
-  function recordPayment({ admissionNo, amount, method, note }) {
+  function recordPayment({ admissionNo, amount, method, note, reference }) {
     const year = state.currentYear;
-    const ts = Date.now();
-    const paymentRef = db().ref(`graduation/${year}/payments`).push();
-    const paymentId = paymentRef.key;
+    const student = state.students?.[sanitizeKey(admissionNo)] || state.students?.[admissionNo];
+    if (!student) {
+      return Promise.reject(new Error('Student not found in graduation roster.'));
+    }
+    const expected = Number(student.expectedFee || computeExpectedFee(student.class, state.meta));
+    const paidBefore = Number(student.paid || 0);
+    const newBalance = Math.max(0, expected - Math.min(expected, paidBefore + Number(amount || 0)));
+    const recordedBy = state.user?.email || 'unknown';
+    const timestamp = Date.now();
+    const parentContact = student.parentPhone || student.guardianPhone || student.contact || student.parentContact || '--';
+    const pendingRef = db().ref('approvalsPending').push();
 
-    return paymentRef.set({
-      admissionNo,
-      amount: Number(amount),
-      method,
-      note,
-      recordedBy: state.user?.email || 'unknown',
+    return pendingRef.set({
+      approvalId: pendingRef.key,
+      sourceModule: 'graduation',
+      studentAdm: admissionNo,
+      studentName: toStr(student.name) || admissionNo,
+      className: toStr(student.class) || toStr(student.classLevel) || '',
+      parentContact,
+      amountPaidNow: Number(amount),
+      paymentMethod: method,
+      paymentReferenceCode: reference || 'N/A',
+      datePaid: timestamp,
+      recordedBy,
+      status: 'pending',
+      notes: note,
+      totalRequired: expected,
+      totalPaidBefore: paidBefore,
+      newBalanceAfterThis: newBalance,
       createdAt: firebase.database.ServerValue.TIMESTAMP,
-      clientTimestamp: ts,
-      receiptRefId: paymentId,
-    }).then(() => db().ref(`graduation/${year}/students/${admissionNo}`).transaction((student) => {
-      if (!student) return student;
-      const newPaid = Number(student.paid || 0) + Number(amount || 0);
-      const expected = Number(student.expectedFee || computeExpectedFee(student.class, state.meta));
-      const cutoff = new Date(state.meta?.debtCutoffISO || `${year}-11-07`);
-      const now = new Date();
-      let status = 'unpaid';
-      if (newPaid >= expected && expected > 0) status = 'paid';
-      else if (newPaid > 0 && newPaid < expected) status = 'partial';
-      if (now > cutoff && newPaid < expected) status = 'debt';
-      return {
-        ...student,
-        paid: newPaid,
-        status,
-        lastPaymentAt: firebase.database.ServerValue.TIMESTAMP,
-      };
-    })).then(() => {
-      const ledgerRef = db().ref(`receipts/${admissionNo}/${year}/${paymentId}`);
-      return ledgerRef.set({
-        type: 'graduation',
-        amount: Number(amount),
-        method,
-        note: note || `Graduation ${year}`,
-        recordedBy: state.user?.email || 'unknown',
-        timestamp: firebase.database.ServerValue.TIMESTAMP,
-        graduationYear: year,
-        _src: `graduation/${year}/payments/${paymentId}`,
-      });
-    }).then(() => db().ref(`graduation/${year}/audits`).push({
-      actor: state.user?.email || 'unknown',
-      action: 'payment:add',
-      refType: 'payment',
-      refId: paymentId,
-      after: { admissionNo, amount, method, note },
-      at: firebase.database.ServerValue.TIMESTAMP,
-    }));
+      modulePayload: {
+        year,
+        admission: admissionNo,
+        payment: {
+          admissionNo,
+          amount: Number(amount),
+          method,
+          note,
+          reference,
+          recordedBy,
+          timestamp,
+        },
+        breakdown: [
+          { label: 'Class', value: toStr(student.class) || '--' },
+          { label: 'Expected Fee', value: formatCurrency(expected) },
+          { label: 'Paid Before', value: formatCurrency(paidBefore) },
+          { label: 'Balance After Approval', value: formatCurrency(newBalance) },
+        ],
+      },
+    });
   }
 
   function handleExpenseSubmit(event) {

@@ -9,6 +9,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+    <script src="../Todashboardhtml/yearContext.js"></script>
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
@@ -38,13 +39,7 @@
         </div>
         <div>
           <label style="margin-bottom: 0.25rem; font-size: 0.75rem;">Academic Year</label>
-          <select id="yearSelect" style="min-width: 100px; padding: 0.5rem;">
-            <option value="2024">2024</option>
-            <option value="2025">2025</option>
-            <option value="2026">2026</option>
-            <option value="2027">2027</option>
-            <option value="2028">2028</option>
-            <option value="2029">2029</option>
+          <select id="yearSelect" data-somap-year-select data-somap-year-min="2023" style="min-width: 100px; padding: 0.5rem;">
           </select>
         </div>
       </div>
@@ -292,7 +287,11 @@
       const state = {
         user: null,
         role: null,
-        year: new Date().getFullYear(),
+          year: (() => {
+            const rawYear = window.somapYearContext?.getSelectedYear?.();
+            const parsed = parseInt(rawYear, 10);
+            return Number.isFinite(parsed) ? parsed : new Date().getFullYear();
+          })(),
         month: new Date().getMonth() + 1,
         school: "SoMAp",
         students: {},
@@ -356,11 +355,33 @@
       setInterval(updateDateDisplay, 1000);
 
       // Year selection handler
-      yearSelect.value = state.year;
-      yearSelect.addEventListener('change', (e) => {
-        state.year = parseInt(e.target.value);
-        loadAllData();
-      });
+      if (yearSelect && window.somapYearContext) {
+        window.somapYearContext.attachYearDropdown(yearSelect);
+        const synchronizeYear = (yearValue) => {
+          const normalized = parseInt(yearValue, 10);
+          if (!Number.isFinite(normalized)) return;
+          state.year = normalized;
+          if (String(normalized) !== yearSelect.value) {
+            yearSelect.value = String(normalized);
+          }
+          if (state.user) loadAllData();
+        };
+        synchronizeYear(window.somapYearContext.getSelectedYear());
+        window.somapYearContext.onYearChanged((nextYear) => {
+          synchronizeYear(nextYear);
+        });
+        yearSelect.addEventListener('change', (event) => {
+          window.somapYearContext.setSelectedYear(event.target.value);
+        });
+      } else if (yearSelect) {
+        yearSelect.value = state.year;
+        yearSelect.addEventListener('change', (event) => {
+          const normalized = parseInt(event.target.value, 10);
+          if (!Number.isFinite(normalized) || normalized === state.year) return;
+          state.year = normalized;
+          loadAllData();
+        });
+      }
 
       // Render KPI Cards
       function renderKpis() {

@@ -7,6 +7,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+  <script src="Todashboardhtml/yearContext.js"></script>
   <script src="firebase.js"></script>
   <title>SoMAp - Finance</title>
 
@@ -45,9 +46,20 @@
 
 <body class="p-6">
   <div class="max-w-6xl mx-auto">
-    <header class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-semibold text-indigo-700">SoMAp â€” Finance</h1>
-      <div class="space-x-2">
+    <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex flex-col">
+        <h1 class="text-2xl font-semibold text-indigo-700">SoMAp — Finance</h1>
+        <p class="mt-1 text-sm font-medium text-indigo-600/80">Working year: <span id="financeYearLabel">--</span></p>
+      </div>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <label class="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-700">
+          <span class="hidden sm:inline text-[0.7rem]">Academic Year</span>
+          <select
+            data-somap-year-select
+            class="min-w-[120px] rounded-md border border-indigo-200 bg-white px-2 py-1 text-sm font-medium text-indigo-700 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          >
+          </select>
+        </label>
         <button id="reloadBtn" class="px-3 py-1 bg-indigo-600 text-white rounded">Reload</button>
         <a href="index.html" class="px-3 py-1 border rounded text-sm">Back to Dashboard</a>
       </div>
@@ -227,6 +239,9 @@
 <script>
 (function () {
   const db = window.db || null;
+  const yearContext = window.somapYearContext || null;
+  let activeYear = yearContext ? yearContext.getSelectedYear() : String(new Date().getFullYear());
+  let financeYear = activeYear;
   const tbody = document.querySelector('#financeTable tbody');
   const studentSelect = document.getElementById('studentSelect');
   const paymentModal = document.getElementById('paymentModal');
@@ -238,6 +253,7 @@
   const detailsContent = document.getElementById('detailsContent');
   const classFilter = document.getElementById('classFilter');
   const showOnlyDebtorsBtn = document.getElementById('showOnlyDebtors');
+  const yearHint = document.getElementById('financeYearLabel');
   const downloadCsvBtn = document.getElementById('downloadCsv');
   const downloadPdfBtn = document.getElementById('downloadPdf');
   const downloadDebtNowCsvBtn = document.getElementById('downloadDebtNowCsv');
@@ -249,6 +265,10 @@
   let cachedStudents = {};
   let showingDebtorsOnly = false;
 
+  function updateYearHint() {
+    if (yearHint) yearHint.textContent = `${financeYear}`;
+  }
+
   if (!db) {
     console.error('DB not found.');
     alert('DB not ready. Ensure firebase.js initializes window.db.');
@@ -257,7 +277,15 @@
   // ===== Helpers (kept as-is) =====
   function fmt(n) { n = Number(n) || 0; return n.toLocaleString(); }
   function clamp(n) { return Math.max(0, Math.round(Number(n) || 0)); }
-  function todayYMD() { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() }; }
+  function todayYMD() {
+    const now = new Date();
+    const selectedYear = Number(financeYear);
+    return {
+      y: Number.isFinite(selectedYear) ? selectedYear : now.getFullYear(),
+      m: now.getMonth() + 1,
+      d: now.getDate(),
+    };
+  }
   function dateFromYMD(y, m, d) { return new Date(y, m - 1, d).getTime(); }
   function isPast(ts) { return Date.now() > ts; }
   function apportion(total, weights) {
@@ -460,6 +488,108 @@
     };
   }
 
+  function normalizePayments(source) {
+    if (!source) return {};
+    const normalized = {};
+    Object.entries(source).forEach(([key, raw]) => {
+      if (raw == null) return;
+      if (typeof raw === 'number') {
+        if (raw <= 0) return;
+        normalized[key] = { amount: Number(raw), timestamp: Date.now() };
+        return;
+      }
+      const amount = Number(raw.amount ?? raw.value ?? raw.paid ?? raw.payment ?? raw.total ?? 0);
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      const timestamp = Number(
+        raw.timestamp ?? raw.datePaid ?? raw.createdAt ?? raw.updatedAt ?? raw.recordedAt ?? raw.time ?? Date.now()
+      );
+      normalized[key] = { ...raw, amount, timestamp };
+    });
+    return normalized;
+  }
+
+  function buildFinanceStudents(
+    baseStudents = {},
+    enrollments = {},
+    classFees = {},
+    overrides = {},
+    ledgers = {},
+    carryForward = {},
+    year = activeYear
+  ) {
+    const targetYear = String(year || activeYear);
+    const map = {};
+    const ids = new Set([
+      ...Object.keys(baseStudents || {}),
+      ...Object.keys(enrollments || {}),
+      ...Object.keys(overrides || {}),
+      ...Object.keys(ledgers || {}),
+      ...Object.keys(carryForward || {}),
+    ]);
+
+    ids.forEach((id) => {
+      const base = baseStudents[id] || {};
+      const enrollment = enrollments[id] || {};
+      const override = overrides[id] || {};
+      const ledger = ledgers[id] || {};
+      const carry = carryForward[id] || {};
+      const classLevel = enrollment.className || enrollment.classLevel || base.classLevel || base.class || '';
+      const classDefaults = classFees[classLevel] || {};
+
+      const resolvedFee =
+        override.feePerYear ??
+        classDefaults.feePerYear ??
+        base.feePerYear ??
+        base.feeDue ??
+        base.requiredFee ??
+        0;
+      const feePerYear = Math.max(0, Math.round(Number(resolvedFee) || 0));
+      const paymentPlan = override.planName || classDefaults.defaultPlan || base.paymentPlan || '6-instalments';
+
+      let paymentsSource =
+        (ledger[targetYear] && (ledger[targetYear].payments || ledger[targetYear].entries)) ||
+        ledger.payments ||
+        ledger.records ||
+        base.payments ||
+        {};
+      const payments = normalizePayments(paymentsSource);
+
+      const previousDebt = clamp(
+        carry.amount ?? carry.balance ?? override.carryForward ?? override.previousDebt ?? base.previousDebt ?? base.debt
+      );
+
+      const parentContact =
+        enrollment.parentPhone ||
+        enrollment.guardianPhone ||
+        base.primaryParentContact ||
+        base.parentPhone ||
+        base.guardianPhone ||
+        base.contact ||
+        '';
+
+      const record = {
+        ...base,
+        classLevel,
+        paymentPlan,
+        feePerYear,
+        previousDebt,
+        payments,
+        financeYear: targetYear,
+        primaryParentContact: parentContact || base.primaryParentContact,
+        admissionNumber: enrollment.admissionNumber || enrollment.admissionNo || base.admissionNumber || id,
+      };
+
+      if (!record.firstName && enrollment.firstName) record.firstName = enrollment.firstName;
+      if (!record.lastName && enrollment.lastName) record.lastName = enrollment.lastName;
+      if (!record.middleName && enrollment.middleName) record.middleName = enrollment.middleName;
+      if (override && Object.keys(override).length) record.override = override;
+      record._classDefaults = classDefaults;
+      map[id] = record;
+    });
+
+    return map;
+  }
+
   // ====== SPEED FIX: placeholder breakdown row (no iframe yet) ======
   function breakdownRowHTML(id) {
     return `
@@ -525,9 +655,21 @@
     });
 
     const totalOutstanding = totalDue - totalCollected;
-    document.getElementById('totalDue').textContent = fmt(totalDue);
-    document.getElementById('totalCollected').textContent = fmt(totalCollected);
-    document.getElementById('totalOutstanding').textContent = fmt(totalOutstanding);
+    const totalDueEl = document.getElementById('totalDue');
+    if (totalDueEl) {
+      totalDueEl.textContent = fmt(totalDue);
+      totalDueEl.dataset.amount = String(totalDue);
+    }
+    const totalCollectedEl = document.getElementById('totalCollected');
+    if (totalCollectedEl) {
+      totalCollectedEl.textContent = fmt(totalCollected);
+      totalCollectedEl.dataset.amount = String(totalCollected);
+    }
+    const totalOutstandingEl = document.getElementById('totalOutstanding');
+    if (totalOutstandingEl) {
+      totalOutstandingEl.textContent = fmt(totalOutstanding);
+      totalOutstandingEl.dataset.amount = String(totalOutstanding);
+    }
 
     tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', e => openPaymentModalFor(e.target.dataset.id)));
     tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
@@ -600,13 +742,18 @@
   const expenseForm = document.getElementById('expenseForm');
   const expenseTableBody = document.querySelector('#expenseTable tbody');
 
-  async function loadExpenses() {
+  async function loadExpenses(year = activeYear) {
     try {
-      const snap = await db.ref('expenses').once('value');
-      const raw = snap.val() || {};
+      const targetYear = String(year || activeYear);
+      let snap = await db.ref(`expenses/${targetYear}`).once('value');
+      let raw = snap.val();
+      if (!raw || (typeof raw === 'object' && !Object.keys(raw).length)) {
+        snap = await db.ref('expenses').once('value');
+        raw = snap.val();
+      }
       expenseTableBody.innerHTML = '';
       let total = 0;
-      Object.values(raw).forEach(exp => {
+      Object.values(raw || {}).forEach(exp => {
         total += Number(exp.amount) || 0;
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -617,12 +764,28 @@
         `;
         expenseTableBody.appendChild(tr);
       });
-      document.getElementById('totalExpenses').textContent = fmt(total);
-      const collected = Number(document.getElementById('totalCollected').textContent.replace(/,/g, '') || 0);
-      document.getElementById('netBalance').textContent = fmt(collected - total);
+      const totalExpensesEl = document.getElementById('totalExpenses');
+      if (totalExpensesEl) {
+        totalExpensesEl.textContent = fmt(total);
+        totalExpensesEl.dataset.amount = String(total);
+      }
+      const collectedEl = document.getElementById('totalCollected');
+      const collected = Number(collectedEl?.dataset.amount || 0);
+      const net = collected - total;
+      const netEl = document.getElementById('netBalance');
+      if (netEl) {
+        netEl.textContent = fmt(net);
+        netEl.dataset.amount = String(net);
+      }
     } catch (err) {
       console.error('Error loading expenses:', err);
+      alert('Error loading expenses: ' + err.message);
     }
+  }
+
+  async function refreshFinanceData(year = activeYear) {
+    await loadStudents(year);
+    await loadExpenses(year);
   }
 
   // ===== CSV/PDF downloaders (unchanged) =====
@@ -853,6 +1016,7 @@
         datePaid: timestamp,
         recordedBy: recorder,
         status: 'pending',
+        academicYear: financeYear,
         notes: note,
         totalRequired,
         totalPaidBefore,
@@ -869,6 +1033,7 @@
             referenceCode: reference || null,
           },
           breakdown: [
+            { label: 'Academic Year', value: financeYear },
             { label: 'Plan', value: student.paymentPlan || '--' },
             { label: 'Fee (Year)', value: `TSh ${fmt(totalRequired)}` },
             { label: 'Paid Before', value: `TSh ${fmt(totalPaidBefore)}` },
@@ -888,11 +1053,34 @@
   });
 
   // ===== Data loading and UI wiring =====
-  async function loadStudents() {
+  async function loadStudents(year = activeYear) {
     if (!db) return;
+    const targetYear = String(year || activeYear);
+    activeYear = targetYear;
+    financeYear = targetYear;
+    updateYearHint();
     try {
-      const snap = await db.ref('students').once('value');
-      cachedStudents = snap.val() || {};
+      const [baseSnap, enrollmentSnap, classFeesSnap, overridesSnap, ledgerSnap, carrySnap] = await Promise.all([
+        db.ref('students').once('value'),
+        db.ref(`enrollments/${targetYear}`).once('value'),
+        db.ref(`feesStructure/${targetYear}`).once('value'),
+        db.ref(`studentFees/${targetYear}`).once('value'),
+        db.ref(`financeLedgers/${targetYear}`).once('value'),
+        db.ref(`financeCarryForward/${targetYear}`).once('value'),
+      ]);
+      const baseStudents = baseSnap.val() || {};
+      cachedStudents = buildFinanceStudents(
+        baseStudents,
+        enrollmentSnap.val() || {},
+        classFeesSnap.val() || {},
+        overridesSnap.val() || {},
+        ledgerSnap.val() || {},
+        carrySnap.val() || {},
+        targetYear
+      );
+      if (!Object.keys(cachedStudents).length) {
+        cachedStudents = baseStudents;
+      }
       populateStudentSelect();
       renderTable();
     } catch (err) {
@@ -940,14 +1128,26 @@
   downloadDebtNowPdfBtn.addEventListener('click', downloadPDF_DebtNow);
   downloadBreakdownCsvBtn.addEventListener('click', downloadCSV_Breakdown);
   downloadBreakdownPdfBtn.addEventListener('click', downloadPDF_Breakdown);
-  reloadBtn.addEventListener('click', async () => { await loadStudents(); await loadExpenses(); });
+  reloadBtn.addEventListener('click', async () => { await refreshFinanceData(financeYear); });
+
+  if (yearContext) {
+    yearContext.onYearChanged((year) => {
+      const normalized = String(year);
+      if (normalized === financeYear) return;
+      refreshFinanceData(normalized);
+    });
+  }
   window.addEventListener('click', ev => {
     if (ev.target === paymentModal) closePaymentModalFn();
     if (ev.target === detailsModal) closeDetailsModalFn();
   });
   classFilter.addEventListener('change', renderTable);
-  document.addEventListener('DOMContentLoaded', () => { loadStudents(); loadExpenses(); });
+  document.addEventListener('DOMContentLoaded', () => {
+    updateYearHint();
+    refreshFinanceData(activeYear);
+  });
 })();
 </script>
 </body>
 </html>
+

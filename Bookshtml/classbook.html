@@ -4,6 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>SoMAp — Magical Books Library</title>
+  
+  <!-- Performance Optimization: Preconnect to external domains -->
+  <link rel="preconnect" href="https://docs.google.com">
+  <link rel="dns-prefetch" href="https://docs.google.com">
+  <link rel="preconnect" href="https://www.gstatic.com">
+  <link rel="dns-prefetch" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <!-- Firebase CDN SDKs (compat v9.6.10) -->
@@ -11,6 +20,58 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <style>
+    /* Anti-Screenshot & Anti-Print Protection */
+    @media print {
+      body { display: none !important; }
+      * { display: none !important; }
+    }
+    
+    /* Prevent text selection and copying */
+    * {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    
+    /* Protection Watermark Overlay */
+    .protection-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999;
+      background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 100px,
+        rgba(0, 0, 0, 0.02) 100px,
+        rgba(0, 0, 0, 0.02) 200px
+      );
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    
+    .protection-overlay.active {
+      opacity: 1;
+    }
+    
+    .watermark {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-45deg);
+      font-size: 4rem;
+      color: rgba(0, 0, 0, 0.05);
+      font-weight: bold;
+      pointer-events: none;
+      z-index: 9998;
+      white-space: nowrap;
+    }
+    
     /* Dynamic styles - will be updated based on user type */
     body { 
       font-family: 'Inter', sans-serif; 
@@ -377,6 +438,10 @@
   </style>
 </head>
 <body>
+  <!-- Protection Overlays -->
+  <div class="protection-overlay" id="protectionOverlay"></div>
+  <div class="watermark" id="watermark">SOMAP PROTECTED CONTENT</div>
+  
   <a href="#" id="backBtn" class="back-btn"><i class="fas fa-arrow-left mr-2"></i> <span id="backText">Back</span></a>
   <div class="content">
     <div class="hero">
@@ -503,6 +568,10 @@
       document.getElementById('forecastTitle').textContent = 'Upcoming Adventures & Messages 📬';
     }
 
+    // ========== OPTIMIZED FIREBASE LOADING ==========
+    const booksCache = new Map();
+    let searchDebounceTimer;
+    
     function fetchBooks(className) {
       const booksGrid = document.getElementById('booksGrid');
       const noBooks = document.getElementById('noBooks');
@@ -512,49 +581,96 @@
 
       loading.classList.remove('hidden');
       const classPath = `class_books/${encodeURIComponent(className)}`;
-      console.log('Fetching books from path:', classPath);
+      console.log('📚 Fetching books from:', classPath);
       
-      db.ref(classPath).on('value', snap => {
+      // Check cache first for instant loading
+      const cacheKey = `books_${className}`;
+      if (booksCache.has(cacheKey)) {
+        console.log('⚡ Loading from cache (instant!)');
+        const cachedBooks = booksCache.get(cacheKey);
+        allBooks = cachedBooks;
         loading.classList.add('hidden');
-        booksGrid.innerHTML = '';
+        noBooks.classList.add('hidden');
+        renderBooks(allBooks);
+      }
+      
+      // Optimized Firebase query with persistence
+      db.ref(classPath).once('value').then(snap => {
+        loading.classList.add('hidden');
         const books = snap.val() || {};
-        console.log('Books data:', books);
+        console.log('✅ Books loaded:', Object.keys(books).length);
         allBooks = Object.entries(books);
+        
+        // Cache the results
+        booksCache.set(cacheKey, allBooks);
         
         if (allBooks.length === 0) {
           noBooks.classList.remove('hidden');
+          booksGrid.innerHTML = '';
           return;
         }
         
         noBooks.classList.add('hidden');
         renderBooks(allBooks);
-      }, err => {
+        
+        // Set up real-time listener for updates (after initial load)
+        db.ref(classPath).on('value', snap => {
+          const updatedBooks = snap.val() || {};
+          const updatedEntries = Object.entries(updatedBooks);
+          
+          // Only update if data changed
+          if (JSON.stringify(updatedEntries) !== JSON.stringify(allBooks)) {
+            console.log('🔄 Books updated in real-time');
+            allBooks = updatedEntries;
+            booksCache.set(cacheKey, allBooks);
+            renderBooks(allBooks);
+          }
+        });
+      }).catch(err => {
         loading.classList.add('hidden');
-        console.error('Firebase error:', err);
-        alert('Firebase Error: ' + err.message + '\nPath: ' + classPath);
+        console.error('❌ Firebase error:', err);
+        showProtectionAlert('Error loading books. Please refresh the page.');
       });
 
-      // Search functionality
+      // Optimized search with debouncing
       searchInput.addEventListener('input', () => {
-        const query = searchInput.value.toLowerCase().trim();
-        const filtered = allBooks.filter(([id, b]) => 
-          b.title.toLowerCase().includes(query) || b.subject.toLowerCase().includes(query)
-        );
-        booksGrid.innerHTML = '';
-        if (filtered.length === 0) {
-          noBooks.classList.remove('hidden');
-        } else {
-          noBooks.classList.add('hidden');
-          renderBooks(filtered);
-        }
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+          const query = searchInput.value.toLowerCase().trim();
+          
+          if (query === '') {
+            // Show all books
+            booksGrid.innerHTML = '';
+            noBooks.classList.add('hidden');
+            renderBooks(allBooks);
+            return;
+          }
+          
+          const filtered = allBooks.filter(([id, b]) => 
+            b.title.toLowerCase().includes(query) || 
+            b.subject.toLowerCase().includes(query)
+          );
+          
+          booksGrid.innerHTML = '';
+          if (filtered.length === 0) {
+            noBooks.classList.remove('hidden');
+          } else {
+            noBooks.classList.add('hidden');
+            renderBooks(filtered);
+          }
+        }, 300); // Debounce for 300ms
       });
     }
 
+    // ========== OPTIMIZED RENDERING WITH LAZY LOADING ==========
     function renderBooks(bookEntries) {
       const booksGrid = document.getElementById('booksGrid');
       booksGrid.innerHTML = '';
       
-      bookEntries.forEach(([id, b]) => {
+      // Create document fragment for better performance
+      const fragment = document.createDocumentFragment();
+      
+      bookEntries.forEach(([id, b], index) => {
         const thumbnailUrl = b.url.replace('/upload/', '/upload/fl_sanitize,pg_1,f_jpg/');
         const card = document.createElement('div');
         card.className = 'book-card';
@@ -562,64 +678,356 @@
         const buttonText = userMode === 'child' ? 'Open Adventure! 🚀' : 'Read Book';
         const titleEmoji = userMode === 'child' ? ' 📖' : '';
         
+        // Lazy loading for images - only load visible ones
+        const imgPlaceholder = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyMCIgZmlsbD0iI0U1RTdFQiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM5Q0EzQUYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5Mb2FkaW5nLi4uPC90ZXh0Pjwvc3ZnPg==';
+        
         card.innerHTML = `
-          <img src="${thumbnailUrl}" alt="${b.title} thumbnail" class="book-thumbnail" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyMCIgZmlsbD0iI0VFRSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5Cb29rIENvdmVyPC90ZXh0Pjwvc3ZnPg=='">
-          <h3 class="text-xl font-bold mt-3">${b.title}${titleEmoji}</h3>
-          <p class="text-md mb-4 opacity-80">${b.subject}</p>
-          <button class="read-btn" data-url="${b.url}" data-id="${id}" data-title="${b.title}">${buttonText}</button>
+          <img data-src="${thumbnailUrl}" src="${imgPlaceholder}" alt="${b.title} thumbnail" class="book-thumbnail lazy-load" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIyMCIgZmlsbD0iI0VFRSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5Cb29rIENvdmVyPC90ZXh0Pjwvc3ZnPg=='">
+          <h3 class="text-xl font-bold mt-3">${escapeHtml(b.title)}${titleEmoji}</h3>
+          <p class="text-md mb-4 opacity-80">${escapeHtml(b.subject)}</p>
+          <button class="read-btn" data-url="${b.url}" data-id="${id}" data-title="${escapeHtml(b.title)}">${buttonText}</button>
         `;
-        booksGrid.appendChild(card);
+        fragment.appendChild(card);
       });
-
+      
+      // Append all cards at once (better performance)
+      booksGrid.appendChild(fragment);
+      
+      // Lazy load images using Intersection Observer
+      lazyLoadImages();
+      
       // Add event listeners for read buttons
       document.querySelectorAll('.read-btn').forEach(button => {
         button.addEventListener('click', () => {
           const pdfUrl = button.getAttribute('data-url');
           const bookTitle = button.getAttribute('data-title');
+          
+          // Use Google Docs Viewer for maximum protection
           const proxyUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfUrl)}`;
           const modal = document.getElementById('pdfModal');
           const modalTitle = document.getElementById('modalTitle');
           const modalPdfFrame = document.getElementById('modalPdfFrame');
+          const pdfLoader = document.getElementById('pdfLoader');
 
+          // Show modal with loader
           modal.classList.remove('hidden');
           modalTitle.textContent = bookTitle;
+          pdfLoader.classList.remove('hidden');
+          
+          // Load PDF
           modalPdfFrame.src = proxyUrl;
+          
+          // Hide loader after iframe loads (or timeout after 5 seconds)
+          const hideLoader = () => {
+            setTimeout(() => {
+              pdfLoader.classList.add('hidden');
+            }, 2000);
+          };
+          
+          modalPdfFrame.addEventListener('load', hideLoader, { once: true });
+          setTimeout(hideLoader, 5000); // Fallback timeout
+          
+          console.log('📖 Opening book:', bookTitle);
         });
       });
     }
+    
+    // Lazy loading for images
+    function lazyLoadImages() {
+      const images = document.querySelectorAll('img.lazy-load');
+      
+      if ('IntersectionObserver' in window) {
+        const imageObserver = new IntersectionObserver((entries, observer) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const img = entry.target;
+              img.src = img.dataset.src;
+              img.classList.remove('lazy-load');
+              observer.unobserve(img);
+            }
+          });
+        }, {
+          rootMargin: '50px' // Start loading 50px before image is visible
+        });
+        
+        images.forEach(img => imageObserver.observe(img));
+      } else {
+        // Fallback for older browsers
+        images.forEach(img => {
+          img.src = img.dataset.src;
+          img.classList.remove('lazy-load');
+        });
+      }
+    }
+    
+    // HTML escaping for security
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
 
-    // Modal controls
+    // ========== MODAL CONTROLS WITH FULLSCREEN ==========
     let zoomLevel = 1;
-    document.getElementById('zoomInModal').addEventListener('click', () => {
-      zoomLevel += 0.2;
-      document.getElementById('modalPdfFrame').style.transform = `scale(${zoomLevel})`;
+    let rotationAngle = 0;
+    
+    // Fullscreen button
+    document.getElementById('fullscreenBtn').addEventListener('click', () => {
+      const modalContent = document.querySelector('.modal-content');
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      
+      if (!document.fullscreenElement) {
+        modalContent.requestFullscreen().then(() => {
+          fullscreenBtn.innerHTML = '<i class="fas fa-compress mr-2"></i> Exit Full Screen';
+        }).catch(err => {
+          showProtectionAlert('Fullscreen request failed. Please try again.');
+          console.error('Fullscreen error:', err);
+        });
+      } else {
+        document.exitFullscreen().then(() => {
+          fullscreenBtn.innerHTML = '<i class="fas fa-expand mr-2"></i> Full Screen';
+        });
+      }
     });
+    
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', () => {
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      if (!document.fullscreenElement) {
+        fullscreenBtn.innerHTML = '<i class="fas fa-expand mr-2"></i> Full Screen';
+      }
+    });
+    
+    // Zoom In
+    document.getElementById('zoomInModal').addEventListener('click', () => {
+      if (zoomLevel < 3) {
+        zoomLevel += 0.2;
+        updateTransform();
+      }
+    });
+    
+    // Zoom Out
     document.getElementById('zoomOutModal').addEventListener('click', () => {
       if (zoomLevel > 0.5) {
         zoomLevel -= 0.2;
-        document.getElementById('modalPdfFrame').style.transform = `scale(${zoomLevel})`;
+        updateTransform();
       }
     });
+    
+    // Rotate
+    document.getElementById('rotateBtn').addEventListener('click', () => {
+      rotationAngle = (rotationAngle + 90) % 360;
+      updateTransform();
+    });
+    
+    // Update transform with zoom and rotation
+    function updateTransform() {
+      const modalPdfFrame = document.getElementById('modalPdfFrame');
+      modalPdfFrame.style.transform = `scale(${zoomLevel}) rotate(${rotationAngle}deg)`;
+    }
+    
+    // Close modal
     document.getElementById('closeModal').addEventListener('click', () => {
       const modal = document.getElementById('pdfModal');
       const modalPdfFrame = document.getElementById('modalPdfFrame');
+      
+      // Exit fullscreen if active
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+      
       modal.classList.add('hidden');
       modalPdfFrame.src = '';
       zoomLevel = 1;
-      modalPdfFrame.style.transform = 'scale(1)';
+      rotationAngle = 0;
+      modalPdfFrame.style.transform = 'scale(1) rotate(0deg)';
     });
-
-    // Copyright protection
-    document.addEventListener('keydown', e => {
-      if (e.ctrlKey && (e.key === 'p' || e.key === 's')) {
-        e.preventDefault();
-        alert('Printing and saving disabled for copyright protection.');
+    
+    // ESC key to close modal
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const modal = document.getElementById('pdfModal');
+        if (!modal.classList.contains('hidden')) {
+          document.getElementById('closeModal').click();
+        }
       }
     });
-    window.print = () => {
-      alert('Printing disabled for copyright protection.');
+
+    // ========== COMPREHENSIVE PROTECTION SYSTEM ==========
+    
+    // 1. Prevent ALL keyboard shortcuts
+    document.addEventListener('keydown', e => {
+      // Print: Ctrl+P, Cmd+P
+      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+        e.preventDefault();
+        e.stopPropagation();
+        showProtectionAlert('Printing is disabled for copyright protection.');
+        return false;
+      }
+      
+      // Save: Ctrl+S, Cmd+S
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+        showProtectionAlert('Saving is disabled for copyright protection.');
+        return false;
+      }
+      
+      // Screenshot: PrintScreen, Win+Shift+S, Cmd+Shift+4
+      if (e.key === 'PrintScreen' || e.key === 'Print') {
+        e.preventDefault();
+        activateProtectionOverlay();
+        showProtectionAlert('Screenshots are not allowed for copyright protection.');
+        return false;
+      }
+      
+      // Windows Snipping Tool: Win+Shift+S
+      if (e.shiftKey && e.key === 'S' && (e.metaKey || e.key === 'Meta')) {
+        e.preventDefault();
+        activateProtectionOverlay();
+        showProtectionAlert('Screen capture is disabled for copyright protection.');
+        return false;
+      }
+      
+      // DevTools: F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
+      if (e.key === 'F12' || 
+          ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+          ((e.ctrlKey || e.metaKey) && e.key === 'u')) {
+        e.preventDefault();
+        e.stopPropagation();
+        showProtectionAlert('Developer tools are disabled.');
+        return false;
+      }
+      
+      // Copy: Ctrl+C, Cmd+C
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        e.preventDefault();
+        showProtectionAlert('Copying is disabled for copyright protection.');
+        return false;
+      }
+      
+      // Select All: Ctrl+A, Cmd+A
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        return false;
+      }
+    }, true);
+    
+    // 2. Override print function completely
+    window.print = function() {
+      showProtectionAlert('Printing is disabled for copyright protection.');
+      return false;
     };
-    document.addEventListener('contextmenu', e => e.preventDefault());
+    
+    // 3. Prevent right-click context menu
+    document.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      showProtectionAlert('Right-click is disabled for copyright protection.');
+      return false;
+    }, true);
+    
+    // 4. Prevent drag and drop
+    document.addEventListener('dragstart', e => {
+      e.preventDefault();
+      return false;
+    }, true);
+    
+    // 5. Detect screenshot attempts (blur/focus method)
+    let screenshotAttempts = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        screenshotAttempts++;
+        activateProtectionOverlay();
+        setTimeout(() => {
+          if (screenshotAttempts > 0) {
+            console.warn('Screenshot attempt detected');
+          }
+        }, 100);
+      }
+    });
+    
+    // 6. Detect DevTools opening
+    let devtoolsOpen = false;
+    const detectDevTools = () => {
+      const threshold = 160;
+      if (window.outerWidth - window.innerWidth > threshold || 
+          window.outerHeight - window.innerHeight > threshold) {
+        if (!devtoolsOpen) {
+          devtoolsOpen = true;
+          document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:2rem;text-align:center;padding:20px;">⚠️<br>Developer tools detected.<br>Access denied for security.</div>';
+        }
+      }
+    };
+    setInterval(detectDevTools, 1000);
+    
+    // 7. Protection overlay activation
+    function activateProtectionOverlay() {
+      const overlay = document.getElementById('protectionOverlay');
+      overlay.classList.add('active');
+      setTimeout(() => {
+        overlay.classList.remove('active');
+      }, 2000);
+    }
+    
+    // 8. User-friendly protection alerts
+    function showProtectionAlert(message) {
+      const alertDiv = document.createElement('div');
+      alertDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: linear-gradient(135deg, #EF4444, #DC2626);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(239, 68, 68, 0.4);
+        z-index: 10000;
+        font-weight: 600;
+        animation: slideIn 0.3s ease;
+      `;
+      alertDiv.innerHTML = `<i class="fas fa-shield-alt mr-2"></i>${message}`;
+      document.body.appendChild(alertDiv);
+      
+      setTimeout(() => {
+        alertDiv.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => alertDiv.remove(), 300);
+      }, 3000);
+    }
+    
+    // 9. Disable copy-paste
+    document.addEventListener('copy', e => {
+      e.preventDefault();
+      showProtectionAlert('Copying is disabled for copyright protection.');
+      return false;
+    }, true);
+    
+    document.addEventListener('cut', e => {
+      e.preventDefault();
+      return false;
+    }, true);
+    
+    // 10. Watermark with user info
+    function updateWatermark() {
+      const watermark = document.getElementById('watermark');
+      const now = new Date().toLocaleString();
+      watermark.textContent = `SOMAP © ${now}`;
+    }
+    updateWatermark();
+    setInterval(updateWatermark, 30000); // Update every 30 seconds
+    
+    // 11. Add CSS animations for alerts
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(400px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(400px); opacity: 0; }
+      }
+    `;
+    document.head.appendChild(style);
 
     function fetchNotifications(userKey) {
       const notificationsList = document.getElementById('notificationsList');
@@ -664,14 +1072,24 @@
         <button id="closeModal" class="close-btn"><i class="fas fa-times mr-2"></i> Close</button>
       </div>
       <div class="modal-controls">
+        <button id="fullscreenBtn" style="background: #8B5CF6; color: white;">
+          <i class="fas fa-expand mr-2"></i> Full Screen
+        </button>
         <button id="zoomInModal" style="background: #14B8A6; color: white;">
           <i class="fas fa-search-plus mr-2"></i> Zoom In
         </button>
         <button id="zoomOutModal" style="background: #06B6D4; color: white;">
           <i class="fas fa-search-minus mr-2"></i> Zoom Out
         </button>
+        <button id="rotateBtn" style="background: #F59E0B; color: white;">
+          <i class="fas fa-sync-alt mr-2"></i> Rotate
+        </button>
       </div>
       <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0"></iframe>
+      <div id="pdfLoader" class="hidden" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+        <div class="spinner" style="margin: 0 auto 20px;"></div>
+        <p style="font-size: 1.2rem; font-weight: 600;">Loading your book... 📚</p>
+      </div>
     </div>
   </div>
 </body>

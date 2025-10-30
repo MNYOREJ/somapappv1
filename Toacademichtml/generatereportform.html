@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SoMAp — Report Forms Dashboard</title>
+  <title>SoMAp â€” Report Forms Dashboard</title>
 
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -112,7 +112,7 @@
     <div class="max-w-7xl mx-auto px-2 lg:px-0 py-2 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <button id="btnBack" class="btn-outline"><i class="fas fa-arrow-left"></i> Go Back</button>
-        <h1 class="text-sm text-slate-300/80">SoMAp — Report Forms</h1>
+        <h1 class="text-sm text-slate-300/80">SoMAp â€” Report Forms</h1>
       </div>
       <button id="btnFullScreen" class="btn-outline"><i class="fas fa-expand"></i> Full Screen</button>
     </div>
@@ -139,7 +139,7 @@
         <div class="flex items-center justify-between">
           <div>
             <p class="text-xs uppercase tracking-wide text-slate-300/80">Academic year</p>
-            <p class="text-lg font-semibold" id="previewYear">—</p>
+            <p class="text-lg font-semibold" id="previewYear">â€”</p>
           </div>
           <img src="../images/somap-logo.png.jpg" alt="SoMAp" class="w-12 h-12 rounded-xl object-cover shadow-lg border border-slate-500/40" />
         </div>
@@ -240,6 +240,7 @@
                 <div class="preview-badges">
                   <span class="badge" id="previewExam">—</span>
                   <span class="badge" id="previewMonth">—</span>
+                  <span class="badge" id="previewYearBadge">—</span>
                   <span class="badge" id="previewAdm">ADM -</span>
                 </div>
               </div>
@@ -385,6 +386,19 @@
     const EXAM_KEYS = { 'Monthly':'monthly', 'Midterm 1':'midterm1', 'Midterm 2':'midterm2', 'End Term':'endterm', 'Annual':'annual' };
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const MONTH_LABELS = { Jan:'January', Feb:'February', Mar:'March', Apr:'April', May:'May', Jun:'June', Jul:'July', Aug:'August', Sep:'September', Oct:'October', Nov:'November', Dec:'December' };
+    /* === SOMAP REPORTS: PLAN, WEIGHTS & CACHE === */
+    const EXAM_MONTH_PLAN = {
+      monthly:  (selectedMonth) => [selectedMonth],                            // dynamic
+      midterm1: () => ['Jan','Feb','Mar'],
+      endterm:  () => ['Jan','Feb','Mar','Apr','May'],                         // Terminal / Term 1
+      midterm2: () => ['Jul','Aug','Sep'],
+      annual:   () => ['Jan','Feb','Mar','Apr','May','Jul','Aug','Sep','Oct','Nov']
+    };
+    const ATTENDANCE_WEIGHTS = { Apr: 0.5, Sep: 0.5, Dec: 0.25 };
+    const CACHE = {
+      scoresMonthly: new Map(),   // key: `${year}::${class}::${mon}` -> { [adm]: { [subject]: {score,max} } }
+      attendanceMonthly: new Map()// key: `${year}::${class}::${mon}` -> { [adm]: {present,absent,days} }
+    };
 
     // Subject map by class label (customize freely)
     const SUBJECTS_BY_CLASS = {
@@ -502,7 +516,7 @@
       }
       
       // Update page title
-      document.title = `SoMAp — ${state.parentName}'s Report Card`;
+      document.title = `SoMAp â€” ${state.parentName}'s Report Card`;
     }
 
     function persistToSession(){
@@ -537,7 +551,7 @@
       }
       document.getElementById('previewYear').textContent = state.year;
 
-      // Lock class to session value — only show that class and disable switching
+      // Lock class to session value â€” only show that class and disable switching
       const classSel = document.getElementById('classSelect');
       classSel.innerHTML = '';
       const opt = document.createElement('option');
@@ -572,12 +586,14 @@
       }
       document.getElementById('previewExam').textContent = state.examType;
       document.getElementById('previewMonth').textContent = MONTH_LABELS[state.month] || state.month;
+      document.getElementById('previewYearBadge').textContent = String(state.year);
     }
 
     function attachListeners(){
       document.getElementById('yearSelect').addEventListener('change', e => {
         state.year = Number(e.target.value);
         document.getElementById('previewYear').textContent = state.year;
+        document.getElementById('previewYearBadge').textContent = String(state.year);
         persistToSession(); loadAllData();
       });
       document.getElementById('classSelect').addEventListener('change', e => {
@@ -727,7 +743,7 @@
         state.subjects = SUBJECTS_BY_CLASS[state.className] || state.subjects || [];
         const [students, attendance, fees, scores, detailsMap] = await Promise.all([
           fetchStudents(state.className, state.stream),
-          fetchAttendance(state.year, state.month, state.className),
+          fetchAttendance(state.year, state.month, state.className, state.examKey),
           fetchFees(state.year, state.className),
           fetchScores({year: state.year, className: state.className, examKey: state.examKey, month: state.month}),
           fetchStudentDetailsMap()
@@ -874,37 +890,58 @@
       return map;
     }
 
-    async function fetchAttendance(year, month, className){
-      const refPath = month === 'All'
-        ? `/attendance/${year}/${className}` // allow annual aggregation if you store per-month under class
-        : `/attendance/${year}/${month}/${className}`;
-      try{
+    async function fetchAttendance(year, month, className, examKey) {
+      const key = (examKey || 'monthly').toLowerCase();
+      // Determine months for attendance
+      let months = [];
+      if (key === 'monthly') months = [month];
+      else if (key === 'annual') months = [...EXAM_MONTH_PLAN.annual(), 'Dec']; // annual includes Dec (¼)
+      else months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
+
+      if (!months.length) return {};
+      const monthMaps = await Promise.all(months.map(m => getMonthlyAttendance(year, className, m)));
+      const merged = {};
+      for (const [idx, mon] of months.entries()) {
+        const map = monthMaps[idx] || {};
+        const w = Number(ATTENDANCE_WEIGHTS[mon] || 1.0);
+        Object.entries(map).forEach(([adm, a]) => {
+          merged[adm] = merged[adm] || { present: 0, absent: 0, days: 0 };
+          merged[adm].present += w * Number(a.present || a.daysPresent || 0);
+          merged[adm].absent  += w * Number(a.absent  || a.daysAbsent  || 0);
+          const d = Number(a.days || (Number(a.present||0) + Number(a.absent||0)));
+          merged[adm].days    += w * d;
+        });
+      }
+      // Round days/presents/absents sensibly after weighting
+      Object.values(merged).forEach(a => {
+        a.present = Math.round(a.present);
+        a.absent  = Math.round(a.absent);
+        a.days    = Math.round(a.days);
+      });
+      return merged;
+    }
+
+    async function getMonthlyAttendance(year, className, mon) {
+      const cacheKey = `${year}::${className}::${mon}`;
+      if (CACHE.attendanceMonthly.has(cacheKey)) return CACHE.attendanceMonthly.get(cacheKey);
+      const refPath = `/attendance/${year}/${mon}/${className}`;
+      let out = {};
+      try {
         const snap = await db.ref(refPath).get();
-        const out = {};
-        if (snap && snap.exists && snap.exists()){
-          const val = snap.val();
-          if (month === 'All'){
-            // Aggregate over months
-            Object.keys(val || {}).forEach(mon => {
-              const byAdm = val[mon] || {};
-              Object.keys(byAdm).forEach(adm => {
-                const a = byAdm[adm] || {};
-                out[adm] = out[adm] || { present:0, absent:0, days:0 };
-                out[adm].present += Number(a.present || a.daysPresent || 0);
-                out[adm].absent  += Number(a.absent  || a.daysAbsent  || 0);
-                const days = Number(a.days || (Number(a.present||0)+Number(a.absent||0)));
-                out[adm].days += days;
-              });
-            });
-          } else {
-            Object.keys(val || {}).forEach(adm => {
-              const a = val[adm] || {};
-              out[adm] = { present: Number(a.present || a.daysPresent || 0), absent: Number(a.absent || a.daysAbsent || 0), days: Number(a.days || (Number(a.present||0)+Number(a.absent||0))) };
-            });
-          }
+        if (snap && snap.exists && snap.exists()) {
+          const val = snap.val() || {};
+          Object.keys(val).forEach(adm => {
+            const a = val[adm] || {};
+            out[adm] = {
+              present: Number(a.present || a.daysPresent || 0),
+              absent:  Number(a.absent  || a.daysAbsent  || 0),
+              days:    Number(a.days || (Number(a.present||0) + Number(a.absent||0)))
+            };
+          });
         }
-        return out;
-      }catch(e){ console.warn('fetchAttendance', e && e.message); return {}; }
+      } catch(e) { /* ignore */ }
+      CACHE.attendanceMonthly.set(cacheKey, out);
+      return out;
     }
 
     async function fetchFees(year, className){
@@ -925,39 +962,58 @@
       }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
     }
 
-    async function fetchScores({year, className, examKey, month}){
-      const refPath = month === 'All'
-        ? `/scores/${year}/${className}/${examKey}`
-        : `/scores/${year}/${className}/${examKey}/${month}`;
-      try{
+    async function fetchScores({ year, className, examKey, month }) {
+      const key = (examKey || 'monthly').toLowerCase();
+      if (key === 'monthly') {
+        return getMonthlyScores(year, className, month);
+      }
+      // Multi-month aggregation
+      const months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
+      if (!Array.isArray(months) || !months.length) return {};
+      // Sum raw score and max across months, per subject
+      const perMonth = await Promise.all(months.map(m => getMonthlyScores(year, className, m)));
+      const merged = {};
+      for (const monthMap of perMonth) {
+        Object.entries(monthMap || {}).forEach(([adm, subs]) => {
+          merged[adm] = merged[adm] || {};
+          Object.entries(subs || {}).forEach(([subject, o]) => {
+            const cur = merged[adm][subject] || { score: 0, max: 0 };
+            merged[adm][subject] = { score: cur.score + Number(o.score||0), max: cur.max + Number(o.max||0) };
+          });
+        });
+      }
+      return merged;
+    }
+
+    async function getMonthlyScores(year, className, mon) {
+      const cacheKey = `${year}::${className}::${mon}`;
+      if (CACHE.scoresMonthly.has(cacheKey)) return CACHE.scoresMonthly.get(cacheKey);
+      // Primary: read monthly path
+      let out = {};
+      try {
+        const refPath = `/scores/${year}/${className}/monthly/${mon}`;
         const snap = await db.ref(refPath).get();
-        const out = {};
-        if (snap && snap.exists && snap.exists()){
-          const val = snap.val();
-          if (month === 'All'){
-            // If annual stored per-month, pick best/latest per subject or sum — here we pick last month entry encountered
-            Object.keys(val || {}).forEach(mon => {
-              const admBlock = val[mon] || {};
-              Object.keys(admBlock).forEach(adm => {
-                out[adm] = out[adm] || {};
-                Object.keys(admBlock[adm] || {}).forEach(sub => {
-                  const o = admBlock[adm][sub] || {};
-                  out[adm][sub] = { score: Number(o.score||0), max: Number(o.max||100) };
-                });
-              });
+        if (snap && snap.exists && snap.exists()) {
+          const val = snap.val() || {};
+          Object.keys(val).forEach(adm => {
+            const subjObj = val[adm] || {};
+            out[adm] = {};
+            Object.keys(subjObj).forEach(subject => {
+              const o = subjObj[subject] || {};
+              out[adm][subject] = { score: Number(o.score||0), max: Number(o.max||100) };
             });
-          } else {
-            Object.keys(val || {}).forEach(adm => {
-              out[adm] = {};
-              Object.keys(val[adm] || {}).forEach(sub => {
-                const o = val[adm][sub] || {};
-                out[adm][sub] = { score: Number(o.score||0), max: Number(o.max||100) };
-              });
-            });
+          });
+        } else {
+          // Fallback (rare): try the legacy `/scores/{year}/{className}/{examKey}/{mon}`
+          const alt = `/scores/${year}/${className}/monthly/${mon}`; // keep same; you can extend if you keep legacy keys
+          if (alt !== refPath) {
+            const s2 = await db.ref(alt).get();
+            if (s2 && s2.exists && s2.exists()) out = s2.val() || {};
           }
         }
-        return out;
-      }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
+      } catch(e) { /* swallow, leave empty */ }
+      CACHE.scoresMonthly.set(cacheKey, out);
+      return out;
     }
 
     /* -------------------------- COMPOSE -------------------------- */
@@ -1142,6 +1198,7 @@
       document.getElementById('metricStudents').textContent = total;
       document.getElementById('metricGender').textContent = `M:${male} / F:${female}`;
       document.getElementById('metricAverage').textContent = `${avg.toFixed(1)}%`;
+      document.getElementById('metricAverage').previousElementSibling?.nextElementSibling?.textContent = 'Selected exam scope';
       document.getElementById('metricBalance').textContent = `TSh ${formatCurrency(balance)}`;
       document.getElementById('metricAttendance').textContent = `${attendance.toFixed(1)}%`;
     }
@@ -1188,6 +1245,7 @@
       document.getElementById('previewBranch').textContent = state.branch || 'School';
       document.getElementById('previewExam').textContent = state.examType;
       document.getElementById('previewMonth').textContent = MONTH_LABELS[state.month] || state.month;
+      document.getElementById('previewYearBadge').textContent = String(state.year);
       if (!s){
         document.getElementById('previewStudentName').textContent = 'Select a student';
         document.getElementById('previewGender').textContent = '';
@@ -1460,3 +1518,24 @@
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -437,6 +437,12 @@
       align-items: center;
       justify-content: center;
     }
+    .viewer-content iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: white;
+    }
     .viewer-content img {
       max-width: 100%;
       max-height: 100%;
@@ -772,14 +778,14 @@
       return div.innerHTML;
     }
 
-    // ========== SECURE IMAGE-ONLY VIEWER WITH WORKING CONTROLS ==========
+    // ========== SECURE VIEW-ONLY VIEWER (NO DOWNLOAD/PRINT) ==========
     let currentZoom = 1;
     let currentRotation = 0;
     const MIN_ZOOM = 0.5;
     const MAX_ZOOM = 3;
     const ZOOM_STEP = 0.2;
     
-    // Open book viewer - SECURE IMAGE-ONLY (NO PDF DOWNLOADS/PRINTS)
+    // Open book viewer - VIEW ONLY (NO DOWNLOADS/PRINTS/SCREENSHOTS)
     function openBookViewer(url, title) {
       const modal = document.getElementById('pdfModal');
       const modalTitle = document.getElementById('modalTitle');
@@ -798,56 +804,70 @@
       viewerContent.innerHTML = '';
       viewerContent.style.transform = 'scale(1) rotate(0deg)';
       
-      // SECURITY: Block PDF files (they allow downloads and printing)
+      // Detect if PDF or image
       const isPdf = url.toLowerCase().endsWith('.pdf');
       
       if (isPdf) {
-        spinner.classList.add('hidden');
-        viewerContent.innerHTML = `
-          <div style="text-align: center; color: white; padding: 40px;">
-            <i class="fas fa-shield-alt" style="font-size: 4rem; margin-bottom: 20px; color: #EF4444;"></i>
-            <h3 style="font-size: 1.8rem; margin-bottom: 15px; font-weight: bold;">PDF Viewing Disabled for Security</h3>
-            <p style="font-size: 1.1rem; opacity: 0.9; max-width: 600px; margin: 0 auto; line-height: 1.6;">
-              PDFs cannot be viewed directly to prevent unauthorized downloads and printing.<br><br>
-              Please contact your administrator to convert this book to a secure image format.
-            </p>
-            <p style="margin-top: 30px; font-size: 0.95rem; opacity: 0.7;">
-              <i class="fas fa-lock mr-2"></i>Protected by SoMAp Security System
-            </p>
-          </div>
-        `;
-        return;
+        // SECURE PDF VIEWER - Uses Google Docs Viewer (no download/print buttons)
+        const encodedUrl = encodeURIComponent(url);
+        const secureViewerUrl = `https://docs.google.com/viewer?url=${encodedUrl}&embedded=true`;
+        
+        const iframe = document.createElement('iframe');
+        iframe.src = secureViewerUrl;
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        iframe.style.border = 'none';
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin'); // Prevent downloads
+        iframe.setAttribute('allow', 'fullscreen'); // Allow fullscreen only
+        
+        // Hide spinner when loaded
+        iframe.onload = () => {
+          spinner.classList.add('hidden');
+        };
+        
+        // Error handling
+        iframe.onerror = () => {
+          spinner.classList.add('hidden');
+          showProtectionAlert('Error loading PDF. Please try again.');
+        };
+        
+        viewerContent.appendChild(iframe);
+      } else {
+        // SECURE IMAGE VIEWER - View only, protected by existing screenshot/print blockers
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = title;
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '100%';
+        img.style.objectFit = 'contain';
+        img.style.display = 'block';
+        
+        // Additional security attributes
+        img.setAttribute('draggable', 'false');
+        img.style.userSelect = 'none';
+        img.style.pointerEvents = 'none';
+        
+        // Hide spinner when loaded
+        img.onload = () => {
+          spinner.classList.add('hidden');
+        };
+        
+        // Error handling
+        img.onerror = () => {
+          spinner.classList.add('hidden');
+          viewerContent.innerHTML = `
+            <div style="text-align: center; color: white; padding: 40px;">
+              <i class="fas fa-exclamation-triangle" style="font-size: 4rem; margin-bottom: 20px; color: #F59E0B;"></i>
+              <h3 style="font-size: 1.8rem; margin-bottom: 15px; font-weight: bold;">Error Loading Book</h3>
+              <p style="font-size: 1.1rem; opacity: 0.9;">
+                Could not load this book. Please try again or contact support.
+              </p>
+            </div>
+          `;
+        };
+        
+        viewerContent.appendChild(img);
       }
-      
-      // SECURE: Only show images (cannot be easily downloaded/printed)
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = title;
-      img.style.maxWidth = '100%';
-      img.style.maxHeight = '100%';
-      img.style.objectFit = 'contain';
-      img.style.display = 'block';
-      
-      // Hide spinner when loaded
-      img.onload = () => {
-        spinner.classList.add('hidden');
-      };
-      
-      // Error handling
-      img.onerror = () => {
-        spinner.classList.add('hidden');
-        viewerContent.innerHTML = `
-          <div style="text-align: center; color: white; padding: 40px;">
-            <i class="fas fa-exclamation-triangle" style="font-size: 4rem; margin-bottom: 20px; color: #F59E0B;"></i>
-            <h3 style="font-size: 1.8rem; margin-bottom: 15px; font-weight: bold;">Error Loading Book</h3>
-            <p style="font-size: 1.1rem; opacity: 0.9;">
-              Could not load this book. Please try again or contact support.
-            </p>
-          </div>
-        `;
-      };
-      
-      viewerContent.appendChild(img);
     }
     
     // Apply zoom and rotation to viewer content
@@ -903,7 +923,11 @@
       // Hide modal
       modal.classList.add('hidden');
       
-      // Clear viewer content and free memory (images)
+      // Clear viewer content and free memory
+      const iframe = viewerContent.querySelector('iframe');
+      if (iframe) {
+        iframe.src = 'about:blank'; // Stop loading PDF
+      }
       const img = viewerContent.querySelector('img');
       if (img) {
         img.src = ''; // Clear image to free memory

@@ -386,6 +386,71 @@
     const EXAM_KEYS = { 'Monthly':'monthly', 'Midterm 1':'midterm1', 'Midterm 2':'midterm2', 'End Term':'endterm', 'Annual':'annual' };
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const MONTH_LABELS = { Jan:'January', Feb:'February', Mar:'March', Apr:'April', May:'May', Jun:'June', Jul:'July', Aug:'August', Sep:'September', Oct:'October', Nov:'November', Dec:'December' };
+    const MONTH_NUMERIC = Object.fromEntries(MONTHS.map((m, idx) => [m, String(idx + 1).padStart(2, '0')]));
+    const MONTH_ALIAS_TO_KEY = (() => {
+      const map = {};
+      MONTHS.forEach((m, idx) => {
+        const full = MONTH_LABELS[m];
+        const num = String(idx + 1);
+        const padded = num.padStart(2, '0');
+        map[m.toUpperCase()] = m;
+        map[(full || '').toUpperCase()] = m;
+        map[num] = m;
+        map[padded] = m;
+        if (m === 'Sep') map['SEPT'] = m;
+      });
+      return map;
+    })();
+    function resolveMonthKey(input){
+      if (input === null || input === undefined) return null;
+      const raw = String(input).trim();
+      if (!raw) return null;
+      const upper = raw.toUpperCase();
+      if (MONTH_ALIAS_TO_KEY[upper]) return MONTH_ALIAS_TO_KEY[upper];
+      if (MONTH_ALIAS_TO_KEY[raw]) return MONTH_ALIAS_TO_KEY[raw];
+      // Handle values like "2025-08"
+      const parts = raw.split(/[-_/]/);
+      if (parts.length >= 2){
+        const maybe = parts[parts.length - 1];
+        const fromParts = MONTH_ALIAS_TO_KEY[maybe.toUpperCase()] || MONTH_ALIAS_TO_KEY[maybe];
+        if (fromParts) return fromParts;
+      }
+      return null;
+    }
+    function monthVariants(mon, rawMon){
+      const variants = new Set();
+      if (rawMon) variants.add(String(rawMon));
+      if (mon) variants.add(String(mon));
+      const resolved = resolveMonthKey(mon) || resolveMonthKey(rawMon);
+      if (resolved){
+        const upper = resolved.toUpperCase();
+        variants.add(resolved);
+        variants.add(resolved.toLowerCase());
+        variants.add(upper);
+        const full = MONTH_LABELS[resolved];
+        if (full){
+          variants.add(full);
+          variants.add(full.toLowerCase());
+          variants.add(full.toUpperCase());
+        }
+        if (resolved === 'Sep'){
+          variants.add('Sept');
+          variants.add('SEPT');
+        }
+        const numeric = MONTH_NUMERIC[resolved];
+        if (numeric){
+          variants.add(numeric);
+          variants.add(String(Number(numeric)));
+        }
+      }
+      return Array.from(variants).filter(Boolean);
+    }
+    function preferredMonthStorage(mon, rawFallback){
+      const resolved = resolveMonthKey(mon);
+      if (!resolved) return rawFallback !== undefined ? String(rawFallback || '') : String(mon || '');
+      if (rawFallback && /^\d{4}-\d{2}$/.test(String(rawFallback))) return String(rawFallback);
+      return MONTH_NUMERIC[resolved] || resolved;
+    }
     /* === SOMAP REPORTS: PLAN, WEIGHTS & CACHE === */
     const EXAM_MONTH_PLAN = {
       monthly:  (selectedMonth) => [selectedMonth],                            // dynamic
@@ -395,6 +460,8 @@
       annual:   () => ['Jan','Feb','Mar','Apr','May','Jul','Aug','Sep','Oct','Nov']
     };
     const ATTENDANCE_WEIGHTS = { Apr: 0.5, Sep: 0.5, Dec: 0.25 };
+    const ATTEND_PRESENT_CODES = new Set(['P','PRESENT','PR','1','TRUE','YES','Y']);
+    const ATTEND_ABSENT_CODES = new Set(['A','ABSENT','0','FALSE','NO','N']);
     const CACHE = {
       scoresMonthly: new Map(),   // key: `${year}::${class}::${mon}` -> { [adm]: { [subject]: {score,max} } }
       attendanceMonthly: new Map(),// key: `${year}::${class}::${mon}` -> { [adm]: {present,absent,days} }
@@ -429,7 +496,7 @@
 
     /* -------------------------- STATE -------------------------- */
     const state = {
-      className: '', stream: '', year: new Date().getFullYear(), month: 'Sep', examType: 'Monthly', examKey: 'monthly', branch: 'School',
+      className: '', stream: '', year: new Date().getFullYear(), month: 'Sep', monthRaw: preferredMonthStorage('Sep'), examType: 'Monthly', examKey: 'monthly', branch: 'School',
       rawStudents: {}, students: [], filtered: [], selectedAdm: null, subjects: [], teachers: new Map(),
       logoDataUrl: null,
       // Parent mode parameters
@@ -452,9 +519,17 @@
       state.className = ss.getItem('className') || ss.getItem(PREFS.CLASS_KEY) || 'Class 1';
       state.stream = ss.getItem('stream') || ss.getItem(PREFS.STREAM_KEY) || '';
       state.year = ss.getItem('year') || ss.getItem(PREFS.YEAR_KEY) || new Date().getFullYear();
-      state.month = ss.getItem('month') || ss.getItem(PREFS.MONTH_KEY) || 'Sep';
+      const rawMonth = ss.getItem('month') || ss.getItem(PREFS.MONTH_KEY) || '';
       state.examKey = ss.getItem('examKey') || ss.getItem(PREFS.EXAM_KEY) || 'monthly';
       state.examType = Object.keys(EXAM_KEYS).find(k => EXAM_KEYS[k] === state.examKey) || 'Monthly';
+      if (state.examKey === 'annual') {
+        state.month = 'All';
+        state.monthRaw = 'All';
+      } else {
+        const resolved = resolveMonthKey(rawMonth) || 'Sep';
+        state.month = resolved;
+        state.monthRaw = preferredMonthStorage(state.month, rawMonth);
+      }
       state.branch = ss.getItem('schoolBranch') || ss.getItem(PREFS.BRANCH_KEY) || 'Socrates School';
     }
 
@@ -525,7 +600,7 @@
       ss.setItem('className', state.className);
       ss.setItem('stream', state.stream);
       ss.setItem('year', String(state.year));
-      ss.setItem('month', state.month);
+      ss.setItem('month', state.monthRaw || state.month);
       ss.setItem('examKey', state.examKey);
       ss.setItem('schoolBranch', state.branch);
     }
@@ -579,11 +654,14 @@
         const opt = document.createElement('option'); opt.value = 'All'; opt.textContent = 'All Year';
         monthSel.appendChild(opt);
         state.month = 'All';
+        state.monthRaw = 'All';
         monthSel.value = 'All';
       } else {
         if (!MONTHS.includes(state.month)) {
-          state.month = MONTHS[0];
+          const resolved = resolveMonthKey(state.month) || resolveMonthKey(state.monthRaw) || MONTHS[0];
+          state.month = resolved;
         }
+        state.monthRaw = preferredMonthStorage(state.month, state.monthRaw);
         MONTHS.forEach(m => {
           const opt = document.createElement('option'); opt.value = m; opt.textContent = MONTH_LABELS[m];
           if (m === state.month) opt.selected = true;
@@ -613,7 +691,9 @@
         persistToSession(); loadAllData();
       });
       document.getElementById('monthSelect').addEventListener('change', e => {
-        state.month = e.target.value; persistToSession(); loadAllData();
+        state.month = e.target.value;
+        state.monthRaw = state.examType === 'Annual' ? 'All' : preferredMonthStorage(state.month, state.monthRaw);
+        persistToSession(); loadAllData();
       });
       document.getElementById('streamInput').addEventListener('change', e => {
         state.stream = e.target.value; persistToSession(); loadAllData();
@@ -760,9 +840,9 @@
         state.subjects = SUBJECTS_BY_CLASS[state.className] || state.subjects || [];
         const [students, attendance, fees, scores, detailsMap] = await Promise.all([
           fetchStudents(state.className, state.stream),
-          fetchAttendance(state.year, state.month, state.className, state.examKey),
+          fetchAttendance(state.year, state.month, state.className, state.examKey, state.monthRaw),
           fetchFees(state.year, state.className),
-          fetchScores({year: state.year, className: state.className, examKey: state.examKey, month: state.month}),
+          fetchScores({year: state.year, className: state.className, examKey: state.examKey, month: state.month, rawMonth: state.monthRaw}),
           fetchStudentDetailsMap()
         ]);
         state.rawStudents = {};
@@ -907,20 +987,27 @@
       return map;
     }
 
-    async function fetchAttendance(year, month, className, examKey) {
+    async function fetchAttendance(year, month, className, examKey, rawMonth) {
       const key = (examKey || 'monthly').toLowerCase();
       // Determine months for attendance
       let months = [];
-      if (key === 'monthly') months = [month];
-      else if (key === 'annual') months = [...EXAM_MONTH_PLAN.annual(), 'Dec']; // annual includes Dec (¼)
-      else months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
+      if (key === 'monthly') {
+        months = [{ mon: month, raw: rawMonth }];
+      } else if (key === 'annual') {
+        months = EXAM_MONTH_PLAN.annual().map(m => ({ mon: m, raw: null }));
+        months.push({ mon: 'Dec', raw: null });
+      } else {
+        const plan = EXAM_MONTH_PLAN[key] || (() => []);
+        months = (plan(month) || []).map(m => ({ mon: m, raw: null }));
+      }
 
       if (!months.length) return {};
-      const monthMaps = await Promise.all(months.map(m => getMonthlyAttendance(year, className, m)));
+      const monthMaps = await Promise.all(months.map(({ mon, raw }) => getMonthlyAttendance(year, className, mon, raw)));
       const merged = {};
-      for (const [idx, mon] of months.entries()) {
+      for (const [idx, entry] of months.entries()) {
         const map = monthMaps[idx] || {};
-        const w = Number(ATTENDANCE_WEIGHTS[mon] || 1.0);
+        const weightKey = resolveMonthKey(entry.mon) || entry.mon;
+        const w = Number(ATTENDANCE_WEIGHTS[weightKey] || 1.0);
         Object.entries(map).forEach(([adm, a]) => {
           merged[adm] = merged[adm] || { present: 0, absent: 0, days: 0 };
           merged[adm].present += w * Number(a.present || a.daysPresent || 0);
@@ -949,47 +1036,104 @@
       });
       return out;
     }
+    function interpretAttendanceEntry(entry){
+      if (!entry) return null;
+      const normalize = v => {
+        if (v === null || v === undefined) return null;
+        const str = String(v).trim();
+        return str ? str.toUpperCase() : null;
+      };
+      const daily = normalize(entry.daily || entry.status || entry.attendance || entry.value);
+      if (daily){
+        if (ATTEND_PRESENT_CODES.has(daily)) return { present: 1, absent: 0, days: 1 };
+        if (ATTEND_ABSENT_CODES.has(daily)) return { present: 0, absent: 1, days: 1 };
+      }
+      const am = normalize(entry.am);
+      const pm = normalize(entry.pm);
+      if (am || pm){
+        const tokens = [am, pm].filter(Boolean);
+        if (!tokens.length) return null;
+        const presentCount = tokens.filter(t => ATTEND_PRESENT_CODES.has(t)).length;
+        const absentCount = tokens.filter(t => ATTEND_ABSENT_CODES.has(t)).length;
+        if (presentCount === 0 && absentCount === 0) return null;
+        if (presentCount >= absentCount) return { present: 1, absent: 0, days: 1 };
+        return { present: 0, absent: 1, days: 1 };
+      }
+      const generic = normalize(entry.present);
+      if (generic){
+        if (ATTEND_PRESENT_CODES.has(generic)) return { present: 1, absent: 0, days: 1 };
+        if (ATTEND_ABSENT_CODES.has(generic)) return { present: 0, absent: 1, days: 1 };
+      }
+      return null;
+    }
+    function aggregateClassFirstAttendance(val){
+      const out = {};
+      Object.keys(val || {}).forEach(dayKey => {
+        const dayEntries = val[dayKey] || {};
+        Object.keys(dayEntries || {}).forEach(ref => {
+          const entry = dayEntries[ref] || {};
+          const snap = entry.snap || entry.student || {};
+          const adm = String(entry.adm || entry.admissionNo || entry.admNo || entry.studentId || snap.admissionNo || snap.adm || snap.admNo || '').trim();
+          if (!adm) return;
+          const counts = interpretAttendanceEntry(entry);
+          if (!counts) return;
+          out[adm] = out[adm] || { present: 0, absent: 0, days: 0 };
+          out[adm].present += counts.present || 0;
+          out[adm].absent += counts.absent || 0;
+          out[adm].days += counts.days || 0;
+        });
+      });
+      return out;
+    }
 
-    async function getMonthlyAttendance(year, className, mon) {
-      const cacheKey = `${year}::${className}::${mon}`;
+    async function getMonthlyAttendance(year, className, mon, rawMon) {
+      const canonical = resolveMonthKey(mon) || resolveMonthKey(rawMon) || String(mon || rawMon || '').trim() || 'unknown';
+      const cacheKey = `${year}::${className}::${canonical}`;
       if (CACHE.attendanceMonthly.has(cacheKey)) return CACHE.attendanceMonthly.get(cacheKey);
-      const refPath = `/attendance/${year}/${mon}/${className}`;
       let out = {};
-      try {
-        const snap = await db.ref(refPath).get();
-        if (snap && snap.exists && snap.exists()) {
-          out = normalizeMonthlyAttendanceMap(snap.val());
-        }
-        if (!Object.keys(out).length) {
-          const candidates = [];
-          const longMonth = MONTH_LABELS[mon];
-          if (longMonth && longMonth !== mon) {
-            candidates.push(`/attendance/${year}/${longMonth}/${className}`);
-          }
-          const lowerMon = (mon || '').toLowerCase();
-          if (lowerMon && lowerMon !== mon) {
-            candidates.push(`/attendance/${year}/${lowerMon}/${className}`);
-          }
-          if (mon) {
-            candidates.push(`/attendance/${year}/${className}/${mon}`);
-          }
-          if (longMonth && longMonth !== mon) {
-            candidates.push(`/attendance/${year}/${className}/${longMonth}`);
-          }
-          for (const altPath of candidates) {
-            if (!altPath || altPath === refPath) continue;
-            try {
-              const altSnap = await db.ref(altPath).get();
-              if (altSnap && altSnap.exists && altSnap.exists()) {
-                out = normalizeMonthlyAttendanceMap(altSnap.val());
-                if (Object.keys(out).length) break;
+      const variants = monthVariants(mon, rawMon);
+      const tried = new Set();
+      for (const variant of variants.length ? variants : [mon, rawMon]) {
+        if (!variant) continue;
+        const combo = [`/attendance/${year}/${variant}/${className}`, `/attendance/${year}/${className}/${variant}`];
+        for (const path of combo) {
+          if (!path || tried.has(path)) continue;
+          tried.add(path);
+          try {
+            const snap = await db.ref(path).get();
+            if (snap && snap.exists && snap.exists()) {
+              const normalized = normalizeMonthlyAttendanceMap(snap.val());
+              if (Object.keys(normalized).length) {
+                out = normalized;
+                break;
               }
-            } catch (altErr) {
-              /* ignore */
             }
-          }
+          } catch (err) { /* ignore */ }
         }
-      } catch(e) { /* ignore */ }
+        if (Object.keys(out).length) break;
+      }
+      if (!Object.keys(out).length) {
+        const canonicalKey = resolveMonthKey(mon) || resolveMonthKey(rawMon);
+        const numeric = canonicalKey ? MONTH_NUMERIC[canonicalKey] : null;
+        const classFirstKeys = [];
+        if (rawMon && /^\d{4}-\d{2}$/.test(String(rawMon))) classFirstKeys.push(String(rawMon));
+        if (numeric) classFirstKeys.push(`${year}-${numeric}`);
+        for (const key of classFirstKeys) {
+          const path = `/attendance/${className}/${key}`;
+          if (!path || tried.has(path)) continue;
+          tried.add(path);
+          try {
+            const snap = await db.ref(path).get();
+            if (snap && snap.exists && snap.exists()) {
+              const aggregated = aggregateClassFirstAttendance(snap.val());
+              if (Object.keys(aggregated).length) {
+                out = aggregated;
+                break;
+              }
+            }
+          } catch (err) { /* ignore */ }
+        }
+      }
       CACHE.attendanceMonthly.set(cacheKey, out);
       return out;
     }
@@ -1012,16 +1156,16 @@
       }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
     }
 
-    async function fetchScores({ year, className, examKey, month }) {
+    async function fetchScores({ year, className, examKey, month, rawMonth }) {
       const key = (examKey || 'monthly').toLowerCase();
       if (key === 'monthly') {
-        return getMonthlyScores(year, className, month);
+        return getMonthlyScores(year, className, month, rawMonth);
       }
       // Multi-month aggregation
       const months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
       if (!Array.isArray(months) || !months.length) return {};
       // Sum raw score and max across months, per subject
-      const perMonth = await Promise.all(months.map(m => getMonthlyScores(year, className, m)));
+      const perMonth = await Promise.all(months.map(m => getMonthlyScores(year, className, m, null)));
       const merged = {};
       for (const monthMap of perMonth) {
         Object.entries(monthMap || {}).forEach(([adm, subs]) => {
@@ -1041,54 +1185,52 @@
         const subjObj = val[adm] || {};
         out[adm] = out[adm] || {};
         Object.keys(subjObj).forEach(subject => {
-          const o = subjObj[subject] || {};
-          out[adm][subject] = { score: Number(o.score || o.Score || 0), max: Number(o.max || o.Max || 100) };
+          const o = subjObj[subject];
+          if (!o || typeof o !== 'object') return;
+          if (String(subject || '').toLowerCase() === 'snap') return;
+          const hasScore = Object.prototype.hasOwnProperty.call(o, 'score') || Object.prototype.hasOwnProperty.call(o, 'Score');
+          const hasMax = Object.prototype.hasOwnProperty.call(o, 'max') || Object.prototype.hasOwnProperty.call(o, 'Max');
+          if (!hasScore && !hasMax) return;
+          const scoreVal = hasScore ? Number(o.score ?? o.Score ?? 0) : 0;
+          let maxVal = hasMax ? Number(o.max ?? o.Max ?? 0) : 100;
+          if (!Number.isFinite(maxVal) || maxVal <= 0) maxVal = 100;
+          out[adm][subject] = { score: scoreVal, max: maxVal };
         });
       });
       return out;
     }
 
-    async function getMonthlyScores(year, className, mon) {
-      const cacheKey = `${year}::${className}::${mon}`;
+    async function getMonthlyScores(year, className, mon, rawMon) {
+      const canonical = resolveMonthKey(mon) || resolveMonthKey(rawMon) || String(mon || rawMon || '').trim() || 'unknown';
+      const cacheKey = `${year}::${className}::${canonical}`;
       if (CACHE.scoresMonthly.has(cacheKey)) return CACHE.scoresMonthly.get(cacheKey);
-      // Primary: read monthly path
       let out = {};
-      try {
-        const refPath = `/scores/${year}/${className}/monthly/${mon}`;
-        const snap = await db.ref(refPath).get();
-        if (snap && snap.exists && snap.exists()) {
-          out = normalizeMonthlyScoreMap(snap.val());
-        }
-        if (!Object.keys(out).length) {
-          const candidates = [];
-          const longMonth = MONTH_LABELS[mon];
-          if (longMonth && longMonth !== mon) {
-            candidates.push(`/scores/${year}/${className}/monthly/${longMonth}`);
-          }
-          const lowerMon = (mon || '').toLowerCase();
-          if (lowerMon && lowerMon !== mon) {
-            candidates.push(`/scores/${year}/${className}/monthly/${lowerMon}`);
-          }
-          if (longMonth && longMonth !== mon) {
-            candidates.push(`/scores/${year}/${className}/${longMonth}`);
-          }
-          if (mon) {
-            candidates.push(`/scores/${year}/${className}/${mon}`);
-          }
-          for (const altPath of candidates) {
-            if (!altPath || altPath === refPath) continue;
-            try {
-              const altSnap = await db.ref(altPath).get();
-              if (altSnap && altSnap.exists && altSnap.exists()) {
-                out = normalizeMonthlyScoreMap(altSnap.val());
-                if (Object.keys(out).length) break;
+      const variants = monthVariants(mon, rawMon);
+      const tried = new Set();
+      for (const variant of variants.length ? variants : [mon, rawMon]) {
+        if (!variant) continue;
+        const base = `/scores/${year}/${className}`;
+        const paths = [
+          `${base}/monthly/${variant}`,
+          `${base}/Monthly/${variant}`,
+          `${base}/${variant}`
+        ];
+        for (const path of paths) {
+          if (!path || tried.has(path)) continue;
+          tried.add(path);
+          try {
+            const snap = await db.ref(path).get();
+            if (snap && snap.exists && snap.exists()) {
+              const normalized = normalizeMonthlyScoreMap(snap.val());
+              if (Object.keys(normalized).length) {
+                out = normalized;
+                break;
               }
-            } catch (altErr) {
-              /* ignore */
             }
-          }
+          } catch (err) { /* ignore */ }
         }
-      } catch(e) { /* swallow, leave empty */ }
+        if (Object.keys(out).length) break;
+      }
       CACHE.scoresMonthly.set(cacheKey, out);
       return out;
     }
@@ -1598,24 +1740,3 @@
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

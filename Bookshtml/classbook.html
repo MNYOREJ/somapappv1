@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-  <title>SoMAp — Magical Books Library (Secure Reader v2)</title>
+  <title>SoMAp — Magical Books Library (Secure Reader v2.1)</title>
 
   <!-- Perf & CDN hints -->
   <link rel="preconnect" href="https://cdn.tailwindcss.com">
@@ -37,11 +37,20 @@
 
     .maxw { max-width: 1120px; margin: 0 auto; }
 
+    /* ======= Hero ======= */
+    .hero { position:relative; overflow:hidden; border-radius:20px; background:linear-gradient(135deg, #eef2ff, #f5f3ff); border:1px solid #e5e7eb; }
+    .hero-inner { display:flex; gap:18px; align-items:center; padding:18px; }
+    .hero h2 { font-weight:900; letter-spacing:.2px; }
+    .hero p { color:#334155; font-weight:700; }
+    .hero-img { width:64px; height:64px; border-radius:12px; border:2px solid #c7d2fe; background:#fff; object-fit:cover; }
+
     /* ======= Book Grid ======= */
     .book-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px,1fr)); gap:22px; padding:24px; }
     .book-card { background:#fff; border:1px solid #e5e7eb; border-radius:16px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,.05); transition:transform .15s ease, box-shadow .15s ease; }
     .book-card:hover { transform: translateY(-2px); box-shadow:0 6px 18px rgba(2,6,23,.08); }
-    .book-thumb { width:100%; height:180px; object-fit:cover; display:block; background:#eef2ff; }
+    .book-thumb-wrap { position:relative; background:#0b1220; }
+    .book-thumb { width:100%; height:180px; object-fit:cover; display:block; }
+    .thumb-veil { position:absolute; inset:0; background:linear-gradient(180deg, rgba(2,6,23,.0), rgba(2,6,23,.15)); }
     .book-body { padding:14px 14px 16px; }
     .book-title { font-weight:800; line-height:1.2; font-size:1rem; color:#111827; margin-bottom:6px; }
     .book-sub { font-size:.85rem; color:#475569; display:flex; gap:8px; align-items:center; }
@@ -73,7 +82,7 @@
     .modal-header { display:flex; align-items:center; gap:10px; padding:10px 14px; color:#e5e7eb; background:#111827; border-bottom:1px solid #1f2937; }
     .modal-header h2 { font-weight:900; font-size:1rem; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-    .modal-controls { background:#0b1220; border-bottom:1px solid #1f2937; padding:8px 10px; display:flex; gap:8px; align-items:center; }
+    .modal-controls { background:#0b1220; border-bottom:1px solid #1f2937; padding:8px 10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .mc-btn { border:1px solid #293042; background:#111827; color:#e5e7eb; border-radius:10px; padding:8px 12px; font-weight:800; line-height:1; }
     .mc-btn[disabled] { opacity:.5; cursor:not-allowed; }
     .mc-badge { color:#94a3b8; font-weight:800; }
@@ -129,6 +138,19 @@
     </div>
   </header>
 
+  <!-- ======= Hero ======= -->
+  <section class="maxw px-4 mt-4">
+    <div class="hero">
+      <div class="hero-inner">
+        <img class="hero-img" src="../assets/socrates.png" onerror="this.src='https://dummyimage.com/128x128/ffffff/000000.png&text=S'" alt="Socrates"/>
+        <div>
+          <h2 class="text-xl sm:text-2xl">Here is your Library — <span class="text-indigo-700">Read</span>, enjoy <span class="text-emerald-700">school books</span>, <span class="text-purple-700">story books</span>, and <span class="text-amber-700">fun books</span>. Build your own future.</h2>
+          <p class="mt-1 italic">“An unexamined life is not worth living.” — <strong>Socrates</strong></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ======= Body ======= -->
   <main class="maxw px-4 py-6">
     <div class="mb-4 searchwrap">
@@ -163,6 +185,7 @@
         <button id="zoutBtn" class="mc-btn"><i class="fa fa-search-minus mr-1"></i>Zoom Out</button>
         <button id="rotBtn" class="mc-btn"><i class="fa fa-rotate mr-1"></i>Rotate</button>
         <button id="fitBtn" class="mc-btn"><i class="fa fa-compress mr-1"></i>Reset</button>
+        <button id="clarityBtn" class="mc-btn" title="Increase page rendering sharpness">Clarity: <span id="clarityLabel">HD</span></button>
         <div class="ml-auto mc-badge" id="zoomLabel">100%</div>
       </div>
 
@@ -244,12 +267,15 @@
 
   // ================== Data / Grid ==================
   const cache = new Map();
+  const thumbCache = new Map(); // url -> dataURL
   const loadingEl = document.getElementById('loading');
   const noBooksEl = document.getElementById('noBooks');
   const grid = document.getElementById('booksGrid');
   const searchInput = document.getElementById('searchInput');
 
+  function isPdf(url){ return /\.pdf(\?|#|$)/i.test(url||''); }
   function thumbFrom(url){
+    if (isPdf(url)) return null; // handled by PDF cover generator below
     return /res\.cloudinary\.com/.test(url)
       ? url.replace('/upload/','/upload/fl_sanitize,pg_1,f_jpg,q_auto,w_360/')
       : url;
@@ -306,29 +332,72 @@
     return '';
   }
 
-  function renderBooks(entries){
+  async function generatePdfCoverThumb(url){
+    if (thumbCache.has(url)) return thumbCache.get(url);
+    try{
+      const cacheKey = 'somap_thumb_' + btoa(url).replace(/=/g,'');
+      const existing = sessionStorage.getItem(cacheKey);
+      if (existing){ thumbCache.set(url, existing); return existing; }
+
+      const buf = await fetch(url, { credentials:'omit' }).then(r=>r.arrayBuffer());
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const page = await pdf.getPage(1);
+      const desired = 360; // px width for card
+      const vp = page.getViewport({ scale: 1 });
+      const scale = desired / vp.width;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const dataURL = canvas.toDataURL('image/jpeg', 0.86);
+      thumbCache.set(url, dataURL);
+      sessionStorage.setItem(cacheKey, dataURL);
+      return dataURL;
+    }catch(e){
+      console.warn('thumb gen failed', e); return null;
+    }
+  }
+
+  async function renderBooks(entries){
     loadingEl.classList.add('hidden');
     grid.innerHTML = '';
     if (!entries.length){ noBooksEl.classList.remove('hidden'); return; }
     noBooksEl.classList.add('hidden');
 
     const frag = document.createDocumentFragment();
-    entries.forEach(([id,b])=>{
+    for (const [id,b] of entries){
       const card = document.createElement('div');
       card.className = 'book-card';
       const t = (b.title||'Untitled');
       const s = (b.subject||'');
-      const imgUrl = thumbFrom(b.url||'');
       const subClass = subjectClass(s);
+
+      let cover = thumbFrom(b.url||'');
+      if (!cover && isPdf(b.url)){
+        // placeholder while generating
+        cover = 'https://dummyimage.com/640x360/0b1220/ffffff.png&text=Loading…';
+        // async improve once ready
+        generatePdfCoverThumb(b.url).then(dataURL=>{
+          if (!dataURL) return;
+          const imgEl = card.querySelector('img[data-id="'+id+'"]');
+          if (imgEl) imgEl.src = dataURL;
+        });
+      }
+
       card.innerHTML = `
-        <img class="book-thumb" loading="lazy" src="${imgUrl}" alt="${escapeHtml(t)} thumbnail" onerror="this.style.display='none'">
+        <div class="book-thumb-wrap">
+          <img class="book-thumb" data-id="${id}" loading="lazy" src="${cover||''}" alt="${escapeHtml(t)} cover" onerror="this.style.display='none'">
+          <div class="thumb-veil"></div>
+        </div>
         <div class="book-body">
           <div class="book-title">${escapeHtml(t)}</div>
           <div class="book-sub"><span class="subject-chip ${subClass}">${escapeHtml(s||'General')}</span></div>
           <button class="read-btn" data-url="${b.url||''}" data-title="${escapeHtml(t)}"><i class="fa fa-book-open mr-1"></i>Read</button>
         </div>`;
       frag.appendChild(card);
-    });
+    }
     grid.appendChild(frag);
 
     grid.querySelectorAll('.read-btn').forEach(btn=>{
@@ -356,16 +425,42 @@
   const topBtn = document.getElementById('topBtn');
   const closeBtn = document.getElementById('closeBtn');
   const progBar = document.getElementById('progBar');
+  const clarityBtn = document.getElementById('clarityBtn');
+  const clarityLabel = document.getElementById('clarityLabel');
 
   let zoom = 1, rotation = 0;
   const ZMIN=0.6, ZMAX=2.5, ZSTEP=0.1;
-  let activeDoc = null; // { type:'pdf'|'img', pdf?, numPages?, dataUrl? }
+  let activeDoc = null; // { type:'pdf'|'img', pdf?, numPages? }
   let pageRecords = new Map(); // p -> {canvas, container, renderedScale, thumbCanvas}
   let observer = null;
 
+  // Clarity levels (multiplies devicePixelRatio for sharper text on phones)
+  const CLARITIES = [
+    { key:'normal', label:'Normal', mult:1.0 },
+    { key:'hd',     label:'HD',     mult:1.5 },
+    { key:'ultra',  label:'Ultra',  mult:2.0 },
+  ];
+  let clarityIndex = 1; // default HD
+  try{
+    const saved = localStorage.getItem('somap_reader_clarity');
+    if (saved){ const i = CLARITIES.findIndex(c=>c.key===saved); if (i>=0) clarityIndex=i; }
+  }catch(_){ }
+
+  function setClarity(i){
+    clarityIndex = (i+CLARITIES.length)%CLARITIES.length;
+    clarityLabel.textContent = CLARITIES[clarityIndex].label;
+    try{ localStorage.setItem('somap_reader_clarity', CLARITIES[clarityIndex].key); }catch(_){ }
+    rerenderAllVisible(true);
+  }
+  // mobile: default to higher clarity and slightly larger zoom
+  if (window.innerWidth < 720) { clarityIndex = Math.max(clarityIndex, 1); }
+  clarityLabel.textContent = CLARITIES[clarityIndex].label;
+
+  clarityBtn.onclick = ()=> setClarity(clarityIndex+1);
+
   function setLoading(on){
     spinner.classList.toggle('show', !!on);
-    [fsBtn, zinBtn, zoutBtn, rotBtn, fitBtn, fitPageBtn, closeBtn].forEach(b=>{
+    [fsBtn, zinBtn, zoutBtn, rotBtn, fitBtn, fitPageBtn, closeBtn, clarityBtn].forEach(b=>{
       b.disabled = !!on;
     });
   }
@@ -388,7 +483,7 @@
     pagesEl.innerHTML = '';
     railEl.innerHTML = '';
     pageRecords = new Map();
-    rotation = 0; setZoom(1, false);
+    rotation = 0; setZoom(window.innerWidth<720?1.1:1, false);
 
     if (/\.pdf(\?|#|$)/i.test(url)){
       activeDoc = { type:'pdf' };
@@ -413,7 +508,6 @@
   function closeViewer(){
     viewer.classList.remove('show');
     document.body.style.overflow='';
-    // cancel any pending renders
     if (observer) { observer.disconnect(); observer = null; }
     pageRecords.forEach(rec=> rec.renderTask && rec.renderTask.cancel?.());
     activeDoc = null; pageRecords.clear();
@@ -434,7 +528,7 @@
       canvas.className = 'page-canvas';
       canvas.width = 100; canvas.height = 100; // placeholder
 
-      const veil = document.createElement('div'); veil.className = 'glass-veil'; // prevent long-press/save
+      const veil = document.createElement('div'); veil.className = 'glass-veil';
       const wmBig = document.createElement('div'); wmBig.className = 'wm-overlay'; wmBig.textContent = 'SoMAp';
       const wmSmall = document.createElement('div'); wmSmall.className = 'wm-line'; wmSmall.textContent = 'SoMAp';
 
@@ -470,38 +564,45 @@
     document.querySelectorAll('.page').forEach(el=> observer.observe(el));
   }
 
+  function effectiveDpr(){
+    const sys = Math.min(window.devicePixelRatio||1, 2.5);
+    const mult = CLARITIES[clarityIndex].mult;
+    return Math.min(sys*mult, 3);
+  }
+
   async function renderPdfPage(p){
     if (!activeDoc?.pdf) return;
     const rec = pageRecords.get(p); if (!rec) return;
     const pdf = activeDoc.pdf;
 
-    // compute target width based on container width, maintain A4 aspect via PDF viewport
-    const avail = Math.min(rec.container.clientWidth || 1000, 1000);
+    const availCss = Math.min(rec.container.clientWidth || 1000, 1000) * zoom;
     const page = await pdf.getPage(p);
     const baseViewport = page.getViewport({ scale: 1, rotation });
-    let scale = (avail / baseViewport.width) * zoom;
+    const dpr = effectiveDpr();
+    const renderScale = (availCss / baseViewport.width) * dpr; // high-res render
 
-    // avoid thrashing: if rendered at same scale approx, skip
-    if (Math.abs((rec.renderedScale||0) - scale) < 0.02 && rec._lastRot === rotation) return;
+    if (Math.abs((rec.renderedScale||0) - renderScale) < 0.03 && rec._lastRot === rotation) return;
 
-    // cancel previous render if any
     try{ rec.renderTask?.cancel?.(); }catch(_){ }
 
-    const viewport = page.getViewport({ scale, rotation });
+    const viewport = page.getViewport({ scale: renderScale, rotation });
     const canvas = rec.canvas;
     const ctx = canvas.getContext('2d', { willReadFrequently:false });
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
+    // CSS size remains in CSS pixels (not DPR) for crispness on phone
+    canvas.style.width = Math.floor(viewport.width / dpr) + 'px';
+    canvas.style.height = Math.floor(viewport.height / dpr) + 'px';
 
     const renderTask = page.render({ canvasContext: ctx, viewport });
-    rec.renderTask = renderTask; rec.renderedScale = scale; rec._lastRot = rotation;
+    rec.renderTask = renderTask; rec.renderedScale = renderScale; rec._lastRot = rotation;
 
     try{
       await renderTask.promise;
       drawWatermarkOnCanvas(canvas, `SoMAp — ${userKey||'User'}`);
-      // create/update tiny rail thumb (cheap)
+      // tiny rail thumb
       const tctx = rec.thumbCanvas.getContext('2d');
-      const tw = 80; const th = Math.floor((tw/canvas.width)*canvas.height);
+      const tw = 80; const th = Math.floor((tw/canvas.clientWidth)*canvas.clientHeight);
       rec.thumbCanvas.width = tw; rec.thumbCanvas.height = th;
       tctx.drawImage(canvas, 0, 0, tw, th);
     }catch(e){ if (e?.name!=='RenderingCancelledException') console.warn('render error', e); }
@@ -527,12 +628,11 @@
       const small = `SoMAp • ${userKey||'User'} • ${new Date().toLocaleString()}`;
       ctx.fillText(small, canvas.width-12, canvas.height-10);
       ctx.restore();
-    }catch(_){ /* ignore */ }
+    }catch(_){ }
   }
 
   // ===== Image path: render into a canvas (not <img>) =====
   async function renderImageToCanvas(url){
-    // one virtual page for image
     const pageWrap = document.createElement('article');
     pageWrap.className = 'page'; pageWrap.dataset.page = '1';
     const inner = document.createElement('div'); inner.className = 'page-inner';
@@ -546,32 +646,28 @@
     const img = new Image(); img.crossOrigin = 'anonymous';
     await new Promise((res, rej)=>{ img.onload=res; img.onerror=rej; img.src=url; });
 
-    const avail = Math.min(inner.clientWidth||1000, 1000) * zoom;
-    const scale = avail / img.width;
+    const dpr = effectiveDpr();
+    const availCss = Math.min(inner.clientWidth||1000, 1000) * zoom;
+    const scale = (availCss / img.width) * dpr;
     const cw = Math.floor(img.width * scale);
     const ch = Math.floor(img.height * scale);
     canvas.width = cw; canvas.height = ch;
+    canvas.style.width = Math.floor(cw / dpr) + 'px';
+    canvas.style.height = Math.floor(ch / dpr) + 'px';
     const ctx = canvas.getContext('2d');
-    ctx.save();
-    // rotation for images as well
+
     if (rotation) {
-      // rotate canvas by creating a temp and drawing rotated
-      const tmp = document.createElement('canvas');
-      tmp.width = cw; tmp.height = ch; tmp.getContext('2d').drawImage(img, 0,0,cw,ch);
-      canvas.width = ch; canvas.height = cw; // 90 deg swap
-      ctx.translate(canvas.width/2, canvas.height/2);
-      ctx.rotate(rotation*Math.PI/180);
-      ctx.drawImage(tmp, -cw/2, -ch/2);
+      const tmp = document.createElement('canvas'); tmp.width = cw; tmp.height = ch; tmp.getContext('2d').drawImage(img, 0,0,cw,ch);
+      canvas.width = ch; canvas.height = cw; canvas.style.width = Math.floor(ch/dpr)+'px'; canvas.style.height = Math.floor(cw/dpr)+'px';
+      ctx.save(); ctx.translate(canvas.width/2, canvas.height/2); ctx.rotate(rotation*Math.PI/180); ctx.drawImage(tmp, -cw/2, -ch/2); ctx.restore();
     } else {
       ctx.drawImage(img, 0,0,cw,ch);
     }
-    ctx.restore();
     drawWatermarkOnCanvas(canvas, `SoMAp — ${userKey||'User'}`);
 
-    // simple rail thumb
     const r = document.createElement('div'); r.className = 'rail-thumb'; r.dataset.page = '1';
     const tc = document.createElement('canvas'); r.appendChild(tc); railEl.appendChild(r);
-    const tctx = tc.getContext('2d'); tc.width = 80; tc.height = Math.floor((80/canvas.width)*canvas.height);
+    const tctx = tc.getContext('2d'); tc.width = 80; tc.height = Math.floor((80/canvas.clientWidth)*canvas.clientHeight);
     tctx.drawImage(canvas,0,0,tc.width, tc.height);
 
     pageRecords.set(1, { canvas, container: inner, thumbCanvas: tc, renderedScale: zoom, renderTask: null });
@@ -585,7 +681,6 @@
   function rerenderAllVisible(force=false){
     if (!activeDoc) return;
     if (activeDoc.type==='pdf'){
-      // re-render those near viewport
       document.querySelectorAll('.page').forEach(el=>{
         const rect = el.getBoundingClientRect();
         const inView = rect.bottom > 0 && rect.top < window.innerHeight*1.8;
@@ -595,12 +690,12 @@
         }
       });
     } else if (activeDoc.type==='img') {
-      // rebuild the single page
       const rec = pageRecords.get(1);
       if (rec){
-        const url = rec.canvas.toDataURL('image/png'); // not ideal; better to redraw from source if stored
-        renderImageToCanvas(url); // quick hack: re-render using the current canvas snapshot
-        pagesEl.firstChild?.remove(); // remove old page
+        // Re-render from source URL if we saved it in dataset
+        const url = rec._src || rec.canvas.toDataURL('image/png');
+        pagesEl.innerHTML = ''; // clear and rebuild
+        renderImageToCanvas(url);
       }
     }
   }
@@ -626,7 +721,6 @@
     if (e.key.toLowerCase()==='r'){ rotBtn.click(); e.preventDefault(); }
     if (e.key.toLowerCase()==='f'){ fsBtn.click(); e.preventDefault(); }
     if (e.key==='0'){ fitBtn.click(); e.preventDefault(); }
-    // block common save/print combos
     if ((e.ctrlKey||e.metaKey) && (e.key==='p'||e.key==='s')) { e.preventDefault(); alert('Blocked.'); }
   }, true);
 
@@ -651,8 +745,9 @@
     pageElem?.scrollIntoView({ behavior:'smooth', block:'start' });
   });
 
-  // watermark refresh every 30s
+  // watermark refresh & re-render on resize/orientation
   setInterval(()=>{ if (viewer.classList.contains('show')) updateWatermarks(); }, 30000);
+  let resizeTimer=null; window.addEventListener('resize', ()=>{ clearTimeout(resizeTimer); resizeTimer=setTimeout(()=> rerenderAllVisible(true), 200); });
 
   // deterrents: disallow context menu & printing & selection
   window.print = function(){ alert('Printing is disabled.'); return false; };
@@ -661,7 +756,7 @@
   document.addEventListener('copy', (e)=>{ if (viewer.classList.contains('show')) e.preventDefault(); }, true);
 
   // double-tap zoom on mobile
-  let lastTap=0; pagesEl.addEventListener('touchend', (e)=>{
+  let lastTap=0; document.getElementById('pages').addEventListener('touchend', (e)=>{
     const now = Date.now(); if (now-lastTap<300){ setZoom(zoom<1.4?1.6:1); }
     lastTap=now;
   });

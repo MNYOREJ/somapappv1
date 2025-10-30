@@ -175,7 +175,7 @@
       <div class="metric">
         <span class="label">Average score</span>
         <span class="metric-value" id="metricAverage">0%</span>
-        <span class="metric-sub">Selected exam + month</span>
+        <span class="metric-sub">Selected exam scope</span>
       </div>
       <div class="metric">
         <span class="label">Fee balance</span>
@@ -397,7 +397,8 @@
     const ATTENDANCE_WEIGHTS = { Apr: 0.5, Sep: 0.5, Dec: 0.25 };
     const CACHE = {
       scoresMonthly: new Map(),   // key: `${year}::${class}::${mon}` -> { [adm]: { [subject]: {score,max} } }
-      attendanceMonthly: new Map()// key: `${year}::${class}::${mon}` -> { [adm]: {present,absent,days} }
+      attendanceMonthly: new Map(),// key: `${year}::${class}::${mon}` -> { [adm]: {present,absent,days} }
+      lastKey: null
     };
 
     // Subject map by class label (customize freely)
@@ -550,6 +551,7 @@
         yearSel.appendChild(opt);
       }
       document.getElementById('previewYear').textContent = state.year;
+      document.getElementById('previewYearBadge').textContent = String(state.year);
 
       // Lock class to session value â€” only show that class and disable switching
       const classSel = document.getElementById('classSelect');
@@ -577,12 +579,17 @@
         const opt = document.createElement('option'); opt.value = 'All'; opt.textContent = 'All Year';
         monthSel.appendChild(opt);
         state.month = 'All';
+        monthSel.value = 'All';
       } else {
+        if (!MONTHS.includes(state.month)) {
+          state.month = MONTHS[0];
+        }
         MONTHS.forEach(m => {
           const opt = document.createElement('option'); opt.value = m; opt.textContent = MONTH_LABELS[m];
           if (m === state.month) opt.selected = true;
           monthSel.appendChild(opt);
         });
+        monthSel.value = state.month;
       }
       document.getElementById('previewExam').textContent = state.examType;
       document.getElementById('previewMonth').textContent = MONTH_LABELS[state.month] || state.month;
@@ -641,6 +648,15 @@
           btnFullScreen.innerHTML = '<i class="fas fa-expand"></i> Full Screen';
         }
       });
+    }
+
+    function ensureCacheContext(){
+      const cacheKey = `${state.year}::${state.className}`;
+      if (CACHE.lastKey !== cacheKey) {
+        CACHE.scoresMonthly.clear();
+        CACHE.attendanceMonthly.clear();
+        CACHE.lastKey = cacheKey;
+      }
     }
 
     /* -------------------------- LOADERS -------------------------- */
@@ -739,7 +755,8 @@
         if (state.parentMode && state.parentAdm) {
           await findStudentClass();
         }
-        
+
+        ensureCacheContext();
         state.subjects = SUBJECTS_BY_CLASS[state.className] || state.subjects || [];
         const [students, attendance, fees, scores, detailsMap] = await Promise.all([
           fetchStudents(state.className, state.stream),
@@ -921,6 +938,18 @@
       return merged;
     }
 
+    function normalizeMonthlyAttendanceMap(val){
+      const out = {};
+      Object.keys(val || {}).forEach(adm => {
+        const a = val[adm] || {};
+        const present = Number(a.present || a.daysPresent || 0);
+        const absent = Number(a.absent || a.daysAbsent || 0);
+        const days = Number(a.days || (present + absent));
+        out[adm] = { present, absent, days };
+      });
+      return out;
+    }
+
     async function getMonthlyAttendance(year, className, mon) {
       const cacheKey = `${year}::${className}::${mon}`;
       if (CACHE.attendanceMonthly.has(cacheKey)) return CACHE.attendanceMonthly.get(cacheKey);
@@ -929,15 +958,36 @@
       try {
         const snap = await db.ref(refPath).get();
         if (snap && snap.exists && snap.exists()) {
-          const val = snap.val() || {};
-          Object.keys(val).forEach(adm => {
-            const a = val[adm] || {};
-            out[adm] = {
-              present: Number(a.present || a.daysPresent || 0),
-              absent:  Number(a.absent  || a.daysAbsent  || 0),
-              days:    Number(a.days || (Number(a.present||0) + Number(a.absent||0)))
-            };
-          });
+          out = normalizeMonthlyAttendanceMap(snap.val());
+        }
+        if (!Object.keys(out).length) {
+          const candidates = [];
+          const longMonth = MONTH_LABELS[mon];
+          if (longMonth && longMonth !== mon) {
+            candidates.push(`/attendance/${year}/${longMonth}/${className}`);
+          }
+          const lowerMon = (mon || '').toLowerCase();
+          if (lowerMon && lowerMon !== mon) {
+            candidates.push(`/attendance/${year}/${lowerMon}/${className}`);
+          }
+          if (mon) {
+            candidates.push(`/attendance/${year}/${className}/${mon}`);
+          }
+          if (longMonth && longMonth !== mon) {
+            candidates.push(`/attendance/${year}/${className}/${longMonth}`);
+          }
+          for (const altPath of candidates) {
+            if (!altPath || altPath === refPath) continue;
+            try {
+              const altSnap = await db.ref(altPath).get();
+              if (altSnap && altSnap.exists && altSnap.exists()) {
+                out = normalizeMonthlyAttendanceMap(altSnap.val());
+                if (Object.keys(out).length) break;
+              }
+            } catch (altErr) {
+              /* ignore */
+            }
+          }
         }
       } catch(e) { /* ignore */ }
       CACHE.attendanceMonthly.set(cacheKey, out);
@@ -985,6 +1035,19 @@
       return merged;
     }
 
+    function normalizeMonthlyScoreMap(val){
+      const out = {};
+      Object.keys(val || {}).forEach(adm => {
+        const subjObj = val[adm] || {};
+        out[adm] = out[adm] || {};
+        Object.keys(subjObj).forEach(subject => {
+          const o = subjObj[subject] || {};
+          out[adm][subject] = { score: Number(o.score || o.Score || 0), max: Number(o.max || o.Max || 100) };
+        });
+      });
+      return out;
+    }
+
     async function getMonthlyScores(year, className, mon) {
       const cacheKey = `${year}::${className}::${mon}`;
       if (CACHE.scoresMonthly.has(cacheKey)) return CACHE.scoresMonthly.get(cacheKey);
@@ -994,21 +1057,35 @@
         const refPath = `/scores/${year}/${className}/monthly/${mon}`;
         const snap = await db.ref(refPath).get();
         if (snap && snap.exists && snap.exists()) {
-          const val = snap.val() || {};
-          Object.keys(val).forEach(adm => {
-            const subjObj = val[adm] || {};
-            out[adm] = {};
-            Object.keys(subjObj).forEach(subject => {
-              const o = subjObj[subject] || {};
-              out[adm][subject] = { score: Number(o.score||0), max: Number(o.max||100) };
-            });
-          });
-        } else {
-          // Fallback (rare): try the legacy `/scores/{year}/{className}/{examKey}/{mon}`
-          const alt = `/scores/${year}/${className}/monthly/${mon}`; // keep same; you can extend if you keep legacy keys
-          if (alt !== refPath) {
-            const s2 = await db.ref(alt).get();
-            if (s2 && s2.exists && s2.exists()) out = s2.val() || {};
+          out = normalizeMonthlyScoreMap(snap.val());
+        }
+        if (!Object.keys(out).length) {
+          const candidates = [];
+          const longMonth = MONTH_LABELS[mon];
+          if (longMonth && longMonth !== mon) {
+            candidates.push(`/scores/${year}/${className}/monthly/${longMonth}`);
+          }
+          const lowerMon = (mon || '').toLowerCase();
+          if (lowerMon && lowerMon !== mon) {
+            candidates.push(`/scores/${year}/${className}/monthly/${lowerMon}`);
+          }
+          if (longMonth && longMonth !== mon) {
+            candidates.push(`/scores/${year}/${className}/${longMonth}`);
+          }
+          if (mon) {
+            candidates.push(`/scores/${year}/${className}/${mon}`);
+          }
+          for (const altPath of candidates) {
+            if (!altPath || altPath === refPath) continue;
+            try {
+              const altSnap = await db.ref(altPath).get();
+              if (altSnap && altSnap.exists && altSnap.exists()) {
+                out = normalizeMonthlyScoreMap(altSnap.val());
+                if (Object.keys(out).length) break;
+              }
+            } catch (altErr) {
+              /* ignore */
+            }
           }
         }
       } catch(e) { /* swallow, leave empty */ }
@@ -1198,7 +1275,10 @@
       document.getElementById('metricStudents').textContent = total;
       document.getElementById('metricGender').textContent = `M:${male} / F:${female}`;
       document.getElementById('metricAverage').textContent = `${avg.toFixed(1)}%`;
-      document.getElementById('metricAverage').previousElementSibling?.nextElementSibling?.textContent = 'Selected exam scope';
+      const metricAverageLabel = document.getElementById('metricAverage');
+      if (metricAverageLabel && metricAverageLabel.nextElementSibling) {
+        metricAverageLabel.nextElementSibling.textContent = 'Selected exam scope';
+      }
       document.getElementById('metricBalance').textContent = `TSh ${formatCurrency(balance)}`;
       document.getElementById('metricAttendance').textContent = `${attendance.toFixed(1)}%`;
     }

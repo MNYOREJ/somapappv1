@@ -426,20 +426,16 @@
       overflow: auto;
       background: #2d2d2d;
       position: relative;
-    }
-    .modal-pdf-canvas-wrapper {
-      width: 100%;
-      height: 100%;
-      overflow: auto;
       display: flex;
-      flex-direction: column;
       align-items: center;
-      padding: 20px;
+      justify-content: center;
     }
-    .modal-pdf-canvas {
+    .pdf-canvas {
+      max-width: 100%;
+      height: auto;
       display: block;
-      margin: 10px auto;
       box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      transition: transform 0.3s ease;
     }
     
     .hidden { display: none !important; }
@@ -725,63 +721,29 @@
         button.addEventListener('click', async () => {
           const pdfUrl = button.getAttribute('data-url');
           const bookTitle = button.getAttribute('data-title');
-          
-          // Use PDF.js for secure, controlled PDF rendering
-          // NO external viewers, NO pop-out buttons, FULL CONTROL
           const modal = document.getElementById('pdfModal');
           const modalTitle = document.getElementById('modalTitle');
           const pdfLoader = document.getElementById('pdfLoader');
-          const pdfCanvasWrapper = document.getElementById('pdfCanvasWrapper');
 
-          // Show modal with loader
           modal.classList.remove('hidden');
           modalTitle.textContent = bookTitle;
           pdfLoader.classList.remove('hidden');
-          pdfCanvasWrapper.innerHTML = '';
           
-          // Reset zoom and rotation
-          zoomLevel = 1;
-          rotationAngle = 0;
-          
-          console.log('📖 Loading book:', bookTitle);
+          currentPage = 1;
+          currentScale = 1.5;
+          currentRotation = 0;
           
           try {
-            // Load PDF with PDF.js
             const loadingTask = pdfjsLib.getDocument(pdfUrl);
-            const pdf = await loadingTask.promise;
+            currentPdf = await loadingTask.promise;
+            totalPages = currentPdf.numPages;
             
-            console.log('✅ PDF loaded successfully, pages:', pdf.numPages);
-            
-            // Render all pages
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-              const page = await pdf.getPage(pageNum);
-              const viewport = page.getViewport({ scale: 1.5 });
-              
-              // Create canvas for this page
-              const canvas = document.createElement('canvas');
-              canvas.className = 'modal-pdf-canvas';
-              canvas.id = `pdf-page-${pageNum}`;
-              const context = canvas.getContext('2d');
-              canvas.height = viewport.height;
-              canvas.width = viewport.width;
-              
-              pdfCanvasWrapper.appendChild(canvas);
-              
-              // Render page
-              const renderContext = {
-                canvasContext: context,
-                viewport: viewport
-              };
-              await page.render(renderContext).promise;
-            }
-            
+            await renderPage(1);
             pdfLoader.classList.add('hidden');
-            
           } catch (error) {
-            console.error('❌ Error loading PDF:', error);
+            console.error('Error loading PDF:', error);
             pdfLoader.classList.add('hidden');
             showProtectionAlert('Error loading book. Please try again.');
-            pdfCanvasWrapper.innerHTML = '<p style="color: white; text-align: center; padding: 40px;">Failed to load PDF. Please try again.</p>';
           }
         });
       });
@@ -822,95 +784,114 @@
       return div.innerHTML;
     }
 
-    // ========== MODAL CONTROLS WITH FULLSCREEN ==========
-    let zoomLevel = 1;
-    let rotationAngle = 0;
+    // ========== PDF VIEWER CONTROLS ==========
+    let currentPdf = null;
+    let currentPage = 1;
+    let totalPages = 0;
+    let currentScale = 1.5;
+    let currentRotation = 0;
     
-    // Fullscreen button
+    async function renderPage(pageNum) {
+      if (!currentPdf) return;
+      
+      const page = await currentPdf.getPage(pageNum);
+      const canvas = document.getElementById('pdfCanvas');
+      const context = canvas.getContext('2d');
+      
+      // Responsive scaling for mobile
+      const containerWidth = document.getElementById('modalPdfContainer').clientWidth;
+      const viewport = page.getViewport({ scale: 1, rotation: currentRotation });
+      const scale = Math.min(currentScale, (containerWidth - 40) / viewport.width);
+      const scaledViewport = page.getViewport({ scale: scale, rotation: currentRotation });
+      
+      canvas.height = scaledViewport.height;
+      canvas.width = scaledViewport.width;
+      canvas.style.transform = `scale(${currentScale / scale})`;
+      
+      await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+      document.getElementById('pageInfo').textContent = `Page ${pageNum} of ${totalPages}`;
+    }
+    
+    // Fullscreen
     document.getElementById('fullscreenBtn').addEventListener('click', () => {
       const modalContent = document.querySelector('.modal-content');
-      const fullscreenBtn = document.getElementById('fullscreenBtn');
-      
       if (!document.fullscreenElement) {
-        modalContent.requestFullscreen().then(() => {
-          fullscreenBtn.innerHTML = '<i class="fas fa-compress mr-2"></i> Exit Full Screen';
-        }).catch(err => {
-          showProtectionAlert('Fullscreen request failed. Please try again.');
-          console.error('Fullscreen error:', err);
+        modalContent.requestFullscreen().catch(err => {
+          showProtectionAlert('Fullscreen not supported on this device.');
         });
       } else {
-        document.exitFullscreen().then(() => {
-          fullscreenBtn.innerHTML = '<i class="fas fa-expand mr-2"></i> Full Screen';
-        });
-      }
-    });
-    
-    // Listen for fullscreen changes
-    document.addEventListener('fullscreenchange', () => {
-      const fullscreenBtn = document.getElementById('fullscreenBtn');
-      if (!document.fullscreenElement) {
-        fullscreenBtn.innerHTML = '<i class="fas fa-expand mr-2"></i> Full Screen';
+        document.exitFullscreen();
       }
     });
     
     // Zoom In
     document.getElementById('zoomInModal').addEventListener('click', () => {
-      if (zoomLevel < 3) {
-        zoomLevel += 0.2;
-        updateTransform();
+      if (currentScale < 3) {
+        currentScale += 0.25;
+        renderPage(currentPage);
       }
     });
     
     // Zoom Out
     document.getElementById('zoomOutModal').addEventListener('click', () => {
-      if (zoomLevel > 0.5) {
-        zoomLevel -= 0.2;
-        updateTransform();
+      if (currentScale > 0.5) {
+        currentScale -= 0.25;
+        renderPage(currentPage);
       }
     });
     
     // Rotate
     document.getElementById('rotateBtn').addEventListener('click', () => {
-      rotationAngle = (rotationAngle + 90) % 360;
-      updateTransform();
+      currentRotation = (currentRotation + 90) % 360;
+      renderPage(currentPage);
     });
     
-    // Update transform with zoom and rotation
-    function updateTransform() {
-      const pdfCanvasWrapper = document.getElementById('pdfCanvasWrapper');
-      if (pdfCanvasWrapper) {
-        pdfCanvasWrapper.style.transform = `scale(${zoomLevel}) rotate(${rotationAngle}deg)`;
-        pdfCanvasWrapper.style.transformOrigin = 'center center';
-        pdfCanvasWrapper.style.transition = 'transform 0.3s ease';
+    // Page Navigation
+    document.getElementById('prevPage').addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderPage(currentPage);
       }
-    }
+    });
+    
+    document.getElementById('nextPage').addEventListener('click', () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderPage(currentPage);
+      }
+    });
     
     // Close modal
     document.getElementById('closeModal').addEventListener('click', () => {
       const modal = document.getElementById('pdfModal');
-      const pdfCanvasWrapper = document.getElementById('pdfCanvasWrapper');
+      const canvas = document.getElementById('pdfCanvas');
       
-      // Exit fullscreen if active
       if (document.fullscreenElement) {
         document.exitFullscreen();
       }
       
       modal.classList.add('hidden');
-      pdfCanvasWrapper.innerHTML = '';
-      zoomLevel = 1;
-      rotationAngle = 0;
-      if (pdfCanvasWrapper) {
-        pdfCanvasWrapper.style.transform = 'scale(1) rotate(0deg)';
+      if (canvas) {
+        const context = canvas.getContext('2d');
+        context.clearRect(0, 0, canvas.width, canvas.height);
       }
+      currentPdf = null;
+      currentPage = 1;
+      currentScale = 1.5;
+      currentRotation = 0;
     });
     
-    // ESC key to close modal
+    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('pdfModal');
+      if (modal.classList.contains('hidden')) return;
+      
       if (e.key === 'Escape') {
-        const modal = document.getElementById('pdfModal');
-        if (!modal.classList.contains('hidden')) {
-          document.getElementById('closeModal').click();
-        }
+        document.getElementById('closeModal').click();
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        document.getElementById('prevPage').click();
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        document.getElementById('nextPage').click();
       }
     });
 
@@ -1147,7 +1128,16 @@
         </button>
       </div>
       <div id="modalPdfContainer" class="modal-pdf-container">
-        <div id="pdfCanvasWrapper" class="modal-pdf-canvas-wrapper"></div>
+        <canvas id="pdfCanvas" class="pdf-canvas"></canvas>
+      </div>
+      <div class="modal-controls" style="background: #1f2937; border-top: 1px solid #374151;">
+        <button id="prevPage" style="background: #6366F1; color: white;">
+          <i class="fas fa-chevron-left mr-2"></i> Previous
+        </button>
+        <span id="pageInfo" style="color: white; font-weight: 600; padding: 0 20px;">Page 1 of 1</span>
+        <button id="nextPage" style="background: #6366F1; color: white;">
+          <i class="fas fa-chevron-right mr-2"></i> Next
+        </button>
       </div>
       <div id="pdfLoader" class="hidden" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10;">
         <div class="spinner" style="margin: 0 auto 20px;"></div>

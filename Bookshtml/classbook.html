@@ -417,10 +417,21 @@
     .modal-controls button:hover {
       transform: scale(1.05);
     }
+    .modal-pdf-container {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #2d2d2d;
+    }
     .modal-pdf-frame { 
-      flex: 1; 
       width: 100%; 
+      height: 100%;
       border: none;
+      display: block;
     }
     
     .hidden { display: none !important; }
@@ -702,20 +713,28 @@
           const pdfUrl = button.getAttribute('data-url');
           const bookTitle = button.getAttribute('data-title');
           
-          // Use Google Docs Viewer for maximum protection
-          const proxyUrl = `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(pdfUrl)}`;
+          // Use direct PDF embed with strict sandbox for security
+          // No Google Docs viewer to prevent the dangerous "pop out" button
           const modal = document.getElementById('pdfModal');
           const modalTitle = document.getElementById('modalTitle');
           const modalPdfFrame = document.getElementById('modalPdfFrame');
           const pdfLoader = document.getElementById('pdfLoader');
+          const modalPdfContainer = document.getElementById('modalPdfContainer');
 
           // Show modal with loader
           modal.classList.remove('hidden');
           modalTitle.textContent = bookTitle;
           pdfLoader.classList.remove('hidden');
           
-          // Load PDF
-          modalPdfFrame.src = proxyUrl;
+          // Reset zoom and rotation
+          zoomLevel = 1;
+          rotationAngle = 0;
+          
+          // Load PDF directly with strict security
+          modalPdfFrame.src = pdfUrl;
+          
+          // Apply initial transform
+          updateTransform();
           
           // Hide loader after iframe loads (or timeout after 5 seconds)
           const hideLoader = () => {
@@ -822,14 +841,19 @@
     
     // Update transform with zoom and rotation
     function updateTransform() {
-      const modalPdfFrame = document.getElementById('modalPdfFrame');
-      modalPdfFrame.style.transform = `scale(${zoomLevel}) rotate(${rotationAngle}deg)`;
+      const modalPdfContainer = document.getElementById('modalPdfContainer');
+      if (modalPdfContainer) {
+        modalPdfContainer.style.transform = `scale(${zoomLevel}) rotate(${rotationAngle}deg)`;
+        modalPdfContainer.style.transformOrigin = 'center center';
+        modalPdfContainer.style.transition = 'transform 0.3s ease';
+      }
     }
     
     // Close modal
     document.getElementById('closeModal').addEventListener('click', () => {
       const modal = document.getElementById('pdfModal');
       const modalPdfFrame = document.getElementById('modalPdfFrame');
+      const modalPdfContainer = document.getElementById('modalPdfContainer');
       
       // Exit fullscreen if active
       if (document.fullscreenElement) {
@@ -840,7 +864,9 @@
       modalPdfFrame.src = '';
       zoomLevel = 1;
       rotationAngle = 0;
-      modalPdfFrame.style.transform = 'scale(1) rotate(0deg)';
+      if (modalPdfContainer) {
+        modalPdfContainer.style.transform = 'scale(1) rotate(0deg)';
+      }
     });
     
     // ESC key to close modal
@@ -1085,10 +1111,14 @@
           <i class="fas fa-sync-alt mr-2"></i> Rotate
         </button>
       </div>
-      <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0"></iframe>
-      <div id="pdfLoader" class="hidden" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+      <div id="modalPdfContainer" class="modal-pdf-container">
+        <iframe id="modalPdfFrame" class="modal-pdf-frame" src="" frameborder="0" 
+                sandbox="allow-same-origin" 
+                allow=""></iframe>
+      </div>
+      <div id="pdfLoader" class="hidden" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 10;">
         <div class="spinner" style="margin: 0 auto 20px;"></div>
-        <p style="font-size: 1.2rem; font-weight: 600;">Loading your book... 📚</p>
+        <p style="font-size: 1.2rem; font-weight: 600; color: white;">Loading your book... 📚</p>
       </div>
     </div>
   </div>

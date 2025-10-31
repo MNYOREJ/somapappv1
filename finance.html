@@ -200,6 +200,10 @@
             <input id="paymentAmount" type="number" step="1" min="1" class="w-full p-2 border rounded" required />
           </div>
           <div>
+            <label class="text-sm text-gray-600">Payment Date</label>
+            <input id="paymentDate" type="date" class="w-full p-2 border rounded" required />
+          </div>
+          <div>
             <label class="text-sm text-gray-600">Method</label>
             <select id="paymentMethod" class="w-full p-2 border rounded">
               <option>Cash</option>
@@ -213,6 +217,14 @@
           <div>
             <label class="text-sm text-gray-600">Reference Code (MPesa / Receipt / Bank)</label>
             <input id="paymentReference" type="text" class="w-full p-2 border rounded" placeholder="e.g. MPESA1ABC23" />
+          </div>
+          <div>
+            <label class="text-sm text-gray-600">Paid By (Name)</label>
+            <input id="paymentPaidBy" type="text" class="w-full p-2 border rounded" placeholder="e.g. Parent name or Admin name" required />
+          </div>
+          <div>
+            <label class="text-sm text-gray-600">Contact of Payer</label>
+            <input id="paymentPayerContact" type="tel" class="w-full p-2 border rounded" placeholder="e.g. +255..." required />
           </div>
           <div>
             <label class="text-sm text-gray-600">Note (optional)</label>
@@ -990,6 +1002,9 @@
   function openPaymentModalFor(id) {
     if (!cachedStudents[id]) return alert('Student not found');
     studentSelect.value = id;
+    // Set default date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('paymentDate').value = today;
     paymentModal.style.display = 'block';
   }
   function closePaymentModalFn() { paymentModal.style.display = 'none'; paymentForm.reset(); }
@@ -1046,11 +1061,17 @@
     e.preventDefault();
     const studentId = studentSelect.value;
     const amount = Number(document.getElementById('paymentAmount').value || 0);
+    const paymentDateInput = document.getElementById('paymentDate').value;
     const method = document.getElementById('paymentMethod').value || 'Cash';
     const reference = (document.getElementById('paymentReference').value || '').trim();
+    const paidBy = (document.getElementById('paymentPaidBy').value || '').trim();
+    const payerContact = (document.getElementById('paymentPayerContact').value || '').trim();
     const note = document.getElementById('paymentNote').value || '';
     if (!studentId) return alert('Choose a student');
     if (amount <= 0) return alert('Enter a valid amount');
+    if (!paymentDateInput) return alert('Please select payment date');
+    if (!paidBy) return alert('Please enter who made the payment');
+    if (!payerContact) return alert('Please enter contact of payer');
     try {
       const studentRef = db.ref('students/' + studentId);
       const snap = await studentRef.once('value');
@@ -1063,7 +1084,7 @@
       const newBalance = Math.max(0, totalRequired - Math.min(totalRequired, totalPaidBefore + amount));
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.replace(/\s+/g, ' ').trim();
       const recorder = resolveRecorderEmail();
-      const timestamp = Date.now();
+      const paymentTimestamp = new Date(paymentDateInput).getTime() || Date.now();
       const parentContact = student.primaryParentContact || student.parentPhone || student.guardianPhone || student.emergencyPhone || '--';
 
       const pendingRef = db.ref('approvalsPending').push();
@@ -1077,7 +1098,9 @@
         amountPaidNow: Math.round(amount),
         paymentMethod: method,
         paymentReferenceCode: reference || 'N/A',
-        datePaid: timestamp,
+        datePaid: paymentTimestamp,
+        paidBy: paidBy,
+        payerContact: payerContact,
         recordedBy: recorder,
         status: 'pending',
         academicYear: financeYear,
@@ -1092,9 +1115,11 @@
             amount: Math.round(amount),
             method,
             note,
-            timestamp,
+            timestamp: paymentTimestamp,
             recordedBy: recorder,
             referenceCode: reference || null,
+            paidBy: paidBy,
+            payerContact: payerContact,
           },
           breakdown: [
             { label: 'Academic Year', value: financeYear },
@@ -1102,6 +1127,8 @@
             { label: 'Fee (Year)', value: `TSh ${fmt(totalRequired)}` },
             { label: 'Paid Before', value: `TSh ${fmt(totalPaidBefore)}` },
             { label: 'Balance After Approval', value: `TSh ${fmt(newBalance)}` },
+            { label: 'Paid By', value: paidBy },
+            { label: 'Payer Contact', value: payerContact },
           ],
         },
       });
@@ -1127,17 +1154,20 @@
       if (el) el.style.display = 'none';
     });
     
-    // Optionally keep "Main CSV/PDF" visible but auto-scope. Or hide them:
-    // ['downloadCsv','downloadPdf'].forEach(id=>{ const el=document.getElementById(id); if (el) el.style.display='none'; });
+    // Hide expenses KPIs (parents don't need to see school expenses)
+    const kpiCards = document.querySelectorAll('.bg-white.p-4.rounded.shadow');
+    if (kpiCards[3]) kpiCards[3].style.display = 'none'; // Total Expenses
+    if (kpiCards[4]) kpiCards[4].style.display = 'none'; // Net Balance
     
-    // Prevent admin-only actions in parent view
-    const payButtons = document.querySelectorAll('.payBtn');
-    payButtons.forEach(btn => btn.style.display = 'none');
+    // Hide entire expenses section (form, table, reports)
+    const expenseSections = document.querySelectorAll('.bg-white.rounded.shadow.p-4.mt-6');
+    expenseSections.forEach(section => {
+      if (section.querySelector('#expenseForm') || section.querySelector('#expenseTable')) {
+        section.style.display = 'none';
+      }
+    });
     
-    const paymentModal = document.getElementById('paymentModal'); 
-    if (paymentModal) paymentModal.style.display = 'none';
-    
-    // Rename KPIs to singular meaning
+    // Rename finance KPIs to parent-friendly labels
     const kpiHeaders = document.querySelectorAll('.bg-white.p-4.rounded.shadow h3');
     if (kpiHeaders[0]) kpiHeaders[0].textContent = 'Your Total Due (Year)';
     if (kpiHeaders[1]) kpiHeaders[1].textContent = 'Paid (Total)';

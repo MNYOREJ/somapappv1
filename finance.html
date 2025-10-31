@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -277,10 +277,68 @@
     }
   })();
 
+  const SOMAP_DEFAULT_YEAR = 2025;
+  const FINANCE_ADMIN_EMAIL = 'socratesschool2020@gmail.com';
+  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  function shiftClass(baseName, deltaYears) {
+    const i = CLASS_ORDER.findIndex((c) => norm(c) === norm(baseName));
+    if (i < 0) return baseName || '';
+    const j = i + Number(deltaYears || 0);
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASS_ORDER.length) return 'GRADUATED';
+    return CLASS_ORDER[j];
+  }
+
   const db = window.db || null;
   const yearContext = window.somapYearContext || null;
-  let activeYear = yearContext ? yearContext.getSelectedYear() : String(new Date().getFullYear());
-  let financeYear = activeYear;
+  const yearSelectEl = document.querySelector('[data-somap-year-select]');
+  const financeQuery = new URLSearchParams(location.search);
+  let financeYear = financeQuery.get('year')
+    || (yearContext?.getSelectedYear?.())
+    || (() => { try { return sessionStorage.getItem('somap_selected_year'); } catch (_) { return null; } })()
+    || SOMAP_DEFAULT_YEAR;
+  financeYear = String(financeYear);
+  let activeYear = financeYear;
+  try { sessionStorage.setItem('somap_selected_year', financeYear); } catch (_) {}
+  if (yearContext?.setSelectedYear) {
+    yearContext.setSelectedYear(financeYear, { manual: false });
+  }
+  if (yearSelectEl) {
+    yearSelectEl.value = financeYear;
+    yearSelectEl.addEventListener('change', (e) => {
+      const newYear = String(e.target.value || SOMAP_DEFAULT_YEAR);
+      if (newYear === financeYear) return;
+      financeYear = newYear;
+      activeYear = newYear;
+      try { sessionStorage.setItem('somap_selected_year', newYear); } catch (_) {}
+      refreshFinanceData(newYear);
+      window.somapYearContext?.setSelectedYear?.(newYear);
+    });
+  }
+
+  function hasFinanceAdminAccess() {
+    try {
+      const role = sessionStorage.getItem('somap_role');
+      if (role && String(role).toLowerCase() === 'admin') return true;
+    } catch (_) {}
+    const emails = [];
+    if (window.currentUserEmail) emails.push(window.currentUserEmail);
+    try {
+      const stored = sessionStorage.getItem('somapUserEmail');
+      if (stored) emails.push(stored);
+    } catch (_) {}
+    try {
+      const storedLegacy = sessionStorage.getItem('userEmail');
+      if (storedLegacy) emails.push(storedLegacy);
+    } catch (_) {}
+    try {
+      const authEmail = firebase?.auth?.()?.currentUser?.email;
+      if (authEmail) emails.push(authEmail);
+    } catch (_) {}
+    return emails.some((email) => String(email).toLowerCase() === FINANCE_ADMIN_EMAIL.toLowerCase());
+  }
+
   const tbody = document.querySelector('#financeTable tbody');
   const studentSelect = document.getElementById('studentSelect');
   const paymentModal = document.getElementById('paymentModal');
@@ -446,11 +504,18 @@
   }
 
   function buildSchedule(student) {
+    if (!student || student.isGraduated) {
+      return { items: [], periodLabelNow: '-', expectedToDate: 0 };
+    }
     const config = getConfig(student);
     const { y } = todayYMD();
-    // BASE FEE ONLY — NO DISCOUNTS
-    const feeBase = Math.round(Number(student.feePerYear) || 0);
-    const amounts = apportion(feeBase, config.weights);
+    const baseFee = Math.max(0, Math.round(Number(student.baseFee ?? (student.feePerYear - (student.carryAmount || 0))) || 0));
+    const carryAmount = Math.max(0, Number(student.carryAmount || 0));
+    const amounts = apportion(baseFee, config.weights);
+    if (carryAmount > 0) {
+      if (amounts.length) amounts[0] += carryAmount;
+      else amounts.push(carryAmount);
+    }
 
     const sc = [];
     config.labels.forEach((label, i) => {
@@ -461,10 +526,10 @@
       if (toM === 12) toY = y - 1;
       const fromTS = dateFromYMD(fromY, fromM, fromD);
       const toTS = dateFromYMD(toY, toM, toD);
-      sc.push({ key: `inst${i + 1}`, label, fromTS, toTS, amount: amounts[i], paidAllocated:0, status:'Pending' });
+      sc.push({ key: `inst${i + 1}`, label, fromTS, toTS, amount: amounts[i] || 0, paidAllocated:0, status:'Pending' });
     });
 
-    let lastDueIndex = -1, periodLabel = '—', expectedToDate = 0;
+    let lastDueIndex = -1, periodLabel = '-', expectedToDate = 0;
     const now = Date.now();
     sc.forEach((it, idx) => {
       if (it.toTS < now) { lastDueIndex = idx; expectedToDate += it.amount; }
@@ -483,7 +548,7 @@
     payList.sort((a, b) => a.ts - b.ts);
     let pot = payList.reduce((s, p) => s + p.amount, 0);
     const totalPaid = pot;
-    let prevDebt = clamp(student.previousDebt || student.debt);
+    let prevDebt = clamp(student.previousDebt || 0);
     let toPrev = Math.min(prevDebt, pot); prevDebt -= toPrev; pot -= toPrev;
 
     for (const it of schedule.items) {
@@ -509,8 +574,8 @@
   }
 
   function computeStudentFinancials(student) {
-    const feePerYear = Number(student.feePerYear) || 0;
-    const previousDebt = clamp(student.previousDebt || student.debt);
+    const feePerYear = Math.max(0, Number(student.feePerYear) || 0);
+    const previousDebt = 0;
     const schedule = buildSchedule(student);
     const alloc = allocatePayments(student, schedule);
     const paidAfterPrev = Math.max(0, alloc.totalPaid - (previousDebt - alloc.prevDebtAfter));
@@ -520,7 +585,7 @@
       previousDebt,
       paidAmount: alloc.totalPaid,
       balance: yearBalance,
-      periodDebtLabel: schedule.periodLabelNow || '—',
+      periodDebtLabel: schedule.periodLabelNow || '-',
       periodDebtValue: alloc.debtTillNow,
       credit: alloc.credit,
       scheduleItems: alloc.scheduleItems
@@ -549,6 +614,7 @@
 
   function buildFinanceStudents(
     baseStudents = {},
+    anchorEnrollments = {},
     enrollments = {},
     classFees = {},
     overrides = {},
@@ -556,10 +622,12 @@
     carryForward = {},
     year = activeYear
   ) {
-    const targetYear = String(year || activeYear);
+    const targetYear = String(year || activeYear || SOMAP_DEFAULT_YEAR);
+    const deltaYears = Number(targetYear) - SOMAP_DEFAULT_YEAR;
     const map = {};
     const ids = new Set([
       ...Object.keys(baseStudents || {}),
+      ...Object.keys(anchorEnrollments || {}),
       ...Object.keys(enrollments || {}),
       ...Object.keys(overrides || {}),
       ...Object.keys(ledgers || {}),
@@ -568,34 +636,53 @@
 
     ids.forEach((id) => {
       const base = baseStudents[id] || {};
+      const anchor = anchorEnrollments[id] || {};
       const enrollment = enrollments[id] || {};
       const override = overrides[id] || {};
-      const ledger = ledgers[id] || {};
+      const ledgerEntry = ledgers[id] || {};
       const carry = carryForward[id] || {};
-      const classLevel = enrollment.className || enrollment.classLevel || base.classLevel || base.class || '';
-      const classDefaults = classFees[classLevel] || {};
 
-      const resolvedFee =
+      const baseClass =
+        anchor.className ||
+        anchor.classLevel ||
+        base.classLevel ||
+        base.class ||
+        enrollment.className ||
+        enrollment.classLevel ||
+        '';
+      const classLevel = shiftClass(baseClass, deltaYears);
+      const classDefaults = classFees[classLevel] || classFees[baseClass] || {};
+
+      const paymentPlan =
+        override.planName ||
+        override.paymentPlan ||
+        enrollment.planName ||
+        enrollment.paymentPlan ||
+        classDefaults.defaultPlan ||
+        base.paymentPlan ||
+        '6-instalments';
+
+      const baseFeeCandidate =
         override.feePerYear ??
         classDefaults.feePerYear ??
         base.feePerYear ??
         base.feeDue ??
         base.requiredFee ??
         0;
-      const feePerYear = Math.max(0, Math.round(Number(resolvedFee) || 0));
-      const paymentPlan = override.planName || classDefaults.defaultPlan || base.paymentPlan || '6-instalments';
+      const baseFee = Math.max(0, Math.round(Number(baseFeeCandidate) || 0));
+      const carryAmount = Math.max(0, Number(carry.amount ?? carry.balance ?? 0));
+      const effectiveFee = Math.max(0, baseFee + carryAmount);
 
-      let paymentsSource =
-        (ledger[targetYear] && (ledger[targetYear].payments || ledger[targetYear].entries)) ||
-        ledger.payments ||
-        ledger.records ||
-        base.payments ||
-        {};
+      let paymentsSource = {};
+      if (ledgerEntry && typeof ledgerEntry === 'object') {
+        if (ledgerEntry.payments) paymentsSource = ledgerEntry.payments;
+        else if (ledgerEntry.entries) paymentsSource = ledgerEntry.entries;
+        else if (ledgerEntry.records) paymentsSource = ledgerEntry.records;
+        else paymentsSource = ledgerEntry;
+      } else if (ledgerEntry != null) {
+        paymentsSource = ledgerEntry;
+      }
       const payments = normalizePayments(paymentsSource);
-
-      const previousDebt = clamp(
-        carry.amount ?? carry.balance ?? override.carryForward ?? override.previousDebt ?? base.previousDebt ?? base.debt
-      );
 
       const parentContact =
         enrollment.parentPhone ||
@@ -606,18 +693,31 @@
         base.contact ||
         '';
 
+      const hasYearData =
+        (enrollment && Object.keys(enrollment).length > 0) ||
+        (override && Object.keys(override).length > 0) ||
+        (ledgerEntry && typeof ledgerEntry === 'object' && Object.keys(ledgerEntry).length > 0) ||
+        (classDefaults && Object.keys(classDefaults).length > 0) ||
+        carryAmount > 0;
+
       const record = {
         ...base,
         classLevel,
+        classLevelRaw: baseClass || '',
         paymentPlan,
-        feePerYear,
-        previousDebt,
+        feePerYear: effectiveFee,
+        baseFee,
+        carryAmount,
         payments,
         financeYear: targetYear,
+        academicYear: targetYear,
         primaryParentContact: parentContact || base.primaryParentContact,
         admissionNumber: enrollment.admissionNumber || enrollment.admissionNo || base.admissionNumber || id,
+        hasYearData,
+        isGraduated: classLevel === 'GRADUATED',
       };
 
+      record.previousDebt = 0;
       if (!record.firstName && enrollment.firstName) record.firstName = enrollment.firstName;
       if (!record.lastName && enrollment.lastName) record.lastName = enrollment.lastName;
       if (!record.middleName && enrollment.middleName) record.middleName = enrollment.middleName;
@@ -647,18 +747,49 @@
     tbody.innerHTML = '';
     let totalDue = 0, totalCollected = 0;
     const filterClass = classFilter.value;
+    const isParentScope = parentCtx.enabled;
 
     Object.entries(cachedStudents).forEach(([id, student]) => {
       if (filterClass && student.classLevel !== filterClass) return;
+      if (!isParentScope && student.isGraduated) return;
 
-      const fin = computeStudentFinancials(student);
+      let fin = computeStudentFinancials(student);
+      if (!student.hasYearData || student.isGraduated) {
+        const effectiveFee = student.isGraduated ? 0 : Number(student.feePerYear) || 0;
+        fin = {
+          feePerYear: isParentScope ? 0 : effectiveFee,
+          previousDebt: 0,
+          paidAmount: 0,
+          balance: isParentScope ? 0 : effectiveFee,
+          periodDebtLabel: '-',
+          periodDebtValue: 0,
+          credit: 0,
+          scheduleItems: []
+        };
+      }
+
       if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
 
       totalDue += fin.feePerYear;
       totalCollected += fin.paidAmount;
 
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-      const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '—';
+      const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '-';
+      const prevYearNum = Number(financeYear) - 1;
+      const carryYearLabel = Number.isFinite(prevYearNum) ? prevYearNum : `${financeYear}-1`;
+      const carryNote = student.carryAmount > 0
+        ? `<div class="text-xs text-slate-500 text-right mt-1">Includes carry-forward from ${carryYearLabel}: ${fmt(student.carryAmount)}</div>`
+        : '';
+      const statusNote = student.isGraduated
+        ? `<div class="mt-1 text-xs font-semibold text-emerald-600 uppercase">Graduated</div>`
+        : (!student.hasYearData
+            ? `<div class="mt-1 text-xs text-slate-500">No finance records captured for ${financeYear} yet.</div>`
+            : '');
+
+      const disablePay = student.isGraduated || !student.hasYearData;
+      const payBtnHtml = disablePay
+        ? `<button class="payBtn px-2 py-1 text-xs bg-slate-200 text-slate-500 rounded ml-1 cursor-not-allowed" data-id="${id}" disabled>Pay</button>`
+        : `<button class="payBtn px-2 py-1 text-xs bg-indigo-600 text-white rounded ml-1" data-id="${id}">Pay</button>`;
 
       const tr = document.createElement('tr');
       tr.className = 'table-row';
@@ -670,8 +801,8 @@
         </td>
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
-        <td class="p-2 border align-top">${student.classLevel || ''}</td>
-        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}</td>
+        <td class="p-2 border align-top">${student.classLevel || ''}${statusNote}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}${carryNote}</td>
         <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
         <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
         <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
@@ -683,7 +814,7 @@
         </td>
         <td class="p-2 border align-top">
           <button class="viewBtn px-2 py-1 text-xs border rounded" data-id="${id}">View</button>
-          <button class="payBtn px-2 py-1 text-xs bg-indigo-600 text-white rounded ml-1" data-id="${id}">Pay</button>
+          ${payBtnHtml}
         </td>
       `;
       tbody.appendChild(tr);
@@ -710,7 +841,10 @@
       totalOutstandingEl.dataset.amount = String(totalOutstanding);
     }
 
-    tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', e => openPaymentModalFor(e.target.dataset.id)));
+    tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', (e) => {
+      if (btn.disabled) return;
+      openPaymentModalFor(e.currentTarget.dataset.id);
+    }));
     tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
     // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
   }
@@ -720,14 +854,13 @@
     const row = document.getElementById(`br-${id}`);
     if (!row) return;
     const slot = row.querySelector('.breakdown-slot');
-    if (!slot) return;
-    if (slot.dataset.loaded) return;
+    if (!slot || slot.dataset.loaded) return;
 
     const scopeParam = parentCtx.enabled ? '&scope=parent' : '';
     slot.innerHTML = `
       <div class="p-3 text-xs text-slate-500">Loading breakdown…</div>
       <iframe
-        src="Tofinancehtml/payment.html?student=${encodeURIComponent(id)}&v=1${scopeParam}"
+        src="Tofinancehtml/payment.html?student=${encodeURIComponent(id)}&year=${encodeURIComponent(financeYear)}${scopeParam}"
         class="w-full h-[360px] rounded border"
         loading="lazy"
       ></iframe>
@@ -1009,19 +1142,74 @@
   }
   function closePaymentModalFn() { paymentModal.style.display = 'none'; paymentForm.reset(); }
 
+  async function promptEditYearFee(studentId) {
+    if (!db) return alert('Database connection not ready.');
+    if (!hasFinanceAdminAccess()) return alert('Not authorized to edit fees.');
+    const student = cachedStudents[studentId];
+    if (!student) return alert('Student not found');
+    const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim() || (student.admissionNumber || studentId);
+    const currentBase = Math.max(0, Number(student.baseFee || 0));
+    const input = prompt(`Set base fee for ${fullName} (${financeYear})`, currentBase ? String(currentBase) : '');
+    if (input === null) return;
+    const parsed = Number(input);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      alert('Enter a valid non-negative amount.');
+      return;
+    }
+    const rounded = Math.round(parsed);
+    try {
+      await db.ref(`studentFees/${financeYear}/${studentId}`).update({ feePerYear: rounded });
+      await loadStudents(financeYear);
+      openDetailsModal(studentId);
+      alert(`Base fee updated for ${financeYear}.`);
+    } catch (err) {
+      console.error('Failed to update fee', err);
+      alert('Failed to update fee: ' + (err?.message || err));
+    }
+  }
+
   function openDetailsModal(id) {
     const s = cachedStudents[id]; if (!s) return alert('Student not found');
-    const fin = computeStudentFinancials(s);
+    let fin = computeStudentFinancials(s);
+    if (!s.hasYearData || s.isGraduated) {
+      fin = {
+        feePerYear: 0,
+        previousDebt: 0,
+        paidAmount: 0,
+        balance: 0,
+        periodDebtLabel: '-',
+        periodDebtValue: 0,
+        credit: 0,
+        scheduleItems: [],
+      };
+    }
     const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
     let html = `
       <p><strong>Name:</strong> ${fullName}</p>
       <p><strong>Admission No:</strong> ${s.admissionNumber || ''}</p>
       <p><strong>Class:</strong> ${s.classLevel || ''}</p>
-      <p><strong>Fee/year:</strong> ${fmt(fin.feePerYear || 0)}</p>
+      <p><strong>Fee/year:</strong> ${fmt(fin.feePerYear || 0)}${s.carryAmount > 0 ? ` <span class="text-xs text-slate-500">(Base ${fmt(s.baseFee || 0)} + Carry ${fmt(s.carryAmount)})</span>` : ''}</p>
       <p><strong>Payment Plan:</strong> ${s.paymentPlan || ''}</p>
-      <p><strong>Debt till:</strong> ${fin.periodDebtLabel} — <strong>${fmt(fin.periodDebtValue)}</strong></p>
+      <p><strong>Debt till:</strong> ${fin.periodDebtLabel} - <strong>${fmt(fin.periodDebtValue)}</strong></p>
       <p><strong>Paid:</strong> ${fmt(fin.paidAmount)}</p>
       <p><strong>Balance (Year):</strong> ${fmt(fin.balance)}</p>
+    `;
+    if (hasFinanceAdminAccess()) {
+      html += `
+        <div class="mt-3 flex flex-col gap-2">
+          <button class="px-3 py-1.5 text-sm bg-amber-500 text-white rounded-md hover:bg-amber-600 transition" data-action="edit-fee-year" data-id="${id}">
+            Edit Fee (year)
+          </button>
+          <span class="text-xs text-slate-500">Updates apply only to ${financeYear} and adjust the base before carry-forward.</span>
+        </div>
+      `;
+    }
+    if (!s.hasYearData) {
+      html += `
+        <div class="mt-2 text-xs text-slate-500">No finance data recorded for ${financeYear}. All totals show as 0 until this year's structure or receipts are captured.</div>
+      `;
+    }
+    html += `
       <hr class="my-3"/>
       <h4 class="font-semibold">Payments Ledger</h4>
     `;
@@ -1036,6 +1224,10 @@
       html += `</tbody></table></div>`;
     }
     detailsContent.innerHTML = html;
+    if (hasFinanceAdminAccess()) {
+      const editBtn = detailsContent.querySelector('[data-action="edit-fee-year"]');
+      if (editBtn) editBtn.addEventListener('click', () => promptEditYearFee(id));
+    }
     detailsModal.style.display = 'block';
   }
   function closeDetailsModalFn() { detailsModal.style.display = 'none'; detailsContent.innerHTML = ''; }
@@ -1202,10 +1394,15 @@
     const targetYear = String(year || activeYear);
     activeYear = targetYear;
     financeYear = targetYear;
+    try { sessionStorage.setItem('somap_selected_year', targetYear); } catch (_) {}
     updateYearHint();
+    if (yearSelectEl && yearSelectEl.value !== targetYear) {
+      yearSelectEl.value = targetYear;
+    }
     try {
-      const [baseSnap, enrollmentSnap, classFeesSnap, overridesSnap, ledgerSnap, carrySnap] = await Promise.all([
+      const [baseSnap, anchorEnrollSnap, enrollmentSnap, classFeesSnap, overridesSnap, ledgerSnap, carrySnap] = await Promise.all([
         db.ref('students').once('value'),
+        db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}`).once('value'),
         db.ref(`enrollments/${targetYear}`).once('value'),
         db.ref(`feesStructure/${targetYear}`).once('value'),
         db.ref(`studentFees/${targetYear}`).once('value'),
@@ -1215,6 +1412,7 @@
       const baseStudents = baseSnap.val() || {};
       cachedStudents = buildFinanceStudents(
         baseStudents,
+        anchorEnrollSnap.val() || {},
         enrollmentSnap.val() || {},
         classFeesSnap.val() || {},
         overridesSnap.val() || {},
@@ -1311,6 +1509,12 @@
     yearContext.onYearChanged((year) => {
       const normalized = String(year);
       if (normalized === financeYear) return;
+      financeYear = normalized;
+      activeYear = normalized;
+      try { sessionStorage.setItem('somap_selected_year', normalized); } catch (_) {}
+      if (yearSelectEl && yearSelectEl.value !== normalized) {
+        yearSelectEl.value = normalized;
+      }
       refreshFinanceData(normalized);
     });
   }
@@ -1327,4 +1531,6 @@
 </script>
 </body>
 </html>
+
+
 

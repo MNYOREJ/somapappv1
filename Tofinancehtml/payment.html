@@ -33,9 +33,24 @@
 
   <script>
     (function () {
+      const SOMAP_DEFAULT_YEAR = 2025;
+      const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+      const norm = (s) => String(s || '').trim().toLowerCase();
+      function shiftClass(baseName, deltaYears) {
+        const i = CLASS_ORDER.findIndex((c) => norm(c) === norm(baseName));
+        if (i < 0) return baseName || '';
+        const j = i + Number(deltaYears || 0);
+        if (j < 0) return 'PRE-ADMISSION';
+        if (j >= CLASS_ORDER.length) return 'GRADUATED';
+        return CLASS_ORDER[j];
+      }
+
       // ---- Parent scope detection ----
       const q = new URL(location.href).searchParams;
       const isParentScope = (q.get('scope')||'').toLowerCase() === 'parent';
+      const targetYearNum = Number(q.get('year') || SOMAP_DEFAULT_YEAR);
+      const targetYear = Number.isFinite(targetYearNum) ? targetYearNum : SOMAP_DEFAULT_YEAR;
+      const targetYearStr = String(targetYear);
 
       // ---- Firebase init (inline, so the iframe never depends on ../firebase.js) ----
       const firebaseConfig = {
@@ -83,6 +98,19 @@
           for (let i = 0; i < rem; i++) amounts[sortedIdx[i % sortedIdx.length]]++;
         }
         return amounts;
+      }
+
+      function normalizeLedgerPayments(source) {
+        if (!source) return {};
+        const normalized = {};
+        Object.entries(source).forEach(([key, raw]) => {
+          if (!raw) return;
+          const amount = Number(raw.amount ?? raw.value ?? raw.paid ?? raw.payment ?? raw.total ?? 0);
+          if (!Number.isFinite(amount) || amount <= 0) return;
+          const timestamp = Number(raw.timestamp ?? raw.datePaid ?? raw.createdAt ?? raw.recordedAt ?? raw.time ?? Date.now());
+          normalized[key] = { ...raw, amount: Math.round(amount), timestamp };
+        });
+        return normalized;
       }
 
       // ---- installment configs (DISCOUNTS REMOVED) ----
@@ -156,28 +184,42 @@
       }
 
       function buildSchedule(student) {
+        if (!student || student.isGraduated) {
+          return { items: [], academicYear: targetYear, feeBase: 0 };
+        }
         const config = getConfig(student);
-        const academicYear = Number(student.academicYear || new Date().getFullYear());
-        // BASE FEE ONLY — NO DISCOUNTS
-        const feeBase = Math.round(Number(student.feePerYear) || 0);
+        const feeBase = Math.max(0, Math.round(Number(student.baseFee ?? (student.feePerYear - (student.carryAmount || 0))) || 0));
+        const carryAmount = Math.max(0, Number(student.carryAmount || 0));
 
         const amounts = apportion(feeBase, config.weights);
+        if (carryAmount > 0) {
+          if (amounts.length) amounts[0] += carryAmount;
+          else amounts.push(carryAmount);
+        }
         const items = config.labels.map((label, idx) => {
           const [fromM, fromD] = config.windows[idx].from;
           const [toM, toD] = config.windows[idx].to;
           return {
-            label, amount: amounts[idx],
-            fromTS: ymdToTS(academicYear, fromM, fromD, false),
-            toTS:   ymdToTS(academicYear, toM, toD, true),
-            paidAllocated: 0, status: 'Pending'
+            label,
+            amount: amounts[idx] || 0,
+            fromTS: ymdToTS(targetYear, fromM, fromD, false),
+            toTS:   ymdToTS(targetYear, toM, toD, true),
+            paidAllocated: 0,
+            status: 'Pending'
           };
         });
-        return { items, academicYear, feeBase };
+        return { items, academicYear: targetYear, feeBase };
       }
 
       function allocatePayments(schedule, student) {
-        const payments = Object.values(student.payments || {}).map(p => Number(p.amount) || 0);
-        const totalPaid = payments.reduce((a,b) => a + b, 0);
+        const payments = Object.values(student.payments || {})
+          .map(p => ({
+            amount: Math.max(0, Number(p.amount) || 0),
+            ts: Number(p.timestamp || p.datePaid || 0),
+          }))
+          .filter(p => p.amount > 0)
+          .sort((a, b) => a.ts - b.ts);
+        const totalPaid = payments.reduce((a, b) => a + b.amount, 0);
         let pot = totalPaid;
         for (const it of schedule.items) {
           if (pot <= 0) break;
@@ -201,68 +243,117 @@
       }
 
       function render(student) {
-        const schedule = buildSchedule(student);
-        const { credit, totalPaid, debtTillNow } = allocatePayments(schedule, student);
-        const totalsExp = schedule.items.reduce((s, it) => s + it.amount, 0);
-        const totalsPaid = schedule.items.reduce((s, it) => s + it.paidAllocated, 0);
-        const rem = Math.max(0, totalsExp - totalsPaid);
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+        if (student.isGraduated) {
+          mount(`
+            <div class="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <h2 class="font-semibold text-indigo-700">Installment Breakdown - ${fullName} (${student.admissionNumber || ''})</h2>
+              <div class="text-xs">
+                <span class="mr-3">Plan: <strong>${student.paymentPlan || ''}</strong></span>
+                <span class="mr-3">Class: <strong>${student.classLevel || ''}</strong></span>
+                <span>Year: <strong>${targetYearStr}</strong></span>
+              </div>
+            </div>
+            <div class="p-4 border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm rounded">
+              This learner is marked as GRADUATED for ${targetYearStr}. No installments are scheduled for this year.
+            </div>
+          `);
+          return;
+        }
 
-        const rows = schedule.items.map(it => {
-          const remaining = Math.max(0, it.amount - it.paidAllocated);
-          const win = new Date(it.fromTS).toLocaleDateString() + ' – ' + new Date(it.toTS).toLocaleDateString();
-          const statusClass = it.status === 'Cleared'
-            ? 'status-cleared'
-            : (it.status.includes('Overdue') ? 'status-overdue' : 'status-partial');
-          return `
-            <tr>
-              <td class="p-1 border text-center">${it.label}</td>
-              <td class="p-1 border text-right">${fmt(it.amount)}</td>
-              <td class="p-1 border text-right">${fmt(it.paidAllocated)}</td>
-              <td class="p-1 border text-right">${fmt(remaining)}</td>
-              <td class="p-1 border text-center"><span class="status-pill ${statusClass}">${it.status}</span></td>
-              <td class="p-1 border text-center">${win}</td>
-            </tr>`;
-        }).join('');
+        const schedule = buildSchedule(student);
+        const allocation = allocatePayments(schedule, student);
+        const hasYearData = Boolean(student.hasYearData);
+
+        const totalsExpRaw = schedule.items.reduce((s, it) => s + it.amount, 0);
+        const totalsPaidRaw = schedule.items.reduce((s, it) => s + it.paidAllocated, 0);
+
+        const totalsExp = hasYearData ? totalsExpRaw : 0;
+        const totalsPaid = hasYearData ? totalsPaidRaw : 0;
+        const totalPaidAll = hasYearData ? allocation.totalPaid : 0;
+        const rem = hasYearData ? Math.max(0, totalsExp - totalsPaid) : 0;
+        const debtValue = hasYearData ? allocation.debtTillNow : 0;
+        const creditValue = hasYearData ? allocation.credit : 0;
+
+        const prevYearLabel = targetYear - 1;
+        const carryTag = student.carryAmount > 0
+          ? `<span class="mr-3">Carry-forward ${prevYearLabel}: <strong>${fmt(student.carryAmount)}</strong></span>`
+          : '';
+
+        const rows = hasYearData && schedule.items.length
+          ? schedule.items.map(it => {
+              const remaining = Math.max(0, it.amount - it.paidAllocated);
+              const win = new Date(it.fromTS).toLocaleDateString() + ' - ' + new Date(it.toTS).toLocaleDateString();
+              const statusClass = it.status === 'Cleared'
+                ? 'status-cleared'
+                : (it.status.includes('Overdue') ? 'status-overdue' : 'status-partial');
+              return `
+                <tr>
+                  <td class="p-1 border text-center">${it.label}</td>
+                  <td class="p-1 border text-right">${fmt(it.amount)}</td>
+                  <td class="p-1 border text-right">${fmt(it.paidAllocated)}</td>
+                  <td class="p-1 border text-right">${fmt(remaining)}</td>
+                  <td class="p-1 border text-center"><span class="status-pill ${statusClass}">${it.status}</span></td>
+                  <td class="p-1 border text-center">${win}</td>
+                </tr>`;
+            }).join('')
+          : '';
+
+        const tableSection = hasYearData && schedule.items.length
+          ? `
+            <div class="overflow-auto border rounded">
+              <table class="min-w-full text-xs">
+                <thead>
+                  <tr class="table-header">
+                    <th class="p-1 border">Period</th>
+                    <th class="p-1 border">Expected</th>
+                    <th class="p-1 border">Allocated Paid</th>
+                    <th class="p-1 border">Remaining</th>
+                    <th class="p-1 border">Status</th>
+                    <th class="p-1 border">Window</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>`
+          : `
+            <div class="p-4 border border-dashed border-slate-200 rounded text-xs text-slate-500">
+              No installment schedule for ${targetYearStr} yet.
+            </div>`;
+
+        const infoNote = !hasYearData
+          ? `<div class="mb-3 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-3">
+              No finance data has been recorded for ${targetYearStr}. Once this year's fee structure or payments are captured, the breakdown will appear here.
+            </div>`
+          : '';
 
         mount(`
-          <div class="mb-2 flex items-center justify-between">
-            <h2 class="font-semibold text-indigo-700">Installment Breakdown — ${fullName} (${student.admissionNumber || ''})</h2>
+          <div class="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <h2 class="font-semibold text-indigo-700">Installment Breakdown - ${fullName} (${student.admissionNumber || ''})</h2>
             <div class="text-xs">
               <span class="mr-3">Plan: <strong>${student.paymentPlan || ''}</strong></span>
               <span class="mr-3">Class: <strong>${student.classLevel || ''}</strong></span>
-              <span>Year: <strong>${student.academicYear || ''}</strong></span>
+              <span>Year: <strong>${targetYearStr}</strong></span>
             </div>
           </div>
 
-          <div class="mb-3 flex items-center justify-between text-xs">
-            <div>
-              <span class="mr-3">Expected: <strong>${fmt(totalsExp)}</strong></span>
-              <span class="mr-3">Paid (total): <strong>${fmt(totalPaid)}</strong></span>
-              <span class="mr-3">Allocated: <strong>${fmt(totalsPaid)}</strong></span>
-              <span class="mr-3">Remaining: <strong>${fmt(rem)}</strong></span>
+          <div class="mb-3 flex flex-col gap-2 text-xs md:flex-row md:items-center md:justify-between">
+            <div class="flex flex-wrap items-center gap-3">
+              <span>Fee (year): <strong>${fmt(hasYearData ? student.feePerYear : 0)}</strong></span>
+              <span>Base: <strong>${fmt(student.baseFee || 0)}</strong></span>
+              ${carryTag}
             </div>
-            <div>
-              <span class="mr-3">Debt till now: <strong>${fmt(debtTillNow)}</strong></span>
-              <span>Credit: <strong>${fmt(credit)}</strong></span>
+            <div class="flex flex-wrap items-center gap-3">
+              <span>Paid (total): <strong>${fmt(totalPaidAll)}</strong></span>
+              <span>Allocated: <strong>${fmt(totalsPaid)}</strong></span>
+              <span>Remaining: <strong>${fmt(rem)}</strong></span>
+              <span>Debt till now: <strong>${fmt(debtValue)}</strong></span>
+              <span>Credit: <strong>${fmt(creditValue)}</strong></span>
             </div>
           </div>
 
-          <div class="overflow-auto border rounded">
-            <table class="min-w-full text-xs">
-              <thead>
-                <tr class="table-header">
-                  <th class="p-1 border">Period</th>
-                  <th class="p-1 border">Expected</th>
-                  <th class="p-1 border">Allocated Paid</th>
-                  <th class="p-1 border">Remaining</th>
-                  <th class="p-1 border">Status</th>
-                  <th class="p-1 border">Window</th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
+          ${infoNote}
+          ${tableSection}
         `);
       }
 
@@ -270,11 +361,82 @@
       const studentId = new URL(location.href).searchParams.get('student');
       window.__STUDENT_ID__ = studentId;
       if (!studentId) { err('Error: No student ID provided in URL.'); return; }
-      db.ref(`students/${studentId}`).once('value')
-        .then(snap => {
-          const student = snap.val();
-          if (!student) { err('Student not found.'); return; }
-          render(student);
+      Promise.all([
+        db.ref(`students/${studentId}`).once('value'),
+        db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}/${studentId}`).once('value'),
+        db.ref(`enrollments/${targetYearStr}/${studentId}`).once('value'),
+        db.ref(`feesStructure/${targetYearStr}`).once('value'),
+        db.ref(`studentFees/${targetYearStr}/${studentId}`).once('value'),
+        db.ref(`financeLedgers/${targetYearStr}/${studentId}/payments`).once('value'),
+        db.ref(`financeCarryForward/${targetYearStr}/${studentId}`).once('value'),
+      ])
+        .then(([studentSnap, anchorSnap, enrollmentSnap, classFeesSnap, overrideSnap, ledgerSnap, carrySnap]) => {
+          const baseStudent = studentSnap.val();
+          if (!baseStudent) { err('Student not found.'); return; }
+
+          const anchor = anchorSnap.val() || {};
+          const enrollment = enrollmentSnap.val() || {};
+          const classFees = classFeesSnap.val() || {};
+          const override = overrideSnap.val() || {};
+          const carry = carrySnap.val() || {};
+          const ledgerRaw = ledgerSnap.val() || {};
+
+          const baseClass =
+            anchor.className ||
+            anchor.classLevel ||
+            baseStudent.classLevel ||
+            baseStudent.class ||
+            enrollment.className ||
+            enrollment.classLevel ||
+            '';
+          const deltaYears = targetYear - SOMAP_DEFAULT_YEAR;
+          const classLevel = shiftClass(baseClass, deltaYears);
+          const classDefaults = classFees[classLevel] || classFees[baseClass] || {};
+
+          const baseFeeCandidate =
+            override.feePerYear ??
+            classDefaults.feePerYear ??
+            baseStudent.feePerYear ??
+            baseStudent.feeDue ??
+            baseStudent.requiredFee ??
+            0;
+          const baseFee = Math.max(0, Math.round(Number(baseFeeCandidate) || 0));
+          const carryAmount = Math.max(0, Number(carry.amount ?? carry.balance ?? 0));
+          const effectiveFee = Math.max(0, baseFee + carryAmount);
+
+          const payments = normalizeLedgerPayments(ledgerRaw);
+
+          const hasYearData =
+            (Object.keys(enrollment).length > 0) ||
+            (Object.keys(override).length > 0) ||
+            (Object.keys(payments).length > 0) ||
+            (classDefaults && Object.keys(classDefaults).length > 0) ||
+            carryAmount > 0;
+
+          const planName =
+            override.planName ||
+            override.paymentPlan ||
+            enrollment.planName ||
+            enrollment.paymentPlan ||
+            classDefaults.defaultPlan ||
+            baseStudent.paymentPlan ||
+            '6-instalments';
+
+          const prepared = {
+            ...baseStudent,
+            academicYear: targetYearStr,
+            classLevel,
+            paymentPlan: planName,
+            baseFee,
+            carryAmount,
+            feePerYear: effectiveFee,
+            payments,
+            hasYearData,
+            isGraduated: classLevel === 'GRADUATED',
+            admissionNumber: enrollment.admissionNumber || enrollment.admissionNo || baseStudent.admissionNumber || studentId,
+          };
+
+          render(prepared);
         })
         .catch(e => { console.error(e); err('Error loading student data.'); });
 
@@ -287,3 +449,6 @@
   </script>
 </body>
 </html>
+
+
+

@@ -100,15 +100,69 @@
         return amounts;
       }
 
-      function normalizeLedgerPayments(source) {
-        if (!source) return {};
+      function coercePaymentMap(raw) {
+        if (!raw) return {};
+        if (Array.isArray(raw)) {
+          return raw.reduce((acc, entry, idx) => {
+            if (entry != null) acc[`idx-${idx}`] = entry;
+            return acc;
+          }, {});
+        }
+        if (typeof raw === 'object') return { ...raw };
+        return {};
+      }
+
+      function extractPaymentsMap(raw, targetYear) {
+        if (!raw || typeof raw !== 'object') return {};
+        const yearKey = String(targetYear);
+        const numericYear = Number(targetYear);
+
+        if (raw.payments || raw.entries || raw.records) {
+          return coercePaymentMap(raw.payments || raw.entries || raw.records);
+        }
+
+        const possibleBucket =
+          raw[yearKey] ??
+          raw[String(numericYear)] ??
+          raw[numericYear];
+        if (possibleBucket && typeof possibleBucket === 'object') {
+          if (possibleBucket.payments || possibleBucket.entries || possibleBucket.records) {
+            return coercePaymentMap(possibleBucket.payments || possibleBucket.entries || possibleBucket.records);
+          }
+          return coercePaymentMap(possibleBucket);
+        }
+
+        return coercePaymentMap(raw);
+      }
+
+      function normalizeLedgerPayments(source, targetYear) {
         const normalized = {};
+        if (!source) return normalized;
+        const desiredYear = Number(targetYear);
         Object.entries(source).forEach(([key, raw]) => {
           if (!raw) return;
           const amount = Number(raw.amount ?? raw.value ?? raw.paid ?? raw.payment ?? raw.total ?? 0);
           if (!Number.isFinite(amount) || amount <= 0) return;
-          const timestamp = Number(raw.timestamp ?? raw.datePaid ?? raw.createdAt ?? raw.recordedAt ?? raw.time ?? Date.now());
-          normalized[key] = { ...raw, amount: Math.round(amount), timestamp };
+          const timestamp = Number(
+            raw.timestamp ?? raw.datePaid ?? raw.createdAt ?? raw.recordedAt ?? raw.updatedAt ?? raw.time ?? Date.now()
+          );
+          let paymentYear = Number(
+            raw.academicYear ??
+            raw.financeYear ??
+            raw.feeYear ??
+            raw.year ??
+            raw._year ??
+            raw.academic_session
+          );
+          if (!Number.isFinite(paymentYear) && Number.isFinite(timestamp)) {
+            const ts = new Date(timestamp);
+            if (!Number.isNaN(ts.getTime())) paymentYear = ts.getFullYear();
+          }
+          if (Number.isFinite(desiredYear) && Number.isFinite(paymentYear) && paymentYear !== desiredYear) return;
+          const payload = { ...raw, amount: Math.round(Math.max(0, amount)), timestamp };
+          if (Number.isFinite(paymentYear)) payload.academicYear = paymentYear;
+          else if (Number.isFinite(desiredYear)) payload.academicYear = desiredYear;
+          normalized[key] = payload;
         });
         return normalized;
       }
@@ -370,7 +424,7 @@
         db.ref(`financeLedgers/${targetYearStr}/${studentId}/payments`).once('value'),
         db.ref(`financeCarryForward/${targetYearStr}/${studentId}`).once('value'),
       ])
-        .then(([studentSnap, anchorSnap, enrollmentSnap, classFeesSnap, overrideSnap, ledgerSnap, carrySnap]) => {
+        .then(async ([studentSnap, anchorSnap, enrollmentSnap, classFeesSnap, overrideSnap, ledgerSnap, carrySnap]) => {
           const baseStudent = studentSnap.val();
           if (!baseStudent) { err('Student not found.'); return; }
 
@@ -379,7 +433,32 @@
           const classFees = classFeesSnap.val() || {};
           const override = overrideSnap.val() || {};
           const carry = carrySnap.val() || {};
-          const ledgerRaw = ledgerSnap.val() || {};
+
+          let paymentsSource = extractPaymentsMap(ledgerSnap.val(), targetYear);
+          if (!Object.keys(paymentsSource).length) {
+            try {
+              const altSnap = await db.ref(`financeLedgers/${studentId}/${targetYearStr}/payments`).once('value');
+              paymentsSource = extractPaymentsMap(altSnap.val(), targetYear);
+            } catch (altErr) {
+              console.warn('Legacy ledger path (payments) read failed', altErr?.message || altErr);
+            }
+          }
+          if (!Object.keys(paymentsSource).length) {
+            try {
+              const altBucketSnap = await db.ref(`financeLedgers/${studentId}/${targetYearStr}`).once('value');
+              paymentsSource = extractPaymentsMap(altBucketSnap.val(), targetYear);
+            } catch (legacyBucketErr) {
+              console.warn('Legacy ledger path (bucket) read failed', legacyBucketErr?.message || legacyBucketErr);
+            }
+          }
+          if (!Object.keys(paymentsSource).length) {
+            try {
+              const altRootSnap = await db.ref(`financeLedgers/${studentId}`).once('value');
+              paymentsSource = extractPaymentsMap(altRootSnap.val(), targetYear);
+            } catch (legacyRootErr) {
+              console.warn('Legacy ledger root read failed', legacyRootErr?.message || legacyRootErr);
+            }
+          }
 
           const baseClass =
             anchor.className ||
@@ -404,7 +483,19 @@
           const carryAmount = Math.max(0, Number(carry.amount ?? carry.balance ?? 0));
           const effectiveFee = Math.max(0, baseFee + carryAmount);
 
-          const payments = normalizeLedgerPayments(ledgerRaw);
+          let payments = normalizeLedgerPayments(paymentsSource, targetYear);
+          if (!Object.keys(payments).length) {
+            const overridePayments = normalizeLedgerPayments(coercePaymentMap(override.payments), targetYear);
+            if (Object.keys(overridePayments).length) payments = overridePayments;
+          }
+          if (!Object.keys(payments).length) {
+            const enrollmentPayments = normalizeLedgerPayments(coercePaymentMap(enrollment.payments), targetYear);
+            if (Object.keys(enrollmentPayments).length) payments = enrollmentPayments;
+          }
+          if (!Object.keys(payments).length) {
+            const basePayments = normalizeLedgerPayments(coercePaymentMap(baseStudent.payments), targetYear);
+            if (Object.keys(basePayments).length) payments = basePayments;
+          }
 
           const hasYearData =
             (Object.keys(enrollment).length > 0) ||

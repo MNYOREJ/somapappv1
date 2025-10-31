@@ -48,7 +48,7 @@
   <div class="max-w-6xl mx-auto">
     <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex flex-col">
-        <h1 class="text-2xl font-semibold text-indigo-700">SoMAp � Finance</h1>
+        <h1 class="text-2xl font-semibold text-indigo-700">SoMAp � Finance</h1>
         <p class="mt-1 text-sm font-medium text-indigo-600/80">Working year: <span id="financeYearLabel">--</span></p>
       </div>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -238,6 +238,33 @@
 
 <script>
 (function () {
+  /* ===== Parent mode detection (non-destructive) ===== */
+  const parentCtx = { enabled:false, studentId:null, adm:null, year:null, className:null };
+  (function detectParentMode(){
+    const q = new URLSearchParams(location.search);
+    const scope = (q.get('scope')||'').toLowerCase();
+    if (scope === 'parent') {
+      parentCtx.enabled  = true;
+      parentCtx.studentId= q.get('student');
+      parentCtx.adm      = q.get('adm');
+      parentCtx.year     = q.get('year');
+      parentCtx.className= q.get('class');
+      try {
+        sessionStorage.setItem('parent_scope','1');
+        if (parentCtx.studentId) sessionStorage.setItem('parent_student', parentCtx.studentId);
+        if (parentCtx.adm)       sessionStorage.setItem('parent_adm', parentCtx.adm);
+        if (parentCtx.year)      sessionStorage.setItem('parent_year', parentCtx.year);
+        if (parentCtx.className) sessionStorage.setItem('parent_class', parentCtx.className);
+      } catch(_) {}
+    } else if (sessionStorage.getItem('parent_scope') === '1') {
+      parentCtx.enabled   = true;
+      parentCtx.studentId = sessionStorage.getItem('parent_student');
+      parentCtx.adm       = sessionStorage.getItem('parent_adm');
+      parentCtx.year      = sessionStorage.getItem('parent_year');
+      parentCtx.className = sessionStorage.getItem('parent_class');
+    }
+  })();
+
   const db = window.db || null;
   const yearContext = window.somapYearContext || null;
   let activeYear = yearContext ? yearContext.getSelectedYear() : String(new Date().getFullYear());
@@ -684,10 +711,11 @@
     if (!slot) return;
     if (slot.dataset.loaded) return;
 
+    const scopeParam = parentCtx.enabled ? '&scope=parent' : '';
     slot.innerHTML = `
       <div class="p-3 text-xs text-slate-500">Loading breakdown…</div>
       <iframe
-        src="Tofinancehtml/payment.html?student=${encodeURIComponent(id)}&v=1"
+        src="Tofinancehtml/payment.html?student=${encodeURIComponent(id)}&v=1${scopeParam}"
         class="w-full h-[360px] rounded border"
         loading="lazy"
       ></iframe>
@@ -788,7 +816,7 @@
     await loadExpenses(year);
   }
 
-  // ===== CSV/PDF downloaders (unchanged) =====
+  // ===== CSV/PDF downloaders (parent-scoped) =====
   function downloadCSV_Main() {
     const rows = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
     let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
@@ -805,7 +833,16 @@
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Finance');
-    XLSX.writeFile(wb, `finance_export_${Date.now()}.xlsx`);
+    
+    // Parent mode: use child-specific filename
+    let filename = `finance_export_${Date.now()}.xlsx`;
+    if (parentCtx.enabled) {
+      const onlyId = Object.keys(cachedStudents||{})[0];
+      const only = cachedStudents[onlyId] || {};
+      const adm = only.admissionNumber || onlyId;
+      filename = `finance_${adm}_${(parentCtx.year||financeYear)}.xlsx`;
+    }
+    XLSX.writeFile(wb, filename);
   }
 
   function downloadPDF_Main() {
@@ -826,7 +863,16 @@
     body.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
     doc.setFontSize(14); doc.text('SoMAp Finance Report', 14, 14);
     doc.autoTable({ head: headers, body, startY: 20, styles: { fontSize: 8 } });
-    doc.save(`finance_report_${Date.now()}.pdf`);
+    
+    // Parent mode: use child-specific filename
+    let filename = `finance_report_${Date.now()}.pdf`;
+    if (parentCtx.enabled) {
+      const onlyId = Object.keys(cachedStudents||{})[0];
+      const only = cachedStudents[onlyId] || {};
+      const adm = only.admissionNumber || onlyId;
+      filename = `finance_${adm}_${(parentCtx.year||financeYear)}.pdf`;
+    }
+    doc.save(filename);
   }
 
   function _gatherDebtNow() {
@@ -894,7 +940,16 @@
       const ws = XLSX.utils.aoa_to_sheet(sh.rows);
       XLSX.utils.book_append_sheet(wb, ws, sh.title.slice(0, 31));
     });
-    XLSX.writeFile(wb, `breakdowns_${Date.now()}.xlsx`);
+    
+    // Parent mode: use child-specific filename
+    let filename = `breakdowns_${Date.now()}.xlsx`;
+    if (parentCtx.enabled) {
+      const onlyId = Object.keys(cachedStudents||{})[0];
+      const only = cachedStudents[onlyId] || {};
+      const adm = only.admissionNumber || onlyId;
+      filename = `breakdown_${adm}_${(parentCtx.year||financeYear)}.xlsx`;
+    }
+    XLSX.writeFile(wb, filename);
   }
 
   function downloadPDF_Breakdown() {
@@ -908,7 +963,16 @@
       doc.text(`Installment Breakdown — ${sh.title}`, 14, 14);
       doc.autoTable({ head: [['Period', 'Expected', 'Allocated Paid', 'Remaining', 'Status', 'Window']], body: sh.rows.slice(1), startY: 20, styles: { fontSize: 8 } });
     });
-    doc.save(`breakdowns_${Date.now()}.pdf`);
+    
+    // Parent mode: use child-specific filename
+    let filename = `breakdowns_${Date.now()}.pdf`;
+    if (parentCtx.enabled) {
+      const onlyId = Object.keys(cachedStudents||{})[0];
+      const only = cachedStudents[onlyId] || {};
+      const adm = only.admissionNumber || onlyId;
+      filename = `breakdown_${adm}_${(parentCtx.year||financeYear)}.pdf`;
+    }
+    doc.save(filename);
   }
 
   // ===== Payments & modals (unchanged) =====
@@ -1052,6 +1116,56 @@
     }
   });
 
+  // ===== Parent mode UI lockdown =====
+  function applyParentModeUI(){
+    if (!parentCtx.enabled) return;
+    
+    // Hide filters & bulk exports that could reveal other students
+    ['classFilter','showOnlyDebtors','downloadDebtNowCsv','downloadDebtNowPdf',
+     'downloadBreakdownCsv','downloadBreakdownPdf'].forEach(id=>{
+      const el = document.getElementById(id); 
+      if (el) el.style.display = 'none';
+    });
+    
+    // Optionally keep "Main CSV/PDF" visible but auto-scope. Or hide them:
+    // ['downloadCsv','downloadPdf'].forEach(id=>{ const el=document.getElementById(id); if (el) el.style.display='none'; });
+    
+    // Prevent admin-only actions in parent view
+    const payButtons = document.querySelectorAll('.payBtn');
+    payButtons.forEach(btn => btn.style.display = 'none');
+    
+    const paymentModal = document.getElementById('paymentModal'); 
+    if (paymentModal) paymentModal.style.display = 'none';
+    
+    // Rename KPIs to singular meaning
+    const kpiHeaders = document.querySelectorAll('.bg-white.p-4.rounded.shadow h3');
+    if (kpiHeaders[0]) kpiHeaders[0].textContent = 'Your Total Due (Year)';
+    if (kpiHeaders[1]) kpiHeaders[1].textContent = 'Paid (Total)';
+    if (kpiHeaders[2]) kpiHeaders[2].textContent = 'Balance';
+    
+    // Auto-open the lone breakdown row (there is exactly one row in parent mode)
+    setTimeout(() => {
+      const onlyId = Object.keys(cachedStudents||{})[0];
+      if (onlyId) {
+        const br = document.getElementById(`br-${onlyId}`);
+        if (br) {
+          br.classList.remove('hidden');
+          injectIframeIfNeeded(onlyId);
+          // Also rotate the chevron
+          const expandBtn = document.querySelector(`button.expander[data-id="${onlyId}"]`);
+          if (expandBtn) {
+            expandBtn.classList.add('open');
+            const icon = expandBtn.querySelector('i');
+            if (icon) { 
+              icon.classList.remove('fa-chevron-down'); 
+              icon.classList.add('fa-chevron-up'); 
+            }
+          }
+        }
+      }
+    }, 100);
+  }
+
   // ===== Data loading and UI wiring =====
   async function loadStudents(year = activeYear) {
     if (!db) return;
@@ -1081,8 +1195,41 @@
       if (!Object.keys(cachedStudents).length) {
         cachedStudents = baseStudents;
       }
+
+      // ===== Parent mode: filter to single learner =====
+      if (parentCtx.enabled) {
+        let targetId = parentCtx.studentId;
+        if (!targetId && parentCtx.adm) {
+          targetId = Object.keys(cachedStudents||{}).find(k =>
+            String(cachedStudents[k]?.admissionNumber||'') === String(parentCtx.adm)
+          );
+        }
+        if (!targetId || !cachedStudents[targetId]) {
+          // Clear table and show a friendly message; do not leak other records
+          const tbodyEl = document.querySelector('#financeTable tbody');
+          if (tbodyEl) tbodyEl.innerHTML =
+            `<tr><td colspan="10" class="p-4 text-center text-sm text-slate-600">
+              No finance record found for this learner.
+            </td></tr>`;
+          // Also lock KPIs to 0
+          ['totalDue','totalCollected','totalOutstanding'].forEach(id=>{
+            const el = document.getElementById(id);
+            if (el){ el.textContent = '0'; el.dataset.amount = '0'; }
+          });
+          // Stop further rendering in parent scope
+          populateStudentSelect();
+          applyParentModeUI();
+          return;
+        }
+        // Reduce dataset to the single learner
+        cachedStudents = { [targetId]: cachedStudents[targetId] };
+      }
+
       populateStudentSelect();
       renderTable();
+      if (parentCtx.enabled) {
+        applyParentModeUI();
+      }
     } catch (err) {
       console.error('Error loading students:', err);
       alert('Error loading students: ' + err.message);

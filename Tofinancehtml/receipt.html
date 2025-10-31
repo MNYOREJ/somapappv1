@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -451,11 +451,12 @@
     }
 
     /* ===== Finance summary (plan, debt till, annual) ===== */
-    async function computeFinanceSummary(st, payments){
+    async function computeFinanceSummary(st, payments, yearOverride = receiptsYear){
       // Try to discover annual fee + plan from finance/fees nodes. Fall back to heuristics.
       const adm = st.admissionNumber || st.pupilId || '';
       const cls = st.classLevel || '';
-      const year = new Date().getFullYear();
+      const selectedYear = Number.isFinite(Number(yearOverride)) ? Number(yearOverride) : receiptsYear;
+      const year = Number.isFinite(selectedYear) ? selectedYear : new Date().getFullYear();
       let annualFee = 0, planType='monthly', planCount=12, planLabel='Monthly (12)';
 
       // Try several likely nodes
@@ -485,15 +486,19 @@
 
       // Paid tuition this academic year (exclude Friday & "other")
       const now = new Date();
-      const start = new Date(now.getFullYear(), ACADEMIC_START_MONTH, 1);
-      const end = now;
-      const inYear = (ts)=> (new Date(ts) >= start && new Date(ts) <= end);
+      const start = new Date(year, ACADEMIC_START_MONTH, 1);
+      const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
+      const cutoff = year === now.getFullYear() ? now : endOfYear;
+      const inYear = (ts)=> {
+        const d = new Date(ts);
+        return d >= start && d <= endOfYear;
+      };
       const paidTuition = payments
         .filter(p=> p._kind==='tuition' && inYear(p.timestamp))
         .reduce((s,p)=> s+Number(p.amount||0), 0);
 
       // Tuition debt "till" (month or instalment)
-      const monthsElapsed = (now.getFullYear() - start.getFullYear())*12 + (now.getMonth() - start.getMonth()) + 1; // inclusive
+      const monthsElapsed = Math.max(0, (cutoff.getFullYear() - start.getFullYear())*12 + (cutoff.getMonth() - start.getMonth()) + 1); // inclusive
       let cyclesDue = 12;
       if (planType==='monthly'){
         cyclesDue = Math.min(12, Math.max(0, monthsElapsed));
@@ -513,7 +518,7 @@
         .reduce((s,p)=> s+Number(p.amount||0), 0);
 
       const tillLabel = planType==='monthly'
-        ? monthName(now.getMonth())
+        ? monthName(Math.max(0, Math.min(11, cutoff.getMonth())))
         : `Inst ${cyclesDue}`;
 
       // Graduation summary
@@ -550,50 +555,65 @@
       };
     }
 
-    /* ===== Lazy payments fetch on open ===== */
-    const SIMPLE_PAYMENT_PATHS = [
-      st => `students/${st.key}/payments`,
-      st => `payments/${st.admissionNumber||st.pupilId||''}`,
-      st => `feesPayments/${st.admissionNumber||st.pupilId||''}`,
-      st => `fees/${new Date().getFullYear()}/${st.admissionNumber||st.pupilId||''}/payments`,
-      st => `finance/${new Date().getFullYear()}/${st.classLevel||''}/${st.admissionNumber||st.pupilId||''}/payments`,
-      st => `receipts/${st.admissionNumber||st.pupilId||''}/${new Date().getFullYear()}`,
-      // Add more collections keyed by ADM here (e.g. graduationMoney/<ADM>)
-      st => `graduationMoney/${st.admissionNumber||st.pupilId||''}`
-    ];
+    /* ===== Year-scoped payments fetch ===== */
+    async function fetchPaymentsForStudent(st, year = receiptsYear){
+      const yearKey = String(Number.isFinite(Number(year)) ? Number(year) : receiptsYear);
+      const merged = [];
 
-    async function fetchPaymentsForStudent(st){
-      const paths = SIMPLE_PAYMENT_PATHS.map(f=>f(st)).filter(Boolean);
-      const results = await Promise.all(paths.map(async p=>{
-        try { const s = await db.ref(p).once('value'); return { path:p, val:s.val() }; }
-        catch(e){ console.warn('read fail', p, e?.message||e); return { path:p, val:null }; }
-      }));
-
-      let merged = [];
-      for (const r of results){
-        if (!r.val) continue;
-        if (Array.isArray(r.val)) r.val.forEach(v=> merged.push(normalizePayment(v, r.path)));
-        else if (typeof r.val === 'object') Object.values(r.val).forEach(v=> merged.push(normalizePayment(v, r.path)));
+      try {
+        const ledgerSnap = await db.ref(`financeLedgers/${yearKey}/${st.key}/payments`).once('value');
+        let ledger = ledgerSnap.val() || {};
+        if (!Object.keys(ledger).length) {
+          const legacySnap = await db.ref(`financeLedgers/${st.key}/${yearKey}/payments`).once('value');
+          ledger = legacySnap.val() || {};
+        }
+        if (!Object.keys(ledger).length) {
+          const legacyBucketSnap = await db.ref(`financeLedgers/${st.key}/${yearKey}`).once('value');
+          const bucket = legacyBucketSnap.val();
+          if (bucket && typeof bucket === 'object') {
+            if (bucket.payments) ledger = bucket.payments;
+            else if (bucket.entries) ledger = bucket.entries;
+          }
+        }
+        Object.entries(ledger).forEach(([payId, payVal]) => {
+          merged.push(normalizePayment({ ...payVal, academicYear: Number(yearKey) }, `financeLedgers/${yearKey}/${st.key}/payments/${payId}`, 'tuition'));
+        });
+      } catch (err) {
+        console.warn('financeLedgers read failed', err?.message || err);
       }
 
-      // Friday money (NEW)
       const friday = await fetchFridayMoneyRecords(st);
-      merged.push(...friday);
+      friday.forEach(p => {
+        const ay = Number(p.academicYear ?? new Date(p.timestamp).getFullYear());
+        if (!Number.isFinite(ay) || ay === Number(yearKey)) {
+          merged.push({ ...p, academicYear: Number.isFinite(ay) ? ay : Number(yearKey), _kind: 'friday' });
+        }
+      });
 
-      merged = dedupe(merged).sort((a,b)=> a.timestamp - b.timestamp);
-      const last = merged.slice(-1)[0] || null;
-      st.__payments = merged;
-      st.__receiptCount = merged.length;
+      if (!merged.length && st.payments) {
+        const basePayments = Array.isArray(st.payments) ? st.payments : Object.values(st.payments || {});
+        basePayments.forEach((p, idx) => {
+          merged.push(normalizePayment({ ...p, academicYear: Number(yearKey) }, `students/${st.key}/payments/${idx}`, p._kind || 'tuition'));
+        });
+      }
+
+      const deduped = dedupe(merged).sort((a,b)=> a.timestamp - b.timestamp);
+      const last = deduped.slice(-1)[0] || null;
+
+      st.__paymentsByYear = st.__paymentsByYear || {};
+      st.__paymentsByYear[yearKey] = deduped;
+      st.__payments = deduped;
+      st.__receiptCount = deduped.length;
       st.__lastPayment = last;
 
-      // Finance summary cache
-      st.__finance = await computeFinanceSummary(st, merged);
+      st.__financeByYear = st.__financeByYear || {};
+      st.__financeByYear[yearKey] = await computeFinanceSummary(st, deduped, Number(yearKey));
+      st.__finance = st.__financeByYear[yearKey];
 
-      // Update summary cells in table
       const lastCell = document.querySelector(`td.js-last[data-key="${st.key}"]`);
       const countCell = document.querySelector(`td.js-count[data-key="${st.key}"]`);
-      if (lastCell) lastCell.innerHTML = last ? `${formatDate(last.timestamp)} — ${formatCurrency(last.amount)}` : '<span class="text-slate-400">—</span>';
-      if (countCell) countCell.textContent = merged.length;
+      if (lastCell) lastCell.innerHTML = last ? `${formatDate(last.timestamp)} - ${formatCurrency(last.amount)}` : '<span class="text-slate-400">-</span>';
+      if (countCell) countCell.textContent = deduped.length;
     }
 
     async function openDrawer(meta){
@@ -602,24 +622,27 @@
       const title = q('#drawerTitle');
       const st = allStudents.find(s=>s.key===meta.key) || {};
       const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
-      title.textContent = `${name} — ${meta.adm}`;
+      const yearLabel = String(Number.isFinite(Number(receiptsYear)) ? Number(receiptsYear) : receiptsYear);
+      title.textContent = `${name} - ${meta.adm}`;
 
       content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">Loading receipts…</div>`;
-      if (!st.__payments) await fetchPaymentsForStudent(st);
+      if (!st.__paymentsByYear || !st.__paymentsByYear[yearLabel]) {
+        await fetchPaymentsForStudent(st, receiptsYear);
+      }
 
-      const payments = (st.__payments||[]).slice().sort((a,b)=> a.timestamp-b.timestamp)
-        .map((p,i)=> ({...p, receiptNumber:String(i+1).padStart(4,'0')}));
-      if (!payments.length){
-        content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">No payments captured for this child yet.</div>`;
+      const payments = (st.__paymentsByYear?.[yearLabel] || []).slice().sort((a,b)=> a.timestamp-b.timestamp)
+        .map((p,i)=> ({ ...p, receiptNumber: String(i + 1).padStart(4,'0') }));
+      if (!payments.length) {
+        content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">No payments captured for this child in ${yearLabel} yet.</div>`;
       } else {
         content.innerHTML = payments.slice().reverse().map(p=>`
           <div class="p-3 rounded-lg bg-white/5 border border-white/10">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <p class="font-semibold text-white">${formatCurrency(p.amount)} <span class="tag">${p._kind||'other'}</span></p>
-                <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} • ${safe(p.method)}</p>
-                ${p.note ? `<p class="text-sm mt-1">${p.note}</p>`:``}
-                ${p._src ? `<p class="text-[10px] text-slate-400 mt-1">src: ${p._src}</p>`:``}
+                <p class="font-semibold text-white">${formatCurrency(p.amount)} <span class="tag">${p._kind || 'other'}</span></p>
+                <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} - ${safe(p.method)}</p>
+                ${p.note ? `<p class="text-sm mt-1">${p.note}</p>` : ``}
+                ${p._src ? `<p class="text-[10px] text-slate-400 mt-1">src: ${p._src}</p>` : ``}
               </div>
               <div class="text-right">
                 <p class="text-xs muted">Receipt #${p.receiptNumber}</p>
@@ -657,7 +680,12 @@
       q('#pdfKindBadge').textContent   = payment._kind ? ` ${payment._kind.toUpperCase()} ` : '';
 
       // Finance summary for the PDF (uses cached compute)
-      const fin = st.__finance || await computeFinanceSummary(st, st.__payments||[]);
+      const yearLabel = String(Number.isFinite(Number(receiptsYear)) ? Number(receiptsYear) : receiptsYear);
+      const paymentsForYear = st.__paymentsByYear?.[yearLabel] || st.__payments || [];
+      const fin = st.__financeByYear?.[yearLabel] || st.__finance || await computeFinanceSummary(st, paymentsForYear, receiptsYear);
+      st.__financeByYear = st.__financeByYear || {};
+      st.__financeByYear[yearLabel] = fin;
+      st.__finance = fin;
       q('#sumPlan').textContent      = fin.planLabel;
       q('#sumAnnual').textContent    = formatCurrency(fin.annualFee);
       q('#sumPaidYear').textContent  = formatCurrency(fin.paidTuition);
@@ -690,3 +718,7 @@
   </script>
 </body>
 </html>
+
+
+
+

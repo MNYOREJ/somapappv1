@@ -592,14 +592,19 @@
     };
   }
 
-  function normalizePayments(source) {
+  function normalizePayments(source, targetYear) {
     if (!source) return {};
     const normalized = {};
+    const desiredYear = Number(targetYear);
     Object.entries(source).forEach(([key, raw]) => {
       if (raw == null) return;
       if (typeof raw === 'number') {
         if (raw <= 0) return;
-        normalized[key] = { amount: Number(raw), timestamp: Date.now() };
+        normalized[key] = {
+          amount: Number(raw),
+          timestamp: Date.now(),
+          academicYear: Number.isFinite(desiredYear) ? desiredYear : undefined,
+        };
         return;
       }
       const amount = Number(raw.amount ?? raw.value ?? raw.paid ?? raw.payment ?? raw.total ?? 0);
@@ -607,7 +612,23 @@
       const timestamp = Number(
         raw.timestamp ?? raw.datePaid ?? raw.createdAt ?? raw.updatedAt ?? raw.recordedAt ?? raw.time ?? Date.now()
       );
-      normalized[key] = { ...raw, amount, timestamp };
+      let paymentYear = Number(
+        raw.academicYear ??
+        raw.financeYear ??
+        raw.feeYear ??
+        raw.year ??
+        raw._year ??
+        raw.academic_session
+      );
+      if (!Number.isFinite(paymentYear)) {
+        const tsDate = new Date(timestamp);
+        if (!Number.isNaN(tsDate.getTime())) paymentYear = tsDate.getFullYear();
+      }
+      if (Number.isFinite(desiredYear) && Number.isFinite(paymentYear) && paymentYear !== desiredYear) return;
+      const payload = { ...raw, amount, timestamp };
+      if (Number.isFinite(paymentYear)) payload.academicYear = paymentYear;
+      else if (Number.isFinite(desiredYear)) payload.academicYear = desiredYear;
+      normalized[key] = payload;
     });
     return normalized;
   }
@@ -675,14 +696,30 @@
 
       let paymentsSource = {};
       if (ledgerEntry && typeof ledgerEntry === 'object') {
-        if (ledgerEntry.payments) paymentsSource = ledgerEntry.payments;
-        else if (ledgerEntry.entries) paymentsSource = ledgerEntry.entries;
-        else if (ledgerEntry.records) paymentsSource = ledgerEntry.records;
-        else paymentsSource = ledgerEntry;
+        const yearBucket =
+          ledgerEntry[targetYear] ||
+          ledgerEntry[String(targetYear)] ||
+          ledgerEntry[Number(targetYear)];
+        if (yearBucket && typeof yearBucket === 'object') {
+          if (yearBucket.payments) paymentsSource = yearBucket.payments;
+          else if (yearBucket.entries) paymentsSource = yearBucket.entries;
+          else if (yearBucket.records) paymentsSource = yearBucket.records;
+          else paymentsSource = yearBucket;
+        } else if (ledgerEntry.payments || ledgerEntry.entries || ledgerEntry.records) {
+          paymentsSource =
+            ledgerEntry.payments ||
+            ledgerEntry.entries ||
+            ledgerEntry.records;
+        } else {
+          paymentsSource = ledgerEntry;
+        }
       } else if (ledgerEntry != null) {
         paymentsSource = ledgerEntry;
       }
-      const payments = normalizePayments(paymentsSource);
+      if (!Object.keys(paymentsSource || {}).length && base.payments) {
+        paymentsSource = base.payments;
+      }
+      const payments = normalizePayments(paymentsSource, targetYear);
 
       const parentContact =
         enrollment.parentPhone ||
@@ -696,9 +733,10 @@
       const hasYearData =
         (enrollment && Object.keys(enrollment).length > 0) ||
         (override && Object.keys(override).length > 0) ||
-        (ledgerEntry && typeof ledgerEntry === 'object' && Object.keys(ledgerEntry).length > 0) ||
         (classDefaults && Object.keys(classDefaults).length > 0) ||
-        carryAmount > 0;
+        carryAmount > 0 ||
+        Object.keys(payments || {}).length > 0 ||
+        Object.keys(base.payments || {}).length > 0;
 
       const record = {
         ...base,
@@ -782,11 +820,11 @@
         : '';
       const statusNote = student.isGraduated
         ? `<div class="mt-1 text-xs font-semibold text-emerald-600 uppercase">Graduated</div>`
-        : (!student.hasYearData
+        : (!student.hasYearData && Object.keys(student.payments || {}).length === 0
             ? `<div class="mt-1 text-xs text-slate-500">No finance records captured for ${financeYear} yet.</div>`
             : '');
 
-      const disablePay = student.isGraduated || !student.hasYearData;
+      const disablePay = student.isGraduated;
       const payBtnHtml = disablePay
         ? `<button class="payBtn px-2 py-1 text-xs bg-slate-200 text-slate-500 rounded ml-1 cursor-not-allowed" data-id="${id}" disabled>Pay</button>`
         : `<button class="payBtn px-2 py-1 text-xs bg-indigo-600 text-white rounded ml-1" data-id="${id}">Pay</button>`;
@@ -1410,13 +1448,22 @@
         db.ref(`financeCarryForward/${targetYear}`).once('value'),
       ]);
       const baseStudents = baseSnap.val() || {};
+      let ledgerData = ledgerSnap.val() || {};
+      if (!Object.keys(ledgerData || {}).length) {
+        try {
+          const legacyLedgerSnap = await db.ref('financeLedgers').once('value');
+          ledgerData = legacyLedgerSnap.val() || {};
+        } catch (legacyErr) {
+          console.warn('Legacy financeLedgers read failed', legacyErr?.message || legacyErr);
+        }
+      }
       cachedStudents = buildFinanceStudents(
         baseStudents,
         anchorEnrollSnap.val() || {},
         enrollmentSnap.val() || {},
         classFeesSnap.val() || {},
         overridesSnap.val() || {},
-        ledgerSnap.val() || {},
+        ledgerData,
         carrySnap.val() || {},
         targetYear
       );

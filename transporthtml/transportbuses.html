@@ -8,7 +8,6 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script>
       const firebaseConfig = {
@@ -273,6 +272,7 @@
     <div id="toast" class="toast hidden"></div>
 
     <script src="./modules/transport_roles.js"></script>
+    <script src="./modules/transport_context.js"></script>
     <script src="./modules/transport_helpers.js"></script>
     <script src="./modules/transport_pricing.js"></script>
     <script>
@@ -281,7 +281,7 @@
         user: null,
         role: null,
         year: new Date().getFullYear(),
-        school: "SoMAp",
+        school: TransportContext.getContext().school || "socrates",
         vehicles: [],
         drivers: [],
         currentId: null,
@@ -668,35 +668,58 @@
       setupFilePreview('permitFile', 'permitPreview');
       setupFilePreview('inspectionFile', 'inspectionPreview');
 
-      // Upload files to Firebase Storage
+      // Upload files to Cloudinary
       async function uploadIfNeeded(school, year, busId) {
         const uploads = {};
         const uploadPromises = [];
+        const cloudName = 'dg7vnrkgd';
+        const uploadPreset = 'somap_unsigned';
         
         for (const [key, file] of Object.entries(state.uploads)) {
           if (!file) continue;
           
-          const storageRef = firebase.storage().ref(
-            `transport/${school}/${year}/buses/${busId}/${key}-${Date.now()}-${file.name}`
-          );
+          const folder = `transport/${school}/${year}/buses/${busId}`;
+          const uploadPromise = uploadFileToCloudinary(file, folder, cloudName, uploadPreset)
+            .then(url => { 
+              uploads[key] = url; 
+              console.log(`Successfully uploaded ${key}`);
+            })
+            .catch(err => {
+              console.error(`Failed to upload ${key}:`, err);
+              // Continue even if upload fails - don't break the whole save
+            });
           
-          uploadPromises.push(
-            storageRef.put(file)
-              .then(() => storageRef.getDownloadURL())
-              .then(url => { 
-                uploads[key] = url; 
-                console.log(`Successfully uploaded ${key}`);
-              })
-              .catch(err => {
-                console.error(`Failed to upload ${key}:`, err);
-                // Continue even if upload fails - don't break the whole save
-              })
-          );
+          uploadPromises.push(uploadPromise);
         }
         
         // Wait for all uploads (success or failure)
         await Promise.all(uploadPromises);
         return uploads;
+      }
+
+      // Helper function to upload single file to Cloudinary
+      async function uploadFileToCloudinary(file, folder, cloudName, uploadPreset) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', uploadPreset);
+        formData.append('folder', folder);
+        
+        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Cloudinary upload failed: ${res.status} - ${errorText}`);
+        }
+        
+        const data = await res.json();
+        if (!data.secure_url) {
+          throw new Error('Cloudinary did not return a secure URL');
+        }
+        
+        return data.secure_url;
       }
 
       // Reset Form

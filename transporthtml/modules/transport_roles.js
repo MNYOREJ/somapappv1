@@ -55,8 +55,20 @@
     return isAdmin(norm);
   }
 
+  function isDriver(role) {
+    const norm = normalize(role);
+    if (!norm) return false;
+    if (norm.includes("driver")) return true;
+    if (norm === "gate_officer" || norm.includes("conductor")) return true;
+    return false;
+  }
+
   function canViewTransport(role) {
-    return isStaff(role);
+    if (isAdmin(role)) return true;
+    if (isStaff(role)) return true;
+    if (isDriver(role)) return true;
+    const norm = normalize(role);
+    return norm === "gate_officer";
   }
 
   window.TransportRoles = {
@@ -65,6 +77,7 @@
     normalize,
     isAdmin,
     isStaff,
+    isDriver,
     canViewTransport,
   };
 })();

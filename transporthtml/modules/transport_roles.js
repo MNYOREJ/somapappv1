@@ -21,6 +21,23 @@
     "staff",
   ]);
 
+  const GATE_ROLES = new Set([
+    "gate_officer",
+    "gate_attendant",
+    "gate_manager",
+    "gate_staff",
+    "gatekeeper",
+    "gate_keeper",
+    "boarding_gate",
+    "boarding_gate_officer",
+    "boarding_gate_staff",
+    "boarding_officer",
+    "boarding_manager",
+    "boarding_control",
+    "transport_gate",
+    "board_control",
+  ]);
+
   function normalize(role) {
     if (role === null || role === undefined) return "";
     return String(role)
@@ -59,7 +76,21 @@
     const norm = normalize(role);
     if (!norm) return false;
     if (norm.includes("driver")) return true;
-    if (norm === "gate_officer" || norm.includes("conductor")) return true;
+    if (norm.includes("conductor")) return true;
+    return false;
+  }
+
+  function isGateOfficer(role) {
+    const norm = normalize(role);
+    if (!norm) return false;
+    if (GATE_ROLES.has(norm)) return true;
+    const words = norm.replace(/_/g, " ");
+    if (/\bgate\b/.test(words) && /\b(officer|attendant|keeper|staff|manager|control)\b/.test(words)) {
+      return true;
+    }
+    if (/\bboarding\b/.test(words) && /\bgate\b/.test(words)) {
+      return true;
+    }
     return false;
   }
 
@@ -67,17 +98,18 @@
     if (isAdmin(role)) return true;
     if (isStaff(role)) return true;
     if (isDriver(role)) return true;
-    const norm = normalize(role);
-    return norm === "gate_officer";
+    return isGateOfficer(role);
   }
 
   window.TransportRoles = {
     ADMIN_ROLES,
     STAFF_ROLES,
+    GATE_ROLES,
     normalize,
     isAdmin,
     isStaff,
     isDriver,
+    isGateOfficer,
     canViewTransport,
   };
 })();

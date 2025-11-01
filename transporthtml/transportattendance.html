@@ -513,6 +513,9 @@
       const loadInfo = document.getElementById("loadInfo");
       const studentsList = document.getElementById("studentsList");
       const toast = document.getElementById("toast");
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryRole = TransportRoles.normalize(urlParams.get("role"));
+      const preferredVehicleParam = (urlParams.get("vehicle") || "").trim();
 
       const kpiAssigned = document.getElementById("kpiAssigned");
       const kpiPresent = document.getElementById("kpiPresent");
@@ -537,19 +540,14 @@
         ledgerMap: {},
         summaryMap: {},
         loadingLedgers: false,
-        pendingAbsence: null
+        pendingAbsence: null,
+        preferredVehicle: preferredVehicleParam || null
       };
 
       let contextRun = 0;
 
       function canUse() {
-        const norm = TransportRoles.normalize(state.role);
-        return (
-          TransportRoles.isAdmin(state.role) ||
-          TransportRoles.isStaff(state.role) ||
-          TransportRoles.isDriver(state.role) ||
-          norm === "gate_officer"
-        );
+        return TransportRoles.canViewTransport(state.role);
       }
 
       function escapeHtml(value) {
@@ -687,9 +685,20 @@
           return '<option value="' + escapeHtml(bus.id) + '">' + escapeHtml(bus.alias || bus.name || bus.plate || bus.id) + "</option>";
         }).join("");
 
-        if (!items.some(function(bus) { return bus.id === vehicleSelect.value; })) {
-          vehicleSelect.value = items[0].id;
+        let nextVehicle = vehicleSelect.value;
+        if (state.preferredVehicle) {
+          const preferred = items.find(function(bus) {
+            return bus.id === state.preferredVehicle;
+          });
+          if (preferred) {
+            nextVehicle = preferred.id;
+          }
         }
+        if (!items.some(function(bus) { return bus.id === nextVehicle; })) {
+          nextVehicle = items[0].id;
+        }
+        vehicleSelect.value = nextVehicle;
+        state.preferredVehicle = null;
 
         setVehicleMeta();
       }
@@ -1125,17 +1134,32 @@
             return;
           }
           state.user = user;
+          const candidateRoles = [];
           try {
             const roleSnap = await firebase.database().ref("users/" + user.uid + "/role").get();
-            state.role = TransportRoles.normalize(roleSnap.val()) || "guest";
+            candidateRoles.push(TransportRoles.normalize(roleSnap.val()));
           } catch (err) {
             console.warn("Could not load role", err);
-            state.role = "guest";
           }
+          try {
+            const profileRoleSnap = await firebase.database().ref("users/" + user.uid + "/profile/role").get();
+            candidateRoles.push(TransportRoles.normalize(profileRoleSnap.val()));
+          } catch (err) {
+            console.debug("No profile role found for user", err);
+          }
+          if (queryRole) {
+            candidateRoles.push(queryRole);
+          }
+          state.role =
+            candidateRoles.find(function(role) { return TransportRoles.canViewTransport(role); }) ||
+            candidateRoles.find(function(role) { return role; }) ||
+            "guest";
           if (!canUse()) {
-            document.body.innerHTML = '<div class="alert red" style="margin: 2rem;">No permission for transport attendance.</div>';
+            const detail = state.role && state.role !== "guest" ? " (" + state.role + ")" : "";
+            document.body.innerHTML = '<div class="alert red" style="margin: 2rem;">No permission for transport attendance' + detail + '. Contact your administrator.</div>';
             return;
           }
+          console.info("Transport attendance role resolved as:", state.role, "Candidates:", candidateRoles);
           wireUi();
         });
       }

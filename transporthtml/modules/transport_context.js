@@ -30,6 +30,45 @@
     { value: "12", label: "Dec" },
   ];
 
+  function parseQueryContext() {
+    if (typeof window === "undefined" || !window.location) {
+      return {};
+    }
+    const overrides = {};
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("school")) {
+        const school = params.get("school").trim();
+        if (school) overrides.school = school;
+      }
+      if (params.has("schoolName")) {
+        const schoolName = params.get("schoolName").trim();
+        if (schoolName) overrides.schoolName = schoolName;
+      }
+      if (params.has("year")) {
+        const year = Number(params.get("year"));
+        if (Number.isFinite(year) && year >= 2000 && year <= 2100) {
+          overrides.year = year;
+        }
+      }
+      if (params.has("month")) {
+        const month = Number(params.get("month"));
+        if (Number.isFinite(month) && month >= 1 && month <= 12) {
+          overrides.month = month;
+        }
+      }
+      if (params.has("day")) {
+        const day = Number(params.get("day"));
+        if (Number.isFinite(day) && day >= 1 && day <= 31) {
+          overrides.day = day;
+        }
+      }
+    } catch (err) {
+      console.warn("Unable to parse context query params", err);
+    }
+    return overrides;
+  }
+
   function getStored(key, fallback) {
     try {
       return localStorage.getItem(STORAGE_KEYS[key]) || fallback;
@@ -47,13 +86,21 @@
   }
 
   function getContext() {
-    return {
+    const base = {
       school: getStored("school", "socrates"),
       schoolName: getStored("schoolName", "Socrates School"),
       year: Number(getStored("year", String(new Date().getFullYear()))) || 2024,
       month: Number(getStored("month", String(new Date().getMonth() + 1))) || 1,
       day: Number(getStored("day", "1")) || 1,
     };
+    const overrides = parseQueryContext();
+    const ctx = { ...base, ...overrides };
+    if (overrides.school) setStored("school", ctx.school);
+    if (overrides.schoolName) setStored("schoolName", ctx.schoolName);
+    if (overrides.year !== undefined) setStored("year", ctx.year);
+    if (overrides.month !== undefined) setStored("month", ctx.month);
+    if (overrides.day !== undefined) setStored("day", ctx.day);
+    return ctx;
   }
 
   function setContext(partial) {
@@ -206,6 +253,7 @@
   window.TransportContext = {
     getContext,
     setContext,
+    parseQueryContext,
     attachContextSelectors,
   };
 })();

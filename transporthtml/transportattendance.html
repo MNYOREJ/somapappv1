@@ -535,6 +535,7 @@
         role: "guest",
         context: TransportContext.getContext(),
         buses: [],
+        students: {},
         assignments: [],
         attendanceMap: {},
         ledgerMap: {},
@@ -723,6 +724,10 @@
           state.assignments = [];
           return;
         }
+        // Get vehicle info to check assigned routes
+        const vehicle = state.buses.find(function(b) { return b.id === vehicleId; });
+        const vehicleRoutes = (vehicle && vehicle.assignedRoutes) || [];
+        
         // Load all enrollments and filter manually since vehicleId may be nested
         const ref = firebase.database().ref("transport_enrollments");
         const snapshot = await ref.get();
@@ -741,21 +746,34 @@
           const morningVehicleId = value.morningVehicle && value.morningVehicle.vehicleId;
           const eveningVehicleId = value.eveningVehicle && value.eveningVehicle.vehicleId;
           
-          const matchesVehicle = directVehicleId === vehicleId || 
-                                 morningVehicleId === vehicleId || 
-                                 eveningVehicleId === vehicleId;
+          const matchesVehicleById = directVehicleId === vehicleId || 
+                                     morningVehicleId === vehicleId || 
+                                     eveningVehicleId === vehicleId;
           
-          if (!matchesVehicle) return;
+          // If not matched by ID, try matching by route
+          let matchesVehicleByRoute = false;
+          if (!matchesVehicleById && vehicle && vehicleRoutes.length > 0) {
+            const amStop = value.amStop || value.pickupStop || value.morningStop || "";
+            const pmStop = value.pmStop || value.dropoffStop || value.eveningStop || "";
+            matchesVehicleByRoute = (amStop && vehicleRoutes.includes(amStop)) || 
+                                    (pmStop && vehicleRoutes.includes(pmStop));
+          }
+          
+          if (!matchesVehicleById && !matchesVehicleByRoute) return;
           
           const studentId = value.studentId || child.key;
           if (!studentId) return;
+          
+          // Get student details from students collection
+          const student = state.students[studentId] || {};
+          const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
           
           list.push({
             ...value,
             enrollmentId: child.key,
             studentId: studentId,
-            studentName: value.studentName || value.name || value.displayName || "Unknown student",
-            className: value.className || value.class || value.grade || "",
+            studentName: fullName || value.studentName || value.name || value.displayName || "Unknown student",
+            className: student.classLevel || value.className || value.class || value.grade || "",
             route: value.route || value.routeName || "",
             amStop: value.amStop || value.pickupStop || value.morningStop || "",
             pmStop: value.pmStop || value.dropoffStop || value.eveningStop || ""
@@ -1066,6 +1084,15 @@
         }
       }
 
+      async function loadStudents() {
+        const snapshot = await firebase.database().ref("students").get();
+        const students = {};
+        snapshot.forEach(function(child) {
+          students[child.key] = child.val();
+        });
+        state.students = students;
+      }
+
       async function reloadVehicleAndData() {
         const vehicleId = vehicleSelect.value;
         if (!vehicleId) {
@@ -1098,7 +1125,7 @@
         syncSelectorsFromContext();
         updateSelectedDateLabel();
         try {
-          await loadBuses();
+          await Promise.all([loadBuses(), loadStudents()]);
           if (runId !== contextRun) return;
           await reloadVehicleAndData();
         } catch (err) {

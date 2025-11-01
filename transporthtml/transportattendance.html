@@ -655,9 +655,10 @@
       }
 
       async function loadBuses() {
-        const path = "transport/" + state.context.school + "/" + state.context.year + "/buses";
-        const snapshot = await firebase.database().ref(path).get();
         const items = [];
+        const primaryPath = "transport/" + state.context.school + "/" + state.context.year + "/buses";
+        let snapshot = await firebase.database().ref(primaryPath).get();
+        
         snapshot.forEach(function(child) {
           const value = child.val() || {};
           items.push({
@@ -665,6 +666,20 @@
             ...value
           });
         });
+        
+        // Try fallback path for old school ID if no vehicles found
+        if (items.length === 0) {
+          const fallbackPath = "transport/-O_HndQaeuNugluTYPdp/" + state.context.year + "/buses";
+          snapshot = await firebase.database().ref(fallbackPath).get();
+          snapshot.forEach(function(child) {
+            const value = child.val() || {};
+            items.push({
+              id: child.key,
+              ...value
+            });
+          });
+        }
+        
         items.sort(function(a, b) {
           const aLabel = (a.alias || a.name || a.plate || a.id || "").toLowerCase();
           const bLabel = (b.alias || b.name || b.plate || b.id || "").toLowerCase();
@@ -708,15 +723,33 @@
           state.assignments = [];
           return;
         }
-        const ref = firebase.database().ref("transport_enrollments").orderByChild("vehicleId").equalTo(vehicleId);
+        // Load all enrollments and filter manually since vehicleId may be nested
+        const ref = firebase.database().ref("transport_enrollments");
         const snapshot = await ref.get();
         const list = [];
         snapshot.forEach(function(child) {
           const value = child.val() || {};
-          if (value.school && value.school !== state.context.school) return;
+          
+          // Allow both old and new school IDs for backward compatibility
+          const validSchools = [state.context.school, "-O_HndQaeuNugluTYPdp", "HndQaeuNugluTYPdp"];
+          if (value.school && !validSchools.includes(value.school)) return;
           if (value.year && Number(value.year) !== Number(state.context.year)) return;
+          
+          // Check if this enrollment matches the vehicle
+          // vehicleId might be direct or in morningVehicle/eveningVehicle
+          const directVehicleId = value.vehicleId;
+          const morningVehicleId = value.morningVehicle && value.morningVehicle.vehicleId;
+          const eveningVehicleId = value.eveningVehicle && value.eveningVehicle.vehicleId;
+          
+          const matchesVehicle = directVehicleId === vehicleId || 
+                                 morningVehicleId === vehicleId || 
+                                 eveningVehicleId === vehicleId;
+          
+          if (!matchesVehicle) return;
+          
           const studentId = value.studentId || child.key;
           if (!studentId) return;
+          
           list.push({
             ...value,
             enrollmentId: child.key,

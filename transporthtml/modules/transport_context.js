@@ -95,6 +95,15 @@
     };
     const overrides = parseQueryContext();
     const ctx = { ...base, ...overrides };
+    
+    // Fix corrupted localStorage - if school is the old ID, reset to defaults
+    if (base.school && base.school.includes("HndQaeuNugluTYPdp")) {
+      setStored("school", "socrates");
+      setStored("schoolName", "Socrates School");
+      ctx.school = overrides.school || "socrates";
+      ctx.schoolName = overrides.schoolName || "Socrates School";
+    }
+    
     if (overrides.school) setStored("school", ctx.school);
     if (overrides.schoolName) setStored("schoolName", ctx.schoolName);
     if (overrides.year !== undefined) setStored("year", ctx.year);

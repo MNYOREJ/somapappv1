@@ -366,7 +366,10 @@
           if (String(normalized) !== yearSelect.value) {
             yearSelect.value = String(normalized);
           }
-          if (state.user) loadAllData();
+          if (state.user) {
+            studentsLoaded = false; // Reset students cache on year change
+            loadCriticalData();
+          }
         };
         synchronizeYear(window.somapYearContext.getSelectedYear());
         window.somapYearContext.onYearChanged((nextYear) => {
@@ -381,31 +384,41 @@
           const normalized = parseInt(event.target.value, 10);
           if (!Number.isFinite(normalized) || normalized === state.year) return;
           state.year = normalized;
-          loadAllData();
+          studentsLoaded = false; // Reset students cache on year change
+          loadCriticalData();
+          // Reload students if modal is open
+          if (studentsModal && !studentsModal.classList.contains('hidden')) {
+            loadStudentsIfNeeded().then(() => renderStudentsTable());
+          }
         });
       }
 
       // Render KPI Cards
       function renderKpis() {
-        const totalStudents = Object.keys(state.students).length;
-        const studentsOnTransport = Object.keys(state.transportEnrollments).length;
-        const notOnTransport = totalStudents - studentsOnTransport;
+        const totalStudents = Object.keys(state.students || {}).length;
+        const studentsOnTransport = Object.keys(state.transportEnrollments || {}).length;
+        const notOnTransport = totalStudents > 0 ? totalStudents - studentsOnTransport : '—';
 
         // Calculate financial KPIs
         let expectedThisMonth = 0;
         let paidThisMonth = 0;
         let totalDebt = 0;
 
-        Object.entries(state.transportEnrollments).forEach(([studentId, enrollment]) => {
+        const enrollments = state.transportEnrollments || {};
+        const payments = state.transportPayments || {};
+        
+        Object.entries(enrollments).forEach(([studentId, enrollment]) => {
+          if (!enrollment) return;
+          
           const amStop = enrollment.amStop || '';
           const pmStop = enrollment.pmStop || '';
           const monthlyFee = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
           expectedThisMonth += monthlyFee;
 
           // Get actual payments from transport_payments for this student and month
-          const studentPayments = state.transportPayments[studentId] || {};
+          const studentPayments = payments[studentId] || {};
           const monthPayments = Object.values(studentPayments).filter(payment => 
-            payment.month === state.month && payment.year === state.year
+            payment && payment.month === state.month && payment.year === state.year
           );
           const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
           paidThisMonth += monthPaid;
@@ -425,7 +438,7 @@
             id: "not-transport",
             label: "Not Using Transport",
             value: notOnTransport,
-            description: "Available for enrollment",
+            description: totalStudents > 0 ? "Available for enrollment" : "Loading...",
             color: "info",
           },
           {
@@ -539,8 +552,13 @@
       }
 
       // Open Students on Transport Modal
-      function openStudentsModal() {
+      async function openStudentsModal() {
         studentsModal.classList.remove("hidden");
+        // Show loading state
+        studentsTransportBody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 2rem;">Loading students...</td></tr>';
+        
+        // Load students data if not already loaded
+        await loadStudentsIfNeeded();
         renderStudentsTable();
       }
 
@@ -611,14 +629,26 @@
           .join("");
       }
 
+      // Debounce search for better performance
+      let searchTimeout = null;
       classFilterModal.addEventListener('change', renderStudentsTable);
-      searchStudent.addEventListener('input', renderStudentsTable);
+      searchStudent.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => renderStudentsTable(), 300); // Wait 300ms after typing stops
+      });
 
       // Assign Transport Function
-      function assignTransport(studentId) {
+      async function assignTransport(studentId) {
         state.currentAssignStudentId = studentId;
+        
+        // Ensure students are loaded
+        await loadStudentsIfNeeded();
+        
         const student = state.students[studentId];
-        if (!student) return;
+        if (!student) {
+          showToast('Student not found', 'bad');
+          return;
+        }
 
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         document.getElementById('assignStudentInfo').textContent = 
@@ -651,8 +681,8 @@
         transportAssignModal.classList.remove('hidden');
       }
 
-      function editTransportAssignment(studentId) {
-        assignTransport(studentId);
+      async function editTransportAssignment(studentId) {
+        await assignTransport(studentId);
         const enrollment = state.transportEnrollments[studentId];
         if (enrollment) {
           assignRouteSelect.value = enrollment.route || '';
@@ -914,8 +944,19 @@
 
           showToast('Transport assignment saved successfully!');
           transportAssignModal.classList.add('hidden');
-          loadAllData();
-          renderStudentsTable();
+          
+          // Update local state immediately
+          state.transportEnrollments[studentId] = enrollment;
+          
+          // Refresh data in background
+          loadCriticalData().then(() => {
+            if (studentsModal && !studentsModal.classList.contains('hidden')) {
+              renderStudentsTable();
+            }
+          });
+          
+          // Update KPIs immediately
+          renderKpis();
         } catch (error) {
           console.error('Error saving assignment:', error);
           showToast('Failed to save assignment', 'bad');
@@ -930,26 +971,26 @@
         transportAssignModal.classList.add('hidden');
       });
 
-      // Load all data
-      async function loadAllData() {
+      // Cache for drivers (rarely changes)
+      let driversCache = null;
+      let driversCacheTime = 0;
+      const DRIVERS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+      // Load critical data first (for KPIs and UI)
+      async function loadCriticalData() {
         try {
-          // Load students
-          const studentsSnap = await firebase.database().ref('students').once('value');
-          state.students = studentsSnap.val() || {};
+          // Show loading state
+          kpiRowEl.innerHTML = '<article class="card stat-card"><div class="stat-label">Loading...</div><div class="stat-value">⏳</div></article>';
+          
+          // Load critical data in parallel
+          const [enrollSnap, vehiclesSnap] = await Promise.all([
+            firebase.database().ref('transport_enrollments').once('value'),
+            firebase.database().ref(`transport/${state.school}/${state.year}/buses`).once('value')
+          ]);
 
-          // Load transport enrollments
-          const enrollSnap = await firebase.database().ref('transport_enrollments').once('value');
           state.transportEnrollments = enrollSnap.val() || {};
-
-          // Load transport payments
-          const paymentsSnap = await firebase.database().ref('transport_payments').once('value');
-          state.transportPayments = paymentsSnap.val() || {};
-
-          // Load vehicles
-          const vehiclesSnap = await firebase.database()
-            .ref(`transport/${state.school}/${state.year}/buses`)
-            .once('value');
-          // Ensure each vehicle has its ID
+          
+          // Process vehicles
           state.vehicles = {};
           if (vehiclesSnap.exists()) {
             vehiclesSnap.forEach(child => {
@@ -957,7 +998,37 @@
             });
           }
 
-          // Load drivers from workers database
+          // Load drivers (with caching)
+          await loadDriversCached();
+
+          // Load payments in background (needed for KPI calculations)
+          firebase.database().ref('transport_payments').once('value').then(paymentsSnap => {
+            state.transportPayments = paymentsSnap.val() || {};
+            renderKpis(); // Re-render KPIs when payments load
+          }).catch(err => {
+            console.warn('Failed to load payments:', err);
+            state.transportPayments = {};
+            renderKpis();
+          });
+
+          // Render UI immediately with available data
+          renderKpis();
+        } catch (error) {
+          console.error('Error loading critical data:', error);
+          showToast('Error loading data', 'bad');
+          kpiRowEl.innerHTML = '<article class="card stat-card"><div class="stat-label">Error</div><div class="stat-value">❌</div></article>';
+        }
+      }
+
+      // Load drivers with caching
+      async function loadDriversCached() {
+        const now = Date.now();
+        if (driversCache && (now - driversCacheTime) < DRIVERS_CACHE_TTL) {
+          state.drivers = driversCache;
+          return;
+        }
+
+        try {
           const workersSnap = await firebase.database().ref('workers').once('value');
           state.drivers = [];
           if (workersSnap.exists()) {
@@ -975,8 +1046,27 @@
               }
             });
           }
+          driversCache = state.drivers;
+          driversCacheTime = now;
+        } catch (error) {
+          console.warn('Error loading drivers:', error);
+          state.drivers = driversCache || [];
+        }
+      }
 
-          // Store finance data from students for debt tracking
+      // Lazy load students data (only when needed)
+      let studentsLoaded = false;
+      async function loadStudentsIfNeeded() {
+        if (studentsLoaded && Object.keys(state.students).length > 0) {
+          return; // Already loaded
+        }
+
+        try {
+          const studentsSnap = await firebase.database().ref('students').once('value');
+          state.students = studentsSnap.val() || {};
+          
+          // Process finance data
+          state.financeData = {};
           Object.entries(state.students).forEach(([id, student]) => {
             state.financeData[id] = {
               feePerYear: student.feePerYear || 0,
@@ -984,13 +1074,22 @@
               debtTill: student.debtTill || '—',
             };
           });
-
+          
+          studentsLoaded = true;
+          
+          // Update KPIs with student count
           renderKpis();
-          renderStartCards();
         } catch (error) {
-          console.error('Error loading data:', error);
-          showToast('Error loading data', 'bad');
+          console.error('Error loading students:', error);
+          state.students = {};
+          state.financeData = {};
         }
+      }
+
+      // Load all data (backward compatibility)
+      async function loadAllData() {
+        await loadCriticalData();
+        await loadStudentsIfNeeded();
       }
 
       // Auth and initialization
@@ -1047,8 +1146,12 @@
 
       // Initialize
       ensureAuth(() => {
-        loadAllData();
+        // Render start cards immediately (no data needed)
         renderStartCards();
+        // Load critical data (this will render KPIs when ready)
+        loadCriticalData();
+        // Preload students in background (they'll load when modal opens anyway)
+        setTimeout(() => loadStudentsIfNeeded(), 1000);
       });
     </script>
   </body>

@@ -280,6 +280,7 @@
     <div id="toast" class="toast hidden"></div>
 
     <script src="./modules/transport_roles.js"></script>
+    <script src="./modules/transport_context.js"></script>
     <script src="./modules/transport_helpers.js"></script>
     <script src="./modules/transport_pricing.js"></script>
     <script>
@@ -293,7 +294,7 @@
             return Number.isFinite(parsed) ? parsed : new Date().getFullYear();
           })(),
         month: new Date().getMonth() + 1,
-        school: "SoMAp",
+        school: TransportContext.getContext().school || "socrates",
         students: {},
         vehicles: {},
         transportEnrollments: {},
@@ -301,6 +302,7 @@
         financeData: {},
         currentAssignStudentId: null,
         drivers: [],
+        routeVehicleValidation: {}, // Track which routes have vehicles assigned
       };
 
       const toast = document.getElementById("toast");
@@ -635,6 +637,16 @@
         document.getElementById('dropOffSection').style.display = 'none';
         document.getElementById('farePreview').style.display = 'none';
         document.getElementById('vehicleAssignSection').style.display = 'none';
+        state.routeVehicleValidation = {};
+
+        // Reset save button
+        const saveBtn = document.getElementById('saveTransportAssign');
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.style.opacity = '0.6';
+          saveBtn.style.cursor = 'not-allowed';
+          saveBtn.title = 'Please complete all required fields';
+        }
 
         transportAssignModal.classList.remove('hidden');
       }
@@ -648,6 +660,7 @@
           if (enrollment.amStop) assignMorningDrop.value = enrollment.amStop;
           if (enrollment.pmStop) assignEveningDrop.value = enrollment.pmStop;
           calculateFare();
+          updateSaveButtonState();
         }
       }
 
@@ -677,10 +690,17 @@
         }
 
         calculateFare();
+        updateSaveButtonState();
       });
 
-      assignMorningDrop.addEventListener('change', calculateFare);
-      assignEveningDrop.addEventListener('change', calculateFare);
+      assignMorningDrop.addEventListener('change', () => {
+        calculateFare();
+        updateSaveButtonState();
+      });
+      assignEveningDrop.addEventListener('change', () => {
+        calculateFare();
+        updateSaveButtonState();
+      });
 
       // Calculate and display fare with vehicle/driver info
       function calculateFare() {
@@ -733,19 +753,30 @@
         const routes = [morningRoute, eveningRoute].filter(r => r);
         if (routes.length === 0) {
           document.getElementById('autoAssignInfo').innerHTML = '<p style="margin: 0; color: var(--text-muted);">No routes selected</p>';
+          state.routeVehicleValidation = {};
+          updateSaveButtonState();
           return;
         }
 
+        // Reset validation state
+        state.routeVehicleValidation = {};
+
         let vehicleDriverInfo = '<div style="display: grid; gap: 1rem;">';
+        let allRoutesHaveVehicles = true;
 
         routes.forEach(route => {
           // Find vehicle(s) assigned to this route
-          const vehiclesForRoute = Object.values(state.vehicles).filter(v => {
-            const assignedRoutes = v.assignedRoutes || [];
-            return assignedRoutes.some(r => r.toLowerCase() === route.toLowerCase());
+          const vehiclesForRoute = Object.values(state.vehicles || {}).filter(v => {
+            if (!v || !v.assignedRoutes || !Array.isArray(v.assignedRoutes)) return false;
+            return v.assignedRoutes.some(r => 
+              r && route && String(r).toLowerCase().trim() === String(route).toLowerCase().trim()
+            );
           });
 
           if (vehiclesForRoute.length > 0) {
+            // Route has vehicle(s) - mark as valid
+            state.routeVehicleValidation[route] = true;
+
             vehiclesForRoute.forEach(vehicle => {
               const driver = state.drivers.find(d => d.id === vehicle.assignedDriverUid);
               const driverName = driver ? driver.fullName : 'Driver not assigned';
@@ -763,6 +794,10 @@
               `;
             });
           } else {
+            // Route has no vehicle - mark as invalid
+            state.routeVehicleValidation[route] = false;
+            allRoutesHaveVehicles = false;
+
             vehicleDriverInfo += `
               <div style="background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3);">
                 <div style="font-size: 0.875rem;">
@@ -776,6 +811,40 @@
 
         vehicleDriverInfo += '</div>';
         document.getElementById('autoAssignInfo').innerHTML = vehicleDriverInfo;
+
+        // Update save button state based on validation
+        updateSaveButtonState(allRoutesHaveVehicles);
+      }
+
+      // Update save button state based on vehicle assignment validation
+      function updateSaveButtonState(allRoutesHaveVehicles = false) {
+        const saveBtn = document.getElementById('saveTransportAssign');
+        if (!saveBtn) return;
+
+        const period = assignPeriod.value;
+        const morningRoute = assignMorningDrop.value;
+        const eveningRoute = assignEveningDrop.value;
+        const hasRoutes = morningRoute || eveningRoute;
+
+        // Check if all selected routes have vehicles
+        const routes = [morningRoute, eveningRoute].filter(r => r);
+        const allValid = routes.length > 0 && routes.every(route => state.routeVehicleValidation[route] === true);
+
+        if (!period || !hasRoutes || !allValid) {
+          saveBtn.disabled = true;
+          saveBtn.style.opacity = '0.6';
+          saveBtn.style.cursor = 'not-allowed';
+          if (hasRoutes && !allValid) {
+            saveBtn.title = 'Cannot save: No vehicle assigned to one or more selected routes';
+          } else {
+            saveBtn.title = 'Please complete all required fields';
+          }
+        } else {
+          saveBtn.disabled = false;
+          saveBtn.style.opacity = '1';
+          saveBtn.style.cursor = 'pointer';
+          saveBtn.title = '';
+        }
       }
 
       // Save transport assignment
@@ -785,12 +854,45 @@
         const morningRoute = assignMorningDrop.value;
         const eveningRoute = assignEveningDrop.value;
 
+        // Basic validation
         if (!period || (!morningRoute && !eveningRoute)) {
           showToast('Please complete all required fields', 'bad');
           return;
         }
 
+        // Validate vehicle assignment for all selected routes
+        const routes = [morningRoute, eveningRoute].filter(r => r);
+        const missingVehicles = routes.filter(route => state.routeVehicleValidation[route] !== true);
+
+        if (missingVehicles.length > 0) {
+          showToast(`Cannot save: No vehicle assigned to route(s): ${missingVehicles.join(', ')}. Please assign vehicles in Vehicle Registry first.`, 'bad');
+          return;
+        }
+
         try {
+          // Find and store vehicle/driver info for each route
+          const routeVehicleMap = {};
+          routes.forEach(route => {
+            const vehiclesForRoute = Object.values(state.vehicles || {}).filter(v => {
+              if (!v || !v.assignedRoutes || !Array.isArray(v.assignedRoutes)) return false;
+              return v.assignedRoutes.some(r => 
+                r && route && String(r).toLowerCase().trim() === String(route).toLowerCase().trim()
+              );
+            });
+            
+            if (vehiclesForRoute.length > 0) {
+              // Use the first vehicle found for this route
+              const vehicle = vehiclesForRoute[0];
+              const driver = state.drivers.find(d => d.id === vehicle.assignedDriverUid);
+              routeVehicleMap[route] = {
+                vehicleId: vehicle.id || null,
+                vehiclePlate: vehicle.plate || '',
+                driverId: vehicle.assignedDriverUid || null,
+                driverName: driver ? driver.fullName : 'Not assigned'
+              };
+            }
+          });
+
           const enrollment = {
             studentId,
             school: state.school,
@@ -799,6 +901,9 @@
             amStop: morningRoute || '',
             pmStop: eveningRoute || '',
             route: morningRoute || eveningRoute,
+            // Store vehicle/driver assignment info
+            morningVehicle: morningRoute ? routeVehicleMap[morningRoute] : null,
+            eveningVehicle: eveningRoute ? routeVehicleMap[eveningRoute] : null,
             updatedAt: Date.now(),
             updatedBy: state.user.uid,
           };
@@ -844,7 +949,13 @@
           const vehiclesSnap = await firebase.database()
             .ref(`transport/${state.school}/${state.year}/buses`)
             .once('value');
-          state.vehicles = vehiclesSnap.val() || {};
+          // Ensure each vehicle has its ID
+          state.vehicles = {};
+          if (vehiclesSnap.exists()) {
+            vehiclesSnap.forEach(child => {
+              state.vehicles[child.key] = { id: child.key, ...(child.val() || {}) };
+            });
+          }
 
           // Load drivers from workers database
           const workersSnap = await firebase.database().ref('workers').once('value');

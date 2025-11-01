@@ -671,14 +671,31 @@
       // Upload files to Firebase Storage
       async function uploadIfNeeded(school, year, busId) {
         const uploads = {};
+        const uploadPromises = [];
+        
         for (const [key, file] of Object.entries(state.uploads)) {
           if (!file) continue;
+          
           const storageRef = firebase.storage().ref(
             `transport/${school}/${year}/buses/${busId}/${key}-${Date.now()}-${file.name}`
           );
-          await storageRef.put(file);
-          uploads[key] = await storageRef.getDownloadURL();
+          
+          uploadPromises.push(
+            storageRef.put(file)
+              .then(() => storageRef.getDownloadURL())
+              .then(url => { 
+                uploads[key] = url; 
+                console.log(`Successfully uploaded ${key}`);
+              })
+              .catch(err => {
+                console.error(`Failed to upload ${key}:`, err);
+                // Continue even if upload fails - don't break the whole save
+              })
+          );
         }
+        
+        // Wait for all uploads (success or failure)
+        await Promise.all(uploadPromises);
         return uploads;
       }
 
@@ -803,12 +820,17 @@
       // Save Vehicle
       document.getElementById("vehicleForm").addEventListener("submit", async (e) => {
         e.preventDefault();
+        console.log('=== VEHICLE SAVE FORM SUBMITTED ===');
 
         // Prevent double submission
         const saveBtn = document.getElementById("saveVehicleBtn");
-        if (saveBtn.disabled) return;
+        if (saveBtn.disabled) {
+          console.log('Button already disabled, ignoring duplicate submission');
+          return;
+        }
         saveBtn.disabled = true;
         saveBtn.textContent = '💾 Saving...';
+        console.log('Button disabled, starting save process');
 
         // Collect form data
         const plate = document.getElementById("plateInput").value.trim();
@@ -834,12 +856,14 @@
           .filter(value => value !== '');
 
         if (assignedRoutes.length === 0) {
+          console.log('VALIDATION ERROR: No routes assigned');
           modalAlert.textContent = "Please assign at least one route.";
           modalAlert.classList.remove("hidden");
           saveBtn.disabled = false;
           saveBtn.textContent = '💾 Save Vehicle';
           return;
         }
+        console.log('Route validation passed:', assignedRoutes);
 
         // Contract details
         let paymentFrequency = '';
@@ -863,12 +887,26 @@
         // Validation
         if (!plate || !makeModel || !capacity || !ownerName || !ownerPhone || !ownershipType || !assignedDriverUid || 
             !insuranceProvider || !insurancePolicyNo || !insuranceExpiry || !roadPermitExpiry || !inspectionExpiry) {
+          console.log('VALIDATION ERROR: Missing required fields');
           modalAlert.textContent = "Please fill in all required fields (marked with *).";
           modalAlert.classList.remove("hidden");
           saveBtn.disabled = false;
           saveBtn.textContent = '💾 Save Vehicle';
           return;
         }
+        console.log('Field validation passed');
+
+        // Check if user is authenticated
+        if (!state.user || !state.user.uid) {
+          console.log('VALIDATION ERROR: Not authenticated');
+          modalAlert.textContent = "Error: Not authenticated. Please sign in again.";
+          modalAlert.classList.remove("hidden");
+          saveBtn.disabled = false;
+          saveBtn.textContent = '💾 Save Vehicle';
+          showToast('Authentication error', 'bad');
+          return;
+        }
+        console.log('User authenticated:', state.user.uid);
 
         const isNew = !state.currentId;
         const dbPath = `transport/${state.school}/${state.year}/buses`;
@@ -878,10 +916,14 @@
         const busId = isNew ? ref.key : state.currentId;
 
         try {
+          console.log('=== ENTERING TRY BLOCK ===');
+          console.log('Starting save process for busId:', busId);
           showToast('Saving vehicle...', 'ok');
           
           // Upload files
+          console.log('Uploading files...', Object.keys(state.uploads));
           const uploads = await uploadIfNeeded(state.school, state.year, busId);
+          console.log('File uploads completed:', uploads);
           
           const payload = {
             plate,
@@ -920,10 +962,14 @@
             payload.registrationDate = new Date().toISOString();
           }
 
+          console.log('Saving payload to Firebase...', payload);
           await ref.set(payload);
+          console.log('Firebase save successful!');
+          console.log('=== SAVE COMPLETED SUCCESSFULLY ===');
           showToast(`Vehicle saved successfully! ✅`, 'ok');
           closeModal();
         } catch (err) {
+          console.error('=== SAVE ERROR ===', err);
           console.error(err);
           modalAlert.textContent = `Failed to save vehicle: ${err.message}`;
           modalAlert.classList.remove("hidden");

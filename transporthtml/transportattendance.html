@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Transport Attendance · SoMAp</title>
+
+  <!-- Base styles (reuse your transport.css classes: .bar, .card, .grid, .btn, .alert, .toast, etc.) -->
+  <link rel="stylesheet" href="../css/transport.css"/>
+
+  <!-- Firebase compat 9.x -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+
+  <script>
+    // --- Your existing config ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  </script>
+
+  <style>
+    /* Small extras to make it neat without changing your global CSS */
+    .chips { display:flex; flex-wrap:wrap; gap:.5rem; }
+    .chip { padding:.25rem .6rem; border-radius:9999px; font-size:.85rem; font-weight:600; }
+    .chip.ok { background:rgba(22,163,74,.12); color:#065f46; }
+    .chip.warn { background:rgba(245,158,11,.12); color:#92400e; }
+    .chip.bad { background:rgba(220,38,38,.12); color:#7f1d1d; }
+    .muted { color:#6b7280; font-size:.9rem; }
+    .row { display:grid; grid-template-columns: 1fr auto; gap:.5rem; align-items:center; }
+    .student { display:grid; grid-template-columns: 1.4fr .7fr .8fr .8fr auto; gap:.5rem; align-items:center; padding:.5rem 0; border-bottom:1px solid #eee; }
+    .student strong { font-weight:700; }
+    .tag { font-size:.75rem; opacity:.9; }
+    .btn.sm { padding:.25rem .6rem; font-size:.85rem; }
+    .btn.ghost { background:transparent; border:1px solid #d1d5db; color:#374151; }
+    .btn.danger { background:#b91c1c; color:#fff; }
+    .btn.ok { background:#047857; color:#fff; }
+    .grid.three { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+    .grid.four { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; }
+    .skeleton { height:1rem; background:linear-gradient(90deg,#f3f4f6,#e5e7eb,#f3f4f6); background-size:200% 100%; animation:s 1.1s infinite; border-radius:4px; }
+    @keyframes s { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+    .reason-modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.25); display:none; align-items:center; justify-content:center; }
+    .reason-modal{ background:#fff; width:min(520px,94vw); border-radius:12px; padding:1rem; box-shadow:0 10px 30px rgba(0,0,0,.2); }
+    .reason-list{ display:grid; gap:.5rem; margin:.75rem 0; }
+    .reason-list label{ display:flex; gap:.5rem; align-items:center; }
+    .toolbar { display:flex; gap:.75rem; flex-wrap:wrap; align-items:end; }
+    .toolbar > div { min-width:180px; }
+    .kpis .card { padding:.75rem 1rem; }
+  </style>
+</head>
+<body>
+  <div id="contextBar" class="bar"></div>
+
+  <main style="padding:1.25rem; max-width:1100px; margin:0 auto;">
+    <section class="card">
+      <h2>Transport Attendance (Vehicle · Date)</h2>
+
+      <div class="toolbar">
+        <div>
+          <label for="vehicleSelect">Vehicle</label>
+          <select id="vehicleSelect"></select>
+        </div>
+
+        <div>
+          <label for="yearSelect">Year</label>
+          <select id="yearSelect"></select>
+        </div>
+
+        <div>
+          <label for="monthSelect">Month</label>
+          <select id="monthSelect">
+            <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+            <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+            <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+            <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="daySelect">Day</label>
+          <select id="daySelect"></select>
+        </div>
+
+        <div>
+          <button id="todayBtn" class="btn">Jump to Today</button>
+        </div>
+
+        <div style="margin-left:auto">
+          <button id="finalizeBtn" class="btn danger">Finalize Day (mark rest Absent)</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="kpis grid.four mt-2">
+      <div class="card"><div class="muted">Assigned</div><div id="kpiAssigned" style="font-weight:700;font-size:1.4rem">—</div></div>
+      <div class="card"><div class="muted">Present</div><div id="kpiPresent" style="font-weight:700;font-size:1.4rem">—</div></div>
+      <div class="card"><div class="muted">Absent</div><div id="kpiAbsent" style="font-weight:700;font-size:1.4rem">—</div></div>
+      <div class="card"><div class="muted">Unmarked</div><div id="kpiUnmarked" style="font-weight:700;font-size:1.4rem">—</div></div>
+    </section>
+
+    <section class="grid.three mt-2">
+      <div class="card"><div class="muted">Paid-Up (this month)</div><div id="kpiPaid" style="font-weight:700;font-size:1.2rem">—</div></div>
+      <div class="card"><div class="muted">In-Debt (this month)</div><div id="kpiDebt" style="font-weight:700;font-size:1.2rem">—</div></div>
+      <div class="card"><div class="muted">Inactivity Alerts (3+ weeks)</div><div id="kpiInactive" style="font-weight:700;font-size:1.2rem">—</div></div>
+    </section>
+
+    <section class="card mt-2">
+      <div class="row">
+        <div><strong>Students on this vehicle</strong></div>
+        <div><span class="muted" id="loadInfo">Loading…</span></div>
+      </div>
+      <div id="listHeader" class="student" style="font-weight:700; border-bottom:2px solid #e5e7eb; padding-bottom:.6rem; margin-top:.5rem;">
+        <div>Student · Route/Stop</div>
+        <div>Class</div>
+        <div>Debt (month)</div>
+        <div>Status</div>
+        <div>Actions</div>
+      </div>
+      <div id="studentsList"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Reason Modal -->
+  <div id="reasonModalBackdrop" class="reason-modal-backdrop">
+    <div class="reason-modal">
+      <h3>Why absent?</h3>
+      <div class="reason-list">
+        <label><input type="radio" name="absReason" value="SICK" checked/> SICK</label>
+        <label><input type="radio" name="absReason" value="TRANSPORT FEE"/> TRANSPORT FEE</label>
+        <label><input type="radio" name="absReason" value="SCHOOL FEE"/> SCHOOL FEE</label>
+        <label><input type="radio" name="absReason" value="QUIT USING"/> QUIT USING</label>
+        <label><input type="radio" name="absReason" value="OTHER"/> OTHER</label>
+      </div>
+      <label class="muted" for="absNote">Optional note</label>
+      <input id="absNote" placeholder="Add a short note" style="width:100%; padding:.5rem; border:1px solid #ddd; border-radius:8px;"/>
+      <div style="display:flex; gap:.5rem; justify-content:flex-end; margin-top:.75rem;">
+        <button id="reasonCancel" class="btn ghost">Cancel</button>
+        <button id="reasonOk" class="btn danger">Mark Absent</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shared modules -->
+  <script src="../modules/transport_roles.js"></script>
+  <script src="../modules/transport_helpers.js"></script>
+  <script src="../modules/transport_context.js"></script>
+
+  <script>
+    // ---------------- STATE ----------------
+    const toast = document.getElementById("toast");
+    const contextBar = document.getElementById("contextBar");
+    const vehicleSelect = document.getElementById("vehicleSelect");
+    const yearSelect = document.getElementById("yearSelect");
+    const monthSelect = document.getElementById("monthSelect");
+    const daySelect = document.getElementById("daySelect");
+    const todayBtn = document.getElementById("todayBtn");
+    const finalizeBtn = document.getElementById("finalizeBtn");
+
+    const kpiAssigned = document.getElementById("kpiAssigned");
+    const kpiPresent = document.getElementById("kpiPresent");
+    const kpiAbsent = document.getElementById("kpiAbsent");
+    const kpiUnmarked = document.getElementById("kpiUnmarked");
+    const kpiPaid = document.getElementById("kpiPaid");
+    const kpiDebt = document.getElementById("kpiDebt");
+    const kpiInactive = document.getElementById("kpiInactive");
+    const loadInfo = document.getElementById("loadInfo");
+    const listEl = document.getElementById("studentsList");
+
+    // Reason modal
+    const modalBackdrop = document.getElementById("reasonModalBackdrop");
+    const reasonOk = document.getElementById("reasonOk");
+    const reasonCancel = document.getElementById("reasonCancel");
+    const absNote = document.getElementById("absNote");
+
+    const state = {
+      user: null,
+      role: "guest",
+      context: TransportContext.getContext(), // {school, year, month}
+      buses: [],
+      assignments: [],  // all students assigned to selected vehicle
+      ledgerMap: {},    // studentId -> {paid, expected, balance}
+      attendanceMap: {},// studentId -> {status, reason, by, ts}
+      summaryMap: {},   // studentId -> {last_present_ymd, consecutive_absent_days}
+      pendingAbs: null, // temp store for modal: {student}
+    };
+
+    // -------------- UX HELPERS --------------
+    function showToast(msg, tone="ok"){
+      toast.textContent = msg;
+      toast.classList.remove("hidden");
+      toast.style.background = (tone==="bad") ? "#dc2626" : "#1f2937";
+      setTimeout(()=>toast.classList.add("hidden"), 3000);
+    }
+    function ymdFromSelectors(){
+      const y = Number(yearSelect.value);
+      const m = Number(monthSelect.value);
+      const d = Number(daySelect.value);
+      const mm = String(m).padStart(2,"0");
+      const dd = String(d).padStart(2,"0");
+      return `${y}-${mm}-${dd}`;
+    }
+    function todayToSelectors(){
+      const now = new Date();
+      yearSelect.value = String(now.getFullYear());
+      monthSelect.value = String(now.getMonth()+1);
+      refreshDays();
+      daySelect.value = String(now.getDate());
+    }
+    function refreshDays(){
+      // update days for selected month/year
+      const y = Number(yearSelect.value);
+      const m = Number(monthSelect.value);
+      const daysInMonth = new Date(y, m, 0).getDate();
+      const current = Number(daySelect.value || 1);
+      let opts = "";
+      for (let d=1; d<=daysInMonth; d++) opts += `<option value="${d}">${d}</option>`;
+      daySelect.innerHTML = opts;
+      if (current <= daysInMonth) daySelect.value = String(current);
+    }
+
+    // -------------- DATA LOADERS --------------
+    function loadYears(min=2018, max=2042){
+      let opts = "";
+      for(let y=min; y<=max; y++) opts += `<option value="${y}">${y}</option>`;
+      yearSelect.innerHTML = opts;
+      yearSelect.value = String(state.context.year || new Date().getFullYear());
+    }
+
+    function loadBuses(){
+      const path = `transport/${state.context.school}/${state.context.year}/buses`;
+      return firebase.database().ref(path).once("value").then(snap=>{
+        const items = [];
+        snap.forEach(ch=> items.push({ id: ch.key, ...(ch.val()||{}) }));
+        state.buses = items;
+        vehicleSelect.innerHTML = items.map(b=>`<option value="${b.id}">${b.plate||b.id}</option>`).join("");
+      });
+    }
+
+    function loadAssignmentsForVehicle(vehicleId){
+      // Read all enrollments for this school+year and filter by vehicleId
+      return firebase.database().ref("transport_enrollments").once("value").then(snap=>{
+        const list = [];
+        snap.forEach(ch=>{
+          const v = ch.val() || {};
+          if (v.school && v.school !== state.context.school) return;
+          if (v.year && Number(v.year) !== Number(state.context.year)) return;
+          if (v.vehicleId && v.vehicleId !== vehicleId) return;
+          list.push({ id: ch.key, ...v });
+        });
+        state.assignments = list.sort((a,b)=> (a.studentName||"").localeCompare(b.studentName||""));
+      });
+    }
+
+    function loadAttendanceForDay(vehicleId, ymd){
+      const path = `transport/${state.context.school}/${state.context.year}/attendance/${ymd}/${vehicleId}`;
+      return firebase.database().ref(path).once("value").then(snap=>{
+        state.attendanceMap = snap.val() || {};
+      });
+    }
+
+    function loadSummaryForVehicle(vehicleId){
+      const path = `transport/${state.context.school}/${state.context.year}/attendance_summary/${vehicleId}`;
+      return firebase.database().ref(path).once("value").then(snap=>{
+        state.summaryMap = snap.val() || {};
+      });
+    }
+
+    async function loadLedgersForMonth(){
+      // Lazy-fill map; don’t block screen — we’ll render skeletons then fill
+      const y = Number(yearSelect.value);
+      const m = Number(monthSelect.value);
+      const tasks = state.assignments.map(st=>{
+        const p = TransportHelpers.paths.ledgerMonth(st.studentId, y, m);
+        return firebase.database().ref(p).once("value").then(s=>{
+          const L = s.val()||{};
+          const bal = Number(L.balance ?? ((L.expected||0)-(L.paid||0)));
+          state.ledgerMap[st.studentId] = { expected: Number(L.expected||0), paid: Number(L.paid||0), balance: bal };
+        }).catch(()=>{ /* ignore single failures */});
+      });
+      await Promise.allSettled(tasks);
+    }
+
+    // -------------- RENDER --------------
+    function render(){
+      // Compute KPIs first
+      const assigned = state.assignments.length;
+      let present=0, absent=0, unmarked=0, paid=0, debt=0, inactive=0;
+
+      const rows = state.assignments.map(st=>{
+        const att = state.attendanceMap[st.studentId];
+        let statusLabel = '<span class="tag muted">—</span>';
+        if (att && att.status === "present") { statusLabel = '<span class="chip ok">Present</span>'; present++; }
+        else if (att && att.status === "absent") { statusLabel = `<span class="chip bad">Absent</span> <span class="tag muted">${att.reason||""}</span>`; absent++; }
+        else { unmarked++; }
+
+        const led = state.ledgerMap[st.studentId];
+        let debtCell = '<div class="skeleton"></div>';
+        if (led){
+          const tzs = (TransportHelpers.fmtTZS ? TransportHelpers.fmtTZS(Math.max(0, led.balance)) : ("TZS " + (Math.max(0, led.balance)).toLocaleString()));
+          if (led.balance <= 0) { debtCell = `<span class="chip ok">Cleared</span>`; paid++; }
+          else { debtCell = `<span class="chip warn">${tzs}</span>`; debt++; }
+        }
+
+        const summ = state.summaryMap[st.studentId] || {};
+        let alertChip = "";
+        if (Number(summ.consecutive_absent_days||0) >= 21){
+          alertChip = ` <span class="chip bad">3+ weeks inactive</span>`;
+          inactive++;
+        }
+
+        return `
+          <div class="student" data-student="${st.studentId}">
+            <div>
+              <strong>${st.studentName||"Unknown"}</strong>
+              <div class="muted">${st.route||""} · Stop: ${st.amStop||st.pmStop||"—"} ${alertChip}</div>
+            </div>
+            <div>${st.className||"—"}</div>
+            <div>${debtCell}</div>
+            <div>${statusLabel}</div>
+            <div style="display:flex; gap:.35rem; justify-content:flex-end;">
+              <button class="btn sm ok js-present">Present</button>
+              <button class="btn sm ghost js-absent">Absent</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      listEl.innerHTML = rows || `<div class="muted" style="padding:.75rem 0;">No students assigned to this vehicle.</div>`;
+
+      // KPIs
+      kpiAssigned.textContent = assigned;
+      kpiPresent.textContent = present;
+      kpiAbsent.textContent = absent;
+      kpiUnmarked.textContent = unmarked;
+      kpiPaid.textContent = paid;
+      kpiDebt.textContent = debt;
+      kpiInactive.textContent = inactive;
+
+      // Attach row actions
+      listEl.querySelectorAll(".student").forEach(row=>{
+        const studentId = row.dataset.student;
+        row.querySelector(".js-present")?.addEventListener("click", ()=> markPresent(studentId));
+        row.querySelector(".js-absent")?.addEventListener("click", ()=> askAbsentReason(studentId));
+      });
+
+      loadInfo.textContent = "Ready";
+    }
+
+    // -------------- ACTIONS --------------
+    function attendancePath(ymd, vehicleId, studentId){
+      return `transport/${state.context.school}/${state.context.year}/attendance/${ymd}/${vehicleId}/${studentId}`;
+    }
+    function summaryPath(vehicleId, studentId){
+      return `transport/${state.context.school}/${state.context.year}/attendance_summary/${vehicleId}/${studentId}`;
+    }
+
+    async function markPresent(studentId){
+      if (!canUse()) return;
+      const ymd = ymdFromSelectors();
+      const vehicleId = vehicleSelect.value;
+      const att = {
+        status: "present",
+        reason: "OK",
+        by: state.user.uid,
+        ts: Date.now()
+      };
+      await firebase.database().ref(attendancePath(ymd, vehicleId, studentId)).set(att);
+      // Update summary
+      await firebase.database().ref(summaryPath(vehicleId, studentId)).update({
+        last_present_ymd: ymd,
+        consecutive_absent_days: 0
+      });
+      state.attendanceMap[studentId] = att;
+      render();
+      showToast("Marked present");
+    }
+
+    function askAbsentReason(studentId){
+      state.pendingAbs = { studentId };
+      absNote.value = "";
+      modalBackdrop.style.display = "flex";
+    }
+
+    async function markAbsentConfirmed(){
+      if (!state.pendingAbs) return;
+      const studentId = state.pendingAbs.studentId;
+      const ymd = ymdFromSelectors();
+      const vehicleId = vehicleSelect.value;
+
+      const reason = (document.querySelector("input[name='absReason']:checked")?.value || "OTHER");
+      const note = absNote.value?.trim();
+      const reasonText = note ? `${reason} — ${note}` : reason;
+
+      const att = {
+        status: "absent",
+        reason: reasonText,
+        by: state.user.uid,
+        ts: Date.now()
+      };
+      await firebase.database().ref(attendancePath(ymd, vehicleId, studentId)).set(att);
+
+      // Increment consecutive_absent_days in summary
+      const sRef = firebase.database().ref(summaryPath(vehicleId, studentId));
+      const sSnap = await sRef.get();
+      const curr = sSnap.val() || {};
+      const nextConsec = Number(curr.consecutive_absent_days||0) + 1;
+      await sRef.update({ consecutive_absent_days: nextConsec });
+
+      state.attendanceMap[studentId] = att;
+      modalBackdrop.style.display = "none";
+      state.pendingAbs = null;
+      render();
+      showToast("Marked absent", "bad");
+    }
+
+    async function finalizeDay(){
+      if (!canUse()) return;
+      const ymd = ymdFromSelectors();
+      const vehicleId = vehicleSelect.value;
+      const unmarked = state.assignments.filter(st=> !state.attendanceMap[st.studentId]);
+
+      if (!unmarked.length){
+        showToast("Nothing to finalize — all marked");
+        return;
+      }
+
+      // Batch updates
+      const updates = {};
+      const now = Date.now();
+      unmarked.forEach(st=>{
+        updates[attendancePath(ymd, vehicleId, st.studentId)] = {
+          status: "absent",
+          reason: "NO SHOW",
+          by: state.user.uid,
+          ts: now
+        };
+      });
+      await firebase.database().ref().update(updates);
+
+      // Update summaries
+      const sUpdates = {};
+      unmarked.forEach(st=>{
+        const sKey = summaryPath(vehicleId, st.studentId);
+        // We need the current value; to avoid N calls, we’ll just increment optimistically:
+        // Read current then write. (small N usually)
+      });
+
+      // Safer: sequential read-update for each unmarked (still fine for typical bus sizes)
+      for (const st of unmarked){
+        const sRef = firebase.database().ref(summaryPath(vehicleId, st.studentId));
+        const sSnap = await sRef.get();
+        const curr = sSnap.val() || {};
+        await sRef.update({ consecutive_absent_days: Number(curr.consecutive_absent_days||0) + 1 });
+      }
+
+      // Refresh local map and re-render
+      await loadAttendanceForDay(vehicleId, ymd);
+      await loadSummaryForVehicle(vehicleId);
+      render();
+      showToast(`Finalized: ${unmarked.length} set to Absent`, "bad");
+    }
+
+    function canUse(){
+      return TransportRoles.isAdmin(state.role) || state.role === "gate_officer" || TransportRoles.isStaff(state.role);
+    }
+
+    // -------------- INIT / WIRING --------------
+    function wireSelectors(){
+      loadYears(2018, 2042);
+      monthSelect.value = String(state.context.month || (new Date().getMonth()+1));
+      refreshDays();
+      todayBtn.addEventListener("click", ()=> { todayToSelectors(); reloadVehicleAndData(); });
+      yearSelect.addEventListener("change", ()=> { refreshDays(); reloadVehicleAndData(); });
+      monthSelect.addEventListener("change", ()=> { refreshDays(); reloadVehicleAndData(); });
+      daySelect.addEventListener("change", reloadVehicleAndData);
+      vehicleSelect.addEventListener("change", reloadVehicleAndData);
+      finalizeBtn.addEventListener("click", finalizeDay);
+      reasonOk.addEventListener("click", markAbsentConfirmed);
+      reasonCancel.addEventListener("click", ()=> { modalBackdrop.style.display="none"; state.pendingAbs=null; });
+
+      TransportContext.attachContextSelectors(contextBar, async (ctx)=>{
+        state.context = ctx;
+        // Keep the year dropdown in sync with context changes
+        yearSelect.value = String(ctx.year);
+        monthSelect.value = String(ctx.month);
+        refreshDays();
+        await loadBuses();
+        await reloadVehicleAndData();
+      });
+    }
+
+    async function reloadVehicleAndData(){
+      try{
+        loadInfo.textContent = "Loading…";
+        // Ensure we have buses
+        if (!state.buses.length) await loadBuses();
+
+        // Default vehicle if none selected
+        if (!vehicleSelect.value && state.buses[0]) vehicleSelect.value = state.buses[0].id;
+
+        const vehicleId = vehicleSelect.value;
+        const ymd = ymdFromSelectors();
+
+        // Load main sets
+        await loadAssignmentsForVehicle(vehicleId);
+        await Promise.all([
+          loadAttendanceForDay(vehicleId, ymd),
+          loadSummaryForVehicle(vehicleId)
+        ]);
+
+        // Render skeleton then fill ledgers
+        state.ledgerMap = {};
+        render();
+        await loadLedgersForMonth();
+        render();
+      }catch(e){
+        console.error(e);
+        showToast("Failed to load data", "bad");
+      }
+    }
+
+    function ensureAuth(){
+      firebase.auth().onAuthStateChanged(async (user)=>{
+        if (!user){
+          document.body.innerHTML = `<div class="alert red" style="margin:2rem;">Sign in required.</div>`;
+          return;
+        }
+        state.user = user;
+
+        try{
+          const r = await firebase.database().ref(`users/${user.uid}/role`).get();
+          state.role = TransportRoles.normalize(r.val()) || "guest";
+        }catch(e){
+          state.role = "guest";
+        }
+
+        if (!canUse()){
+          document.body.innerHTML = `<div class="alert red" style="margin:2rem;">No permission for transport attendance.</div>`;
+          return;
+        }
+
+        wireSelectors();
+        await reloadVehicleAndData();
+      });
+    }
+
+    // Boot
+    ensureAuth();
+  </script>
+</body>
+</html>

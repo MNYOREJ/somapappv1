@@ -757,56 +757,113 @@
       };
     }
 
-    function resolveClassForYear(studentId, enrollAnchor, enrollYear, targetYear){
+    function resolveClassForYear(studentId, studentRecord, enrollAnchor, enrollYear, targetYear){
+      // First, try to get class directly from student record (most reliable for current year)
+      const directClass = studentRecord?.classLevel || studentRecord?.className || studentRecord?.class || '';
+      if (directClass && String(targetYear) === String(SOMAP_DEFAULT_YEAR)) {
+        return directClass;
+      }
+      
+      // For other years, use enrollment data with shifting
       const anchor = enrollAnchor[studentId]||{};
-      const baseClass = anchor.className || anchor.classLevel || 'Baby Class';
+      const baseClass = anchor.className || anchor.classLevel || directClass || studentRecord?.classLevel || studentRecord?.className || 'Baby Class';
       const yrRec = enrollYear[studentId]||{};
       if (yrRec.className || yrRec.classLevel) return (yrRec.className || yrRec.classLevel);
+      
+      // Shift from anchor year
       const delta = Number(targetYear) - SOMAP_DEFAULT_YEAR;
       return shiftClass(baseClass, delta);
     }
 
     function countClassForYear(targetClass, maps, targetYear){
+      // Try explicit studentlist/{year}/{className} first
       const yList = maps.studentlistYear?.[targetClass];
-      if (yList && typeof yList === 'object') return Object.keys(yList).length;
-      
-      let n = 0;
-      for(const id of Object.keys(maps.students||{})){
-        const cls = resolveClassForYear(id, maps.enrollAnchor, maps.enrollYear, targetYear);
-        if (L(cls)===L(targetClass)) n++;
+      if (yList && typeof yList === 'object' && Object.keys(yList).length > 0) {
+        return Object.keys(yList).length;
       }
+      
+      // Count from students collection directly
+      let n = 0;
+      const students = maps.students || {};
+      
+      for(const id of Object.keys(students)){
+        const studentRecord = students[id];
+        if (!studentRecord || typeof studentRecord !== 'object') continue;
+        
+        // Get class for this year
+        const cls = resolveClassForYear(id, studentRecord, maps.enrollAnchor, maps.enrollYear, targetYear);
+        
+        // Normalize both class names for comparison (case-insensitive, trim spaces)
+        const normalizedTarget = L(targetClass);
+        const normalizedClass = L(cls);
+        
+        if (normalizedClass === normalizedTarget) {
+          n++;
+        }
+      }
+      
+      console.log(`Counted ${n} students for ${targetClass} in year ${targetYear}`);
       return n;
     }
 
     async function loadAttendanceCounts(year, className, dateStr, studentsMap){
-      const y = String(year), cls = className, key = yyyymmdd(dateStr);
+      const y = String(year), cls = className.trim(), key = yyyymmdd(dateStr);
       const tryPaths = [
         `classAttendance/${y}/${cls}/${key}`,
         `attendance/class/${y}/${cls}/${key}`,
         `attendance/${y}/${cls}/${key}`,
         `classAttendance/${cls}/${key}`,
-        `attendance/${cls}/${key}`
+        `attendance/${cls}/${key}`,
+        // Also try alternative class name formats
+        `classAttendance/${y}/${cls.replace(/\s+/g, '_')}/${key}`,
+        `attendance/${y}/${cls.replace(/\s+/g, '_')}/${key}`,
+        `classAttendance/${cls.replace(/\s+/g, '_')}/${key}`,
+        `attendance/${cls.replace(/\s+/g, '_')}/${key}`
       ];
       
       let node = null;
+      let usedPath = null;
+      
       for(const p of tryPaths){
         try {
           const snap = await db.ref(p).once('value');
           const val = snap && snap.val ? snap.val() : null;
-          if (val && typeof val === 'object' && Object.keys(val).length){ node = val; break; }
-        } catch(e) { continue; }
+          if (val && typeof val === 'object' && Object.keys(val).length > 0){ 
+            node = val; 
+            usedPath = p;
+            console.log(`Found attendance at path: ${p}`);
+            break; 
+          }
+        } catch(e) { 
+          console.log(`Tried path ${p}, not found`);
+          continue; 
+        }
+      }
+      
+      if (!node) {
+        console.log(`No attendance data found for ${cls} on ${dateStr}`);
+        return { present:0, absent:0, boysP:0, girlsP:0, boysA:0, girlsA:0 };
       }
       
       let pb=0, pg=0, ab=0, ag=0;
-      if (!node) return { present:0, absent:0, boysP:0, girlsP:0, boysA:0, girlsA:0 };
       
       for(const sid of Object.keys(node)){
         const rec = node[sid]||{};
-        const status = String(rec.status || rec.s || (rec.am || rec.pm || '')).toUpperCase();
+        // Check multiple status formats
+        const status = String(rec.status || rec.s || (rec.am || rec.pm || '') || '').toUpperCase().trim();
+        const amStatus = String(rec.am || '').toUpperCase().trim();
+        const pmStatus = String(rec.pm || '').toUpperCase().trim();
+        
+        // Consider present if status is P, PRESENT, 1, true, or if either AM/PM is P
         const isPresent = status==='P' || status==='PRESENT' || status==='1' || status===1 || status===true || 
-                         (rec.am && rec.am.toUpperCase()==='P') || (rec.pm && rec.pm.toUpperCase()==='P');
-        const gen = String(rec.gender || rec.sex || studentsMap[sid]?.gender || studentsMap[sid]?.sex || '').toUpperCase().slice(0,1);
-        const isBoy = gen==='M' || gen==='B';
+                         amStatus==='P' || pmStatus==='P';
+        
+        // Get gender from attendance record or student record
+        const genderFromAtt = String(rec.gender || rec.sex || '').toUpperCase().trim();
+        const studentRecord = studentsMap[sid];
+        const genderFromStudent = String(studentRecord?.gender || studentRecord?.sex || '').toUpperCase().trim();
+        const gen = genderFromAtt || genderFromStudent;
+        const isBoy = gen==='M' || gen==='B' || gen==='BOY' || gen==='MALE';
         
         if (isPresent){
           if(isBoy) pb++; else pg++;
@@ -814,6 +871,8 @@
           if(isBoy) ab++; else ag++;
         }
       }
+      
+      console.log(`Attendance counts - Present: ${pb+pg} (♂${pb} ♀${pg}), Absent: ${ab+ag} (♂${ab} ♀${ag})`);
       
       return { present: pb+pg, absent: ab+ag, boysP:pb, girlsP:pg, boysA:ab, girlsA:ag };
     }
@@ -835,10 +894,17 @@
         return;
       }
       
-      const chosenClass = clsSel.value;
+      const chosenClass = clsSel.value.trim();
 
       try {
+        if(statNote) statNote.textContent = 'Loading student data...';
+        
         const maps = await getBaseMaps(year);
+        console.log('Loaded maps:', {
+          studentsCount: Object.keys(maps.students || {}).length,
+          enrollAnchorCount: Object.keys(maps.enrollAnchor || {}).length,
+          studentlistYear: Object.keys(maps.studentlistYear || {}).length
+        });
         
         if (L(chosenClass)==='graduated'){
           totalInp.value = 0;
@@ -854,21 +920,28 @@
         }
 
         const total = countClassForYear(chosenClass, maps, year);
-        if (totalInp){ totalInp.value = total; }
-        if (statTotal) statTotal.textContent = total;
+        console.log(`Total students for ${chosenClass} in ${year}: ${total}`);
+        
+        if (totalInp){ 
+          totalInp.value = total || 0; 
+        }
+        if (statTotal) statTotal.textContent = total || 0;
 
         if (dateInp && dateInp.value){
+          if(statNote) statNote.textContent = 'Loading attendance data...';
           const att = await loadAttendanceCounts(year, chosenClass, dateInp.value, maps.students||{});
-          if (presentInp) presentInp.value = att.present;
-          if (pbEl) pbEl.value = att.boysP;
-          if (pgEl) pgEl.value = att.girlsP;
-          if (abEl) abEl.value = att.boysA;
-          if (agEl) agEl.value = att.girlsA;
-          if (statPB) statPB.textContent = att.boysP;
-          if (statPG) statPG.textContent = att.girlsP;
-          if (statAB) statAB.textContent = att.boysA;
-          if (statAG) statAG.textContent = att.girlsA;
-          if (statNote) statNote.textContent = `Auto from attendance: ${dateInp.value}`;
+          console.log('Attendance data:', att);
+          
+          if (presentInp) presentInp.value = att.present || 0;
+          if (pbEl) pbEl.value = att.boysP || 0;
+          if (pgEl) pgEl.value = att.girlsP || 0;
+          if (abEl) abEl.value = att.boysA || 0;
+          if (agEl) agEl.value = att.girlsA || 0;
+          if (statPB) statPB.textContent = att.boysP || 0;
+          if (statPG) statPG.textContent = att.girlsP || 0;
+          if (statAB) statAB.textContent = att.boysA || 0;
+          if (statAG) statAG.textContent = att.girlsA || 0;
+          if (statNote) statNote.textContent = `Auto from attendance: ${dateInp.value} (${att.present} present)`;
         } else {
           if (presentInp) presentInp.value = '';
           [pbEl,pgEl,abEl,agEl].forEach(el=>{ if(el) el.value = ''; });
@@ -876,11 +949,11 @@
           if (statPG) statPG.textContent = '0';
           if (statAB) statAB.textContent = '0';
           if (statAG) statAG.textContent = '0';
-          if (statNote) statNote.textContent = 'Pick a Lesson Date to pull attendance';
+          if (statNote) statNote.textContent = `Total: ${total || 0} students. Pick a Lesson Date to pull attendance.`;
         }
       } catch(error) {
         console.error('Error in recomputeForSelection:', error);
-        if(statNote) statNote.textContent = 'Error loading data';
+        if(statNote) statNote.textContent = 'Error loading data: ' + error.message;
       }
     }
 

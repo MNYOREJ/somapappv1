@@ -151,61 +151,6 @@
         </div>
       </section>
 
-      <!-- Parent Transport Payment View -->
-      <section id="parentTransportView" class="card mt-3 hidden">
-        <h2 style="margin: 0 0 1rem 0;">🚐 Transport Payment — <span id="tpStudentName">—</span></h2>
-        <div class="text-sm text-slate-700 mb-3" style="padding: 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
-          <div>Admission: <b id="tpAdm">—</b> • Class: <b id="tpClass">—</b> • Phone: <b id="tpPhone">—</b></div>
-          <div>Monthly Fee: <b id="tpMonthlyFee">—</b> • Total Debt: <b id="tpDebt">—</b></div>
-          <div>Unpaid Months: <b id="tpUnpaid">—</b></div>
-        </div>
-
-        <h3 class="font-bold mb-2">📋 Payment History</h3>
-        <div id="tpHistoryTable" class="text-sm border rounded p-2 mb-4" style="overflow-x: auto;"></div>
-
-        <h3 class="font-bold mb-2">💵 Record Payment</h3>
-        <div id="tpPaymentForm">
-          <div class="grid two">
-            <div>
-              <label for="tpMonth">Payment Month</label>
-              <select id="tpMonth" class="w-full" required></select>
-            </div>
-            <div>
-              <label for="tpAmount">Amount Paid (TZS)</label>
-              <input id="tpAmount" type="number" min="0" class="w-full" required/>
-            </div>
-            <div>
-              <label for="tpMethod">Payment Method</label>
-              <select id="tpMethod" class="w-full" required>
-                <option value="">Select…</option>
-                <option>M-Pesa</option><option>Airtel Money</option><option>Tigo Pesa</option>
-                <option>Bank</option><option>Cash</option>
-              </select>
-            </div>
-            <div>
-              <label for="tpRef">Reference/Transaction No <span style="color: red;">*</span></label>
-              <input id="tpRef" class="w-full" placeholder="e.g., RFX123..." required/>
-            </div>
-            <div>
-              <label for="tpPayer">Payer Full Name <span style="color: red;">*</span></label>
-              <input id="tpPayer" class="w-full" placeholder="Parent/Guardian name" required/>
-            </div>
-            <div>
-              <label for="tpDate">Payment Date <span style="color: red;">*</span></label>
-              <input id="tpDate" type="date" class="w-full" required/>
-            </div>
-          </div>
-          <label class="block mt-2">Notes (Optional)
-            <textarea id="tpNotes" class="w-full" placeholder="Any additional notes..."></textarea>
-          </label>
-          <div class="mt-3 flex gap-2">
-            <button id="tpSave" class="btn success">💾 Save Payment</button>
-            <button id="tpCancel" class="btn secondary">Cancel</button>
-          </div>
-          <p id="tpStatus" class="text-sm mt-2"></p>
-        </div>
-      </section>
-
       <!-- Expenses Tracking -->
       <section class="card mt-3">
         <h2>Transport Expenses Tracker</h2>
@@ -825,7 +770,16 @@
 
           showToast('Payment pending admin approval.', 'ok');
           closePaymentModal();
-          loadAllData();
+          
+          // Refresh based on view mode
+          const studentParam = localStorage.getItem('parentFocusStudent');
+          if (studentParam) {
+            // Parent view - reload single student
+            renderParentTransportPayment(studentParam);
+          } else {
+            // Admin view - reload all data
+            loadAllData();
+          }
         } catch (error) {
           console.error('Error saving payment:', error);
           showToast('Failed to save payment', 'bad');
@@ -835,23 +789,36 @@
       // View payment history
       function viewPaymentHistory(studentId) {
         const student = state.students[studentId];
-        const payments = Object.values(state.transportPayments[studentId] || {})
-          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        let payments = state.transportPayments[studentId] || {};
+        
+        // Handle array or object format
+        if (Array.isArray(payments)) {
+          payments = payments.sort((a, b) => (b.timestamp || b.paidAt || 0) - (a.timestamp || a.paidAt || 0));
+        } else if (payments && typeof payments === 'object') {
+          payments = Object.values(payments).sort((a, b) => (b.timestamp || b.paidAt || 0) - (a.timestamp || a.paidAt || 0));
+        } else {
+          payments = [];
+        }
         
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         
-        let html = `<h3>${fullName} - Payment History</h3><table class="table mt-2"><thead><tr><th>Date</th><th>Month</th><th>Amount</th><th>Method</th><th>Reference</th></tr></thead><tbody>`;
+        let html = `<h3>${fullName} - Payment History</h3><table class="table mt-2"><thead><tr><th>Date</th><th>Month</th><th>Amount</th><th>Method</th><th>Reference</th><th>Payer</th><th>Status</th></tr></thead><tbody>`;
         
         if (payments.length === 0) {
-          html += '<tr><td colspan="5" style="text-align: center; padding: 2rem;">No payments recorded</td></tr>';
+          html += '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No payments recorded</td></tr>';
         } else {
           payments.forEach(p => {
+            const badge = p.approved ? '✅ Approved' : '⏳ Pending';
+            const d = p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-GB') : (p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-GB') : '—');
+            const monthName = typeof p.month === 'number' ? MONTH_NAMES[p.month] : (p.month || '—');
             html += `<tr>
-              <td>${formatDate(p.timestamp)}</td>
-              <td>${MONTH_NAMES[p.month] || 'N/A'}</td>
+              <td>${d}</td>
+              <td>${monthName}</td>
               <td>${formatCurrency(p.amount)}</td>
               <td>${p.method || '—'}</td>
-              <td>${p.reference || '—'}</td>
+              <td>${p.ref || p.reference || '—'}</td>
+              <td>${p.payerName || '—'}</td>
+              <td>${badge}</td>
             </tr>`;
           });
         }
@@ -1077,37 +1044,29 @@
       const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
       document.getElementById('dueDate').textContent = `${dueDay}th ${MONTH_NAMES[nextMonth.getMonth() + 1]} ${nextMonth.getFullYear()}`;
 
-      // Parent transport payment renderer
+      // Parent transport payment renderer - unified view with existing KPIs and table
       async function renderParentTransportPayment(studentId) {
         const y = String(state.year);
         const prefix = currentSchoolPrefix();
         
-        // Hide admin sections immediately
-        document.querySelector('section.row')?.classList.add('hidden'); // KPIs
-        document.getElementById('criticalAlerts')?.classList.add('hidden');
-        document.querySelector('section.card:has(#paymentsTable)')?.classList.add('hidden'); // Admin table
-        document.querySelector('section.card:has(#expensesTable)')?.classList.add('hidden'); // Expenses
+        // Hide ONLY expenses (keep KPIs and table for parent's child)
         document.querySelector('section.card.mt-3:has([id="fuelExpenses"])')?.classList.add('hidden'); // Expense stats
         
-        // Show parent view
-        const parentViewEl = document.getElementById('parentTransportView');
-        if (!parentViewEl) return;
-        parentViewEl.classList.remove('hidden');
-        
-        // Get parent phone
-        const user = firebase.auth().currentUser;
-        const parentPhone = normalizePhone(user?.phoneNumber || localStorage.getItem('parentPhone') || '');
+        // Get parent phone (parents logged in via index.html with studentKey)
+        const parentPhone = normalizePhone(localStorage.getItem('parentPhone') || '');
         
         // Load ONLY this specific student's data (fast!)
-        const [sSnap, enrollSnap, ledSnap] = await Promise.all([
+        const [sSnap, enrollSnap, ledSnap, finSnap] = await Promise.all([
           firebase.database().ref(`${prefix}students/${studentId}`).once('value'),
           firebase.database().ref(`${prefix}transport_enrollments/${studentId}`).once('value').catch(() => ({ val: () => null })),
-          firebase.database().ref(`${prefix}transport_payments/${studentId}`).once('value').catch(() => ({ val: () => null }))
+          firebase.database().ref(`${prefix}transport_payments/${studentId}`).once('value').catch(() => ({ val: () => null })),
+          firebase.database().ref(`${prefix}finance/${y}/${studentId}/payments`).once('value').catch(() => ({ val: () => null }))
         ]);
         
         const S = sSnap.val() || {};
         const enrollment = enrollSnap.val() || {};
         let pays = ledSnap.val() || {};
+        const schoolPayments = finSnap.val() || {};
         
         // Convert payments to array if object
         if (pays && typeof pays === 'object' && !Array.isArray(pays)) {
@@ -1115,49 +1074,44 @@
         }
         if (!Array.isArray(pays)) pays = [];
         
-        // Verify parent owns student
+        // Verify parent owns student (but don't block if no phone match - parents already authenticated)
         const studentPhone = normalizePhone(S.motherPhone || S.parentPhone || S.primaryParentContact || '');
-        if (!parentPhone || parentPhone !== studentPhone) {
-          document.getElementById('parentTransportView').classList.add('hidden');
-          document.getElementById('tpStatus').textContent = 'Access denied. This child is not linked to your phone number.';
-          document.getElementById('tpStatus').style.color = '#991b1b';
+        if (parentPhone && parentPhone !== studentPhone) {
+          alert('Access denied. This child is not linked to your account.');
+          window.location.href = 'parent.html';
           return;
         }
         
         // Check if using transport
         if (!enrollment) {
-          document.getElementById('parentTransportView').classList.add('hidden');
-          document.getElementById('tpStatus').textContent = 'This child is not marked as USING transport for the selected year.';
-          document.getElementById('tpStatus').style.color = '#991b1b';
+          alert('This child is not using transport for the selected year.');
+          window.location.href = 'parent.html';
           return;
         }
+        
+        // Populate state so modal functions work
+        state.students[studentId] = S;
+        state.transportEnrollments[studentId] = enrollment;
+        state.transportPayments[studentId] = pays;
         
         // Calculate class for year
         const yearDelta = state.year - BASE_YEAR;
         const baseClass = S.classLevel || '';
         const shiftedClass = shiftClass(baseClass, yearDelta);
         
-        // Render student info
         const fullName = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim() || '—';
-        document.getElementById('tpStudentName').textContent = fullName;
-        document.getElementById('tpAdm').textContent = S.admissionNumber || studentId;
-        document.getElementById('tpClass').textContent = shiftedClass;
-        document.getElementById('tpPhone').textContent = studentPhone || '—';
         
         // Get monthly fee from enrollment (handle both formats)
         let monthlyFee = 0;
         if (enrollment.monthlyFee) {
           monthlyFee = Number(enrollment.monthlyFee || 0);
         } else if (enrollment.amStop || enrollment.pmStop) {
-          // Calculate from route stops using TransportPricing
           const amStop = enrollment.amStop || '';
           const pmStop = enrollment.pmStop || '';
           monthlyFee = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
         }
         
-        document.getElementById('tpMonthlyFee').textContent = formatCurrency(monthlyFee);
-        
-        // Calculate debt - for parent view we show all payments (approved or pending)
+        // Calculate debt - for parent view show all payments (approved or pending)
         const paidByMonth = {};
         pays.forEach(p => {
           if (p && p.month) {
@@ -1168,7 +1122,7 @@
         
         const startMonth = enrollment.startMonth || 'January';
         const startIdx = Math.max(0, MONTH_NAMES.indexOf(startMonth));
-        const monthsOrdered = [...MONTH_NAMES.slice(1)]; // Remove empty first element
+        const monthsOrdered = [...MONTH_NAMES.slice(1)];
         const duesByMonth = {};
         monthsOrdered.forEach(m => {
           const active = MONTH_NAMES.indexOf(m) >= startIdx;
@@ -1176,74 +1130,87 @@
         });
         
         const unpaid = monthsOrdered.filter(m => duesByMonth[m] > (paidByMonth[m] || 0));
-        document.getElementById('tpUnpaid').textContent = unpaid.length ? unpaid.join(', ') : 'None';
-        
         const totalDue = monthsOrdered.reduce((a, m) => a + duesByMonth[m], 0);
         const totalPaid = Object.values(paidByMonth).reduce((a, b) => a + b, 0);
         const debt = Math.max(0, totalDue - totalPaid);
-        document.getElementById('tpDebt').textContent = formatCurrency(debt);
         
-        // Render history - sort by timestamp if available, else by month
-        const rows = pays.sort((a, b) => {
-          const tsA = a.paidAt || a.timestamp || 0;
-          const tsB = b.paidAt || b.timestamp || 0;
-          return tsB - tsA;
-        }).map(p => {
-          const badge = p.approved ? '✅ Approved' : '⏳ Pending';
-          const d = p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-GB') : (p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-GB') : '—');
-          const monthName = typeof p.month === 'number' ? MONTH_NAMES[p.month] : (p.month || '—');
-          return `<tr>
-            <td>${monthName}</td><td>${formatCurrency(p.amount || 0)}</td><td>${p.method || '—'}</td>
-            <td>${p.ref || p.reference || '—'}</td><td>${p.payerName || '—'}</td><td>${d}</td><td>${badge}</td>
-          </tr>`;
-        }).join('');
+        // Render KPIs for THIS child only
+        document.getElementById('totalExpected').textContent = formatCurrency(monthlyFee);
+        document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
+        document.getElementById('totalDebt').textContent = formatCurrency(debt);
+        document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
         
-        document.getElementById('tpHistoryTable').innerHTML = `
-          <table class="w-full text-sm">
-            <thead><tr class="font-bold">
-              <th>Month</th><th>Amount</th><th>Method</th><th>Ref</th><th>Payer</th><th>Date</th><th>Status</th>
-            </tr></thead>
-            <tbody>${rows || '<tr><td colspan="7">No payments yet.</td></tr>'}</tbody>
-          </table>
+        // Hide expense/balance KPIs for parents
+        document.getElementById('totalExpenses').parentElement.parentElement.style.display = 'none';
+        document.getElementById('netBalance').parentElement.parentElement.style.display = 'none';
+        
+        // Calculate school fees
+        const feePerYear = Number(S.feePerYear || 0);
+        const schoolPaid = Object.values(schoolPayments).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        const schoolDebt = Math.max(0, feePerYear - schoolPaid);
+        const combinedDebt = schoolDebt + debt;
+        
+        // Render table with THIS child only (using existing table structure)
+        paymentsBody.innerHTML = `
+          <tr style="background: ${debt > 0 ? 'rgba(239, 68, 68, 0.15);' : 'rgba(16, 185, 129, 0.15);'} font-weight: 600;">
+            <td>${S.admissionNumber || 'N/A'}</td>
+            <td>${fullName}${debt > 0 ? '<br><span style="color: var(--accent-danger); font-weight: 800; font-size: 0.75rem;">⚠️ USIMCHUKUE ANADAIWA</span>' : ''}</td>
+            <td>${shiftedClass}</td>
+            <td>${formatDate(S.timestamp || S.createdAt)}</td>
+            <td>${studentPhone || 'N/A'}</td>
+            <td>${formatCurrency(feePerYear)}</td>
+            <td>${formatCurrency(schoolPaid)}</td>
+            <td style="color: ${schoolDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">${formatCurrency(schoolDebt)}</td>
+            <td>${calculateDebtTill(S)}</td>
+            <td>${enrollment.amStop || '—'}</td>
+            <td>${enrollment.pmStop || '—'}</td>
+            <td>${formatCurrency(monthlyFee)}</td>
+            <td style="color: var(--accent-success);">${formatCurrency(totalPaid)}</td>
+            <td style="color: ${debt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">${formatCurrency(debt)}</td>
+            <td style="font-size: 0.75rem;">${unpaid.length ? unpaid.join(', ') : '—'}</td>
+            <td style="color: ${combinedDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'}; font-weight: 700;">${formatCurrency(combinedDebt)}</td>
+            <td class="table-actions">
+              <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
+              <button class="btn secondary" onclick="viewPaymentHistory('${studentId}')">📋 History</button>
+            </td>
+          </tr>
         `;
         
-        // Fill month dropdown
-        const monthSelect = document.getElementById('tpMonth');
-        monthSelect.innerHTML = monthsOrdered.map(m => `<option value="${MONTH_NAMES.indexOf(m)}">${m}</option>`).join('');
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('paymentSummary').textContent = '1 student on transport';
         
-        // Set defaults
-        document.getElementById('tpAmount').value = monthlyFee > 0 ? monthlyFee : '';
-        document.getElementById('tpDate').valueAsDate = new Date();
+        // Hide search/filter controls
+        classFilter.style.display = 'none';
+        searchInput.style.display = 'none';
+        statusFilter.style.display = 'none';
+        document.getElementById('debtorsBtnText').parentElement.style.display = 'none';
       }
 
       // Auth and initialization
       firebase.auth().onAuthStateChanged((user) => {
         state.user = user;
         
-        // Check if parent view (via URL param)
+        // Check if parent view (via URL param or localStorage from parent.html)
         const urlParams = new URLSearchParams(window.location.search);
-        const studentParam = urlParams.get('student');
+        const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
         
-        if (studentParam && user) {
-          // Parent view mode
+        if (studentParam) {
+          // Parent view mode - render immediately (parents already authenticated via index.html)
           localStorage.setItem('parentFocusStudent', studentParam);
           state.currentPaymentStudentId = studentParam;
           renderParentTransportPayment(studentParam);
-        } else if (user) {
-          // Admin view mode
+          return; // Don't continue with admin check
+        }
+        
+        // Admin view mode (only if no student param)
+        if (user) {
           firebase.database().ref(`users/${user.uid}/role`).get()
             .then((snapshot) => {
               state.role = TransportRoles.normalize(snapshot.val());
               
               if (!TransportRoles.isAdmin(state.role)) {
-                // Try parent mode if not admin
-                const storedStudent = localStorage.getItem('parentFocusStudent');
-                if (storedStudent) {
-                  renderParentTransportPayment(storedStudent);
-                } else {
-                  alert('Access denied. Admin privileges required.');
-                  window.location.href = 'transport.html';
-                }
+                alert('Access denied. Admin privileges required.');
+                window.location.href = 'transport.html';
                 return;
               }
               
@@ -1251,121 +1218,24 @@
             })
             .catch((err) => {
               console.error(err);
-              // Try parent mode on error
-              const storedStudent = localStorage.getItem('parentFocusStudent');
-              if (storedStudent) {
-                renderParentTransportPayment(storedStudent);
-              } else {
-                alert('Error verifying permissions');
-              }
+              alert('Error verifying permissions');
             });
         } else {
-          // Not signed in - check if parent view from localStorage
-          const storedStudent = localStorage.getItem('parentFocusStudent');
-          if (storedStudent) {
-            // Allow viewing without auth for now (can add guest mode later)
-            renderParentTransportPayment(storedStudent);
-          } else {
-            alert('Please sign in to access this page');
-            window.location.href = 'transport.html';
-          }
+          alert('Please sign in to access this page');
+          window.location.href = 'transport.html';
         }
-      });
-      
-      // Parent payment save handler
-      document.getElementById('tpSave')?.addEventListener('click', async () => {
-        const studentId = state.currentPaymentStudentId || localStorage.getItem('parentFocusStudent');
-        if (!studentId) {
-          document.getElementById('tpStatus').textContent = 'Error: Student ID not found.';
-          document.getElementById('tpStatus').style.color = '#991b1b';
-          return;
-        }
-        
-        const month = parseInt(document.getElementById('tpMonth').value);
-        const amount = Number(document.getElementById('tpAmount').value);
-        const method = document.getElementById('tpMethod').value.trim();
-        const ref = document.getElementById('tpRef').value.trim();
-        const payerName = document.getElementById('tpPayer').value.trim();
-        const dateStr = document.getElementById('tpDate').value;
-        const notes = document.getElementById('tpNotes').value.trim();
-        
-        if (!month || !amount || !method || !ref || !payerName || !dateStr) {
-          document.getElementById('tpStatus').textContent = 'Please fill ALL required fields (Month, Amount, Method, Reference, Payer, Date).';
-          document.getElementById('tpStatus').style.color = '#991b1b';
-          return;
-        }
-        
-        if (amount <= 0) {
-          document.getElementById('tpStatus').textContent = 'Amount must be greater than 0.';
-          document.getElementById('tpStatus').style.color = '#991b1b';
-          return;
-        }
-        
-        const paidAt = new Date(dateStr + 'T12:00:00').getTime();
-        const y = String(state.year);
-        const prefix = currentSchoolPrefix();
-        const db = firebase.database();
-        const payRef = db.ref(`${prefix}transportLedgers/${y}/${studentId}/payments`).push();
-        
-        const payload = {
-          month: MONTH_NAMES[month],
-          amount,
-          method,
-          ref,
-          payerName,
-          paidAt,
-          notes: notes || null,
-          createdBy: 'parent',
-          createdByUid: state.user?.uid || null,
-          approved: false,
-          approvedBy: null,
-          approvedAt: null
-        };
-        
-        try {
-          await payRef.set(payload);
-          
-          const queueRef = db.ref(`${prefix}pendingApprovals/transportPayments/${payRef.key}`);
-          await queueRef.set({
-            year: y,
-            studentId,
-            admissionNumber: localStorage.getItem('parentFocusAdm') || studentId,
-            studentName: document.getElementById('tpStudentName').textContent,
-            parentPhone: normalizePhone(document.getElementById('tpPhone').textContent),
-            ...payload,
-            queuedAt: Date.now()
-          });
-          
-          document.getElementById('tpStatus').textContent = 'Saved. Payment submitted for approval. Thank you!';
-          document.getElementById('tpStatus').style.color = '#065f46';
-          
-          // Refresh view
-          setTimeout(() => renderParentTransportPayment(studentId), 1000);
-        } catch (error) {
-          console.error('Error saving payment:', error);
-          document.getElementById('tpStatus').textContent = 'Failed to save payment. Please try again.';
-          document.getElementById('tpStatus').style.color = '#991b1b';
-        }
-      });
-      
-      document.getElementById('tpCancel')?.addEventListener('click', () => {
-        const monthlyFee = Number(document.getElementById('tpMonthlyFee').textContent.replace(/[^\d]/g, '') || 0);
-        document.getElementById('tpAmount').value = monthlyFee > 0 ? monthlyFee : '';
-        document.getElementById('tpRef').value = '';
-        document.getElementById('tpPayer').value = '';
-        document.getElementById('tpDate').valueAsDate = new Date();
-        document.getElementById('tpNotes').value = '';
-        document.getElementById('tpStatus').textContent = '';
       });
       
       // Listen to year changes for parent view
       if (window.somapYearContext) {
         window.somapYearContext.onYearChanged((year) => {
           const studentId = state.currentPaymentStudentId || localStorage.getItem('parentFocusStudent');
-          if (studentId && document.getElementById('parentTransportView') && !document.getElementById('parentTransportView').classList.contains('hidden')) {
+          const urlParams = new URLSearchParams(window.location.search);
+          const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
+          if (studentParam) {
             const newYear = parseInt(year) || state.year;
             state.year = newYear;
-            renderParentTransportPayment(studentId);
+            renderParentTransportPayment(studentId || studentParam);
           }
         });
       }

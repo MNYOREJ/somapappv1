@@ -6,6 +6,13 @@
   <title>Lesson Notes | SoMAp Teacher Dashboard</title>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha512-4w2d+Sxgpo1Jpj9V3dJbvt0mv47neVQcYcJJ2ULFuIkt6xl7V2bW77hlUjMt8uokG2ysL0ePkB2USK0lr7qC1A==" crossorigin="anonymous"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js" integrity="sha512-YFhfUg9Q1YvoplXh+ObodHj+04rcJ4DBegGngWqtXv0CBEvp13UFqjuIeUHZfw8RXrCFkjyAWkqEDurtBy17Xg==" crossorigin="anonymous"></script>
 
   <style>
     * {
@@ -340,6 +347,274 @@
       display: none;
     }
 
+    .classbook-panel {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .lookup-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .lookup-actions .btn {
+      padding: 10px 18px;
+    }
+
+    .topic-status {
+      font-size: 0.9rem;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .topic-status span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .topic-status span.ok {
+      background: rgba(16, 185, 129, 0.22);
+      color: #bbf7d0;
+    }
+
+    .topic-status span.warn {
+      background: rgba(245, 158, 11, 0.25);
+      color: #fde68a;
+    }
+
+    .topic-status span.err {
+      background: rgba(239, 68, 68, 0.25);
+      color: #fecaca;
+    }
+
+    .range-controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .range-controls label {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .range-controls input {
+      width: 100%;
+    }
+
+    .topic-meta {
+      display: grid;
+      gap: 6px;
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .topic-meta strong {
+      font-weight: 700;
+    }
+
+    .auto-import-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .auto-import-toolbar label {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.85rem;
+      background: rgba(255, 255, 255, 0.12);
+      padding: 8px 12px;
+      border-radius: 10px;
+    }
+
+    .auto-import-toolbar input[type="checkbox"] {
+      accent-color: #f093fb;
+    }
+
+    .pdf-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(13, 14, 35, 0.85);
+      backdrop-filter: blur(12px);
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+    }
+
+    .pdf-modal.hidden {
+      display: none;
+    }
+
+    .pdf-modal-content {
+      background: #0f172a;
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      width: min(960px, 100%);
+      height: min(90vh, 720px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .pdf-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      background: rgba(15, 23, 42, 0.9);
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      color: #e2e8f0;
+    }
+
+    .pdf-toolbar h4 {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .pdf-toolbar .btn {
+      background: linear-gradient(135deg, #38bdf8, #6366f1);
+      color: white;
+      border-radius: 8px;
+      border: none;
+      padding: 8px 16px;
+    }
+
+    .pdf-pages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px;
+      display: grid;
+      gap: 18px;
+      background: radial-gradient(circle at top, rgba(14, 22, 42, 0.75), transparent 70%);
+    }
+
+    .pdf-page {
+      background: rgba(15, 23, 42, 0.85);
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(8, 14, 35, 0.35);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pdf-page canvas {
+      width: 100%;
+      display: block;
+    }
+
+    .pdf-page .page-tag {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(30, 64, 175, 0.82);
+      color: #c7d2fe;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .pdf-pages .loading {
+      color: #cbd5f5;
+    }
+
+    .homework-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .homework-toolbar .btn {
+      padding: 10px 18px;
+    }
+
+    .revision-banner {
+      background: rgba(234, 179, 8, 0.28);
+      border: 1px solid rgba(253, 224, 71, 0.35);
+      border-radius: 12px;
+      padding: 14px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+      color: #fef08a;
+      font-size: 0.95rem;
+    }
+
+    .revision-banner button {
+      background: rgba(253, 224, 71, 0.18);
+      color: #fef08a;
+      border: 1px solid rgba(253, 224, 71, 0.35);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .extracted-highlight {
+      background: rgba(34, 197, 94, 0.16);
+      border-left: 3px solid rgba(34, 197, 94, 0.7);
+      padding: 10px 12px;
+      border-radius: 10px;
+      margin-top: 10px;
+      font-size: 0.9rem;
+      line-height: 1.55;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .extracted-preview {
+      background: rgba(15, 23, 42, 0.35);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 12px;
+      padding: 12px 14px;
+      max-height: 240px;
+      overflow-y: auto;
+      display: grid;
+      gap: 12px;
+    }
+
+    .extracted-preview button {
+      background: rgba(59, 130, 246, 0.18);
+      color: #bfdbfe;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .extracted-preview button.active {
+      background: rgba(34, 197, 94, 0.24);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: #dcfce7;
+    }
+
     @media (max-width: 768px) {
       .header {
         flex-direction: column;
@@ -416,7 +691,14 @@
 
     <div class="notes-form hidden" id="notesForm">
       <h3>✍️ New Lesson Notes</h3>
-      
+      <div class="revision-banner hidden" id="revisionBanner">
+        <span id="revisionBannerText">This topic was already taught recently. Save as revision?</span>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <button type="button" id="markRevisionBtn">Mark as Revision</button>
+          <button type="button" id="dismissRevisionBtn">Dismiss</button>
+        </div>
+      </div>
+
       <div class="form-row">
         <div class="form-group">
           <label>Class *</label>
@@ -451,6 +733,45 @@
         </div>
       </div>
 
+      <div class="classbook-panel" id="classbookPanel">
+        <div class="lookup-actions">
+          <button class="btn btn-secondary" type="button" id="findTopicBtn">Find Topic in Classbooks</button>
+          <button class="btn btn-primary" type="button" id="openPagesBtn" disabled>Open Topic Pages</button>
+          <button class="btn btn-success" type="button" id="autoImportBtn" disabled>Auto Import to Lesson Development</button>
+          <button class="btn btn-secondary" type="button" id="clearImportBtn" disabled>Clear Imported Text</button>
+        </div>
+        <div class="topic-status" id="topicStatus">
+          <span class="warn">Waiting</span>
+          <p id="topicStatusText">Select class, subject, and topic, then click &ldquo;Find Topic in Classbooks&rdquo;.</p>
+        </div>
+        <div class="topic-meta hidden" id="topicMeta">
+          <div><strong>Book:</strong> <span id="topicBookTitle"></span></div>
+          <div><strong>Pages:</strong> <span id="topicPages"></span></div>
+          <div><strong>Keywords:</strong> <span id="topicKeywords"></span></div>
+          <a class="btn btn-secondary" id="openExternalBookLink" href="#" target="_blank" rel="noopener">Open Full Book</a>
+        </div>
+        <div class="range-controls hidden" id="rangeControls">
+          <div class="form-group">
+            <label for="pageStartInput">Page Start</label>
+            <input type="number" id="pageStartInput" min="1" value="1">
+          </div>
+          <div class="form-group">
+            <label for="pageEndInput">Page End</label>
+            <input type="number" id="pageEndInput" min="1" value="1">
+          </div>
+        </div>
+        <div class="auto-import-toolbar hidden" id="autoImportToolbar">
+          <button class="btn btn-success" type="button" id="importToNotesBtn">Import Range into Lesson Development</button>
+          <button class="btn btn-secondary" type="button" id="previewExtractBtn">Preview Extracted Text</button>
+          <button class="btn btn-secondary" type="button" id="clearExtractBtn">Clear Auto Text</button>
+          <label for="enableOcrToggle">
+            <input type="checkbox" id="enableOcrToggle">
+            OCR scanned pages (slow)
+          </label>
+        </div>
+        <div class="extracted-preview hidden" id="extractedPreview"></div>
+      </div>
+
       <div class="form-group">
         <label>Key Concepts & Definitions *</label>
         <textarea id="keyConceptsNotes" placeholder="List and explain the main concepts, definitions, and terminology..." required></textarea>
@@ -482,8 +803,13 @@
       </div>
 
       <div class="form-group">
-        <label>Practice Questions / Exercises</label>
-        <textarea id="practiceQuestions" placeholder="Sample questions for students to practice..."></textarea>
+        <label>Practice Questions / Homework</label>
+        <div class="homework-toolbar">
+          <button class="btn btn-success" type="button" id="generateHomeworkBtn">Generate 15 Homework Questions</button>
+          <button class="btn btn-secondary" type="button" id="clearHomeworkBtn">Clear Homework</button>
+          <span id="homeworkSummary" style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.8);"></span>
+        </div>
+        <textarea id="practiceQuestions" placeholder="Generated homework will appear here. You can still edit or add your own questions." style="min-height: 160px;"></textarea>
       </div>
 
       <div class="form-group">
@@ -502,13 +828,34 @@
       </div>
     </div>
 
-    <div id="notesList">
+        <div id="notesList">
       <div class="empty-state">
-        <h3>📚 No Lesson Notes Yet</h3>
+        <h3>No Lesson Notes Yet</h3>
         <p>Click "Create New Lesson Notes" to get started!</p>
       </div>
     </div>
   </div>
+
+    <div class="pdf-modal hidden" id="pdfModal">
+      <div class="pdf-modal-content">
+        <div class="pdf-toolbar">
+          <div>
+            <h4 id="pdfModalTitle">Topic Pages</h4>
+            <div id="pdfModalSummary" style="font-size: 0.85rem; color: rgba(224, 231, 255, 0.75);"></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <button class="btn btn-success" type="button" id="appendVisibleBtn">Import These Pages</button>
+            <button class="btn btn-secondary" type="button" id="closePdfBtn">Close</button>
+          </div>
+        </div>
+        <div class="pdf-pages" id="pdfPageContainer">
+          <div class="loading" id="pdfLoadingState">
+            <div class="spinner" style="margin-bottom: 8px;"></div>
+            Loading topic pages...
+          </div>
+        </div>
+      </div>
+    </div>
 
   <script type="module">
     const firebaseConfig = {
@@ -528,6 +875,63 @@
     let notes = {};
     let editingNoteId = null;
 
+    const HOMEWORK_TOTAL = 15;
+    const HOMEWORK_BLUEPRINT = [
+      { type: 'multiple_choice', ratio: 0.10, label: 'Multiple Choice', min: 1 },
+      { type: 'matching', ratio: 0.10, label: 'Matching Items', min: 1 },
+      { type: 'true_false', ratio: 0.20, label: 'True or False', min: 2 },
+      { type: 'passage', ratio: 0.20, label: 'Passage Question', min: 2 },
+      { type: 'word_problem', ratio: 0.20, label: 'Word Problem', min: 2 },
+      { type: 'reflection', ratio: 0.20, label: 'Reflection', min: 2 }
+    ];
+
+    const CLASS_AGE_LOOKUP = {
+      'baby class': 3,
+      'play group': 3,
+      'nursery': 4,
+      'kindergarten': 4,
+      'pre-primary': 5,
+      'pre primary': 5,
+      'reception': 5,
+      'class 1': 5,
+      'class one': 5,
+      'class 2': 6,
+      'class two': 6,
+      'class 3': 7,
+      'class three': 7,
+      'class 4': 8,
+      'class four': 8,
+      'class 5': 9,
+      'class five': 9,
+      'class 6': 10,
+      'class six': 10,
+      'class 7': 11,
+      'class seven': 11,
+      'standard 1': 7,
+      'standard i': 7,
+      'standard 2': 8,
+      'standard 3': 9,
+      'standard 4': 10,
+      'standard 5': 11,
+      'standard 6': 12,
+      'standard 7': 13
+    };
+
+    const lessonState = {
+      classbooksCache: {},
+      currentBook: null,
+      extractedParagraphs: [],
+      selectedParagraphs: new Set(),
+      paragraphIndex: {},
+      previousDetailValue: null,
+      autoTextSnippet: '',
+      pdfDoc: null,
+      pageTextCache: {},
+      lastHomeworkMeta: null,
+      isRevision: false,
+      revisionCandidate: null
+    };
+
     const teacherName = document.getElementById('teacherName');
     const teacherType = document.getElementById('teacherType');
     const currentDate = document.getElementById('currentDate');
@@ -541,12 +945,70 @@
     const saveNoteBtn = document.getElementById('saveNoteBtn');
     const notesList = document.getElementById('notesList');
 
-    function toast(message, type = 'success') {
+    const noteClassField = document.getElementById('noteClass');
+    const noteSubjectField = document.getElementById('noteSubject');
+    const noteTopicField = document.getElementById('noteTopic');
+    const noteSubTopicField = document.getElementById('noteSubTopic');
+    const noteTermField = document.getElementById('noteTerm');
+    const keyConceptsField = document.getElementById('keyConceptsNotes');
+    const detailedContentField = document.getElementById('detailedContent');
+    const examplesField = document.getElementById('examples');
+    const keyTakeawaysField = document.getElementById('keyTakeaways');
+    const diagramsField = document.getElementById('diagrams');
+    const misconceptionsField = document.getElementById('misconceptions');
+    const practiceQuestionsField = document.getElementById('practiceQuestions');
+    const referencesField = document.getElementById('references');
+    const teachingTipsField = document.getElementById('teachingTips');
+
+    const revisionBanner = document.getElementById('revisionBanner');
+    const revisionBannerText = document.getElementById('revisionBannerText');
+    const markRevisionBtn = document.getElementById('markRevisionBtn');
+    const dismissRevisionBtn = document.getElementById('dismissRevisionBtn');
+
+    const findTopicBtn = document.getElementById('findTopicBtn');
+    const openPagesBtn = document.getElementById('openPagesBtn');
+    const autoImportBtn = document.getElementById('autoImportBtn');
+    const clearImportBtn = document.getElementById('clearImportBtn');
+    const topicStatus = document.getElementById('topicStatus');
+    const topicStatusBadge = topicStatus ? topicStatus.querySelector('span') : null;
+    const topicStatusText = document.getElementById('topicStatusText');
+    const topicMeta = document.getElementById('topicMeta');
+    const topicBookTitle = document.getElementById('topicBookTitle');
+    const topicPages = document.getElementById('topicPages');
+    const topicKeywords = document.getElementById('topicKeywords');
+    const openExternalBookLink = document.getElementById('openExternalBookLink');
+    const rangeControls = document.getElementById('rangeControls');
+    const pageStartInput = document.getElementById('pageStartInput');
+    const pageEndInput = document.getElementById('pageEndInput');
+    const autoImportToolbar = document.getElementById('autoImportToolbar');
+    const importedPreview = document.getElementById('extractedPreview');
+    const previewExtractBtn = document.getElementById('previewExtractBtn');
+    const importToNotesBtn = document.getElementById('importToNotesBtn');
+    const clearExtractBtn = document.getElementById('clearExtractBtn');
+    const enableOcrToggle = document.getElementById('enableOcrToggle');
+
+    const pdfModal = document.getElementById('pdfModal');
+    const pdfModalTitle = document.getElementById('pdfModalTitle');
+    const pdfModalSummary = document.getElementById('pdfModalSummary');
+    const pdfPageContainer = document.getElementById('pdfPageContainer');
+    const pdfLoadingState = document.getElementById('pdfLoadingState');
+    const appendVisibleBtn = document.getElementById('appendVisibleBtn');
+    const closePdfBtn = document.getElementById('closePdfBtn');
+
+    const generateHomeworkBtn = document.getElementById('generateHomeworkBtn');
+    const clearHomeworkBtn = document.getElementById('clearHomeworkBtn');
+    const homeworkSummary = document.getElementById('homeworkSummary');
+
+        function toast(message, type = "success") {
       const container = document.getElementById('toastContainer');
+      if (!container) {
+        alert(message);
+        return;
+      }
       const toastEl = document.createElement('div');
       toastEl.className = `toast ${type}`;
       toastEl.innerHTML = `
-        <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : '⚠️'}</span>
+        <span>${type === 'success' ? '[OK]' : type === 'error' ? '[X]' : '[!]'}</span>
         <span>${message}</span>
       `;
       container.appendChild(toastEl);
@@ -554,7 +1016,7 @@
       setTimeout(() => {
         toastEl.classList.remove('show');
         setTimeout(() => toastEl.remove(), 300);
-      }, 3000);
+      }, 3200);
     }
 
     currentDate.textContent = new Date().toLocaleDateString('en-US', {
@@ -565,10 +1027,819 @@
       day: 'numeric'
     });
 
+    function sanitizeKey(value) {
+      return String(value || '').replace(/[.#$\[\]]/g, '_');
+    }
+
+    function normalizeText(text) {
+      return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    }
+
+    function tokenize(text) {
+      return normalizeText(text).split(' ').filter(Boolean);
+    }
+
+    function similarityFromSets(aSet, bSet) {
+      if (!aSet.size || !bSet.size) return 0;
+      let matches = 0;
+      aSet.forEach(token => {
+        if (bSet.has(token)) matches += 1;
+      });
+      return matches / Math.min(aSet.size, bSet.size);
+    }
+
+    function getAcademicYearKey() {
+      const year = teacherConfig?.currentYear || teacherConfig?.academicYear || teacherConfig?.year;
+      if (year) return sanitizeKey(String(year));
+      return String(new Date().getFullYear());
+    }
+
+    function updateTopicStatus(level, message) {
+      if (!topicStatusBadge || !topicStatusText) return;
+      topicStatusBadge.classList.remove('ok', 'warn', 'err');
+      topicStatusBadge.classList.add(level);
+      topicStatusBadge.textContent = level === 'ok' ? 'Ready' : level === 'err' ? 'Missing' : 'Waiting';
+      topicStatusText.textContent = message;
+    }
+
+    function resetClassbookUi(fullReset = false) {
+      updateTopicStatus('warn', 'Select class, subject, and topic, then find a book.');
+      topicMeta?.classList.add('hidden');
+      rangeControls?.classList.add('hidden');
+      autoImportToolbar?.classList.add('hidden');
+      importedPreview?.classList.add('hidden');
+      if (importedPreview) importedPreview.innerHTML = '';
+      if (openPagesBtn) openPagesBtn.disabled = true;
+      if (autoImportBtn) autoImportBtn.disabled = true;
+      if (importToNotesBtn) importToNotesBtn.disabled = true;
+      if (previewExtractBtn) previewExtractBtn.disabled = true;
+      if (clearExtractBtn) clearExtractBtn.disabled = true;
+      if (clearImportBtn) clearImportBtn.disabled = true;
+      if (enableOcrToggle) enableOcrToggle.checked = false;
+      if (openExternalBookLink) {
+        openExternalBookLink.classList.add('hidden');
+        openExternalBookLink.removeAttribute('href');
+      }
+      lessonState.currentBook = null;
+      lessonState.pageTextCache = {};
+      lessonState.extractedParagraphs = [];
+      lessonState.selectedParagraphs.clear();
+      lessonState.paragraphIndex = {};
+      lessonState.previousDetailValue = null;
+      lessonState.autoTextSnippet = '';
+      if (fullReset && pageStartInput && pageEndInput) {
+        pageStartInput.value = '';
+        pageEndInput.value = '';
+      }
+    }
+
+    function splitIntoParagraphs(text) {
+      return text
+        .replace(/\r/g, '')
+        .split(/(?:\n{2,}|(?<=\.|\?|!)\s{2,})/)
+        .map(part => part.trim())
+        .filter(part => part.length > 30);
+    }
+
+    async function runPageOcr(page) {
+      if (typeof window.Tesseract === 'undefined') return '';
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const { data } = await window.Tesseract.recognize(canvas, 'eng', { logger: () => {} });
+      return data && data.text ? data.text.replace(/\s+/g, ' ').trim() : '';
+    }
+
+    async function fetchParagraphsFromRange(start, end, useOcr) {
+      if (!lessonState.currentBook?.book?.cloudinaryUrl) return [];
+      const pdfjs = window.pdfjsLib;
+      if (!pdfjs) throw new Error('pdf.js not loaded');
+
+      if (!lessonState.pdfDoc || lessonState.pdfDoc.__bookUrl !== lessonState.currentBook.book.cloudinaryUrl) {
+        if (lessonState.pdfDoc) {
+          try { lessonState.pdfDoc.destroy(); } catch (e) {}
+        }
+        const loadingTask = pdfjs.getDocument({
+          url: lessonState.currentBook.book.cloudinaryUrl,
+          withCredentials: false
+        });
+        lessonState.pdfDoc = await loadingTask.promise;
+        lessonState.pdfDoc.__bookUrl = lessonState.currentBook.book.cloudinaryUrl;
+      }
+
+      const totalPages = lessonState.pdfDoc.numPages;
+      const safeStart = Math.max(1, Math.min(start, totalPages));
+      const safeEnd = Math.max(safeStart, Math.min(end, totalPages));
+      const paragraphs = [];
+      const stamp = Date.now();
+
+      for (let pageNumber = safeStart; pageNumber <= safeEnd; pageNumber++) {
+        let text = lessonState.pageTextCache[pageNumber];
+        let page = null;
+
+        if (!text) {
+          page = await lessonState.pdfDoc.getPage(pageNumber);
+          const textContent = await page.getTextContent().catch(() => null);
+          if (textContent && textContent.items.length) {
+            text = textContent.items
+              .sort((a, b) => (a.transform[5] - b.transform[5]) || (a.transform[4] - b.transform[4]))
+              .map(item => item.str)
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            lessonState.pageTextCache[pageNumber] = text;
+          }
+        }
+
+        if (!text && useOcr) {
+          page = page || await lessonState.pdfDoc.getPage(pageNumber);
+          text = await runPageOcr(page);
+          lessonState.pageTextCache[pageNumber] = text;
+        }
+
+        if (text) {
+          splitIntoParagraphs(text).forEach((para, idx) => {
+            paragraphs.push({
+              id: `para-${pageNumber}-${idx}-${stamp}`,
+              page: pageNumber,
+              text: para
+            });
+          });
+        }
+      }
+
+      return paragraphs.slice(0, 40);
+    }
+
+    function populatePreview(paragraphs, autoSelectAll = true) {
+      if (!importedPreview) return;
+      importedPreview.innerHTML = '';
+      if (!paragraphs.length) {
+        importedPreview.classList.remove('hidden');
+        importedPreview.innerHTML = '<small>No text extracted. Try enabling OCR or adjusting the page range.</small>';
+        lessonState.extractedParagraphs = [];
+        lessonState.paragraphIndex = {};
+        lessonState.selectedParagraphs.clear();
+        return;
+      }
+
+      importedPreview.classList.remove('hidden');
+      lessonState.extractedParagraphs = paragraphs;
+      lessonState.paragraphIndex = {};
+      lessonState.selectedParagraphs.clear();
+
+      paragraphs.forEach(para => {
+        lessonState.paragraphIndex[para.id] = para;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = `p.${para.page} — ${para.text.slice(0, 160)}${para.text.length > 160 ? '…' : ''}`;
+        button.dataset.paragraphId = para.id;
+        button.addEventListener('click', () => toggleParagraphSelection(button, para));
+        importedPreview.appendChild(button);
+        if (autoSelectAll) {
+          lessonState.selectedParagraphs.add(para.id);
+          button.classList.add('active');
+        }
+      });
+
+      if (autoSelectAll) {
+        syncDetailedContent();
+      }
+    }
+
+    function toggleParagraphSelection(button, para) {
+      if (lessonState.selectedParagraphs.has(para.id)) {
+        lessonState.selectedParagraphs.delete(para.id);
+        button.classList.remove('active');
+      } else {
+        lessonState.selectedParagraphs.add(para.id);
+        button.classList.add('active');
+      }
+      syncDetailedContent();
+    }
+
+    function syncDetailedContent() {
+      if (!detailedContentField) return;
+      if (lessonState.previousDetailValue === null) {
+        lessonState.previousDetailValue = detailedContentField.value;
+      }
+
+      if (!lessonState.selectedParagraphs.size) {
+        if (lessonState.previousDetailValue !== null) {
+          detailedContentField.value = lessonState.previousDetailValue;
+          lessonState.autoTextSnippet = '';
+        }
+        return;
+      }
+
+      const ordered = Array.from(lessonState.selectedParagraphs)
+        .map(id => lessonState.paragraphIndex[id])
+        .filter(Boolean)
+        .sort((a, b) => a.page - b.page);
+
+      const bullets = ordered.map(para => `- (p.${para.page}) ${para.text}`);
+      const baseline = lessonState.previousDetailValue || '';
+      detailedContentField.value = baseline
+        ? `${baseline.trim()}\n\n${bullets.join('\n')}`
+        : bullets.join('\n');
+      lessonState.autoTextSnippet = bullets.join('\n');
+    }
+
+    function clearExtractedText() {
+      if (importedPreview) {
+        importedPreview.classList.add('hidden');
+        importedPreview.innerHTML = '';
+      }
+      lessonState.extractedParagraphs = [];
+      lessonState.paragraphIndex = {};
+      lessonState.selectedParagraphs.clear();
+      if (lessonState.previousDetailValue !== null && detailedContentField) {
+        detailedContentField.value = lessonState.previousDetailValue;
+      }
+      lessonState.previousDetailValue = null;
+      lessonState.autoTextSnippet = '';
+    }
+
+    async function handleAutoImport(writeToNotes = true) {
+      if (!lessonState.currentBook?.book?.cloudinaryUrl) {
+        toast('Please find a classbook first.', 'warning');
+        return;
+      }
+      const useOcr = enableOcrToggle?.checked;
+      try {
+        const start = parseInt(pageStartInput?.value || '1', 10) || 1;
+        const end = parseInt(pageEndInput?.value || String(start), 10) || start;
+        updateTopicStatus('warn', 'Reading the selected pages...');
+        if (previewExtractBtn) previewExtractBtn.disabled = true;
+        if (importToNotesBtn) importToNotesBtn.disabled = true;
+        if (autoImportBtn) autoImportBtn.disabled = true;
+
+        const paragraphs = await fetchParagraphsFromRange(start, end, useOcr);
+        populatePreview(paragraphs, writeToNotes);
+        if (paragraphs.length) {
+          updateTopicStatus('ok', `Captured ${paragraphs.length} snippet(s) from pages ${start}-${end}.`);
+        }
+      } catch (error) {
+        console.error('Auto import failed', error);
+        toast('Auto import failed. Try again or adjust the range.', 'error');
+        updateTopicStatus('err', 'Could not extract text from the PDF.');
+      } finally {
+        if (previewExtractBtn) previewExtractBtn.disabled = false;
+        if (importToNotesBtn) importToNotesBtn.disabled = false;
+        if (autoImportBtn) autoImportBtn.disabled = false;
+      }
+    }
+
+    function scoreTopicMatch(normalizedTopic, topicEntry) {
+      if (!topicEntry) return 0;
+      const topicTokens = new Set(tokenize(topicEntry.name || ''));
+      const queryTokens = new Set(normalizedTopic.split(' ').filter(Boolean));
+      let score = similarityFromSets(queryTokens, topicTokens);
+      const keywordTokens = new Set();
+      (topicEntry.keywords || []).forEach(kw => tokenize(kw).forEach(token => keywordTokens.add(token)));
+      if (keywordTokens.size) {
+        score = Math.max(score, similarityFromSets(queryTokens, keywordTokens));
+      }
+      if (normalizeText(topicEntry.name) === normalizedTopic) {
+        score += 0.25;
+      }
+      return Math.min(1, score);
+    }
+
+    async function findTopicInClassbooks() {
+      const className = noteClassField?.value.trim();
+      const subjectName = noteSubjectField?.value.trim();
+      const topicName = noteTopicField?.value.trim();
+
+      if (!className || !subjectName || !topicName) {
+        toast('Select class, subject, and topic before searching.', 'warning');
+        updateTopicStatus('warn', 'Fill in class, subject, and topic first.');
+        return;
+      }
+
+      updateTopicStatus('warn', 'Searching for a matching book...');
+
+      const yearKey = getAcademicYearKey();
+      const classKey = sanitizeKey(className).toLowerCase();
+      const subjectKey = sanitizeKey(subjectName).toLowerCase();
+      const cacheKey = `${yearKey}::${classKey}::${subjectKey}`;
+
+      if (!lessonState.classbooksCache[cacheKey]) {
+        try {
+          const snap = await db.ref(`classbooksIndex/${yearKey}/${classKey}/${subjectKey}`).once('value');
+          if (!snap.exists()) {
+            resetClassbookUi();
+            updateTopicStatus('err', 'Book not available now — please use a hard copy.');
+            return;
+          }
+          lessonState.classbooksCache[cacheKey] = snap.val();
+        } catch (error) {
+          console.error('Book lookup error', error);
+          updateTopicStatus('err', 'Unable to reach the classbook index right now.');
+          toast('Book lookup failed. Please try again.', 'error');
+          return;
+        }
+      }
+
+      const bookEntry = lessonState.classbooksCache[cacheKey];
+      const normalizedTopic = normalizeText(topicName);
+      let bestMatch = null;
+
+      if (Array.isArray(bookEntry.topics)) {
+        bestMatch = bookEntry.topics
+          .map(entry => ({ topic: entry, score: scoreTopicMatch(normalizedTopic, entry) }))
+          .sort((a, b) => b.score - a.score)[0];
+      }
+
+      lessonState.currentBook = {
+        yearKey,
+        book: bookEntry,
+        topic: bestMatch && bestMatch.score >= 0.35 ? bestMatch.topic : null
+      };
+
+      const matchedTopic = lessonState.currentBook.topic;
+      const startPage = matchedTopic && matchedTopic.pageStart ? Number(matchedTopic.pageStart) : 1;
+      const endPage = matchedTopic && matchedTopic.pageEnd ? Number(matchedTopic.pageEnd) : startPage + 4;
+
+      if (pageStartInput) pageStartInput.value = startPage;
+      if (pageEndInput) pageEndInput.value = endPage;\n      syncPageRangeLabel();
+      if (topicBookTitle) topicBookTitle.textContent = bookEntry.title || 'Classbook';
+      if (topicKeywords) {
+        topicKeywords.textContent = matchedTopic && matchedTopic.keywords && matchedTopic.keywords.length
+          ? matchedTopic.keywords.join(', ')
+          : 'No keywords indexed yet';
+      }
+      if (topicPages) topicPages.textContent = `${startPage} to ${endPage}`;
+
+      topicMeta?.classList.remove('hidden');
+      rangeControls?.classList.remove('hidden');
+      autoImportToolbar?.classList.remove('hidden');
+      importedPreview?.classList.add('hidden');
+      if (importedPreview) importedPreview.innerHTML = '';
+
+      const hasUrl = Boolean(bookEntry.cloudinaryUrl);
+      if (openPagesBtn) openPagesBtn.disabled = !hasUrl;
+      if (autoImportBtn) autoImportBtn.disabled = !hasUrl;
+      if (importToNotesBtn) importToNotesBtn.disabled = !hasUrl;
+      if (previewExtractBtn) previewExtractBtn.disabled = !hasUrl;
+      if (clearExtractBtn) clearExtractBtn.disabled = false;
+      if (clearImportBtn) clearImportBtn.disabled = false;
+
+      if (hasUrl && openExternalBookLink) {
+        openExternalBookLink.classList.remove('hidden');
+        openExternalBookLink.href = bookEntry.cloudinaryUrl;
+      } else if (openExternalBookLink) {
+        openExternalBookLink.classList.add('hidden');
+        openExternalBookLink.removeAttribute('href');
+      }
+
+      if (matchedTopic) {
+        updateTopicStatus('ok', `Matched "${matchedTopic.name}" on pages ${startPage}-${endPage}. Adjust if needed.`);
+      } else {
+        updateTopicStatus('warn', 'Book found but topic not indexed yet. Adjust the pages manually.');
+      }
+
+      lessonState.pageTextCache = {};
+      lessonState.previousDetailValue = null;
+      lessonState.autoTextSnippet = '';
+      if (lessonState.selectedParagraphs.size) {
+        lessonState.selectedParagraphs.clear();
+        syncDetailedContent();
+      }
+
+      checkRevisionFlag();
+    }
+
+    function syncPageRangeLabel() {
+      if (!pageStartInput || !pageEndInput || !topicPages) return;
+      const start = parseInt(pageStartInput.value || '1', 10) || 1;
+      const end = parseInt(pageEndInput.value || String(start), 10) || start;
+      const safeStart = Math.max(1, Math.min(start, end));
+      const safeEnd = Math.max(safeStart, end);
+      pageStartInput.value = safeStart;
+      pageEndInput.value = safeEnd;
+      topicPages.textContent = `${safeStart} to ${safeEnd}`;
+    }
+
+    async function openPdfModalForRange() {
+      if (!lessonState.currentBook?.book?.cloudinaryUrl) {
+        toast('No book URL available.', 'warning');
+        return;
+      }
+      const pdfjs = window.pdfjsLib;
+      if (!pdfjs) {
+        toast('PDF reader failed to load.', 'error');
+        return;
+      }
+
+      const start = parseInt(pageStartInput?.value || '1', 10) || 1;
+      const end = parseInt(pageEndInput?.value || String(start), 10) || start;
+
+      pdfModal?.classList.remove('hidden');
+      if (pdfModalTitle) pdfModalTitle.textContent = lessonState.currentBook.topic?.name || (noteTopicField?.value || 'Topic pages');
+      if (pdfModalSummary) pdfModalSummary.textContent = `${lessonState.currentBook.book.title || 'Classbook'} • Pages ${start}-${end}`;
+      if (pdfPageContainer) pdfPageContainer.innerHTML = '';
+      if (pdfLoadingState) {
+        pdfLoadingState.classList.remove('hidden');
+        pdfPageContainer?.appendChild(pdfLoadingState);
+      }
+
+      try {
+        if (!lessonState.pdfDoc || lessonState.pdfDoc.__bookUrl !== lessonState.currentBook.book.cloudinaryUrl) {
+          if (lessonState.pdfDoc) {
+            try { lessonState.pdfDoc.destroy(); } catch (e) {}
+          }
+          const loadingTask = pdfjs.getDocument({
+            url: lessonState.currentBook.book.cloudinaryUrl,
+            withCredentials: false
+          });
+          lessonState.pdfDoc = await loadingTask.promise;
+          lessonState.pdfDoc.__bookUrl = lessonState.currentBook.book.cloudinaryUrl;
+        }
+
+        const totalPages = lessonState.pdfDoc.numPages;
+        const safeStart = Math.max(1, Math.min(start, totalPages));
+        const safeEnd = Math.max(safeStart, Math.min(end, totalPages));
+
+        if (pdfLoadingState) pdfLoadingState.classList.add('hidden');
+        if (pdfPageContainer) pdfPageContainer.innerHTML = '';
+
+        for (let pageNumber = safeStart; pageNumber <= safeEnd; pageNumber++) {
+          const page = await lessonState.pdfDoc.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.35 });
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+
+          const wrapper = document.createElement('div');
+          wrapper.className = 'pdf-page';
+          const badge = document.createElement('div');
+          badge.className = 'page-tag';
+          badge.textContent = `Page ${pageNumber}`;
+          wrapper.appendChild(badge);
+          wrapper.appendChild(canvas);
+          pdfPageContainer?.appendChild(wrapper);
+
+          if (!lessonState.pageTextCache[pageNumber]) {
+            const textContent = await page.getTextContent().catch(() => null);
+            if (textContent && textContent.items.length) {
+              lessonState.pageTextCache[pageNumber] = textContent.items
+                .sort((a, b) => (a.transform[5] - b.transform[5]) || (a.transform[4] - b.transform[4]))
+                .map(item => item.str)
+                .join(' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            } else {
+              lessonState.pageTextCache[pageNumber] = '';
+            }
+          }
+        }
+
+        updateTopicStatus('ok', `Viewer ready. Scroll through pages ${safeStart}-${safeEnd}.`);
+      } catch (error) {
+        console.error('Error rendering PDF', error);
+        if (pdfPageContainer) {
+          pdfPageContainer.innerHTML = '<p style=\"color: #fca5a5;\">Unable to open the PDF reader. Use the book link instead.</p>';
+        }
+        updateTopicStatus('err', 'Unable to open the PDF right now.');
+      }
+    }
+
+    function closePdfModal() {
+      pdfModal?.classList.add('hidden');
+    }
+
+    function setRevisionBanner(visible, message = '') {
+      if (!revisionBanner || !revisionBannerText) return;
+      if (!visible) {
+        revisionBanner.classList.add('hidden');
+        revisionBannerText.textContent = '';
+        return;
+      }
+      revisionBanner.classList.remove('hidden');
+      revisionBannerText.textContent = message;
+    }
+
+    function formatDate(timestamp) {
+      return new Date(timestamp).toLocaleDateString('en-US', { timeZone: 'Africa/Nairobi' });
+    }
+
+    function checkRevisionFlag() {
+      if (!notes || !noteClassField || !noteSubjectField || !noteTopicField) {
+        setRevisionBanner(false);
+        return;
+      }
+      const className = noteClassField.value.trim();
+      const subjectName = noteSubjectField.value.trim();
+      const topicName = noteTopicField.value.trim();
+      if (!className || !subjectName || !topicName) {
+        setRevisionBanner(false);
+        lessonState.isRevision = false;
+        lessonState.revisionCandidate = null;
+        return;
+      }
+
+      const normalizedTopic = normalizeText(topicName);
+      const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+      let latest = null;
+
+      Object.entries(notes).forEach(([id, note]) => {
+        if (editingNoteId && id === editingNoteId) return;
+        if (note.class !== className || note.subject !== subjectName) return;
+        const noteTopic = normalizeText(note.topic);
+        if (noteTopic === normalizedTopic || noteTopic.includes(normalizedTopic) || normalizedTopic.includes(noteTopic)) {
+          const stamp = note.updatedAt || note.createdAt || 0;
+          if (stamp >= ninetyDaysAgo && (!latest || stamp > latest.createdAt)) {
+            latest = { id, createdAt: stamp, isRevision: !!note.isRevision };
+          }
+        }
+      });
+
+      if (latest) {
+        lessonState.revisionCandidate = latest;
+        setRevisionBanner(true, `Already taught on ${formatDate(latest.createdAt)}${latest.isRevision ? ' (saved as revision)' : ''}. Save this as revision?`);
+      } else {
+        lessonState.revisionCandidate = null;
+        lessonState.isRevision = false;
+        setRevisionBanner(false);
+      }
+    }
+
+    function parseConcepts(text) {
+      return String(text || '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const parts = line.split(/[:\-–]/);
+          if (parts.length >= 2) {
+            const term = parts.shift().trim();
+            const description = parts.join(' ').trim();
+            return { term, description };
+          }
+          return null;
+        })
+        .filter(Boolean);
+    }
+
+    function extractSentences(text) {
+      return String(text || '')
+        .replace(/\s+/g, ' ')
+        .split(/(?<=[.!?])\s+/)
+        .map(sentence => sentence.trim())
+        .filter(sentence => sentence.length > 0);
+    }
+
+    function getLearnerAge(className) {
+      if (!className) return 10;
+      const key = className.toLowerCase().trim();
+      if (CLASS_AGE_LOOKUP[key]) return CLASS_AGE_LOOKUP[key];
+      const match = key.match(/\d+/);
+      if (match) {
+        const number = parseInt(match[0], 10);
+        if (!Number.isNaN(number)) {
+          if (key.includes('standard')) {
+            return Math.min(13, Math.max(7, 6 + number));
+          }
+          return Math.min(12, Math.max(3, 4 + number));
+        }
+      }
+      return 10;
+    }
+
+    function buildHomeworkCounts(total) {
+      const counts = HOMEWORK_BLUEPRINT.map(item => ({ ...item, count: item.min }));
+      let assigned = counts.reduce((sum, item) => sum + item.count, 0);
+      const fractions = HOMEWORK_BLUEPRINT.map(item => ({
+        type: item.type,
+        fraction: item.ratio * total
+      }));
+
+      while (assigned < total) {
+        fractions.sort((a, b) => b.fraction - a.fraction);
+        for (const frac of fractions) {
+          if (assigned >= total) break;
+          const target = counts.find(item => item.type === frac.type);
+          target.count += 1;
+          assigned += 1;
+        }
+      }
+
+      while (assigned > total) {
+        const target = counts.find(item => item.count > item.min);
+        if (!target) break;
+        target.count -= 1;
+        assigned -= 1;
+      }
+      return counts;
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function generateGenericDistractor(topic, subjectName) {
+      const baseTopic = topic || 'the lesson';
+      const subject = (subjectName || '').toLowerCase();
+      if (subject.includes('math')) {
+        return `${baseTopic} is solved by guessing without checking.`;
+      }
+      if (subject.includes('science')) {
+        return `${baseTopic} only happens in outer space.`;
+      }
+      if (subject.includes('english') || subject.includes('language')) {
+        return `${baseTopic} means writing without using any words.`;
+      }
+      if (subject.includes('kiswahili')) {
+        return `${baseTopic} ignores all new words from the story.`;
+      }
+      return `${baseTopic} is just for fun and has no rules.`;
+    }
+
+    function buildMultipleChoiceQuestion({ age, subjectName, topicName, conceptPairs, keywords, sentences }) {
+      const pair = conceptPairs.length ? conceptPairs[Math.floor(Math.random() * conceptPairs.length)] : null;
+      const promptTopic = pair ? pair.term : topicName;
+      const correct = pair ? pair.description : (sentences[0] || `It is the main idea of ${topicName}.`);
+      const distractors = conceptPairs.filter(p => p !== pair).map(p => p.description);
+      while (distractors.length < 3) {
+        distractors.push(generateGenericDistractor(promptTopic, subjectName));
+      }
+      const options = shuffle([correct, distractors[0], distractors[1], distractors[2]]);
+      const labels = ['A', 'B', 'C', 'D'];
+      const stem = age <= 6
+        ? `What does ${promptTopic} help us do?`
+        : `Which statement best explains ${promptTopic}?`;
+      return `Multiple Choice: ${stem}\n${options.map((opt, idx) => `${labels[idx]}. ${opt}`).join('\n')}`;
+    }
+
+    function buildMatchingQuestion({ age, topicName, conceptPairs }) {
+      const pairs = conceptPairs.slice(0, 4);
+      while (pairs.length < 4) {
+        pairs.push({
+          term: `${topicName} idea ${pairs.length + 1}`,
+          description: `Describe what ${topicName.toLowerCase()} idea ${pairs.length + 1} means in your own words.`
+        });
+      }
+      const columnA = ['A', 'B', 'C', 'D'];
+      const shuffledDescriptions = shuffle(pairs.map(pair => pair.description));
+      const instructions = age <= 6
+        ? 'Match the word with its meaning.'
+        : 'Match Column A with Column B.';
+      return `Matching: ${instructions}\nColumn A:\n${pairs.map((pair, idx) => `${columnA[idx]}. ${pair.term}`).join('\n')}\nColumn B:\n${shuffledDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n')}`;
+    }
+
+    function buildTrueFalseQuestion({ age, topicName, sentences, conceptPairs, keywords }) {
+      let statement = sentences.length ? sentences[Math.floor(Math.random() * sentences.length)] : `This statement about ${topicName} is correct.`;
+      if (statement.length < 25 && conceptPairs.length) {
+        statement = `${conceptPairs[0].term} means ${conceptPairs[0].description}.`;
+      }
+      if (!/[.!?]$/.test(statement)) {
+        statement += '.';
+      }
+      if (Math.random() > 0.5) {
+        const words = statement.split(' ');
+        if (words.length > 4) {
+          const index = Math.max(1, Math.floor(words.length / 2));
+          const replacement = keywords.find(word => !statement.toLowerCase().includes(word.toLowerCase()));
+          if (replacement) {
+            words[index] = replacement;
+            statement = words.join(' ');
+          } else {
+            statement = statement.replace(/\bis\b/, 'is not');
+          }
+        } else {
+          statement = statement.replace(/\bis\b/, 'is not');
+        }
+      }
+      const prompt = age <= 6 ? 'Is this right or wrong? Say True or False.' : 'Decide whether the statement is True or False.';
+      return `True or False: ${prompt}\n- ${statement}`;
+    }
+
+    function buildPassageQuestion({ age, topicName, sentences, subjectName }) {
+      const baseSentences = sentences.slice(0, 3);
+      if (baseSentences.length < 3) {
+        while (baseSentences.length < 3) {
+          baseSentences.push(`This part explains ${topicName.toLowerCase()} in a simple way.`);
+        }
+      }
+      const passage = baseSentences.join(' ');
+      const question = age <= 6
+        ? `After listening to the story, tell one thing that happens in ${topicName}.`
+        : `After reading the passage, answer: Why is ${topicName.toLowerCase()} important in ${subjectName.toLowerCase()}?`;
+      return `Passage Question:\nPassage: ${passage}\nQuestion: ${question}`;
+    }
+
+    function buildWordProblem({ age, topicName, subjectName }) {
+      const numberA = age <= 6 ? 3 + Math.floor(Math.random() * 4) : 8 + Math.floor(Math.random() * 12);
+      const numberB = age <= 6 ? 2 + Math.floor(Math.random() * 3) : 5 + Math.floor(Math.random() * 10);
+      const subject = (subjectName || '').toLowerCase();
+      let scenario = '';
+      if (subject.includes('math')) {
+        scenario = `A teacher splits ${numberA * numberB} ${topicName.toLowerCase()} tasks equally among ${numberA} groups. How many tasks does each group get?`;
+      } else if (subject.includes('science')) {
+        scenario = `${numberA} plants were observed during a ${topicName.toLowerCase()} experiment. Each plant showed ${numberB} results. How many results were recorded in total?`;
+      } else {
+        scenario = `During a ${topicName.toLowerCase()} activity, ${numberA} pupils each wrote ${numberB} notes. How many notes were written altogether?`;
+      }
+      const extension = age <= 6
+        ? 'Show your working with small drawings if you need to.'
+        : 'Explain your reasoning clearly.';
+      return `Word Problem: ${scenario} ${extension}`;
+    }
+
+    function buildReflectionQuestion({ age, topicName, subjectName }) {
+      if (age <= 6) {
+        return `Reflection: How will you use what you learned about ${topicName.toLowerCase()} at home?`;
+      }
+      return `Reflection: Describe a real-life situation in Tanzania where ${topicName.toLowerCase()} from ${subjectName.toLowerCase()} is useful.`;
+    }
+
+    function generateHomework() {
+      if (!noteClassField || !noteSubjectField || !noteTopicField) return;
+      const className = noteClassField.value;
+      const subjectName = noteSubjectField.value;
+      const topicName = noteTopicField.value || 'the topic';
+      if (!className || !subjectName || !topicName) {
+        toast('Fill in class, subject, and topic before generating homework.', 'warning');
+        return;
+      }
+      const notesText = [
+        keyConceptsField?.value || '',
+        detailedContentField?.value || '',
+        keyTakeawaysField?.value || ''
+      ].filter(Boolean).join(' ');
+      if (!notesText.trim()) {
+        toast('Add some notes or key concepts before generating homework.', 'warning');
+        return;
+      }
+
+      const age = getLearnerAge(className);
+      const conceptPairs = parseConcepts(keyConceptsField?.value || '');
+      const sentences = extractSentences(detailedContentField?.value || keyConceptsField?.value || '');
+      const keywords = Array.from(new Set(tokenize(notesText))).filter(word => word.length > 4).slice(0, 12);
+
+      const counts = buildHomeworkCounts(HOMEWORK_TOTAL);
+      const blocks = [];
+
+      counts.forEach(item => {
+        for (let i = 0; i < item.count; i++) {
+          switch (item.type) {
+            case 'multiple_choice':
+              blocks.push(buildMultipleChoiceQuestion({ age, subjectName, topicName, conceptPairs, keywords, sentences }));
+              break;
+            case 'matching':
+              blocks.push(buildMatchingQuestion({ age, topicName, conceptPairs }));
+              break;
+            case 'true_false':
+              blocks.push(buildTrueFalseQuestion({ age, topicName, sentences, conceptPairs, keywords }));
+              break;
+            case 'passage':
+              blocks.push(buildPassageQuestion({ age, topicName, sentences, subjectName }));
+              break;
+            case 'word_problem':
+              blocks.push(buildWordProblem({ age, topicName, subjectName }));
+              break;
+            case 'reflection':
+              blocks.push(buildReflectionQuestion({ age, topicName, subjectName }));
+              break;
+            default:
+              break;
+          }
+        }
+      });
+
+      if (practiceQuestionsField) practiceQuestionsField.value = blocks.join('\n\n');
+      if (homeworkSummary) {
+        const breakdown = counts.map(c => `${c.label}: ${c.count}`).join(', ');
+        homeworkSummary.textContent = `Prepared ${blocks.length} questions (${breakdown}).`;
+      }
+      lessonState.lastHomeworkMeta = {
+        generatedAt: Date.now(),
+        className,
+        subjectName,
+        topicName,
+        counts
+      };
+      toast('Homework questions generated.', 'success');
+    }
+
     workerId = localStorage.getItem('workerId');
     if (!workerId) {
       toast('Please login first', 'error');
       setTimeout(() => window.location.href = '../../index.html', 2000);
+    } else {
+      resetClassbookUi(true);
+      setRevisionBanner(false);
+      loadTeacherConfig();
     }
 
     async function loadTeacherConfig() {
@@ -599,14 +1870,23 @@
     }
 
     function populateSelects() {
-      teacherConfig.classes.forEach(className => {
-        filterClass.add(new Option(className, className));
-        document.getElementById('noteClass').add(new Option(className, className));
+      [filterClass, noteClassField].forEach(select => {
+        if (!select) return;
+        while (select.options.length > 1) select.remove(1);
+      });
+      [filterSubject, noteSubjectField].forEach(select => {
+        if (!select) return;
+        while (select.options.length > 1) select.remove(1);
       });
 
-      teacherConfig.subjects.forEach(subject => {
-        filterSubject.add(new Option(subject, subject));
-        document.getElementById('noteSubject').add(new Option(subject, subject));
+      (teacherConfig?.classes || []).forEach(className => {
+        filterClass?.add(new Option(className, className));
+        noteClassField?.add(new Option(className, className));
+      });
+
+      (teacherConfig?.subjects || []).forEach(subjectName => {
+        filterSubject?.add(new Option(subjectName, subjectName));
+        noteSubjectField?.add(new Option(subjectName, subjectName));
       });
     }
 
@@ -622,29 +1902,61 @@
       }
     }
 
-    function renderNotes() {
-      const selectedClass = filterClass.value;
-      const selectedSubject = filterSubject.value;
-      const topicFilter = filterTopic.value.toLowerCase();
+        function renderNotes() {
+      if (!notesList) return;
+      const selectedClass = filterClass?.value;
+      const selectedSubject = filterSubject?.value;
+      const topicFilter = (filterTopic?.value || '').toLowerCase();
 
-      let filtered = Object.entries(notes).filter(([id, note]) => {
+      const entries = Object.entries(notes).filter(([id, note]) => {
         if (selectedClass && note.class !== selectedClass) return false;
         if (selectedSubject && note.subject !== selectedSubject) return false;
-        if (topicFilter && !note.topic.toLowerCase().includes(topicFilter)) return false;
+        if (topicFilter && !(note.topic || '').toLowerCase().includes(topicFilter)) return false;
         return true;
-      });
+      }).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
 
-      filtered.sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
-
-      if (filtered.length === 0) {
+      if (!entries.length) {
         notesList.innerHTML = `
           <div class="empty-state">
-            <h3>📚 No Lesson Notes Found</h3>
-            <p>Create your first notes or adjust your filters</p>
+            <h3>No Lesson Notes Found</h3>
+            <p>Create your first notes or adjust your filters.</p>
           </div>
         `;
         return;
       }
+
+      notesList.innerHTML = entries.map(([id, note]) => {
+        const snippetSource = note.detailedContent || note.keyConcepts || '';
+        const snippet = snippetSource.length > 200 ? `${snippetSource.slice(0, 200)}...` : (snippetSource || 'No detail captured yet.');
+        const pageLabel = note.pageStart && note.pageEnd ? `<span class="meta-tag">Pages ${note.pageStart}-${note.pageEnd}</span>` : '';
+        const revisionLabel = note.isRevision ? `<span class="meta-tag" style="background: rgba(236, 72, 153, 0.25);">Revision</span>` : '';
+        return `
+          <div class="note-card" onclick="viewNote('${id}')">
+            <div class="note-header">
+              <div>
+                <div class="note-title">${note.topic}</div>
+                <div class="note-meta">
+                  <span class="meta-tag">${note.class}</span>
+                  <span class="meta-tag">${note.subject}</span>
+                  ${note.subTopic ? `<span class="meta-tag">${note.subTopic}</span>` : ''}
+                  <span class="meta-tag">${note.term || 'Term 1'}</span>
+                  ${pageLabel}
+                  ${revisionLabel}
+                </div>
+              </div>
+            </div>
+            <div class="note-content" style="max-height: 120px; overflow: hidden;">
+              ${snippet}
+            </div>
+            <div class="note-actions">
+              <button class="btn btn-primary" type="button" onclick="event.stopPropagation(); viewNote('${id}')">View Full Notes</button>
+              <button class="btn btn-secondary" type="button" onclick="event.stopPropagation(); editNote('${id}')">Edit</button>
+              <button class="btn btn-secondary" type="button" onclick="event.stopPropagation(); deleteNote('${id}')">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
 
       notesList.innerHTML = filtered.map(([id, note]) => `
         <div class="note-card" onclick="viewNote('${id}')">
@@ -671,157 +1983,254 @@
       `).join('');
     }
 
-    window.viewNote = function(noteId) {
+        window.viewNote = function(noteId) {
       const note = notes[noteId];
       if (!note) return;
 
-      const details = `
-📄 LESSON NOTES
+      const header = [
+        `Class: ${note.class}`,
+        `Subject: ${note.subject}`,
+        `Topic: ${note.topic}`,
+        `Sub-topic: ${note.subTopic || 'N/A'}`,
+        `Term: ${note.term || 'N/A'}`,
+        note.pageStart && note.pageEnd ? `Pages: ${note.pageStart}-${note.pageEnd}` : '',
+        note.bookTitle ? `Book: ${note.bookTitle}` : '',
+        note.isRevision ? 'Marked as revision: Yes' : ''
+      ].filter(Boolean).join('\n');
 
-Class: ${note.class}
-Subject: ${note.subject}
-Topic: ${note.topic}
-Sub-Topic: ${note.subTopic || 'N/A'}
-Term: ${note.term}
+      const body = [
+        'KEY CONCEPTS:',
+        note.keyConcepts || 'N/A',
+        '',
+        'DETAILED CONTENT:',
+        note.detailedContent || 'N/A',
+        '',
+        'EXAMPLES:',
+        note.examples || 'N/A',
+        '',
+        'KEY TAKEAWAYS:',
+        note.keyTakeaways || 'N/A',
+        '',
+        'MISCONCEPTIONS:',
+        note.misconceptions || 'N/A',
+        '',
+        'PRACTICE / HOMEWORK:',
+        note.practiceQuestions || 'N/A',
+        '',
+        'REFERENCES:',
+        note.references || 'N/A',
+        '',
+        'TEACHING TIPS:',
+        note.teachingTips || 'N/A'
+      ].join('\n');
 
-🔑 KEY CONCEPTS & DEFINITIONS:
-${note.keyConcepts}
-
-📚 DETAILED CONTENT:
-${note.detailedContent}
-
-💡 EXAMPLES & ILLUSTRATIONS:
-${note.examples || 'N/A'}
-
-⭐ KEY TAKEAWAYS:
-${note.keyTakeaways || 'N/A'}
-
-📊 DIAGRAMS & VISUAL AIDS:
-${note.diagrams || 'N/A'}
-
-⚠️ COMMON MISTAKES:
-${note.misconceptions || 'N/A'}
-
-✍️ PRACTICE QUESTIONS:
-${note.practiceQuestions || 'N/A'}
-
-📖 REFERENCES:
-${note.references || 'N/A'}
-
-💭 TEACHING TIPS:
-${note.teachingTips || 'N/A'}
-      `;
-
-      alert(details);
+      alert(`${header}\n\n${body}`);
     };
 
-    window.editNote = function(noteId) {
+        window.editNote = function(noteId) {
       const note = notes[noteId];
       if (!note) return;
 
       editingNoteId = noteId;
 
-      document.getElementById('noteClass').value = note.class;
-      document.getElementById('noteSubject').value = note.subject;
-      document.getElementById('noteTopic').value = note.topic;
-      document.getElementById('noteSubTopic').value = note.subTopic || '';
-      document.getElementById('noteTerm').value = note.term;
-      document.getElementById('keyConceptsNotes').value = note.keyConcepts;
-      document.getElementById('detailedContent').value = note.detailedContent;
-      document.getElementById('examples').value = note.examples || '';
-      document.getElementById('keyTakeaways').value = note.keyTakeaways || '';
-      document.getElementById('diagrams').value = note.diagrams || '';
-      document.getElementById('misconceptions').value = note.misconceptions || '';
-      document.getElementById('practiceQuestions').value = note.practiceQuestions || '';
-      document.getElementById('references').value = note.references || '';
-      document.getElementById('teachingTips').value = note.teachingTips || '';
+      if (noteClassField) noteClassField.value = note.class || '';
+      if (noteSubjectField) noteSubjectField.value = note.subject || '';
+      if (noteTopicField) noteTopicField.value = note.topic || '';
+      if (noteSubTopicField) noteSubTopicField.value = note.subTopic || '';
+      if (noteTermField) noteTermField.value = note.term || 'Term 1';
+      if (keyConceptsField) keyConceptsField.value = note.keyConcepts || '';
+      if (detailedContentField) detailedContentField.value = note.detailedContent || '';
+      if (examplesField) examplesField.value = note.examples || '';
+      if (keyTakeawaysField) keyTakeawaysField.value = note.keyTakeaways || '';
+      if (diagramsField) diagramsField.value = note.diagrams || '';
+      if (misconceptionsField) misconceptionsField.value = note.misconceptions || '';
+      if (practiceQuestionsField) practiceQuestionsField.value = note.practiceQuestions || '';
+      if (referencesField) referencesField.value = note.references || '';
+      if (teachingTipsField) teachingTipsField.value = note.teachingTips || '';
 
-      notesForm.classList.remove('hidden');
-      notesForm.scrollIntoView({ behavior: 'smooth' });
+      if (homeworkSummary) homeworkSummary.textContent = '';
+      lessonState.lastHomeworkMeta = note.homeworkMeta || null;
+      lessonState.previousDetailValue = null;
+      lessonState.autoTextSnippet = '';
+      lessonState.isRevision = !!note.isRevision;
+      lessonState.revisionCandidate = null;
+
+      resetClassbookUi(true);
+
+      if (note.pageStart && note.pageEnd && pageStartInput && pageEndInput) {
+        pageStartInput.value = note.pageStart;
+        pageEndInput.value = note.pageEnd;
+        syncPageRangeLabel();
+      }
+
+      if (note.bookUrl || note.bookTitle) {
+        lessonState.currentBook = {
+          yearKey: getAcademicYearKey(),
+          book: {
+            title: note.bookTitle || 'Classbook',
+            cloudinaryUrl: note.bookUrl
+          },
+          topic: note.bookTopic ? { name: note.bookTopic } : null
+        };
+        topicMeta?.classList.remove('hidden');
+        rangeControls?.classList.remove('hidden');
+        autoImportToolbar?.classList.remove('hidden');
+        if (topicBookTitle) topicBookTitle.textContent = note.bookTitle || 'Classbook';
+        if (topicKeywords) topicKeywords.textContent = note.matchedKeywords || 'Imported manually';
+        if (topicPages && note.pageStart && note.pageEnd) topicPages.textContent = `${note.pageStart} to ${note.pageEnd}`;
+        const hasUrl = Boolean(note.bookUrl);
+        if (openPagesBtn) openPagesBtn.disabled = !hasUrl;
+        if (autoImportBtn) autoImportBtn.disabled = !hasUrl;
+        if (importToNotesBtn) importToNotesBtn.disabled = !hasUrl;
+        if (previewExtractBtn) previewExtractBtn.disabled = !hasUrl;
+        if (clearExtractBtn) clearExtractBtn.disabled = false;
+        if (clearImportBtn) clearImportBtn.disabled = false;
+        if (hasUrl && openExternalBookLink) {
+          openExternalBookLink.classList.remove('hidden');
+          openExternalBookLink.href = note.bookUrl;
+        }
+        updateTopicStatus('ok', 'Using the saved book settings for this note.');
+      }
+
+      notesForm?.classList.remove('hidden');
+      notesForm?.scrollIntoView({ behavior: 'smooth' });
+
+      checkRevisionFlag();
     };
 
-    window.deleteNote = async function(noteId) {
+        window.deleteNote = async function(noteId) {
       if (!confirm('Are you sure you want to delete these lesson notes?')) return;
 
       try {
         await db.ref(`lesson_notes/${workerId}/${noteId}`).remove();
         delete notes[noteId];
-        toast('Lesson notes deleted successfully', 'success');
-        renderNotes();
+        toast('Lesson notes deleted successfully.', 'success');
         totalNotes.textContent = Object.keys(notes).length;
+        renderNotes();
       } catch (error) {
         console.error('Error deleting note:', error);
-        toast('Error deleting note', 'error');
+        toast('Error deleting note.', 'error');
       }
     };
 
-    newNoteBtn.addEventListener('click', () => {
+        newNoteBtn.addEventListener('click', () => {
       editingNoteId = null;
+      lessonState.isRevision = false;
+      lessonState.revisionCandidate = null;
+      lessonState.lastHomeworkMeta = null;
+      lessonState.previousDetailValue = null;
+      lessonState.autoTextSnippet = '';
+      setRevisionBanner(false);
+      resetClassbookUi(true);
       document.querySelectorAll('#notesForm input, #notesForm textarea, #notesForm select').forEach(el => {
         if (el.tagName === 'TEXTAREA') el.value = '';
         else if (el.tagName === 'SELECT') el.selectedIndex = 0;
         else el.value = '';
       });
+      if (homeworkSummary) homeworkSummary.textContent = '';
+      notesForm?.classList.remove('hidden');
+      notesForm?.scrollIntoView({ behavior: 'smooth' });
+    });
       notesForm.classList.remove('hidden');
       notesForm.scrollIntoView({ behavior: 'smooth' });
     });
 
-    cancelNoteBtn.addEventListener('click', () => {
-      notesForm.classList.add('hidden');
+        cancelNoteBtn.addEventListener('click', () => {
+      notesForm?.classList.add('hidden');
       editingNoteId = null;
+      lessonState.isRevision = false;
+      lessonState.revisionCandidate = null;
+      setRevisionBanner(false);
+      resetClassbookUi(true);
     });
 
-    saveNoteBtn.addEventListener('click', async () => {
-      const required = ['noteClass', 'noteSubject', 'noteTopic', 'keyConceptsNotes', 'detailedContent'];
-      
-      for (const id of required) {
-        const el = document.getElementById(id);
-        if (!el.value.trim()) {
-          toast(`Please fill in: ${el.previousElementSibling.textContent}`, 'warning');
-          el.focus();
+        saveNoteBtn.addEventListener('click', async () => {
+      const requiredFields = [noteClassField, noteSubjectField, noteTopicField, keyConceptsField, detailedContentField];
+      for (const field of requiredFields) {
+        if (!field || !field.value.trim()) {
+          const label = field?.previousElementSibling?.textContent || 'this field';
+          toast(`Please fill in: ${label}`, 'warning');
+          field?.focus();
           return;
         }
       }
 
       const noteData = {
-        class: document.getElementById('noteClass').value,
-        subject: document.getElementById('noteSubject').value,
-        topic: document.getElementById('noteTopic').value,
-        subTopic: document.getElementById('noteSubTopic').value,
-        term: document.getElementById('noteTerm').value,
-        keyConcepts: document.getElementById('keyConceptsNotes').value,
-        detailedContent: document.getElementById('detailedContent').value,
-        examples: document.getElementById('examples').value,
-        keyTakeaways: document.getElementById('keyTakeaways').value,
-        diagrams: document.getElementById('diagrams').value,
-        misconceptions: document.getElementById('misconceptions').value,
-        practiceQuestions: document.getElementById('practiceQuestions').value,
-        references: document.getElementById('references').value,
-        teachingTips: document.getElementById('teachingTips').value
+        class: noteClassField?.value || '',
+        subject: noteSubjectField?.value || '',
+        topic: noteTopicField?.value || '',
+        subTopic: noteSubTopicField?.value || '',
+        term: noteTermField?.value || 'Term 1',
+        keyConcepts: keyConceptsField?.value || '',
+        detailedContent: detailedContentField?.value || '',
+        examples: examplesField?.value || '',
+        keyTakeaways: keyTakeawaysField?.value || '',
+        diagrams: diagramsField?.value || '',
+        misconceptions: misconceptionsField?.value || '',
+        practiceQuestions: practiceQuestionsField?.value || '',
+        references: referencesField?.value || '',
+        teachingTips: teachingTipsField?.value || '',
+        isRevision: lessonState.isRevision
       };
+
+      const startValue = parseInt(pageStartInput?.value || '', 10);
+      const endValue = parseInt(pageEndInput?.value || '', 10);
+      if (!Number.isNaN(startValue) && !Number.isNaN(endValue) && lessonState.currentBook?.book?.cloudinaryUrl) {
+        noteData.pageStart = startValue;
+        noteData.pageEnd = endValue;
+      } else {
+        noteData.pageStart = null;
+        noteData.pageEnd = null;
+      }
+
+      if (lessonState.currentBook?.book?.title) {
+        noteData.bookTitle = lessonState.currentBook.book.title;
+      }
+      if (lessonState.currentBook?.book?.cloudinaryUrl) {
+        noteData.bookUrl = lessonState.currentBook.book.cloudinaryUrl;
+      }
+      if (lessonState.currentBook?.topic?.name) {
+        noteData.bookTopic = lessonState.currentBook.topic.name;
+      }
+      if (lessonState.currentBook?.topic?.keywords) {
+        noteData.matchedKeywords = (lessonState.currentBook.topic.keywords || []).join(', ');
+      }
+      if (lessonState.autoTextSnippet) {
+        noteData.autoImportedAt = Date.now();
+      }
+      if (lessonState.lastHomeworkMeta) {
+        noteData.homeworkMeta = lessonState.lastHomeworkMeta;
+      }
 
       try {
         if (editingNoteId) {
           noteData.updatedAt = Date.now();
           await db.ref(`lesson_notes/${workerId}/${editingNoteId}`).update(noteData);
           notes[editingNoteId] = { ...notes[editingNoteId], ...noteData };
-          toast('Lesson notes updated successfully!', 'success');
+          toast('Lesson notes updated successfully.', 'success');
         } else {
           noteData.createdAt = Date.now();
-          noteData.teacherName = teacherName.textContent;
+          noteData.teacherName = teacherName?.textContent || '';
           const newRef = db.ref(`lesson_notes/${workerId}`).push();
           await newRef.set(noteData);
           notes[newRef.key] = noteData;
-          toast('Lesson notes created successfully!', 'success');
+          toast('Lesson notes created successfully.', 'success');
         }
 
-        notesForm.classList.add('hidden');
-        editingNoteId = null;
         totalNotes.textContent = Object.keys(notes).length;
         renderNotes();
+        notesForm?.classList.add('hidden');
+        editingNoteId = null;
+        lessonState.isRevision = false;
+        lessonState.revisionCandidate = null;
+        lessonState.lastHomeworkMeta = null;
+        lessonState.previousDetailValue = null;
+        lessonState.autoTextSnippet = '';
+        setRevisionBanner(false);
+        resetClassbookUi(true);
       } catch (error) {
         console.error('Error saving note:', error);
-        toast('Error saving lesson notes', 'error');
+        toast('Error saving lesson notes.', 'error');
       }
     });
 
@@ -829,8 +2238,84 @@ ${note.teachingTips || 'N/A'}
     filterSubject.addEventListener('change', renderNotes);
     filterTopic.addEventListener('input', renderNotes);
 
-    loadTeacherConfig();
+    findTopicBtn?.addEventListener('click', findTopicInClassbooks);
+    openPagesBtn?.addEventListener('click', openPdfModalForRange);
+    appendVisibleBtn?.addEventListener('click', () => {
+      if (lessonState.extractedParagraphs.length && importedPreview) {
+        lessonState.selectedParagraphs = new Set(lessonState.extractedParagraphs.map(p => p.id));
+        importedPreview.querySelectorAll('button').forEach(btn => btn.classList.add('active'));
+        syncDetailedContent();
+        toast('Imported the current selection into Lesson Development.', 'success');
+      } else {
+        handleAutoImport(true);
+      }
+    });
+    closePdfBtn?.addEventListener('click', closePdfModal);
+    pdfModal?.addEventListener('click', event => {
+      if (event.target === pdfModal) closePdfModal();
+    });
+
+    autoImportBtn?.addEventListener('click', () => handleAutoImport(true));
+    importToNotesBtn?.addEventListener('click', () => handleAutoImport(true));
+    previewExtractBtn?.addEventListener('click', () => handleAutoImport(false));
+    clearExtractBtn?.addEventListener('click', () => {
+      clearExtractedText();
+      updateTopicStatus('warn', 'Auto-import cleared. Adjust the range or import again.');
+    });
+    clearImportBtn?.addEventListener('click', () => {
+      clearExtractedText();
+      updateTopicStatus('warn', 'Auto-import cleared. Adjust the range or import again.');
+    });
+
+    pageStartInput?.addEventListener('change', syncPageRangeLabel);
+    pageEndInput?.addEventListener('change', syncPageRangeLabel);
+
+    markRevisionBtn?.addEventListener('click', () => {
+      lessonState.isRevision = true;
+      setRevisionBanner(false);
+      toast('Marked this note as a revision.', 'success');
+    });
+
+    dismissRevisionBtn?.addEventListener('click', () => {
+      lessonState.isRevision = false;
+      setRevisionBanner(false);
+    });
+
+    noteClassField?.addEventListener('change', () => {
+      resetClassbookUi(true);
+      checkRevisionFlag();
+    });
+    noteSubjectField?.addEventListener('change', () => {
+      resetClassbookUi(true);
+      checkRevisionFlag();
+    });
+    noteTopicField?.addEventListener('blur', () => {
+      checkRevisionFlag();
+    });
+
+    generateHomeworkBtn?.addEventListener('click', generateHomework);
+    clearHomeworkBtn?.addEventListener('click', () => {
+      if (practiceQuestionsField) practiceQuestionsField.value = '';
+      if (homeworkSummary) homeworkSummary.textContent = '';
+      lessonState.lastHomeworkMeta = null;
+    });
+
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

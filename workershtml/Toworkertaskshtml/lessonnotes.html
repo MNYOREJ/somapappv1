@@ -1138,28 +1138,84 @@
       const subjectKey = sanitizeKey(subjectName).toLowerCase();
       const cacheKey = `${yearKey}::${classKey}::${subjectKey}`;
 
+      let bookEntry = null;
+
+      // Try classbooksIndex first (for indexed books with topics)
       if (!lessonState.classbooksCache[cacheKey]) {
         try {
-          const snap = await db.ref(`classbooksIndex/${yearKey}/${classKey}/${subjectKey}`).once('value');
-          if (!snap.exists()) {
+          const indexedSnap = await db.ref(`classbooksIndex/${yearKey}/${classKey}/${subjectKey}`).once('value');
+          if (indexedSnap.exists()) {
+            lessonState.classbooksCache[cacheKey] = indexedSnap.val();
+            bookEntry = indexedSnap.val();
+          }
+        } catch (error) {
+          console.error('Indexed book lookup error', error);
+        }
+      } else {
+        bookEntry = lessonState.classbooksCache[cacheKey];
+      }
+
+      // Fallback to class_books structure (actual storage location)
+      if (!bookEntry) {
+        try {
+          const encodedClass = encodeURIComponent(className);
+          const classBooksSnap = await db.ref(`class_books/${encodedClass}`).once('value');
+          
+          if (!classBooksSnap.exists()) {
             resetClassbookUi();
-            updateTopicStatus('err', 'Book not available now — please use a hard copy.');
+            updateTopicStatus('err', 'No books found for this class. Books may need to be uploaded first.');
+            toast('No books found for this class.', 'warning');
             return;
           }
-          lessonState.classbooksCache[cacheKey] = snap.val();
+
+          const allBooks = classBooksSnap.val() || {};
+          const normalizedSubject = normalizeText(subjectName);
+          
+          // Find books matching the subject
+          const matchingBooks = Object.entries(allBooks)
+            .map(([bookId, book]) => {
+              const bookSubject = normalizeText(book.subject || '');
+              const score = similarityFromSets(
+                new Set(normalizedSubject.split(' ').filter(Boolean)),
+                new Set(bookSubject.split(' ').filter(Boolean))
+              );
+              return { bookId, book, score };
+            })
+            .filter(item => item.score > 0.3 || normalizedSubject === item.book.subject?.toLowerCase())
+            .sort((a, b) => b.score - a.score);
+
+          if (matchingBooks.length === 0) {
+            resetClassbookUi();
+            updateTopicStatus('err', `No ${subjectName} book found for ${className}. Books may need to be uploaded.`);
+            toast(`No ${subjectName} book found for ${className}.`, 'warning');
+            return;
+          }
+
+          // Use the best matching book
+          const bestBook = matchingBooks[0];
+          bookEntry = {
+            title: bestBook.book.title || 'Classbook',
+            cloudinaryUrl: bestBook.book.url || bestBook.book.cloudinaryUrl || '',
+            subject: bestBook.book.subject || subjectName,
+            bookId: bestBook.bookId,
+            topics: [] // Topics not indexed in this structure
+          };
+
+          // Cache it for future use
+          lessonState.classbooksCache[cacheKey] = bookEntry;
         } catch (error) {
           console.error('Book lookup error', error);
-          updateTopicStatus('err', 'Unable to reach the classbook index right now.');
+          updateTopicStatus('err', 'Unable to reach the books database right now.');
           toast('Book lookup failed. Please try again.', 'error');
           return;
         }
       }
 
-      const bookEntry = lessonState.classbooksCache[cacheKey];
       const normalizedTopic = normalizeText(topicName);
       let bestMatch = null;
 
-      if (Array.isArray(bookEntry.topics)) {
+      // Try to match topics if available
+      if (bookEntry.topics && Array.isArray(bookEntry.topics)) {
         bestMatch = bookEntry.topics
           .map(entry => ({ topic: entry, score: scoreTopicMatch(normalizedTopic, entry) }))
           .sort((a, b) => b.score - a.score)[0];
@@ -1195,7 +1251,7 @@
         importedPreview.innerHTML = '';
       }
 
-      const hasUrl = Boolean(bookEntry.cloudinaryUrl);
+      const hasUrl = Boolean(bookEntry.cloudinaryUrl || bookEntry.url);
       if (openPagesBtn) openPagesBtn.disabled = !hasUrl;
       if (autoImportBtn) autoImportBtn.disabled = !hasUrl;
       if (importToNotesBtn) importToNotesBtn.disabled = !hasUrl;
@@ -1206,17 +1262,19 @@
       if (openExternalBookLink) {
         if (hasUrl) {
           openExternalBookLink.classList.remove('hidden');
-          openExternalBookLink.href = bookEntry.cloudinaryUrl;
+          openExternalBookLink.href = bookEntry.cloudinaryUrl || bookEntry.url || '';
         } else {
           openExternalBookLink.classList.add('hidden');
           openExternalBookLink.removeAttribute('href');
         }
       }
-
+      
       if (matchedTopic) {
         updateTopicStatus('ok', `Matched "${matchedTopic.name}" on pages ${startPage}-${endPage}. Adjust if needed.`);
+      } else if (hasUrl) {
+        updateTopicStatus('ok', `Found "${bookEntry.title}". Topic not indexed - adjust pages manually or search the book.`);
       } else {
-        updateTopicStatus('warn', 'Book found but topic not indexed yet. Adjust the pages manually.');
+        updateTopicStatus('warn', 'Book found but no PDF URL available. Please check book upload.');
       }
 
       lessonState.pageTextCache = {};
@@ -1231,7 +1289,12 @@
     }
 
     async function openPdfModalForRange() {
-      if (!lessonState.currentBook || !lessonState.currentBook.book || !lessonState.currentBook.book.cloudinaryUrl) {
+      if (!lessonState.currentBook || !lessonState.currentBook.book) {
+        toast('No book selected.', 'warning');
+        return;
+      }
+      const bookUrl = lessonState.currentBook.book.cloudinaryUrl || lessonState.currentBook.book.url;
+      if (!bookUrl) {
         toast('No book URL available.', 'warning');
         return;
       }
@@ -1260,16 +1323,17 @@
       }
 
       try {
-        if (!lessonState.pdfDoc || lessonState.pdfDoc.__bookUrl !== lessonState.currentBook.book.cloudinaryUrl) {
+        const bookUrl = lessonState.currentBook.book.cloudinaryUrl || lessonState.currentBook.book.url;
+        if (!lessonState.pdfDoc || lessonState.pdfDoc.__bookUrl !== bookUrl) {
           if (lessonState.pdfDoc) {
             try { lessonState.pdfDoc.destroy(); } catch (e) {}
           }
           const loadingTask = pdfjs.getDocument({
-            url: lessonState.currentBook.book.cloudinaryUrl,
+            url: bookUrl,
             withCredentials: false
           });
           lessonState.pdfDoc = await loadingTask.promise;
-          lessonState.pdfDoc.__bookUrl = lessonState.currentBook.book.cloudinaryUrl;
+          lessonState.pdfDoc.__bookUrl = bookUrl;
         }
 
         const totalPages = lessonState.pdfDoc.numPages;
@@ -1342,7 +1406,11 @@ function splitIntoParagraphs(text) {
     }
 
     async function fetchParagraphsFromRange(start, end, useOcr) {
-      if (!lessonState.currentBook || !lessonState.currentBook.book || !lessonState.currentBook.book.cloudinaryUrl) {
+      if (!lessonState.currentBook || !lessonState.currentBook.book) {
+        return [];
+      }
+      const bookUrl = lessonState.currentBook.book.cloudinaryUrl || lessonState.currentBook.book.url;
+      if (!bookUrl) {
         return [];
       }
 
@@ -1790,7 +1858,13 @@ function splitIntoParagraphs(text) {
       }
 
       try {
-        if (!lessonState.pdfDoc || lessonState.pdfDoc.__bookUrl !== lessonState.currentBook.book.cloudinaryUrl) {
+        const bookUrl = lessonState.currentBook.book.cloudinaryUrl || lessonState.currentBook.book.url;
+        if (!bookUrl) {
+          toast('No book URL available.', 'error');
+          return;
+        }
+        
+        if (!lessonState.pdfDoc || lessonState.pdfDoc.__bookUrl !== bookUrl) {
           const pdfjs = window.pdfjsLib;
           if (!pdfjs) {
             toast('PDF reader not available.', 'error');
@@ -1800,11 +1874,11 @@ function splitIntoParagraphs(text) {
             try { lessonState.pdfDoc.destroy(); } catch (e) {}
           }
           const loadingTask = pdfjs.getDocument({
-            url: lessonState.currentBook.book.cloudinaryUrl,
+            url: bookUrl,
             withCredentials: false
           });
           lessonState.pdfDoc = await loadingTask.promise;
-          lessonState.pdfDoc.__bookUrl = lessonState.currentBook.book.cloudinaryUrl;
+          lessonState.pdfDoc.__bookUrl = bookUrl;
           lessonState.pageTextCache = {};
         }
 
@@ -2250,7 +2324,7 @@ function splitIntoParagraphs(text) {
 
       const startValue = parseInt(pageStartInput && pageStartInput.value ? pageStartInput.value : '', 10);
       const endValue = parseInt(pageEndInput && pageEndInput.value ? pageEndInput.value : '', 10);
-      const hasBookUrl = lessonState.currentBook && lessonState.currentBook.book && lessonState.currentBook.book.cloudinaryUrl;
+      const hasBookUrl = lessonState.currentBook && lessonState.currentBook.book && (lessonState.currentBook.book.cloudinaryUrl || lessonState.currentBook.book.url);
 
       if (!Number.isNaN(startValue) && !Number.isNaN(endValue) && hasBookUrl) {
         noteData.pageStart = startValue;
@@ -2262,7 +2336,8 @@ function splitIntoParagraphs(text) {
 
       if (lessonState.currentBook && lessonState.currentBook.book) {
         if (lessonState.currentBook.book.title) noteData.bookTitle = lessonState.currentBook.book.title;
-        if (lessonState.currentBook.book.cloudinaryUrl) noteData.bookUrl = lessonState.currentBook.book.cloudinaryUrl;
+        const bookUrl = lessonState.currentBook.book.cloudinaryUrl || lessonState.currentBook.book.url;
+        if (bookUrl) noteData.bookUrl = bookUrl;
       }
       if (lessonState.currentBook && lessonState.currentBook.topic) {
         if (lessonState.currentBook.topic.name) noteData.bookTopic = lessonState.currentBook.topic.name;

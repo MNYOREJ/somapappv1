@@ -6,6 +6,8 @@
   <title>Logbooks | SoMAp Teacher Dashboard</title>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <style>
     * {
@@ -67,6 +69,75 @@
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+    }
+
+    .year-selector-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      margin-bottom: 16px;
+    }
+
+    .year-selector-wrap label {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .year-selector-wrap select {
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      color: white;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .year-selector-wrap select option {
+      background: #5a67d8;
+      color: white;
+    }
+
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .stat-card {
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      text-align: center;
+    }
+
+    .stat-card-label {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-card-value {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: white;
+    }
+
+    .form-group input[readonly] {
+      background: rgba(255, 255, 255, 0.08);
+      cursor: not-allowed;
     }
 
     .btn {
@@ -372,6 +443,13 @@
       </a>
     </div>
 
+    <!-- Year Selector -->
+    <div class="year-selector-wrap">
+      <label>Academic Year:</label>
+      <select data-somap-year-select id="yearSelector"></select>
+      <span style="font-size: 0.85rem; color: rgba(255,255,255,0.7);">Working year: <b id="yearHint">2025</b></span>
+    </div>
+
     <div class="teacher-info">
       <div class="info-item">
         <span class="info-label">Teacher Name</span>
@@ -393,103 +471,140 @@
 
     <!-- Quick Log Entry -->
     <div class="quick-log-section">
-      <h3>✍️ Quick Log Entry (Today's Lesson)</h3>
+      <h3>✍️ Quick Log Entry</h3>
       
       <div class="form-row">
         <div class="form-group">
           <label>Class *</label>
-          <select id="logClass" required>
+          <select id="lbClass" required>
             <option value="">Select Class</option>
           </select>
         </div>
         <div class="form-group">
           <label>Subject *</label>
-          <select id="logSubject" required>
+          <select id="lbSubject" required>
             <option value="">Select Subject</option>
           </select>
         </div>
         <div class="form-group">
+          <label>Date *</label>
+          <input type="date" id="lbDate" required>
+        </div>
+        <div class="form-group">
           <label>Period / Time *</label>
-          <input type="time" id="logTime" required>
+          <input type="time" id="lbTime" required>
         </div>
       </div>
 
       <div class="form-row">
         <div class="form-group">
           <label>Total Students in Class *</label>
-          <input type="number" id="totalStudents" min="1" placeholder="e.g., 30" required>
+          <input type="number" id="lbTotal" min="0" placeholder="Auto-filled from roster" readonly required>
         </div>
         <div class="form-group">
           <label>Students Present *</label>
-          <input type="number" id="studentsPresent" min="0" placeholder="e.g., 28" required>
+          <input type="number" id="lbPresent" min="0" placeholder="Auto-filled from attendance" readonly required>
         </div>
         <div class="form-group">
           <label>Duration (minutes) *</label>
-          <input type="number" id="logDuration" min="30" max="180" placeholder="e.g., 45" required>
+          <input type="number" id="lbDuration" min="30" max="180" placeholder="e.g., 45" required>
         </div>
       </div>
 
+      <!-- Attendance Stats Strip -->
+      <div class="stats-strip" id="lbStats">
+        <div class="stat-card">
+          <div class="stat-card-label">Total Students</div>
+          <div class="stat-card-value" id="stTotal">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Present</div>
+          <div class="stat-card-value" id="stPresent">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Absent</div>
+          <div class="stat-card-value" id="stAbsent">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">♂ Present / Absent</div>
+          <div class="stat-card-value"><b id="stPB">0</b> / <b id="stAB">0</b></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">♀ Present / Absent</div>
+          <div class="stat-card-value"><b id="stPG">0</b> / <b id="stAG">0</b></div>
+        </div>
+      </div>
+
+      <!-- Hidden gender fields -->
+      <input type="hidden" id="lbPresentBoys" value="0">
+      <input type="hidden" id="lbPresentGirls" value="0">
+      <input type="hidden" id="lbAbsentBoys" value="0">
+      <input type="hidden" id="lbAbsentGirls" value="0">
+
       <div class="form-group">
         <label>Topic Taught *</label>
-        <input type="text" id="logTopic" placeholder="What topic did you teach today?" required>
+        <input type="text" id="lbTopic" placeholder="Auto-filled from lesson plan" required>
       </div>
 
       <div class="form-group">
         <label>Lesson Summary *</label>
-        <textarea id="logSummary" placeholder="Briefly describe what was taught and activities done..." required></textarea>
+        <textarea id="lbSummary" placeholder="Auto-filled from lesson plan (Activities + Resources)" required></textarea>
       </div>
 
       <div class="form-row">
         <div class="form-group">
           <label>Homework Given</label>
-          <input type="text" id="logHomework" placeholder="Describe homework assignment (if any)">
+          <input type="text" id="lbHomework" placeholder="Auto-filled from lesson plan">
         </div>
         <div class="form-group">
-          <label>Progress / Completion (%)</label>
-          <input type="number" id="logProgress" min="0" max="100" placeholder="e.g., 80">
+          <label>Progress / Completion (%) *</label>
+          <input type="number" id="lbProgress" min="0" max="100" placeholder="e.g., 80" required>
+          <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Required: Please fill this before saving</small>
         </div>
       </div>
 
       <div class="form-group">
-        <label>Challenges / Issues Faced</label>
-        <textarea id="logChallenges" placeholder="Any difficulties, disruptions, or challenges during the lesson?"></textarea>
+        <label>Challenges / Issues Faced *</label>
+        <textarea id="lbChallenges" placeholder="Any difficulties, disruptions, or challenges during the lesson?" required></textarea>
+        <small style="color: rgba(255,255,255,0.6); font-size: 0.8rem;">Required: Please fill this before saving</small>
       </div>
 
       <div class="form-group">
         <label>Remarks / Observations</label>
-        <textarea id="logRemarks" placeholder="Any additional observations or notes..."></textarea>
+        <textarea id="lbRemarks" placeholder="Auto-filled from lesson plan (Reflection/Notes)"></textarea>
       </div>
 
-      <button class="btn btn-success" id="saveLogBtn">
+      <button class="btn btn-success" id="lbSave">
         💾 Save Today's Log
       </button>
     </div>
 
-    <!-- Filters -->
+    <!-- Filters & Export -->
     <div class="controls">
-      <h4 style="margin-bottom: 16px; color: white;">Filter Past Logs</h4>
+      <h4 style="margin-bottom: 16px; color: white;">Filter & Export Past Logs</h4>
       <div class="controls-grid">
         <div class="form-group">
           <label>Filter by Class</label>
-          <select id="filterClass">
+          <select id="lbFilterClass">
             <option value="">All Classes</option>
           </select>
         </div>
         <div class="form-group">
           <label>Filter by Subject</label>
-          <select id="filterSubject">
-            <option value="">All Subjects</option>
-          </select>
+          <input type="text" id="lbFilterSubject" placeholder="Subject (optional)" style="width: 100%;">
         </div>
         <div class="form-group">
-          <label>Filter by Date Range</label>
-          <select id="filterDateRange">
-            <option value="7">Last 7 Days</option>
-            <option value="14">Last 14 Days</option>
-            <option value="30">Last 30 Days</option>
-            <option value="0">All Time</option>
-          </select>
+          <label>From Date</label>
+          <input type="date" id="lbFromDate" style="width: 100%;">
         </div>
+        <div class="form-group">
+          <label>To Date</label>
+          <input type="date" id="lbToDate" style="width: 100%;">
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap;">
+        <button class="btn btn-secondary" id="lbExportPdf" style="background: linear-gradient(135deg, #ef4444, #dc2626);">📄 Export PDF</button>
+        <button class="btn btn-secondary" id="lbExportCsv" style="background: linear-gradient(135deg, #10b981, #059669);">📊 Export CSV</button>
       </div>
     </div>
 
@@ -501,6 +616,40 @@
       </div>
     </div>
   </div>
+
+  <script>
+    // ========== YEAR CONTEXT & CLASS SHIFTING ==========
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+    const SOMAP_DEFAULT_YEAR = 2025;
+    const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    
+    const L = s => String(s||'').trim().toLowerCase();
+
+    function shiftClass(baseClass, deltaYears){
+      const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+      if (i<0) return baseClass||'';
+      const j = i + Number(deltaYears||0);
+      if (j < 0) return 'PRE-ADMISSION';
+      if (j >= CLASS_ORDER.length) return 'GRADUATED';
+      return CLASS_ORDER[j];
+    }
+
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected===y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
+          listeners.forEach(fn=>{ try{ fn(y); }catch{} });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+      };
+    })();
+  </script>
 
   <script type="module">
     const firebaseConfig = {
@@ -514,20 +663,23 @@
     };
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
+    window.db = db;
 
+    // State
     let workerId = null;
     let teacherConfig = null;
     let logs = {};
+    const schoolId = window.currentSchoolId || null;
+    const base = (p) => schoolId ? `schools/${schoolId}/${p}` : p;
 
+    // UI Elements
     const teacherName = document.getElementById('teacherName');
     const teacherType = document.getElementById('teacherType');
     const currentDate = document.getElementById('currentDate');
     const totalLogs = document.getElementById('totalLogs');
-    const saveLogBtn = document.getElementById('saveLogBtn');
     const logsList = document.getElementById('logsList');
-    const filterClass = document.getElementById('filterClass');
-    const filterSubject = document.getElementById('filterSubject');
-    const filterDateRange = document.getElementById('filterDateRange');
+    const yearSelector = document.getElementById('yearSelector');
+    const yearHint = document.getElementById('yearHint');
 
     function toast(message, type = 'success') {
       const container = document.getElementById('toastContainer');
@@ -545,6 +697,42 @@
       }, 3000);
     }
 
+    // Helper functions
+    function yyyymmdd(dateStr) {
+      const d = new Date(dateStr);
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const da = String(d.getDate()).padStart(2,'0');
+      return `${y}${m}${da}`;
+    }
+
+    function currentUserEmail() {
+      try {
+        if (window.currentUserEmail) return window.currentUserEmail;
+        const s = sessionStorage.getItem('somapUserEmail') || sessionStorage.getItem('userEmail');
+        if (s) return s;
+        const u = firebase?.auth?.().currentUser;
+        if (u?.email) return u.email;
+      } catch {}
+      return 'unknown';
+    }
+
+    // Initialize year selector (after DOM ready)
+    function initYearSelector() {
+      if (!yearSelector) return;
+      yearSelector.innerHTML = SOMAP_ALLOWED_YEARS.map(y => `<option value="${y}">${y}</option>`).join('');
+      const current = window.somapYearContext.getSelectedYear();
+      yearSelector.value = current;
+      if (yearHint) yearHint.textContent = current;
+      yearSelector.addEventListener('change', e => {
+        const ny = String(e.target.value);
+        window.somapYearContext.setSelectedYear(ny);
+        if (yearHint) yearHint.textContent = ny;
+        loadLogs();
+        recomputeLogForm();
+      });
+    }
+
     // Set today's date
     const today = new Date();
     currentDate.textContent = today.toLocaleDateString('en-US', {
@@ -555,10 +743,15 @@
       day: 'numeric'
     });
 
-    // Set default time to current time
+    // Set default date and time
     const now = new Date();
-    document.getElementById('logTime').value = 
-      String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    const todayStr = now.toISOString().split('T')[0];
+    const lbDateEl = document.getElementById('lbDate');
+    if (lbDateEl) lbDateEl.value = todayStr;
+    const lbTimeEl = document.getElementById('lbTime');
+    if (lbTimeEl) {
+      lbTimeEl.value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    }
 
     workerId = localStorage.getItem('workerId');
     if (!workerId) {
@@ -594,22 +787,204 @@
     }
 
     function populateSelects() {
+      const lbClass = document.getElementById('lbClass');
+      const lbSubject = document.getElementById('lbSubject');
+      const lbFilterClass = document.getElementById('lbFilterClass');
+      const lbFilterSubject = document.getElementById('lbFilterSubject');
+
       teacherConfig.classes.forEach(className => {
-        filterClass.add(new Option(className, className));
-        document.getElementById('logClass').add(new Option(className, className));
+        if (lbFilterClass) lbFilterClass.add(new Option(className, className));
+        if (lbClass) lbClass.add(new Option(className, className));
       });
 
       teacherConfig.subjects.forEach(subject => {
-        filterSubject.add(new Option(subject, subject));
-        document.getElementById('logSubject').add(new Option(subject, subject));
+        if (lbSubject) lbSubject.add(new Option(subject, subject));
       });
     }
 
+    // Data loading helpers
+    async function getBaseMaps(year) {
+      const y = String(year), anchorY = String(SOMAP_DEFAULT_YEAR);
+      const [studentsSnap, anchorSnap, ySnap, listSnap] = await Promise.all([
+        db.ref(base('students')).once('value'),
+        db.ref(base(`enrollments/${anchorY}`)).once('value'),
+        db.ref(base(`enrollments/${y}`)).once('value').catch(()=>({val:()=>null})),
+        db.ref(base(`studentlist/${y}`)).once('value').catch(()=>({val:()=>null}))
+      ]);
+      return {
+        y,
+        students: studentsSnap.val()||{},
+        enrollAnchor: anchorSnap.val()||{},
+        enrollYear: (ySnap && ySnap.val && ySnap.val())||{},
+        studentlistYear: (listSnap && listSnap.val && listSnap.val())||{}
+      };
+    }
+
+    function resolveClassForYear(studentId, enrollAnchor, enrollYear, targetYear) {
+      const anchor = enrollAnchor[studentId] || {};
+      const baseClass = anchor.className || anchor.classLevel || 'Baby Class';
+      const yr = enrollYear[studentId] || {};
+      if (yr.className || yr.classLevel) return (yr.className || yr.classLevel);
+      const delta = Number(targetYear) - SOMAP_DEFAULT_YEAR;
+      return shiftClass(baseClass, delta);
+    }
+
+    function countClassForYear(targetClass, maps) {
+      const yList = maps.studentlistYear?.[targetClass];
+      if (yList && typeof yList === 'object') return Object.keys(yList).length;
+      let n = 0;
+      for (const id of Object.keys(maps.students||{})) {
+        const cls = resolveClassForYear(id, maps.enrollAnchor, maps.enrollYear, maps.y);
+        if (L(cls) === L(targetClass)) n++;
+      }
+      return n;
+    }
+
+    async function loadAttendanceCounts(year, className, dateStr, studentsMap) {
+      const y = String(year), cls = className, key = yyyymmdd(dateStr);
+      const tryPaths = [
+        base(`classAttendance/${y}/${cls}/${key}`),
+        base(`attendance/class/${y}/${cls}/${key}`),
+        base(`attendance/${y}/${cls}/${key}`),
+        base(`classAttendance/${cls}/${key}`),
+        base(`attendance/class/${cls}/${key}`)
+      ];
+      let node = null;
+      for (const p of tryPaths) {
+        try {
+          const snap = await db.ref(p).once('value');
+          const v = snap.val();
+          if (v && Object.keys(v).length) { node = v; break; }
+        } catch {}
+      }
+      let pb = 0, pg = 0, ab = 0, ag = 0;
+      if (!node) return { total: 0, present: 0, absent: 0, pb: 0, pg: 0, ab: 0, ag: 0 };
+      for (const sid of Object.keys(node)) {
+        const rec = node[sid] || {};
+        const status = (rec.status || rec.s || '').toString().toUpperCase();
+        const gen = (rec.gender || rec.sex || studentsMap[sid]?.gender || studentsMap[sid]?.sex || '').toString().toUpperCase().slice(0,1);
+        const isP = (status === 'P' || status === 'PRESENT' || status === '1' || status === 1 || status === true);
+        const isBoy = (gen === 'M' || gen === 'B');
+        if (isP) { if (isBoy) pb++; else pg++; } else { if (isBoy) ab++; else ag++; }
+      }
+      const present = pb + pg, absent = ab + ag;
+      return { total: present + absent, present, absent, pb, pg, ab, ag };
+    }
+
+    async function loadLessonPlanInjects(year, className, dateStr, subject) {
+      const y = String(year), cls = className, d = dateStr;
+      const tryPaths = [
+        base(`lessonPlans/${y}/${cls}/${d}`),
+        base(`lessonPlans/${cls}/${d}`)
+      ];
+      let tree = null;
+      for (const p of tryPaths) {
+        try {
+          const snap = await db.ref(p).once('value');
+          const v = snap.val();
+          if (v && Object.keys(v).length) { tree = v; break; }
+        } catch {}
+      }
+      if (!tree) return null;
+      const rec = Object.values(tree).find(r => L(r.subject) === L(subject)) || Object.values(tree)[0] || null;
+      if (!rec) return null;
+      return {
+        topic: rec.topic || rec.theme || rec.mainTopic || '',
+        activities: (rec.activities || rec.mainActivities || '').trim(),
+        resources: (rec.resources || rec.materials || rec.teachingAids || '').trim(),
+        homework: (rec.homework || rec.assignment || '').trim(),
+        reflection: (rec.reflection || rec.notes || rec.remarks || '').trim()
+      };
+    }
+
+    // Auto-populate form
+    async function recomputeLogForm() {
+      const year = window.somapYearContext.getSelectedYear();
+      const cls = document.getElementById('lbClass')?.value?.trim();
+      const subj = document.getElementById('lbSubject')?.value?.trim();
+      const date = document.getElementById('lbDate')?.value?.trim();
+
+      if (!cls) return;
+
+      const maps = await getBaseMaps(year);
+      if (L(cls) === 'graduated') {
+        ['lbTotal','lbPresent','lbPresentBoys','lbPresentGirls','lbAbsentBoys','lbAbsentGirls'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.value = '0'; if (el.readOnly !== undefined) el.readOnly = true; }
+        });
+        ['stTotal','stPresent','stAbsent','stPB','stPG','stAB','stAG'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = '0';
+        });
+        return;
+      }
+
+      // Total students
+      const total = countClassForYear(cls, maps);
+      const totalEl = document.getElementById('lbTotal');
+      if (totalEl) { totalEl.readOnly = true; totalEl.value = total; }
+      const stTotal = document.getElementById('stTotal');
+      if (stTotal) stTotal.textContent = total;
+
+      // Attendance
+      if (date) {
+        const att = await loadAttendanceCounts(year, cls, date, maps.students);
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+        set('lbPresent', att.present);
+        set('lbPresentBoys', att.pb);
+        set('lbPresentGirls', att.pg);
+        set('lbAbsentBoys', att.ab);
+        set('lbAbsentGirls', att.ag);
+
+        const P = att.present, A = att.absent;
+        if (document.getElementById('stPresent')) document.getElementById('stPresent').textContent = P;
+        if (document.getElementById('stAbsent')) document.getElementById('stAbsent').textContent = A;
+        if (document.getElementById('stPB')) document.getElementById('stPB').textContent = att.pb;
+        if (document.getElementById('stPG')) document.getElementById('stPG').textContent = att.pg;
+        if (document.getElementById('stAB')) document.getElementById('stAB').textContent = att.ab;
+        if (document.getElementById('stAG')) document.getElementById('stAG').textContent = att.ag;
+      }
+
+      // Lesson plan autofill
+      if (date && subj) {
+        const inj = await loadLessonPlanInjects(year, cls, date, subj);
+        if (inj) {
+          const mergeSummary = [inj.activities, inj.resources].filter(Boolean).join('\n\nResources:\n');
+          const topicEl = document.getElementById('lbTopic');
+          if (topicEl && !topicEl.value) topicEl.value = inj.topic || '';
+          const summaryEl = document.getElementById('lbSummary');
+          if (summaryEl && !summaryEl.value) summaryEl.value = mergeSummary || '';
+          const homeworkEl = document.getElementById('lbHomework');
+          if (homeworkEl && !homeworkEl.value) homeworkEl.value = inj.homework || '';
+          const remarksEl = document.getElementById('lbRemarks');
+          if (remarksEl && !remarksEl.value) remarksEl.value = inj.reflection || '';
+        }
+      }
+    }
+
+    // Wire form changes
+    ['lbClass','lbSubject','lbDate'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', recomputeLogForm);
+    });
+    window.somapYearContext.onYearChanged(() => recomputeLogForm());
+
     async function loadLogs() {
       try {
-        const snap = await db.ref(`teaching_logs/${workerId}`).once('value');
+        const year = window.somapYearContext.getSelectedYear();
+        const snap = await db.ref(base(`logbooks/${year}`)).once('value');
         logs = snap.val() || {};
-        totalLogs.textContent = Object.keys(logs).length;
+        let count = 0;
+        Object.values(logs).forEach(byClass => {
+          if (byClass && typeof byClass === 'object') {
+            Object.values(byClass).forEach(byDate => {
+              if (byDate && typeof byDate === 'object') {
+                count += Object.keys(byDate).length;
+              }
+            });
+          }
+        });
+        totalLogs.textContent = count;
         renderLogs();
       } catch (error) {
         console.error('Error loading logs:', error);
@@ -618,22 +993,31 @@
     }
 
     function renderLogs() {
-      const selectedClass = filterClass.value;
-      const selectedSubject = filterSubject.value;
-      const dayRange = parseInt(filterDateRange.value);
-
-      const cutoffTime = dayRange > 0 ? Date.now() - (dayRange * 24 * 60 * 60 * 1000) : 0;
-
-      let filtered = Object.entries(logs).filter(([id, log]) => {
-        if (selectedClass && log.class !== selectedClass) return false;
-        if (selectedSubject && log.subject !== selectedSubject) return false;
-        if (dayRange > 0 && log.timestamp < cutoffTime) return false;
-        return true;
+      const year = window.somapYearContext.getSelectedYear();
+      const selectedClass = document.getElementById('lbFilterClass')?.value || '';
+      const selectedSubject = document.getElementById('lbFilterSubject')?.value?.trim() || '';
+      
+      let allLogs = [];
+      Object.keys(logs).forEach(className => {
+        if (selectedClass && L(className) !== L(selectedClass)) return;
+        const byDate = logs[className] || {};
+        Object.keys(byDate).forEach(date => {
+          const byId = byDate[date] || {};
+          Object.keys(byId).forEach(id => {
+            const log = byId[id];
+            if (selectedSubject && L(log.subject || '') !== L(selectedSubject)) return;
+            allLogs.push({ year, className, date, id, ...log });
+          });
+        });
       });
 
-      filtered.sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+      allLogs.sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return dateB - dateA;
+      });
 
-      if (filtered.length === 0) {
+      if (allLogs.length === 0) {
         logsList.innerHTML = `
           <div class="empty-state">
             <h3>📓 No Logs Found</h3>
@@ -643,121 +1027,312 @@
         return;
       }
 
-      logsList.innerHTML = filtered.map(([id, log]) => {
-        const logDate = new Date(log.timestamp);
-        const dateStr = logDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-        
+      logsList.innerHTML = allLogs.map(log => {
+        const dateStr = new Date(log.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+        const totals = log.totals || {};
         return `
         <div class="log-card">
           <div class="log-header">
             <div>
-              <div class="log-title">${log.topic}</div>
+              <div class="log-title">${log.topicTaught || 'No Topic'}</div>
               <div class="log-meta">
-                <span class="meta-tag">📚 ${log.class}</span>
-                <span class="meta-tag">📖 ${log.subject}</span>
+                <span class="meta-tag">📚 ${log.className}</span>
+                <span class="meta-tag">📖 ${log.subject || ''}</span>
                 <span class="meta-tag">📅 ${dateStr}</span>
-                <span class="meta-tag">🕐 ${log.time}</span>
-                <span class="meta-tag">👥 ${log.studentsPresent}/${log.totalStudents}</span>
-                ${log.progress ? `<span class="meta-tag">📊 ${log.progress}% Complete</span>` : ''}
+                <span class="meta-tag">🕐 ${log.time || '--'}</span>
+                <span class="meta-tag">👥 ${totals.present || 0}/${totals.totalStudents || 0}</span>
+                ${log.progressCompletion ? `<span class="meta-tag">📊 ${log.progressCompletion}% Complete</span>` : ''}
               </div>
             </div>
           </div>
           <div class="log-details">
-            <p><strong>📝 Summary:</strong> ${log.summary}</p>
-            ${log.homework ? `<p><strong>📋 Homework:</strong> ${log.homework}</p>` : ''}
-            ${log.challenges ? `<p><strong>⚠️ Challenges:</strong> ${log.challenges}</p>` : ''}
+            <p><strong>📝 Summary:</strong> ${log.lessonSummary || '--'}</p>
+            ${log.homeworkGiven ? `<p><strong>📋 Homework:</strong> ${log.homeworkGiven}</p>` : ''}
+            ${log.challengesIssues ? `<p><strong>⚠️ Challenges:</strong> ${log.challengesIssues}</p>` : ''}
             ${log.remarks ? `<p><strong>💭 Remarks:</strong> ${log.remarks}</p>` : ''}
             <p style="font-size: 0.85rem; color: rgba(255,255,255,0.6); margin-top: 8px;">
-              Duration: ${log.duration} minutes
+              Duration: ${log.durationMinutes || '--'} minutes | 
+              ♂: ${totals.presentBoys || 0}P/${totals.absentBoys || 0}A | 
+              ♀: ${totals.presentGirls || 0}P/${totals.absentGirls || 0}A
             </p>
           </div>
           <div class="log-actions">
-            <button class="btn btn-secondary" onclick="deleteLog('${id}')">🗑️ Delete</button>
+            <button class="btn btn-secondary" onclick="deleteLog('${log.year}','${log.className}','${log.date}','${log.id}')">🗑️ Delete</button>
           </div>
         </div>
       `}).join('');
     }
 
-    window.deleteLog = async function(logId) {
+    window.deleteLog = async function(year, className, date, logId) {
       if (!confirm('Are you sure you want to delete this log entry?')) return;
-
       try {
-        await db.ref(`teaching_logs/${workerId}/${logId}`).remove();
-        delete logs[logId];
+        await db.ref(base(`logbooks/${year}/${className}/${date}/${logId}`)).remove();
+        if (logs[className] && logs[className][date] && logs[className][date][logId]) {
+          delete logs[className][date][logId];
+          if (Object.keys(logs[className][date]).length === 0) {
+            delete logs[className][date];
+          }
+          if (Object.keys(logs[className]).length === 0) {
+            delete logs[className];
+          }
+        }
         toast('Log deleted successfully', 'success');
-        renderLogs();
-        totalLogs.textContent = Object.keys(logs).length;
+        loadLogs();
       } catch (error) {
         console.error('Error deleting log:', error);
         toast('Error deleting log', 'error');
       }
     };
 
-    saveLogBtn.addEventListener('click', async () => {
-      const logClass = document.getElementById('logClass').value;
-      const logSubject = document.getElementById('logSubject').value;
-      const logTime = document.getElementById('logTime').value;
-      const totalStudentsVal = document.getElementById('totalStudents').value;
-      const studentsPresentVal = document.getElementById('studentsPresent').value;
-      const logDuration = document.getElementById('logDuration').value;
-      const logTopic = document.getElementById('logTopic').value;
-      const logSummary = document.getElementById('logSummary').value;
+    // Save log
+    document.getElementById('lbSave')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const ySel = window.somapYearContext.getSelectedYear();
+      const cls = document.getElementById('lbClass')?.value?.trim();
+      const subj = document.getElementById('lbSubject')?.value?.trim();
+      const date = document.getElementById('lbDate')?.value?.trim();
+      const time = document.getElementById('lbTime')?.value?.trim();
+      const total = Number(document.getElementById('lbTotal')?.value || 0);
+      const present = Number(document.getElementById('lbPresent')?.value || 0);
+      const pb = Number(document.getElementById('lbPresentBoys')?.value || 0);
+      const pg = Number(document.getElementById('lbPresentGirls')?.value || 0);
+      const ab = Number(document.getElementById('lbAbsentBoys')?.value || 0);
+      const ag = Number(document.getElementById('lbAbsentGirls')?.value || 0);
+      const dur = document.getElementById('lbDuration')?.value?.trim();
+      const topic = document.getElementById('lbTopic')?.value?.trim();
+      const summary = document.getElementById('lbSummary')?.value?.trim();
+      const homework = document.getElementById('lbHomework')?.value?.trim();
+      const progress = document.getElementById('lbProgress')?.value?.trim();
+      const challenges = document.getElementById('lbChallenges')?.value?.trim();
+      const remarks = document.getElementById('lbRemarks')?.value?.trim();
 
-      if (!logClass || !logSubject || !logTime || !totalStudentsVal || !studentsPresentVal || !logDuration || !logTopic || !logSummary) {
-        toast('Please fill in all required fields', 'warning');
+      if (!cls || !subj || !date) {
+        toast('Select Class, Subject and Date.', 'warning');
+        return;
+      }
+      if (!progress || !challenges) {
+        toast('Please fill Progress / Completion (%) and Challenges / Issues before saving.', 'warning');
         return;
       }
 
-      const logData = {
-        class: logClass,
-        subject: logSubject,
-        time: logTime,
-        totalStudents: parseInt(totalStudentsVal),
-        studentsPresent: parseInt(studentsPresentVal),
-        duration: parseInt(logDuration),
-        topic: logTopic,
-        summary: logSummary,
-        homework: document.getElementById('logHomework').value,
-        progress: parseInt(document.getElementById('logProgress').value) || 0,
-        challenges: document.getElementById('logChallenges').value,
-        remarks: document.getElementById('logRemarks').value,
-        timestamp: Date.now(),
-        teacherName: teacherName.textContent,
-        date: new Date().toISOString().split('T')[0]
-      };
-
-      try {
-        const newRef = db.ref(`teaching_logs/${workerId}`).push();
-        await newRef.set(logData);
-        logs[newRef.key] = logData;
-        toast('Log saved successfully!', 'success');
-
-        // Clear form
-        document.getElementById('logClass').value = '';
-        document.getElementById('logSubject').value = '';
-        document.getElementById('totalStudents').value = '';
-        document.getElementById('studentsPresent').value = '';
-        document.getElementById('logDuration').value = '';
-        document.getElementById('logTopic').value = '';
-        document.getElementById('logSummary').value = '';
-        document.getElementById('logHomework').value = '';
-        document.getElementById('logProgress').value = '';
-        document.getElementById('logChallenges').value = '';
-        document.getElementById('logRemarks').value = '';
-
-        totalLogs.textContent = Object.keys(logs).length;
-        renderLogs();
-      } catch (error) {
-        console.error('Error saving log:', error);
-        toast('Error saving log', 'error');
+      const dateYear = new Date(date).getFullYear().toString();
+      if (dateYear !== String(ySel)) {
+        console.warn(`Year mismatch: selected ${ySel}, date ${dateYear}. Saving under ${dateYear}.`);
       }
+
+      const path = base(`logbooks/${dateYear}/${cls}/${date}`);
+      const ref = db.ref(path).push();
+      await ref.set({
+        id: ref.key,
+        className: cls,
+        subject: subj,
+        date,
+        time,
+        totals: {
+          totalStudents: total,
+          present,
+          presentBoys: pb,
+          presentGirls: pg,
+          absentBoys: ab,
+          absentGirls: ag
+        },
+        durationMinutes: dur ? Number(dur) : null,
+        topicTaught: topic || '',
+        lessonSummary: summary || '',
+        homeworkGiven: homework || '',
+        progressCompletion: progress || '',
+        challengesIssues: challenges || '',
+        remarks: remarks || '',
+        recordedBy: currentUserEmail(),
+        teacherName: teacherName.textContent,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        autoFromLessonPlan: Boolean(topic || summary || homework || remarks)
+      });
+
+      toast('Log saved successfully!', 'success');
+      loadLogs();
+
+      // Clear form (except date/time)
+      document.getElementById('lbClass').value = '';
+      document.getElementById('lbSubject').value = '';
+      document.getElementById('lbTotal').value = '';
+      document.getElementById('lbPresent').value = '';
+      document.getElementById('lbPresentBoys').value = '0';
+      document.getElementById('lbPresentGirls').value = '0';
+      document.getElementById('lbAbsentBoys').value = '0';
+      document.getElementById('lbAbsentGirls').value = '0';
+      document.getElementById('lbDuration').value = '';
+      document.getElementById('lbTopic').value = '';
+      document.getElementById('lbSummary').value = '';
+      document.getElementById('lbHomework').value = '';
+      document.getElementById('lbProgress').value = '';
+      document.getElementById('lbChallenges').value = '';
+      document.getElementById('lbRemarks').value = '';
+      ['stTotal','stPresent','stAbsent','stPB','stPG','stAB','stAG'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0';
+      });
     });
 
-    filterClass.addEventListener('change', renderLogs);
-    filterSubject.addEventListener('change', renderLogs);
-    filterDateRange.addEventListener('change', renderLogs);
+    // Export functions
+    function datesToYears(fromStr, toStr) {
+      const fy = new Date(fromStr).getFullYear();
+      const ty = new Date(toStr).getFullYear();
+      const ys = [];
+      for (let y = fy; y <= ty; y++) ys.push(String(y));
+      return ys;
+    }
 
-    loadTeacherConfig();
+    async function fetchLogsRange(fromStr, toStr, clsFilter, subjFilter) {
+      const years = datesToYears(fromStr, toStr);
+      const rows = [];
+      for (const y of years) {
+        try {
+          const snap = await db.ref(base(`logbooks/${y}`)).once('value');
+          const byClass = snap.val() || {};
+          for (const cls of Object.keys(byClass)) {
+            if (clsFilter && L(cls) !== L(clsFilter)) continue;
+            const byDate = byClass[cls] || {};
+            for (const d of Object.keys(byDate)) {
+              if (d < fromStr || d > toStr) continue;
+              const byId = byDate[d] || {};
+              for (const k of Object.keys(byId)) {
+                const r = byId[k] || {};
+                if (subjFilter && L(r.subject || '') !== L(subjFilter)) continue;
+                rows.push({ year: y, cls, date: d, ...r });
+              }
+            }
+          }
+        } catch {}
+      }
+      return rows.sort((a, b) => a.date.localeCompare(b.date) || L(a.cls).localeCompare(L(b.cls)) || L(a.subject || '').localeCompare(L(b.subject || '')));
+    }
+
+    document.getElementById('lbExportPdf')?.addEventListener('click', async () => {
+      const from = document.getElementById('lbFromDate')?.value;
+      const to = document.getElementById('lbToDate')?.value;
+      const clsF = document.getElementById('lbFilterClass')?.value || '';
+      const subjF = document.getElementById('lbFilterSubject')?.value?.trim() || '';
+      if (!from || !to) {
+        toast('Pick From and To dates.', 'warning');
+        return;
+      }
+      const items = await fetchLogsRange(from, to, clsF || null, subjF || null);
+      if (!items.length) {
+        toast('No logs found for the selected date range.', 'warning');
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const margin = 40, width = 595 - margin * 2, lh = 14;
+      function addWrapped(text, y) {
+        const lines = doc.splitTextToSize(text || '', width);
+        lines.forEach(line => { doc.text(line, margin, y); y += lh; });
+        return y;
+      }
+      let first = true;
+      for (const it of items) {
+        if (!first) doc.addPage();
+        first = false;
+        doc.setFontSize(14);
+        doc.text(`Teaching Logbook — ${it.date}`, margin, margin);
+        doc.setFontSize(11);
+        doc.text(`${it.cls} · ${it.subject || ''} · Time: ${it.time || '—'}`, margin, margin + 18);
+        doc.setFontSize(10);
+        let y = margin + 40;
+        const T = it.totals || {};
+        const stat = `Total: ${T.totalStudents || 0}  |  Present: ${T.present || 0}  |  Absent: ${(T.totalStudents || 0) - (T.present || 0)}  |  ♂ P/A: ${(T.presentBoys || 0)}/${(T.absentBoys || 0)}  |  ♀ P/A: ${(T.presentGirls || 0)}/${(T.absentGirls || 0)}`;
+        y = addWrapped(stat, y + 2);
+        y += 12;
+        doc.setFont(undefined, 'bold');
+        doc.text('Topic Taught', margin, y);
+        doc.setFont(undefined, 'normal');
+        y += 12;
+        y = addWrapped(it.topicTaught || '—', y);
+        y += 6;
+        doc.setFont(undefined, 'bold');
+        doc.text('Lesson Summary', margin, y);
+        doc.setFont(undefined, 'normal');
+        y += 12;
+        y = addWrapped(it.lessonSummary || '—', y);
+        y += 6;
+        doc.setFont(undefined, 'bold');
+        doc.text('Homework Given', margin, y);
+        doc.setFont(undefined, 'normal');
+        y += 12;
+        y = addWrapped(it.homeworkGiven || '—', y);
+        y += 6;
+        doc.setFont(undefined, 'bold');
+        doc.text('Progress / Completion (%)', margin, y);
+        doc.setFont(undefined, 'normal');
+        y += 12;
+        y = addWrapped(it.progressCompletion || '—', y);
+        y += 6;
+        doc.setFont(undefined, 'bold');
+        doc.text('Challenges / Issues Faced', margin, y);
+        doc.setFont(undefined, 'normal');
+        y += 12;
+        y = addWrapped(it.challengesIssues || '—', y);
+        y += 6;
+        doc.setFont(undefined, 'bold');
+        doc.text('Remarks / Observations', margin, y);
+        doc.setFont(undefined, 'normal');
+        y += 12;
+        y = addWrapped(it.remarks || '—', y);
+        doc.setFontSize(8);
+        doc.text(`Recorded by: ${it.recordedBy || '—'} · Saved: ${new Date(it.createdAt || Date.now()).toLocaleString()}`, margin, 820);
+      }
+      const fname = `logbooks_${from}_to_${to}.pdf`;
+      doc.save(fname);
+      toast('PDF exported successfully!', 'success');
+    });
+
+    document.getElementById('lbExportCsv')?.addEventListener('click', async () => {
+      const from = document.getElementById('lbFromDate')?.value;
+      const to = document.getElementById('lbToDate')?.value;
+      const clsF = document.getElementById('lbFilterClass')?.value || '';
+      const subjF = document.getElementById('lbFilterSubject')?.value?.trim() || '';
+      if (!from || !to) {
+        toast('Pick From and To dates.', 'warning');
+        return;
+      }
+      const items = await fetchLogsRange(from, to, clsF || null, subjF || null);
+      if (!items.length) {
+        toast('No logs found for the selected date range.', 'warning');
+        return;
+      }
+      const rows = [['Date','Class','Subject','Time','Total','Present','P♂','P♀','A♂','A♀','Minutes','Topic','Summary','Homework','Progress%','Challenges','Remarks','By']];
+      items.forEach(it => {
+        const t = it.totals || {};
+        rows.push([
+          it.date, it.cls, it.subject || '', it.time || '', t.totalStudents || 0, t.present || 0,
+          t.presentBoys || 0, t.presentGirls || 0, t.absentBoys || 0, t.absentGirls || 0,
+          it.durationMinutes || '', it.topicTaught || '', it.lessonSummary || '', it.homeworkGiven || '',
+          it.progressCompletion || '', it.challengesIssues || '', it.remarks || '', it.recordedBy || ''
+        ]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Logbooks');
+      XLSX.writeFile(wb, `logbooks_${from}_to_${to}.xlsx`);
+      toast('CSV exported successfully!', 'success');
+    });
+
+    // Wire filters
+    document.getElementById('lbFilterClass')?.addEventListener('change', renderLogs);
+    document.getElementById('lbFilterSubject')?.addEventListener('input', renderLogs);
+    window.somapYearContext.onYearChanged(() => loadLogs());
+
+    // Initialize on DOM ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        initYearSelector();
+        loadTeacherConfig();
+      });
+    } else {
+      initYearSelector();
+      loadTeacherConfig();
+    }
   </script>
 </body>
 </html>

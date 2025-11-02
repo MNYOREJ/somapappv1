@@ -968,29 +968,35 @@
           const studentsSnap = await db.ref(`${prefix}students`).once('value');
           state.students = studentsSnap.val() || {};
 
-          // Load transport enrollments (year-scoped)
-          const enrollSnap = await db.ref(`${prefix}transportRegistry/${year}`).once('value');
-          const registry = enrollSnap.val() || {};
-          // Convert registry format to enrollment format for compatibility
-          state.transportEnrollments = {};
-          Object.entries(registry).forEach(([studentId, reg]) => {
-            if (reg && reg.using) {
-              state.transportEnrollments[studentId] = {
-                amStop: reg.routeId || '',
-                pmStop: reg.stopName || '',
-                monthlyFee: reg.monthlyFee || 0
-              };
-            }
-          });
-          
-          // Also check legacy path
+          // Load transport enrollments - check legacy path first (this is what's actually being used)
           const legacyEnrollSnap = await db.ref(`${prefix}transport_enrollments`).once('value');
           const legacyEnrollments = legacyEnrollSnap.val() || {};
+          state.transportEnrollments = {};
           Object.entries(legacyEnrollments).forEach(([studentId, enrollment]) => {
-            if (!state.transportEnrollments[studentId]) {
+            if (enrollment) {
               state.transportEnrollments[studentId] = enrollment;
             }
           });
+          
+          // Also check new registry format for year-scoped data
+          try {
+            const enrollSnap = await db.ref(`${prefix}transportRegistry/${year}`).once('value');
+            const registry = enrollSnap.val() || {};
+            Object.entries(registry).forEach(([studentId, reg]) => {
+              if (reg && reg.using) {
+                // Merge with legacy or add new
+                if (!state.transportEnrollments[studentId]) {
+                  state.transportEnrollments[studentId] = {
+                    amStop: reg.routeId || '',
+                    pmStop: reg.stopName || '',
+                    monthlyFee: reg.monthlyFee || 0
+                  };
+                }
+              }
+            });
+          } catch (err) {
+            console.warn('Could not load transportRegistry:', err);
+          }
 
           // Load transport payments (year-scoped)
           const paymentsData = {};
@@ -1081,14 +1087,16 @@
         const parentPhone = normalizePhone(user?.phoneNumber || localStorage.getItem('parentPhone') || '');
         
         // Load student data
-        const [sSnap, regSnap, ledSnap] = await Promise.all([
+        const [sSnap, regSnap, enrollSnap, ledSnap] = await Promise.all([
           firebase.database().ref(`${prefix}students/${studentId}`).once('value'),
-          firebase.database().ref(`${prefix}transportRegistry/${y}/${studentId}`).once('value'),
-          firebase.database().ref(`${prefix}transportLedgers/${y}/${studentId}/payments`).once('value')
+          firebase.database().ref(`${prefix}transportRegistry/${y}/${studentId}`).once('value').catch(() => ({ val: () => null })),
+          firebase.database().ref(`${prefix}transport_enrollments/${studentId}`).once('value').catch(() => ({ val: () => null })),
+          firebase.database().ref(`${prefix}transportLedgers/${y}/${studentId}/payments`).once('value').catch(() => ({ val: () => null }))
         ]);
         
         const S = sSnap.val() || {};
         const reg = regSnap.val() || {};
+        const legacyEnrollment = enrollSnap.val() || {};
         const pays = ledSnap.val() || {};
         
         // Verify parent owns student
@@ -1100,8 +1108,16 @@
           return;
         }
         
-        // Check if using transport
-        if (!reg.using) {
+        // Check if using transport - check both new registry format and legacy enrollments
+        let enrollment = null;
+        if (reg && reg.using) {
+          enrollment = reg;
+        } else if (legacyEnrollment) {
+          // Use legacy transport_enrollments
+          enrollment = legacyEnrollment;
+        }
+        
+        if (!enrollment) {
           document.getElementById('parentTransportView').classList.add('hidden');
           document.getElementById('tpStatus').textContent = 'This child is not marked as USING transport for the selected year.';
           document.getElementById('tpStatus').style.color = '#991b1b';
@@ -1120,7 +1136,17 @@
         document.getElementById('tpClass').textContent = shiftedClass;
         document.getElementById('tpPhone').textContent = studentPhone || '—';
         
-        const monthlyFee = Number(reg.monthlyFee || 0);
+        // Get monthly fee from enrollment (handle both formats)
+        let monthlyFee = 0;
+        if (enrollment.monthlyFee) {
+          monthlyFee = Number(enrollment.monthlyFee || 0);
+        } else if (enrollment.amStop || enrollment.pmStop) {
+          // Calculate from route stops using TransportPricing
+          const amStop = enrollment.amStop || '';
+          const pmStop = enrollment.pmStop || '';
+          monthlyFee = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
+        }
+        
         document.getElementById('tpMonthlyFee').textContent = formatCurrency(monthlyFee);
         
         // Calculate debt
@@ -1131,7 +1157,7 @@
           }
         });
         
-        const startMonth = reg.startMonth || 'January';
+        const startMonth = enrollment.startMonth || 'January';
         const startIdx = Math.max(0, MONTH_NAMES.indexOf(startMonth));
         const monthsOrdered = [...MONTH_NAMES.slice(1)]; // Remove empty first element
         const duesByMonth = {};

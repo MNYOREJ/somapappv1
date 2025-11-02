@@ -603,21 +603,45 @@
       
       // Build cards for children using transport
       const cards = [];
+      
+      // Load all transport enrollments once
+      const enrollmentsSnap = await db.ref(`${prefix}transport_enrollments`).once('value');
+      const allEnrollments = enrollmentsSnap.val() || {};
+      
       for (const studentId of childIds) {
-        const [sSnap, regSnap] = await Promise.all([
-          db.ref(`${prefix}students/${studentId}`).once('value'),
-          db.ref(`${prefix}transportRegistry/${year}/${studentId}`).once('value')
-        ]);
-        
+        const sSnap = await db.ref(`${prefix}students/${studentId}`).once('value');
         const S = sSnap.val() || {};
-        const reg = regSnap.val() || {};
         
-        if (!reg || !reg.using) continue;
+        // Check if student is enrolled in transport (using Firebase student key)
+        const enrollment = allEnrollments[studentId];
+        
+        // Also check by admission number as fallback
+        let foundEnrollment = enrollment;
+        if (!foundEnrollment) {
+          // Try finding by admission number
+          const adm = S.admissionNumber;
+          if (adm) {
+            for (const [eid, e] of Object.entries(allEnrollments)) {
+              if (e && e.studentId === adm || e && e.admissionNumber === adm) {
+                foundEnrollment = e;
+                break;
+              }
+            }
+          }
+        }
+        
+        if (!foundEnrollment) continue;
         
         const fullName = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim();
         const adm = S.admissionNumber || studentId;
-        const route = reg.routeId || '—';
-        const stop = reg.stopName || '—';
+        
+        // Extract route/stop info
+        const route = foundEnrollment.route || foundEnrollment.amStop || '—';
+        const morningStop = foundEnrollment.amStop || '—';
+        const eveningStop = foundEnrollment.pmStop || '—';
+        const stopDisplay = morningStop !== '—' && eveningStop !== '—' && morningStop !== eveningStop 
+          ? `${morningStop} / ${eveningStop}`
+          : (morningStop !== '—' ? morningStop : eveningStop);
         
         cards.push(`
           <div class="glass bg-white/5 border border-white/10 rounded-xl p-4">
@@ -625,7 +649,7 @@
               <div>
                 <div class="title font-bold">${fullName || '—'}</div>
                 <div class="muted text-xs mt-1">Admission: ${adm}</div>
-                <div class="muted text-xs">Route: ${route} • Stop: ${stop}</div>
+                <div class="muted text-xs">Route: ${route} • Stop: ${stopDisplay}</div>
               </div>
               <button class="btn" data-student-id="${studentId}" data-student-adm="${adm}">
                 <i class="fas fa-credit-card mr-2"></i>View Payments

@@ -170,6 +170,7 @@
     <div title="Market" class="icon" data-action="market"><i class="fas fa-store"></i></div>
     <div title="Attendance" class="icon" data-action="attendance"><i class="fas fa-calendar-check"></i></div>
     <div title="Finance" class="icon" id="parentFinanceIcon"><i class="fas fa-money-bill-wave"></i></div>
+    <div title="Transport" class="icon" id="parentTransportIcon"><i class="fas fa-bus"></i></div>
     <div title="Books" class="icon" data-action="books"><i class="fas fa-book"></i></div>
     <div id="preform-icon" title="Preform One" class="icon" style="display:none;" onclick="if(localStorage.getItem('preformParentIcon')) window.location.href='preformonehtml/prefoneparent.html';"><i class="fas fa-graduation-cap"></i></div>
     <div style="flex:1"></div>
@@ -414,6 +415,16 @@
           </div>
         </article>
 
+        <!-- TRANSPORT PAYMENT SECTION -->
+        <article id="parentTransportSection" class="card hidden">
+          <h4 class="title text-lg font-extrabold m-0">🚐 Transport Payments</h4>
+          <p class="muted mt-1 text-sm">View and pay transport fees for your child.</p>
+          <div id="transportChildrenList" class="mt-3 flex flex-col gap-2">
+            <div class="skeleton h-16 rounded-xl"></div>
+            <div class="skeleton h-16 rounded-xl"></div>
+          </div>
+        </article>
+
       </aside>
     </section>
 
@@ -540,6 +551,118 @@
     window.location.href = url;
   });
 
+  // Transport icon - show transport section or open transport payments
+  q('#parentTransportIcon')?.addEventListener('click', async ()=> {
+    await loadParentTransportHome();
+    // Scroll to transport section
+    q('#parentTransportSection')?.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  // Load parent transport home
+  async function loadParentTransportHome() {
+    const transportSection = q('#parentTransportSection');
+    const childrenList = q('#transportChildrenList');
+    if (!transportSection || !childrenList) return;
+    
+    transportSection.classList.remove('hidden');
+    childrenList.innerHTML = '<div class="skeleton h-16 rounded-xl"></div>';
+    
+    try {
+      const year = getActiveYearString();
+      const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
+      
+      // Get parent phone
+      const user = firebase.auth().currentUser;
+      const parentPhone = normalizePhone(user?.phoneNumber || localStorage.getItem('parentPhone') || currentStudent?.primaryParentContact || '');
+      
+      if (!parentPhone) {
+        childrenList.innerHTML = '<div class="muted text-sm">Please sign in to view transport information.</div>';
+        return;
+      }
+      
+      // Find children for this parent
+      // Try index first
+      const idxSnap = await db.ref(`${prefix}parentChildren/${parentPhone}`).once('value');
+      let childIds = Object.keys(idxSnap.val() || {});
+      
+      // Fallback: scan students
+      if (!childIds.length) {
+        const studentsSnap = await db.ref(`${prefix}students`).once('value');
+        const allStudents = studentsSnap.val() || {};
+        childIds = Object.keys(allStudents).filter(id => {
+          const s = allStudents[id] || {};
+          const sPhone = normalizePhone(s.motherPhone || s.parentPhone || s.primaryParentContact || '');
+          return sPhone && sPhone === parentPhone;
+        });
+      }
+      
+      if (!childIds.length) {
+        childrenList.innerHTML = '<div class="muted text-sm">No linked children found for your phone number.</div>';
+        return;
+      }
+      
+      // Build cards for children using transport
+      const cards = [];
+      for (const studentId of childIds) {
+        const [sSnap, regSnap] = await Promise.all([
+          db.ref(`${prefix}students/${studentId}`).once('value'),
+          db.ref(`${prefix}transportRegistry/${year}/${studentId}`).once('value')
+        ]);
+        
+        const S = sSnap.val() || {};
+        const reg = regSnap.val() || {};
+        
+        if (!reg || !reg.using) continue;
+        
+        const fullName = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim();
+        const adm = S.admissionNumber || studentId;
+        const route = reg.routeId || '—';
+        const stop = reg.stopName || '—';
+        
+        cards.push(`
+          <div class="glass bg-white/5 border border-white/10 rounded-xl p-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="title font-bold">${fullName || '—'}</div>
+                <div class="muted text-xs mt-1">Admission: ${adm}</div>
+                <div class="muted text-xs">Route: ${route} • Stop: ${stop}</div>
+              </div>
+              <button class="btn" data-student-id="${studentId}" data-student-adm="${adm}">
+                <i class="fas fa-credit-card mr-2"></i>View Payments
+              </button>
+            </div>
+          </div>
+        `);
+      }
+      
+      if (cards.length === 0) {
+        childrenList.innerHTML = '<div class="muted text-sm">No children using transport for this academic year.</div>';
+      } else {
+        childrenList.innerHTML = cards.join('');
+        
+        // Attach click handlers
+        childrenList.querySelectorAll('button[data-student-id]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const studentId = btn.getAttribute('data-student-id');
+            const adm = btn.getAttribute('data-student-adm');
+            localStorage.setItem('parentFocusStudent', studentId);
+            localStorage.setItem('parentFocusAdm', adm);
+            window.location.href = `transporthtml/transportpayments.html?student=${encodeURIComponent(studentId)}&year=${year}`;
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Error loading transport:', error);
+      childrenList.innerHTML = '<div class="text-red-300 text-sm">Error loading transport information. Please try again.</div>';
+    }
+  }
+  
+  // Helper to normalize phone
+  function normalizePhone(p) {
+    const s = String(p || '').replace(/[\s\-()]/g, '');
+    return s.replace(/(?!^\+)[^\d]/g, '');
+  }
+
   // State
   let currentStudentKey = null, currentStudent = null;
   let graduationGalleryLoaded = false;
@@ -616,6 +739,7 @@
     await loadAttendanceForStudent(currentStudent.admissionNumber);
     await loadScoresForStudent(currentStudent.admissionNumber);
     await checkTransportAccess(adm);
+    await loadParentTransportHome();
 
     loadGraduationGallery(getActiveYearString());
 
@@ -1107,6 +1231,7 @@
       updateYearBadge();
       refreshYearDependentData().catch(console.error);
       loadGraduationGallery(getActiveYearString());
+      loadParentTransportHome().catch(console.error); // Refresh transport on year change
     });
   }
 

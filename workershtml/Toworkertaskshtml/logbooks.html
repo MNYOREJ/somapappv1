@@ -804,89 +804,174 @@
 
     // Data loading helpers
     async function getBaseMaps(year) {
-      const y = String(year), anchorY = String(SOMAP_DEFAULT_YEAR);
+      const anchorY = String(SOMAP_DEFAULT_YEAR), y = String(year);
       const [studentsSnap, anchorSnap, ySnap, listSnap] = await Promise.all([
         db.ref(base('students')).once('value'),
-        db.ref(base(`enrollments/${anchorY}`)).once('value'),
+        db.ref(base(`enrollments/${anchorY}`)).once('value').catch(()=>({val:()=>null})),
         db.ref(base(`enrollments/${y}`)).once('value').catch(()=>({val:()=>null})),
         db.ref(base(`studentlist/${y}`)).once('value').catch(()=>({val:()=>null}))
       ]);
       return {
         y,
-        students: studentsSnap.val()||{},
-        enrollAnchor: anchorSnap.val()||{},
+        students: (studentsSnap && studentsSnap.val && studentsSnap.val())||{},
+        enrollAnchor: (anchorSnap && anchorSnap.val && anchorSnap.val())||{},
         enrollYear: (ySnap && ySnap.val && ySnap.val())||{},
         studentlistYear: (listSnap && listSnap.val && listSnap.val())||{}
       };
     }
 
-    function resolveClassForYear(studentId, enrollAnchor, enrollYear, targetYear) {
+    function resolveClassForYear(studentId, studentRecord, enrollAnchor, enrollYear, targetYear) {
+      // First, try to get class directly from student record (most reliable for current year)
+      const directClass = studentRecord?.classLevel || studentRecord?.className || studentRecord?.class || '';
+      if (directClass && String(targetYear) === String(SOMAP_DEFAULT_YEAR)) {
+        return directClass;
+      }
+      
+      // For other years, use enrollment data with shifting
       const anchor = enrollAnchor[studentId] || {};
-      const baseClass = anchor.className || anchor.classLevel || 'Baby Class';
-      const yr = enrollYear[studentId] || {};
-      if (yr.className || yr.classLevel) return (yr.className || yr.classLevel);
+      const baseClass = anchor.className || anchor.classLevel || directClass || studentRecord?.classLevel || studentRecord?.className || 'Baby Class';
+      const yrRec = enrollYear[studentId] || {};
+      if (yrRec.className || yrRec.classLevel) return (yrRec.className || yrRec.classLevel);
+      
+      // Shift from anchor year
       const delta = Number(targetYear) - SOMAP_DEFAULT_YEAR;
       return shiftClass(baseClass, delta);
     }
 
-    function countClassForYear(targetClass, maps) {
+    function countClassForYear(targetClass, maps, targetYear) {
+      // Try explicit studentlist/{year}/{className} first
       const yList = maps.studentlistYear?.[targetClass];
-      if (yList && typeof yList === 'object') return Object.keys(yList).length;
-      let n = 0;
-      for (const id of Object.keys(maps.students||{})) {
-        const cls = resolveClassForYear(id, maps.enrollAnchor, maps.enrollYear, maps.y);
-        if (L(cls) === L(targetClass)) n++;
+      if (yList && typeof yList === 'object' && Object.keys(yList).length > 0) {
+        return Object.keys(yList).length;
       }
+      
+      // Count from students collection directly
+      let n = 0;
+      const students = maps.students || {};
+      
+      for (const id of Object.keys(students)) {
+        const studentRecord = students[id];
+        if (!studentRecord || typeof studentRecord !== 'object') continue;
+        
+        // Get class for this year
+        const cls = resolveClassForYear(id, studentRecord, maps.enrollAnchor, maps.enrollYear, targetYear);
+        
+        // Normalize both class names for comparison (case-insensitive, trim spaces)
+        const normalizedTarget = L(targetClass);
+        const normalizedClass = L(cls);
+        
+        if (normalizedClass === normalizedTarget) {
+          n++;
+        }
+      }
+      
+      console.log(`Counted ${n} students for ${targetClass} in year ${targetYear}`);
       return n;
     }
 
     async function loadAttendanceCounts(year, className, dateStr, studentsMap) {
-      const y = String(year), cls = className, key = yyyymmdd(dateStr);
+      const y = String(year), cls = className.trim(), key = yyyymmdd(dateStr);
       const tryPaths = [
         base(`classAttendance/${y}/${cls}/${key}`),
         base(`attendance/class/${y}/${cls}/${key}`),
         base(`attendance/${y}/${cls}/${key}`),
         base(`classAttendance/${cls}/${key}`),
-        base(`attendance/class/${cls}/${key}`)
+        base(`attendance/${cls}/${key}`),
+        // Also try alternative class name formats
+        base(`classAttendance/${y}/${cls.replace(/\s+/g, '_')}/${key}`),
+        base(`attendance/${y}/${cls.replace(/\s+/g, '_')}/${key}`),
+        base(`classAttendance/${cls.replace(/\s+/g, '_')}/${key}`),
+        base(`attendance/${cls.replace(/\s+/g, '_')}/${key}`)
       ];
+      
       let node = null;
+      let usedPath = null;
+      
       for (const p of tryPaths) {
         try {
           const snap = await db.ref(p).once('value');
-          const v = snap.val();
-          if (v && Object.keys(v).length) { node = v; break; }
-        } catch {}
+          const val = snap && snap.val ? snap.val() : null;
+          if (val && typeof val === 'object' && Object.keys(val).length > 0) {
+            node = val;
+            usedPath = p;
+            console.log(`Found attendance at path: ${p}`);
+            break;
+          }
+        } catch (e) {
+          console.log(`Tried path ${p}, not found`);
+          continue;
+        }
       }
+      
+      if (!node) {
+        console.log(`No attendance data found for ${cls} on ${dateStr}`);
+        return { present: 0, absent: 0, pb: 0, pg: 0, ab: 0, ag: 0 };
+      }
+      
       let pb = 0, pg = 0, ab = 0, ag = 0;
-      if (!node) return { total: 0, present: 0, absent: 0, pb: 0, pg: 0, ab: 0, ag: 0 };
+      
       for (const sid of Object.keys(node)) {
         const rec = node[sid] || {};
-        const status = (rec.status || rec.s || '').toString().toUpperCase();
-        const gen = (rec.gender || rec.sex || studentsMap[sid]?.gender || studentsMap[sid]?.sex || '').toString().toUpperCase().slice(0,1);
-        const isP = (status === 'P' || status === 'PRESENT' || status === '1' || status === 1 || status === true);
-        const isBoy = (gen === 'M' || gen === 'B');
-        if (isP) { if (isBoy) pb++; else pg++; } else { if (isBoy) ab++; else ag++; }
+        // Check multiple status formats
+        const status = String(rec.status || rec.s || (rec.am || rec.pm || '') || '').toUpperCase().trim();
+        const amStatus = String(rec.am || '').toUpperCase().trim();
+        const pmStatus = String(rec.pm || '').toUpperCase().trim();
+        
+        // Consider present if status is P, PRESENT, 1, true, or if either AM/PM is P
+        const isPresent = status === 'P' || status === 'PRESENT' || status === '1' || status === 1 || status === true ||
+                         amStatus === 'P' || pmStatus === 'P';
+        
+        // Get gender from attendance record or student record
+        const genderFromAtt = String(rec.gender || rec.sex || '').toUpperCase().trim();
+        const studentRecord = studentsMap[sid];
+        const genderFromStudent = String(studentRecord?.gender || studentRecord?.sex || '').toUpperCase().trim();
+        const gen = genderFromAtt || genderFromStudent;
+        const isBoy = gen === 'M' || gen === 'B' || gen === 'BOY' || gen === 'MALE';
+        
+        if (isPresent) {
+          if (isBoy) pb++;
+          else pg++;
+        } else {
+          if (isBoy) ab++;
+          else ag++;
+        }
       }
-      const present = pb + pg, absent = ab + ag;
-      return { total: present + absent, present, absent, pb, pg, ab, ag };
+      
+      console.log(`Attendance counts - Present: ${pb + pg} (♂${pb} ♀${pg}), Absent: ${ab + ag} (♂${ab} ♀${ag})`);
+      
+      return { present: pb + pg, absent: ab + ag, pb, pg, ab, ag };
     }
 
     async function loadLessonPlanInjects(year, className, dateStr, subject) {
-      const y = String(year), cls = className, d = dateStr;
+      const y = String(year), cls = className.trim(), d = dateStr;
       const tryPaths = [
         base(`lessonPlans/${y}/${cls}/${d}`),
-        base(`lessonPlans/${cls}/${d}`)
+        base(`lessonPlans/${cls}/${d}`),
+        base(`lessonPlans/${y}/${cls.replace(/\s+/g, '_')}/${d}`),
+        base(`lessonPlans/${cls.replace(/\s+/g, '_')}/${d}`)
       ];
       let tree = null;
+      let usedPath = null;
       for (const p of tryPaths) {
         try {
           const snap = await db.ref(p).once('value');
-          const v = snap.val();
-          if (v && Object.keys(v).length) { tree = v; break; }
-        } catch {}
+          const v = snap && snap.val ? snap.val() : null;
+          if (v && typeof v === 'object' && Object.keys(v).length > 0) {
+            tree = v;
+            usedPath = p;
+            console.log(`Found lesson plan at path: ${p}`);
+            break;
+          }
+        } catch (e) {
+          console.log(`Tried lesson plan path ${p}, not found`);
+          continue;
+        }
       }
-      if (!tree) return null;
-      const rec = Object.values(tree).find(r => L(r.subject) === L(subject)) || Object.values(tree)[0] || null;
+      if (!tree) {
+        console.log(`No lesson plan found for ${cls}, ${subject}, ${d}`);
+        return null;
+      }
+      const rec = Object.values(tree).find(r => L(r.subject || '') === L(subject || '')) || Object.values(tree)[0] || null;
       if (!rec) return null;
       return {
         topic: rec.topic || rec.theme || rec.mainTopic || '',
@@ -904,61 +989,95 @@
       const subj = document.getElementById('lbSubject')?.value?.trim();
       const date = document.getElementById('lbDate')?.value?.trim();
 
-      if (!cls) return;
-
-      const maps = await getBaseMaps(year);
-      if (L(cls) === 'graduated') {
-        ['lbTotal','lbPresent','lbPresentBoys','lbPresentGirls','lbAbsentBoys','lbAbsentGirls'].forEach(id => {
-          const el = document.getElementById(id);
-          if (el) { el.value = '0'; if (el.readOnly !== undefined) el.readOnly = true; }
-        });
-        ['stTotal','stPresent','stAbsent','stPB','stPG','stAB','stAG'].forEach(id => {
-          const el = document.getElementById(id);
-          if (el) el.textContent = '0';
-        });
+      if (!cls) {
+        console.log('No class selected');
         return;
       }
 
-      // Total students
-      const total = countClassForYear(cls, maps);
-      const totalEl = document.getElementById('lbTotal');
-      if (totalEl) { totalEl.readOnly = true; totalEl.value = total; }
-      const stTotal = document.getElementById('stTotal');
-      if (stTotal) stTotal.textContent = total;
+      try {
+        console.log(`Loading data for ${cls} in year ${year}...`);
+        const maps = await getBaseMaps(year);
+        console.log('Loaded maps:', {
+          studentsCount: Object.keys(maps.students || {}).length,
+          enrollAnchorCount: Object.keys(maps.enrollAnchor || {}).length,
+          studentlistYear: Object.keys(maps.studentlistYear || {}).length
+        });
 
-      // Attendance
-      if (date) {
-        const att = await loadAttendanceCounts(year, cls, date, maps.students);
-        const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-        set('lbPresent', att.present);
-        set('lbPresentBoys', att.pb);
-        set('lbPresentGirls', att.pg);
-        set('lbAbsentBoys', att.ab);
-        set('lbAbsentGirls', att.ag);
-
-        const P = att.present, A = att.absent;
-        if (document.getElementById('stPresent')) document.getElementById('stPresent').textContent = P;
-        if (document.getElementById('stAbsent')) document.getElementById('stAbsent').textContent = A;
-        if (document.getElementById('stPB')) document.getElementById('stPB').textContent = att.pb;
-        if (document.getElementById('stPG')) document.getElementById('stPG').textContent = att.pg;
-        if (document.getElementById('stAB')) document.getElementById('stAB').textContent = att.ab;
-        if (document.getElementById('stAG')) document.getElementById('stAG').textContent = att.ag;
-      }
-
-      // Lesson plan autofill
-      if (date && subj) {
-        const inj = await loadLessonPlanInjects(year, cls, date, subj);
-        if (inj) {
-          const mergeSummary = [inj.activities, inj.resources].filter(Boolean).join('\n\nResources:\n');
-          const topicEl = document.getElementById('lbTopic');
-          if (topicEl && !topicEl.value) topicEl.value = inj.topic || '';
-          const summaryEl = document.getElementById('lbSummary');
-          if (summaryEl && !summaryEl.value) summaryEl.value = mergeSummary || '';
-          const homeworkEl = document.getElementById('lbHomework');
-          if (homeworkEl && !homeworkEl.value) homeworkEl.value = inj.homework || '';
-          const remarksEl = document.getElementById('lbRemarks');
-          if (remarksEl && !remarksEl.value) remarksEl.value = inj.reflection || '';
+        if (L(cls) === 'graduated') {
+          ['lbTotal','lbPresent','lbPresentBoys','lbPresentGirls','lbAbsentBoys','lbAbsentGirls'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.value = '0'; if (el.readOnly !== undefined) el.readOnly = true; }
+          });
+          ['stTotal','stPresent','stAbsent','stPB','stPG','stAB','stAG'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '0';
+          });
+          return;
         }
+
+        // Total students
+        const total = countClassForYear(cls, maps, year);
+        console.log(`Total students for ${cls} in ${year}: ${total}`);
+        
+        const totalEl = document.getElementById('lbTotal');
+        if (totalEl) { totalEl.readOnly = true; totalEl.value = total || 0; }
+        const stTotal = document.getElementById('stTotal');
+        if (stTotal) stTotal.textContent = total || 0;
+
+        // Attendance
+        if (date) {
+          console.log(`Loading attendance for ${cls} on ${date}...`);
+          const att = await loadAttendanceCounts(year, cls, date, maps.students || {});
+          console.log('Attendance data:', att);
+          
+          const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || 0; };
+          set('lbPresent', att.present);
+          set('lbPresentBoys', att.pb);
+          set('lbPresentGirls', att.pg);
+          set('lbAbsentBoys', att.ab);
+          set('lbAbsentGirls', att.ag);
+
+          const P = att.present, A = att.absent;
+          if (document.getElementById('stPresent')) document.getElementById('stPresent').textContent = P || 0;
+          if (document.getElementById('stAbsent')) document.getElementById('stAbsent').textContent = A || 0;
+          if (document.getElementById('stPB')) document.getElementById('stPB').textContent = att.pb || 0;
+          if (document.getElementById('stPG')) document.getElementById('stPG').textContent = att.pg || 0;
+          if (document.getElementById('stAB')) document.getElementById('stAB').textContent = att.ab || 0;
+          if (document.getElementById('stAG')) document.getElementById('stAG').textContent = att.ag || 0;
+        } else {
+          // Reset attendance fields if no date
+          ['lbPresent','lbPresentBoys','lbPresentGirls','lbAbsentBoys','lbAbsentGirls'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '0';
+          });
+          ['stPresent','stAbsent','stPB','stPG','stAB','stAG'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '0';
+          });
+        }
+
+        // Lesson plan autofill
+        if (date && subj) {
+          console.log(`Loading lesson plan for ${cls}, ${subj}, ${date}...`);
+          const inj = await loadLessonPlanInjects(year, cls, date, subj);
+          if (inj) {
+            console.log('Lesson plan data found:', inj);
+            const mergeSummary = [inj.activities, inj.resources].filter(Boolean).join('\n\nResources:\n');
+            const topicEl = document.getElementById('lbTopic');
+            if (topicEl && !topicEl.value) topicEl.value = inj.topic || '';
+            const summaryEl = document.getElementById('lbSummary');
+            if (summaryEl && !summaryEl.value) summaryEl.value = mergeSummary || '';
+            const homeworkEl = document.getElementById('lbHomework');
+            if (homeworkEl && !homeworkEl.value) homeworkEl.value = inj.homework || '';
+            const remarksEl = document.getElementById('lbRemarks');
+            if (remarksEl && !remarksEl.value) remarksEl.value = inj.reflection || '';
+          } else {
+            console.log('No lesson plan found for this class/subject/date');
+          }
+        }
+      } catch (error) {
+        console.error('Error in recomputeLogForm:', error);
+        toast('Error loading data: ' + error.message, 'error');
       }
     }
 

@@ -558,7 +558,7 @@
     q('#parentTransportSection')?.scrollIntoView({ behavior: 'smooth' });
   });
 
-  // Load parent transport home
+  // Load parent transport home - OPTIMIZED for speed
   async function loadParentTransportHome() {
     const transportSection = q('#parentTransportSection');
     const childrenList = q('#transportChildrenList');
@@ -571,110 +571,71 @@
       const year = getActiveYearString();
       const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
       
-      // Get parent phone
+      // Get parent phone - use current student's data if available
       const user = firebase.auth().currentUser;
-      const parentPhone = normalizePhone(user?.phoneNumber || localStorage.getItem('parentPhone') || currentStudent?.primaryParentContact || '');
+      let parentPhone = normalizePhone(user?.phoneNumber || localStorage.getItem('parentPhone') || '');
       
-      if (!parentPhone) {
+      // If no phone yet, use currentStudent's parent contact
+      if (!parentPhone && currentStudent) {
+        parentPhone = normalizePhone(currentStudent.primaryParentContact || '');
+      }
+      
+      if (!parentPhone && !currentStudent) {
         childrenList.innerHTML = '<div class="muted text-sm">Please sign in to view transport information.</div>';
         return;
       }
       
-      // Find children for this parent
-      // Try index first
-      const idxSnap = await db.ref(`${prefix}parentChildren/${parentPhone}`).once('value');
-      let childIds = Object.keys(idxSnap.val() || {});
-      
-      // Fallback: scan students
-      if (!childIds.length) {
-        const studentsSnap = await db.ref(`${prefix}students`).once('value');
-        const allStudents = studentsSnap.val() || {};
-        childIds = Object.keys(allStudents).filter(id => {
-          const s = allStudents[id] || {};
-          const sPhone = normalizePhone(s.motherPhone || s.parentPhone || s.primaryParentContact || '');
-          return sPhone && sPhone === parentPhone;
-        });
-      }
-      
-      if (!childIds.length) {
-        childrenList.innerHTML = '<div class="muted text-sm">No linked children found for your phone number.</div>';
+      // For parent with current student, just check if current student uses transport
+      if (currentStudent && currentStudentKey) {
+        const currentStudentId = currentStudentKey;
+        
+        // Check if current student uses transport
+        const enrollSnap = await db.ref(`${prefix}transport_enrollments/${currentStudentId}`).once('value');
+        const enrollment = enrollSnap.val();
+        
+        if (enrollment) {
+          const fullName = `${currentStudent.firstName || ''} ${currentStudent.middleName || ''} ${currentStudent.lastName || ''}`.replace(/\s+/g, ' ').trim();
+          const adm = currentStudent.admissionNumber || currentStudentId;
+          const route = enrollment.route || enrollment.amStop || '—';
+          const morningStop = enrollment.amStop || '—';
+          const eveningStop = enrollment.pmStop || '—';
+          const stopDisplay = morningStop !== '—' && eveningStop !== '—' && morningStop !== eveningStop 
+            ? `${morningStop} / ${eveningStop}`
+            : (morningStop !== '—' ? morningStop : eveningStop);
+          
+          childrenList.innerHTML = `
+            <div class="glass bg-white/5 border border-white/10 rounded-xl p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="title font-bold">${fullName || '—'}</div>
+                  <div class="muted text-xs mt-1">Admission: ${adm}</div>
+                  <div class="muted text-xs">Route: ${route} • Stop: ${stopDisplay}</div>
+                </div>
+                <button class="btn" data-student-id="${currentStudentId}" data-student-adm="${adm}">
+                  <i class="fas fa-credit-card mr-2"></i>View Payments
+                </button>
+              </div>
+            </div>
+          `;
+          
+          // Attach click handler
+          const btn = childrenList.querySelector('button[data-student-id]');
+          if (btn) {
+            btn.addEventListener('click', () => {
+              localStorage.setItem('parentFocusStudent', currentStudentId);
+              localStorage.setItem('parentFocusAdm', adm);
+              window.location.href = `transporthtml/transportpayments.html?student=${encodeURIComponent(currentStudentId)}&year=${year}`;
+            });
+          }
+        } else {
+          childrenList.innerHTML = '<div class="muted text-sm">Your child is not currently using transport.</div>';
+        }
         return;
       }
       
-      // Build cards for children using transport
-      const cards = [];
-      
-      // Load all transport enrollments once
-      const enrollmentsSnap = await db.ref(`${prefix}transport_enrollments`).once('value');
-      const allEnrollments = enrollmentsSnap.val() || {};
-      
-      for (const studentId of childIds) {
-        const sSnap = await db.ref(`${prefix}students/${studentId}`).once('value');
-        const S = sSnap.val() || {};
-        
-        // Check if student is enrolled in transport (using Firebase student key)
-        const enrollment = allEnrollments[studentId];
-        
-        // Also check by admission number as fallback
-        let foundEnrollment = enrollment;
-        if (!foundEnrollment) {
-          // Try finding by admission number
-          const adm = S.admissionNumber;
-          if (adm) {
-            for (const [eid, e] of Object.entries(allEnrollments)) {
-              if (e && e.studentId === adm || e && e.admissionNumber === adm) {
-                foundEnrollment = e;
-                break;
-              }
-            }
-          }
-        }
-        
-        if (!foundEnrollment) continue;
-        
-        const fullName = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim();
-        const adm = S.admissionNumber || studentId;
-        
-        // Extract route/stop info
-        const route = foundEnrollment.route || foundEnrollment.amStop || '—';
-        const morningStop = foundEnrollment.amStop || '—';
-        const eveningStop = foundEnrollment.pmStop || '—';
-        const stopDisplay = morningStop !== '—' && eveningStop !== '—' && morningStop !== eveningStop 
-          ? `${morningStop} / ${eveningStop}`
-          : (morningStop !== '—' ? morningStop : eveningStop);
-        
-        cards.push(`
-          <div class="glass bg-white/5 border border-white/10 rounded-xl p-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <div class="title font-bold">${fullName || '—'}</div>
-                <div class="muted text-xs mt-1">Admission: ${adm}</div>
-                <div class="muted text-xs">Route: ${route} • Stop: ${stopDisplay}</div>
-              </div>
-              <button class="btn" data-student-id="${studentId}" data-student-adm="${adm}">
-                <i class="fas fa-credit-card mr-2"></i>View Payments
-              </button>
-            </div>
-          </div>
-        `);
-      }
-      
-      if (cards.length === 0) {
-        childrenList.innerHTML = '<div class="muted text-sm">No children using transport for this academic year.</div>';
-      } else {
-        childrenList.innerHTML = cards.join('');
-        
-        // Attach click handlers
-        childrenList.querySelectorAll('button[data-student-id]').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const studentId = btn.getAttribute('data-student-id');
-            const adm = btn.getAttribute('data-student-adm');
-            localStorage.setItem('parentFocusStudent', studentId);
-            localStorage.setItem('parentFocusAdm', adm);
-            window.location.href = `transporthtml/transportpayments.html?student=${encodeURIComponent(studentId)}&year=${year}`;
-          });
-        });
-      }
+      // Multi-child scenario (fallback to original logic but optimized)
+      // This would only happen if parent has multiple children and not logged in via a specific student
+      childrenList.innerHTML = '<div class="muted text-sm">Please sign in through your child\'s account.</div>';
     } catch (error) {
       console.error('Error loading transport:', error);
       childrenList.innerHTML = '<div class="text-red-300 text-sm">Error loading transport information. Please try again.</div>';

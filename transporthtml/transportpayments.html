@@ -1082,22 +1082,38 @@
         const y = String(state.year);
         const prefix = currentSchoolPrefix();
         
+        // Hide admin sections immediately
+        document.querySelector('section.row')?.classList.add('hidden'); // KPIs
+        document.getElementById('criticalAlerts')?.classList.add('hidden');
+        document.querySelector('section.card:has(#paymentsTable)')?.classList.add('hidden'); // Admin table
+        document.querySelector('section.card:has(#expensesTable)')?.classList.add('hidden'); // Expenses
+        document.querySelector('section.card.mt-3:has([id="fuelExpenses"])')?.classList.add('hidden'); // Expense stats
+        
+        // Show parent view
+        const parentViewEl = document.getElementById('parentTransportView');
+        if (!parentViewEl) return;
+        parentViewEl.classList.remove('hidden');
+        
         // Get parent phone
         const user = firebase.auth().currentUser;
         const parentPhone = normalizePhone(user?.phoneNumber || localStorage.getItem('parentPhone') || '');
         
-        // Load student data
-        const [sSnap, regSnap, enrollSnap, ledSnap] = await Promise.all([
+        // Load ONLY this specific student's data (fast!)
+        const [sSnap, enrollSnap, ledSnap] = await Promise.all([
           firebase.database().ref(`${prefix}students/${studentId}`).once('value'),
-          firebase.database().ref(`${prefix}transportRegistry/${y}/${studentId}`).once('value').catch(() => ({ val: () => null })),
           firebase.database().ref(`${prefix}transport_enrollments/${studentId}`).once('value').catch(() => ({ val: () => null })),
-          firebase.database().ref(`${prefix}transportLedgers/${y}/${studentId}/payments`).once('value').catch(() => ({ val: () => null }))
+          firebase.database().ref(`${prefix}transport_payments/${studentId}`).once('value').catch(() => ({ val: () => null }))
         ]);
         
         const S = sSnap.val() || {};
-        const reg = regSnap.val() || {};
-        const legacyEnrollment = enrollSnap.val() || {};
-        const pays = ledSnap.val() || {};
+        const enrollment = enrollSnap.val() || {};
+        let pays = ledSnap.val() || {};
+        
+        // Convert payments to array if object
+        if (pays && typeof pays === 'object' && !Array.isArray(pays)) {
+          pays = Object.values(pays);
+        }
+        if (!Array.isArray(pays)) pays = [];
         
         // Verify parent owns student
         const studentPhone = normalizePhone(S.motherPhone || S.parentPhone || S.primaryParentContact || '');
@@ -1108,15 +1124,7 @@
           return;
         }
         
-        // Check if using transport - check both new registry format and legacy enrollments
-        let enrollment = null;
-        if (reg && reg.using) {
-          enrollment = reg;
-        } else if (legacyEnrollment) {
-          // Use legacy transport_enrollments
-          enrollment = legacyEnrollment;
-        }
-        
+        // Check if using transport
         if (!enrollment) {
           document.getElementById('parentTransportView').classList.add('hidden');
           document.getElementById('tpStatus').textContent = 'This child is not marked as USING transport for the selected year.';
@@ -1149,11 +1157,12 @@
         
         document.getElementById('tpMonthlyFee').textContent = formatCurrency(monthlyFee);
         
-        // Calculate debt
-        const approvedByMonth = {};
-        Object.values(pays).forEach(p => {
-          if (p && p.approved && p.month) {
-            approvedByMonth[p.month] = (approvedByMonth[p.month] || 0) + Number(p.amount || 0);
+        // Calculate debt - for parent view we show all payments (approved or pending)
+        const paidByMonth = {};
+        pays.forEach(p => {
+          if (p && p.month) {
+            const monthName = typeof p.month === 'number' ? MONTH_NAMES[p.month] : p.month;
+            paidByMonth[monthName] = (paidByMonth[monthName] || 0) + Number(p.amount || 0);
           }
         });
         
@@ -1166,21 +1175,26 @@
           duesByMonth[m] = active ? monthlyFee : 0;
         });
         
-        const unpaid = monthsOrdered.filter(m => duesByMonth[m] > (approvedByMonth[m] || 0));
+        const unpaid = monthsOrdered.filter(m => duesByMonth[m] > (paidByMonth[m] || 0));
         document.getElementById('tpUnpaid').textContent = unpaid.length ? unpaid.join(', ') : 'None';
         
         const totalDue = monthsOrdered.reduce((a, m) => a + duesByMonth[m], 0);
-        const totalPaid = Object.values(approvedByMonth).reduce((a, b) => a + b, 0);
+        const totalPaid = Object.values(paidByMonth).reduce((a, b) => a + b, 0);
         const debt = Math.max(0, totalDue - totalPaid);
         document.getElementById('tpDebt').textContent = formatCurrency(debt);
         
-        // Render history
-        const rows = Object.entries(pays).sort((a, b) => (b[1].paidAt || 0) - (a[1].paidAt || 0)).map(([id, p]) => {
+        // Render history - sort by timestamp if available, else by month
+        const rows = pays.sort((a, b) => {
+          const tsA = a.paidAt || a.timestamp || 0;
+          const tsB = b.paidAt || b.timestamp || 0;
+          return tsB - tsA;
+        }).map(p => {
           const badge = p.approved ? '✅ Approved' : '⏳ Pending';
-          const d = p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-GB', { timeZone: 'Africa/Nairobi' }) : '—';
+          const d = p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-GB') : (p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-GB') : '—');
+          const monthName = typeof p.month === 'number' ? MONTH_NAMES[p.month] : (p.month || '—');
           return `<tr>
-            <td>${p.month || '—'}</td><td>${formatCurrency(p.amount || 0)}</td><td>${p.method || '—'}</td>
-            <td>${p.ref || '—'}</td><td>${p.payerName || '—'}</td><td>${d}</td><td>${badge}</td>
+            <td>${monthName}</td><td>${formatCurrency(p.amount || 0)}</td><td>${p.method || '—'}</td>
+            <td>${p.ref || p.reference || '—'}</td><td>${p.payerName || '—'}</td><td>${d}</td><td>${badge}</td>
           </tr>`;
         }).join('');
         
@@ -1200,12 +1214,6 @@
         // Set defaults
         document.getElementById('tpAmount').value = monthlyFee > 0 ? monthlyFee : '';
         document.getElementById('tpDate').valueAsDate = new Date();
-        
-        // Show section
-        document.getElementById('parentTransportView').classList.remove('hidden');
-        
-        // Hide admin table if parent view
-        document.querySelector('.card:has(#paymentsTable)')?.classList.add('hidden');
       }
 
       // Auth and initialization

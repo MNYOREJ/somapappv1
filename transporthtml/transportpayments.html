@@ -157,7 +157,7 @@
         <p class="muted mb-2">Track all transport-related expenses including fuel, maintenance, repairs, etc.</p>
 
         <div class="grid two" style="margin-bottom: 1.5rem;">
-          <div class="card">
+          <div class="card"> 
             <h3 style="margin-top: 0;">Quick Stats</h3>
             <div style="display: grid; gap: 0.75rem;">
               <div style="display: flex; justify-content: space-between;">
@@ -712,7 +712,7 @@
         state.currentPaymentStudentId = null;
       }
 
-      // Save payment
+      // Save payment (enhanced: also write to canonical year path)
       async function savePayment() {
         const studentId = state.currentPaymentStudentId;
         const month = parseInt(document.getElementById('paymentMonth').value);
@@ -769,6 +769,20 @@
           };
           
           await payRef.set(paymentData);
+
+          // Canonical write: transportPayments/{year}/{studentId}/{paymentId}
+          const canonical = {
+            month,
+            amount,
+            method,
+            reference,
+            payerName,
+            paidAt,
+            notes: notes || '',
+            status: 'pending',
+            createdAt: timestamp
+          };
+          await db.ref(`transportPayments/${year}/${studentId}`).push(canonical);
           
           // Queue for approval - include payment key for matching
           const queueRef = db.ref(`${prefix}pendingApprovals/transportPayments/${payRef.key}`);
@@ -1378,7 +1392,106 @@
         }
       }
 
-      // Check for parent view IMMEDIATELY (before auth state) - parents already authenticated
+      // Year-scoped single-student renderer (strict; never switch student)
+      function monthName(num){ return MONTH_NAMES[num] || ''; }
+      async function loadTransportContextStrict(year, studentId){
+        const db = firebase.database();
+        const [assignSnap, paysSnap, financeSnap, studentSnap] = await Promise.all([
+          db.ref(`transportAssignments/${year}/${studentId}`).once('value'),
+          db.ref(`transportPayments/${year}/${studentId}`).once('value'),
+          db.ref(`financeLedgers/${year}/${studentId}/payments`).once('value'),
+          db.ref(`students/${studentId}`).once('value')
+        ]);
+        const assign = assignSnap.val() || null;
+        const payments = Object.values(paysSnap.val()||{}).map(x=>({
+          month:Number(x.month)||0, amount:Number(x.amount)||0, status:x.status||'pending'
+        }));
+        const finance = Object.values(financeSnap.val()||{});
+        const schoolFeePaid = finance.reduce((a,p)=>a+(Number(p.amount)||0),0);
+        const student = studentSnap.val() || {};
+        return { assign, payments, schoolFeePaid, student };
+      }
+
+      function setText(sel, txt){ const el=document.querySelector(sel); if(el) el.textContent=txt; }
+      function renderIdentityStrict(S){
+        const fullName = `${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`.replace(/\s+/g,' ').trim();
+        // Use table header summary for identity context
+        document.getElementById('paymentSummary').textContent = fullName ? `Payments for ${fullName}` : '';
+      }
+      function renderNoDataStrict(msg){
+        document.getElementById('totalExpected').textContent = '—';
+        document.getElementById('totalCollected').textContent = '—';
+        document.getElementById('totalDebt').textContent = '—';
+        const tbody = document.getElementById('paymentsBody');
+        if (tbody) tbody.innerHTML = '';
+        const empty = document.getElementById('emptyState');
+        if (empty) { empty.textContent = msg || 'No data'; empty.classList.remove('hidden'); }
+      }
+
+      async function renderYearScopedStudentView(studentId){
+        const year = String(state.year);
+        const { assign, payments, schoolFeePaid, student } = await loadTransportContextStrict(year, studentId);
+        renderIdentityStrict(student);
+        if (!assign || assign.status !== 'Using'){
+          renderNoDataStrict(`No transport assignment for ${year}.`);
+          return;
+        }
+        const base = Number(assign.baseMonthlyFee)||0;
+        const startDate = assign.startDate || `${year}-01-01`;
+        const ledger = TransportPricing.buildLedger({ year: Number(year), baseMonthlyFee: base, startDate, payments });
+
+        const now = new Date();
+        const currentMonth = (now.getFullYear()===Number(year)) ? (now.getMonth()+1) : 1;
+        const dueThisMonth = TransportPricing.dueForMonth({ year:Number(year), month:currentMonth, baseMonthlyFee: base, startDate });
+
+        document.getElementById('totalExpected').textContent = formatCurrency(Math.round(dueThisMonth));
+        document.getElementById('totalCollected').textContent = formatCurrency(Math.round(ledger.totals.paid));
+        document.getElementById('totalDebt').textContent = formatCurrency(Math.round(ledger.totals.balance));
+        document.getElementById('monthLabel').textContent = `${MONTH_NAMES[currentMonth]} ${year}`;
+
+        // School fee alignment
+        // Note: only show value; the rest of school columns are fed from student rows
+        // We will update the single-row table to reflect school fee paid from finance ledger
+
+        const unpaid = ledger.months.filter(m=>m.status==='UNPAID'||m.status==='PARTIAL').map(m=>MONTH_NAMES[m.month]).join(', ') || '—';
+
+        const tbody = document.getElementById('paymentsBody');
+        if (tbody){
+          const fullName = `${student.firstName||''} ${student.middleName||''} ${student.lastName||''}`.replace(/\s+/g,' ').trim();
+          const schoolPaid = schoolFeePaid;
+          const feePerYear = Number(student.feePerYear)||0;
+          const schoolDebt = Math.max(0, feePerYear - schoolPaid);
+          const combinedDebt = Math.max(0, schoolDebt + ledger.totals.balance);
+          const rowClass = (combinedDebt>0) ? 'style="background: rgba(239, 68, 68, 0.15); font-weight: 600;"' : '';
+          tbody.innerHTML = `
+            <tr ${rowClass}>
+              <td>${student.admissionNumber || 'N/A'}</td>
+              <td>${fullName}</td>
+              <td>${student.classLevel || '—'}</td>
+              <td>${formatDate(student.timestamp || student.createdAt)}</td>
+              <td>${student.primaryParentContact || 'N/A'}</td>
+              <td>${formatCurrency(feePerYear)}</td>
+              <td id="__schoolPaidCell">${formatCurrency(schoolPaid)}</td>
+              <td style="color: ${schoolDebt>0?'var(--accent-danger)':'var(--accent-success)'};">${formatCurrency(schoolDebt)}</td>
+              <td>—</td>
+              <td>${assign.morningRouteId || '—'}</td>
+              <td>${assign.eveningRouteId || '—'}</td>
+              <td>${formatCurrency(base)}</td>
+              <td style="color: var(--accent-success);">${formatCurrency(ledger.totals.paid)}</td>
+              <td style="color: ${ledger.totals.balance>0?'var(--accent-danger)':'var(--accent-success)'};">${formatCurrency(ledger.totals.balance)}</td>
+              <td style="font-size: 0.75rem;">${unpaid}</td>
+              <td style="color: ${combinedDebt>0?'var(--accent-danger)':'var(--accent-success)'}; font-weight: 700;">${formatCurrency(combinedDebt)}</td>
+              <td class="table-actions">
+                <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
+                <button class="btn secondary" onclick="viewPaymentHistory('${studentId}')">📋 History</button>
+              </td>
+            </tr>`;
+          document.getElementById('emptyState').classList.add('hidden');
+          document.getElementById('paymentSummary').textContent = '1 student on transport';
+        }
+      }
+
+      // Check for parent/single-student view IMMEDIATELY
       const urlParams = new URLSearchParams(window.location.search);
       const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
       const yearParam = urlParams.get('year');
@@ -1425,8 +1538,8 @@
         if (totalDebtEl) totalDebtEl.textContent = 'Loading...';
         if (monthLabelEl) monthLabelEl.textContent = '';
         
-        // Load and render immediately
-        renderParentTransportPayment(studentParam).catch(err => {
+        // Load and render immediately using strict year-scoped data
+        renderYearScopedStudentView(studentParam).catch(err => {
           console.error('Error rendering parent transport payment:', err);
           if (totalExpectedEl) totalExpectedEl.textContent = 'Error';
           if (totalCollectedEl) totalCollectedEl.textContent = 'Error';
@@ -1470,7 +1583,7 @@
           if (studentParam) {
             const newYear = parseInt(year) || state.year;
             state.year = newYear;
-            renderParentTransportPayment(studentId || studentParam);
+            renderYearScopedStudentView(studentId || studentParam);
           }
         });
       }

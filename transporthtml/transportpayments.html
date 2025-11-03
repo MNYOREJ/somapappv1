@@ -1619,16 +1619,22 @@
         const dueThisMonth = TransportPricing.dueForMonth({ year:Number(year), month:focusedMonth, baseMonthlyFee: base, startDate });
         const startDisplay = hasAssignedStart ? formatStartDateDisplay(startDate) : 'N/A';
 
+        // Compute carry-forward debt up to the focused month (exclude future months)
+        const monthsToDate = (ledger.months || []).filter(m => m.month <= focusedMonth && m.status !== 'SKIP');
+        const dueToDate = monthsToDate.reduce((s,m)=> s + (Number(m.due)||0), 0);
+        const paidToDate = monthsToDate.reduce((s,m)=> s + (Number(m.paid)||0), 0);
+        const balanceToDate = Math.max(0, Math.round(dueToDate - paidToDate));
+
         document.getElementById('totalExpected').textContent = formatCurrency(Math.round(dueThisMonth));
-        document.getElementById('totalCollected').textContent = formatCurrency(Math.round(ledger.totals.paid));
-        document.getElementById('totalDebt').textContent = formatCurrency(Math.round(ledger.totals.balance));
+        document.getElementById('totalCollected').textContent = formatCurrency(Math.round(paidToDate));
+        document.getElementById('totalDebt').textContent = formatCurrency(balanceToDate);
         document.getElementById('monthLabel').textContent = `${selectedMonthLabel} ${year}`;
 
         // School fee alignment
         // Note: only show value; the rest of school columns are fed from student rows
         // We will update the single-row table to reflect school fee paid from finance ledger
 
-        const unpaid = ledger.months.filter(m=>m.status==='UNPAID'||m.status==='PARTIAL').map(m=>MONTH_NAMES[m.month]).join(', ') || 'None';
+        const unpaid = monthsToDate.filter(m=>m.status==='UNPAID'||m.status==='PARTIAL').map(m=>MONTH_NAMES[m.month]).join(', ') || 'None';
 
         const tbody = document.getElementById('paymentsBody');
         if (tbody){
@@ -1636,7 +1642,7 @@
           const schoolPaid = schoolFeePaid;
           const feePerYear = Number(student.feePerYear)||0;
           const schoolDebt = Math.max(0, feePerYear - schoolPaid);
-          const combinedDebt = Math.max(0, schoolDebt + ledger.totals.balance);
+          const combinedDebt = Math.max(0, schoolDebt + balanceToDate);
           const morningRoute = assign.amStop || assign.morningRouteId || '&mdash;';
           const eveningRoute = assign.pmStop || assign.eveningRouteId || '&mdash;';
           const currentMonthDue = Math.round(dueThisMonth);
@@ -1662,8 +1668,8 @@
                   Base: ${baseDisplay} &#183; ${selectedMonthLabel}
                 </span>
               </td>
-              <td style="color: var(--accent-success);">${formatCurrency(ledger.totals.paid)}</td>
-              <td style="color: ${ledger.totals.balance>0?'var(--accent-danger)':'var(--accent-success)'};">${formatCurrency(ledger.totals.balance)}</td>
+              <td style="color: var(--accent-success);">${formatCurrency(paidToDate)}</td>
+              <td style="color: ${balanceToDate>0?'var(--accent-danger)':'var(--accent-success)'};">${formatCurrency(balanceToDate)}</td>
               <td style="font-size: 0.75rem;">${unpaid}</td>
               <td style="color: ${combinedDebt>0?'var(--accent-danger)':'var(--accent-success)'}; font-weight: 700;">${formatCurrency(combinedDebt)}</td>
               <td class="table-actions" style="justify-content: flex-end;">
@@ -1680,6 +1686,7 @@
       const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
       const yearParam = urlParams.get('year');
       const monthParam = parseInt(urlParams.get('month'), 10);
+      const schoolParam = urlParams.get('school');
       
       // Initialize year from URL or context
       if (yearParam) {
@@ -1693,6 +1700,13 @@
         state.monthSelectedFromUrl = true;
       } else {
         state.monthSelectedFromUrl = false;
+      }
+      // Apply school from URL early so data loads under correct scope
+      if (schoolParam) {
+        state.school = schoolParam;
+        if (typeof schoolParam === 'string' && schoolParam.startsWith('-')) {
+          window.currentSchoolId = schoolParam;
+        }
       }
       if (yearSelect && state.year) yearSelect.value = state.year;
       

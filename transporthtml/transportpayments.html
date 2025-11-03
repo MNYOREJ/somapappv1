@@ -1567,12 +1567,24 @@
             if (normPhone) {
               const snap = await firebase.database().ref('students').once('value');
               const all = snap.val() || {};
-              const entry = Object.entries(all).find(([k,v]) => {
+              const matches = Object.entries(all).filter(([k,v]) => {
                 const sp = String(v?.primaryParentContact||v?.parentPhone||'').replace(/\D/g,'');
                 return sp && sp.endsWith(normPhone);
               });
-              if (entry) {
-                sid = entry[0];
+              if (matches.length) {
+                // Prefer a child with an assignment in the selected year
+                const year = String(state.year);
+                let picked = null;
+                for (const [kid] of matches) {
+                  const a = await firebase.database().ref(`transportAssignments/${year}/${kid}`).once('value');
+                  if (a.exists()) { picked = kid; break; }
+                }
+                if (!picked) {
+                  // fallback: pick the most recently created student
+                  matches.sort((a,b)=> (Number(b[1]?.timestamp||0) - Number(a[1]?.timestamp||0)));
+                  picked = matches[0][0];
+                }
+                sid = picked;
                 localStorage.setItem('parentFocusStudent', sid);
                 state.currentPaymentStudentId = sid;
                 await renderYearScopedStudentView(sid);

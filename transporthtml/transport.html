@@ -399,30 +399,50 @@
         const studentsOnTransport = Object.keys(state.transportEnrollments || {}).length;
         const notOnTransport = totalStudents > 0 ? totalStudents - studentsOnTransport : '—';
 
-        // Calculate financial KPIs
+        // Calculate financial KPIs (matching transportpayments.html logic)
         let expectedThisMonth = 0;
-        let paidThisMonth = 0;
+        let totalCollected = 0;
         let totalDebt = 0;
 
         const enrollments = state.transportEnrollments || {};
         const payments = state.transportPayments || {};
+        const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
         
         Object.entries(enrollments).forEach(([studentId, enrollment]) => {
           if (!enrollment) return;
           
           const amStop = enrollment.amStop || '';
           const pmStop = enrollment.pmStop || '';
-          const monthlyFee = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
-          expectedThisMonth += monthlyFee;
+          
+          // Current month expected (with multiplier) - for "Expected This Month" KPI
+          const currentMonthExpected = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
+          expectedThisMonth += currentMonthExpected;
 
-          // Get actual payments from transport_payments for this student and month
+          // Calculate total expected and total paid across ALL months (like transportpayments.html)
+          let totalExpected = 0;
+          let totalPaid = 0;
+          
           const studentPayments = payments[studentId] || {};
-          const monthPayments = Object.values(studentPayments).filter(payment => 
-            payment && payment.month === state.month && payment.year === state.year
-          );
-          const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-          paidThisMonth += monthPaid;
-          totalDebt += Math.max(0, monthlyFee - monthPaid);
+          const paymentsArray = Array.isArray(studentPayments) ? studentPayments : Object.values(studentPayments || {});
+          
+          for (let month = 1; month <= 12; month++) {
+            const monthlyExpected = TransportPricing.expectedForMonth(amStop, pmStop, month);
+            totalExpected += monthlyExpected;
+            
+            // Handle both number and month name formats for payments
+            const monthPayments = paymentsArray.filter(p => {
+              if (!p || !p.month) return false;
+              if (typeof p.month === 'number') return p.month === month;
+              if (typeof p.month === 'string') return MONTH_NAMES[month] === p.month;
+              return false;
+            });
+            
+            const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+            totalPaid += monthPaid;
+          }
+          
+          totalCollected += totalPaid;
+          totalDebt += Math.max(0, totalExpected - totalPaid);
         });
 
         const cards = [
@@ -450,16 +470,16 @@
           },
           {
             id: "paid-month",
-            label: "Paid This Month",
-            value: formatCurrency(paidThisMonth),
-            description: `${Math.round((paidThisMonth/expectedThisMonth)*100) || 0}% collected`,
+            label: "Total Collected",
+            value: formatCurrency(totalCollected),
+            description: "All transport payments",
             color: "success",
           },
           {
             id: "debt-month",
-            label: "Outstanding Debt",
+            label: "Total Transport Debt",
             value: formatCurrency(totalDebt),
-            description: "Overdue payments",
+            description: "Unpaid amounts",
             color: "danger",
           },
         ];
@@ -1002,8 +1022,32 @@
           await loadDriversCached();
 
           // Load payments in background (needed for KPI calculations)
-          firebase.database().ref('transport_payments').once('value').then(paymentsSnap => {
-            state.transportPayments = paymentsSnap.val() || {};
+          // Use same data source as transportpayments.html (transportLedgers)
+          const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
+          const year = String(state.year);
+          
+          Promise.all([
+            firebase.database().ref(`${prefix}transportLedgers/${year}`).once('value').catch(() => ({ val: () => null })),
+            firebase.database().ref(`${prefix}transport_payments`).once('value').catch(() => ({ val: () => null }))
+          ]).then(([ledgersSnap, legacySnap]) => {
+            // New format: transportLedgers/{year}/{studentId}/payments
+            const paymentsData = {};
+            const ledgers = ledgersSnap.val() || {};
+            Object.entries(ledgers).forEach(([studentId, ledger]) => {
+              if (ledger && ledger.payments) {
+                paymentsData[studentId] = Object.values(ledger.payments);
+              }
+            });
+            
+            // Also check legacy path for backward compatibility
+            const legacyPayments = legacySnap.val() || {};
+            Object.entries(legacyPayments).forEach(([studentId, payments]) => {
+              if (!paymentsData[studentId]) {
+                paymentsData[studentId] = Array.isArray(payments) ? payments : Object.values(payments || {});
+              }
+            });
+            
+            state.transportPayments = paymentsData;
             renderKpis(); // Re-render KPIs when payments load
           }).catch(err => {
             console.warn('Failed to load payments:', err);

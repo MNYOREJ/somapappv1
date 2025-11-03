@@ -40,7 +40,7 @@
           </select>
         </div>
         <script src="../Todashboardhtml/yearContext.js"></script>
-        <a href="transport.html" class="btn secondary">← Back to Dashboard</a>
+        <a id="backButton" href="transport.html" class="btn secondary">← Back to Dashboard</a>
       </div>
     </div>
 
@@ -213,6 +213,36 @@
         </div>
       </section>
     </main>
+
+    <!-- Payment History Modal -->
+    <div id="historyModal" class="modal hidden">
+      <div class="modal-content" style="max-width: 1200px;">
+        <div class="flex space center mb-2">
+          <h2 style="margin: 0;" id="historyModalTitle">Payment History</h2>
+          <button class="btn secondary" onclick="closeHistoryModal()">Close</button>
+        </div>
+        <div style="overflow-x: auto; margin-top: 1.5rem;">
+          <table class="table" id="historyTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Month</th>
+                <th>Amount</th>
+                <th>Method</th>
+                <th>Reference</th>
+                <th>Payer Name</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody">
+              <!-- Populated by JavaScript -->
+            </tbody>
+          </table>
+          <div id="historyEmpty" class="empty hidden">No payments recorded</div>
+        </div>
+      </div>
+    </div>
 
     <!-- Record Payment Modal -->
     <div id="paymentModal" class="modal hidden">
@@ -396,10 +426,20 @@
         return debt > 0 ? `Inst ${Math.min(6, Math.ceil(debt / (feePerYear / 6)))}` : '—';
       }
 
+      // Calculate base monthly fee (without month multipliers) - for display in table
+      function calculateBaseMonthlyFee(amStop, pmStop) {
+        const amPrice = amStop ? TransportPricing.priceForStop(amStop) : 0;
+        const pmPrice = pmStop ? TransportPricing.priceForStop(pmStop) : 0;
+        return amPrice + pmPrice; // Base fee without multipliers
+      }
+
       // Calculate transport payment status
       function calculateTransportStatus(enrollment, payments) {
         const amStop = enrollment.amStop || '';
         const pmStop = enrollment.pmStop || '';
+        
+        // Base monthly fee (without multipliers) - for display
+        const baseMonthlyFee = calculateBaseMonthlyFee(amStop, pmStop);
         
         let totalExpected = 0;
         let totalPaid = 0;
@@ -410,7 +450,12 @@
           const monthlyExpected = TransportPricing.expectedForMonth(amStop, pmStop, month);
           totalExpected += monthlyExpected;
           
-          const monthPayments = payments.filter(p => p.month === month);
+          // Handle both number and month name formats for payments
+          const monthPayments = payments.filter(p => {
+            if (typeof p.month === 'number') return p.month === month;
+            if (typeof p.month === 'string') return MONTH_NAMES[month] === p.month;
+            return false;
+          });
           const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
           totalPaid += monthPaid;
           
@@ -421,12 +466,16 @@
         
         const debt = Math.max(0, totalExpected - totalPaid);
         
+        // Current month expected (with multiplier) - for KPI calculations
+        const currentMonthExpected = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
+        
         return {
           totalExpected,
           totalPaid,
           debt,
           unpaidMonths: unpaidMonths.join(', ') || '—',
-          monthlyFee: TransportPricing.expectedForMonth(amStop, pmStop, state.month),
+          monthlyFee: baseMonthlyFee, // Base fee for table display (e.g., 35,500)
+          currentMonthExpected, // Month-specific fee with multiplier for KPIs
         };
       }
 
@@ -440,7 +489,8 @@
           const payments = Object.values(state.transportPayments[studentId] || {});
           const status = calculateTransportStatus(enrollment, payments);
           
-          totalExpected += status.monthlyFee;
+          // Use currentMonthExpected for KPI (includes month multiplier)
+          totalExpected += status.currentMonthExpected;
           totalCollected += status.totalPaid;
           totalDebt += status.debt;
         });
@@ -623,12 +673,16 @@
         const payments = Object.values(state.transportPayments[studentId] || {});
         const status = calculateTransportStatus(enrollment, payments);
         
+        // Get current month's expected amount (with multiplier)
+        const currentMonthAmount = status.currentMonthExpected || status.monthlyFee;
+        
         document.getElementById('paymentStudentInfo').innerHTML = `
           <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
             <div><strong>Name:</strong> ${fullName}</div>
             <div><strong>Admission No:</strong> ${student.admissionNumber}</div>
             <div><strong>Class:</strong> ${student.classLevel}</div>
-            <div><strong>Monthly Fee:</strong> ${formatCurrency(status.monthlyFee)}</div>
+            <div><strong>Base Monthly Fee:</strong> ${formatCurrency(status.monthlyFee)}</div>
+            <div><strong>Current Month Fee (${MONTH_NAMES[state.month]}):</strong> ${formatCurrency(currentMonthAmount)}</div>
             <div><strong>Total Debt:</strong> <span style="color: var(--accent-danger);">${formatCurrency(status.debt)}</span></div>
             <div><strong>Unpaid Months:</strong> ${status.unpaidMonths}</div>
           </div>
@@ -636,7 +690,7 @@
         
         // Set current month as default
         document.getElementById('paymentMonth').value = state.month;
-        document.getElementById('paymentAmount').value = status.monthlyFee;
+        document.getElementById('paymentAmount').value = currentMonthAmount;
         document.getElementById('paymentDate').valueAsDate = new Date();
         document.getElementById('paymentReference').value = '';
         document.getElementById('paymentPayerName').value = '';
@@ -789,6 +843,11 @@
       // View payment history
       function viewPaymentHistory(studentId) {
         const student = state.students[studentId];
+        if (!student) {
+          showToast('Student not found', 'bad');
+          return;
+        }
+        
         let payments = state.transportPayments[studentId] || {};
         
         // Handle array or object format
@@ -801,31 +860,47 @@
         }
         
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
+        const admissionNo = student.admissionNumber || 'N/A';
         
-        let html = `<h3>${fullName} - Payment History</h3><table class="table mt-2"><thead><tr><th>Date</th><th>Month</th><th>Amount</th><th>Method</th><th>Reference</th><th>Payer</th><th>Status</th></tr></thead><tbody>`;
+        // Update modal title
+        document.getElementById('historyModalTitle').textContent = `Payment History - ${fullName} (${admissionNo})`;
+        
+        const historyBody = document.getElementById('historyBody');
+        const historyEmpty = document.getElementById('historyEmpty');
         
         if (payments.length === 0) {
-          html += '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No payments recorded</td></tr>';
+          historyBody.innerHTML = '';
+          historyEmpty.classList.remove('hidden');
         } else {
-          payments.forEach(p => {
-            const badge = p.approved ? '✅ Approved' : '⏳ Pending';
+          historyEmpty.classList.add('hidden');
+          historyBody.innerHTML = payments.map(p => {
+            const isApproved = p.approved === true || p.approved === 'true';
+            const statusBadge = isApproved 
+              ? '<span class="chip ok" style="background: rgba(16, 185, 129, 0.15); color: #86efac; border: 1px solid rgba(16, 185, 129, 0.35); padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">✅ Approved</span>'
+              : '<span class="chip warn" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.35); padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">⏳ Pending</span>';
+            
             const d = p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-GB') : (p.timestamp ? new Date(p.timestamp).toLocaleDateString('en-GB') : '—');
             const monthName = typeof p.month === 'number' ? MONTH_NAMES[p.month] : (p.month || '—');
-            html += `<tr>
-              <td>${d}</td>
+            const rowColor = isApproved ? 'style="background: rgba(16, 185, 129, 0.05);"' : 'style="background: rgba(245, 158, 11, 0.05);"';
+            
+            return `<tr ${rowColor}>
+              <td style="font-weight: 600;">${d}</td>
               <td>${monthName}</td>
-              <td>${formatCurrency(p.amount)}</td>
+              <td style="color: var(--accent-success); font-weight: 700;">${formatCurrency(p.amount || 0)}</td>
               <td>${p.method || '—'}</td>
-              <td>${p.ref || p.reference || '—'}</td>
+              <td style="font-family: monospace; font-size: 0.875rem;">${p.ref || p.reference || '—'}</td>
               <td>${p.payerName || '—'}</td>
-              <td>${badge}</td>
+              <td>${statusBadge}</td>
+              <td style="font-size: 0.875rem; color: var(--text-secondary);">${p.notes || '—'}</td>
             </tr>`;
-          });
+          }).join('');
         }
         
-        html += '</tbody></table>';
-        
-        alert(html); // In a real app, this would be a modal
+        document.getElementById('historyModal').classList.remove('hidden');
+      }
+      
+      function closeHistoryModal() {
+        document.getElementById('historyModal').classList.add('hidden');
       }
 
       // Add expense
@@ -1056,9 +1131,11 @@
         const parentPhone = normalizePhone(localStorage.getItem('parentPhone') || '');
         
         // Load ONLY this specific student's data (fast!)
-        const [sSnap, enrollSnap, ledSnap, finSnap] = await Promise.all([
+        // Use same data source as admin view (transportLedgers)
+        const [sSnap, enrollSnap, ledSnap, legacySnap, finSnap] = await Promise.all([
           firebase.database().ref(`${prefix}students/${studentId}`).once('value'),
           firebase.database().ref(`${prefix}transport_enrollments/${studentId}`).once('value').catch(() => ({ val: () => null })),
+          firebase.database().ref(`${prefix}transportLedgers/${y}/${studentId}/payments`).once('value').catch(() => ({ val: () => null })),
           firebase.database().ref(`${prefix}transport_payments/${studentId}`).once('value').catch(() => ({ val: () => null })),
           firebase.database().ref(`${prefix}finance/${y}/${studentId}/payments`).once('value').catch(() => ({ val: () => null }))
         ]);
@@ -1066,13 +1143,28 @@
         const S = sSnap.val() || {};
         const enrollment = enrollSnap.val() || {};
         let pays = ledSnap.val() || {};
+        
+        // Also check legacy path if no data in new path
+        if (!pays || (typeof pays === 'object' && Object.keys(pays).length === 0)) {
+          const legacyPays = legacySnap.val() || {};
+          if (legacyPays && typeof legacyPays === 'object') {
+            pays = Object.values(legacyPays);
+          } else {
+            pays = legacyPays;
+          }
+        } else {
+          // New format - convert to array
+          if (typeof pays === 'object' && !Array.isArray(pays)) {
+            pays = Object.values(pays);
+          }
+        }
+        
         const schoolPayments = finSnap.val() || {};
         
-        // Convert payments to array if object
-        if (pays && typeof pays === 'object' && !Array.isArray(pays)) {
-          pays = Object.values(pays);
+        // Ensure pays is an array
+        if (!Array.isArray(pays)) {
+          pays = pays ? [pays] : [];
         }
-        if (!Array.isArray(pays)) pays = [];
         
         // Verify parent owns student (but don't block if no phone match - parents already authenticated)
         const studentPhone = normalizePhone(S.motherPhone || S.parentPhone || S.primaryParentContact || '');
@@ -1101,41 +1193,40 @@
         
         const fullName = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim() || '—';
         
-        // Get monthly fee from enrollment (handle both formats)
-        let monthlyFee = 0;
-        if (enrollment.monthlyFee) {
-          monthlyFee = Number(enrollment.monthlyFee || 0);
-        } else if (enrollment.amStop || enrollment.pmStop) {
-          const amStop = enrollment.amStop || '';
-          const pmStop = enrollment.pmStop || '';
-          monthlyFee = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
-        }
+        // Get base monthly fee (without multipliers) for display
+        const amStop = enrollment.amStop || '';
+        const pmStop = enrollment.pmStop || '';
+        const baseMonthlyFee = calculateBaseMonthlyFee(amStop, pmStop);
+        const currentMonthExpected = TransportPricing.expectedForMonth(amStop, pmStop, state.month);
         
         // Calculate debt - for parent view show all payments (approved or pending)
-        const paidByMonth = {};
-        pays.forEach(p => {
-          if (p && p.month) {
-            const monthName = typeof p.month === 'number' ? MONTH_NAMES[p.month] : p.month;
-            paidByMonth[monthName] = (paidByMonth[monthName] || 0) + Number(p.amount || 0);
+        // Use the same logic as calculateTransportStatus for consistency
+        let totalExpected = 0;
+        let totalPaid = 0;
+        const unpaidMonths = [];
+        
+        for (let month = 1; month <= 12; month++) {
+          const monthlyExpected = TransportPricing.expectedForMonth(amStop, pmStop, month);
+          totalExpected += monthlyExpected;
+          
+          const monthPayments = pays.filter(p => {
+            if (!p || !p.month) return false;
+            if (typeof p.month === 'number') return p.month === month;
+            if (typeof p.month === 'string') return MONTH_NAMES[month] === p.month;
+            return false;
+          });
+          const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          totalPaid += monthPaid;
+          
+          if (monthPaid < monthlyExpected && monthlyExpected > 0) {
+            unpaidMonths.push(MONTH_NAMES[month]);
           }
-        });
+        }
         
-        const startMonth = enrollment.startMonth || 'January';
-        const startIdx = Math.max(0, MONTH_NAMES.indexOf(startMonth));
-        const monthsOrdered = [...MONTH_NAMES.slice(1)];
-        const duesByMonth = {};
-        monthsOrdered.forEach(m => {
-          const active = MONTH_NAMES.indexOf(m) >= startIdx;
-          duesByMonth[m] = active ? monthlyFee : 0;
-        });
+        const debt = Math.max(0, totalExpected - totalPaid);
         
-        const unpaid = monthsOrdered.filter(m => duesByMonth[m] > (paidByMonth[m] || 0));
-        const totalDue = monthsOrdered.reduce((a, m) => a + duesByMonth[m], 0);
-        const totalPaid = Object.values(paidByMonth).reduce((a, b) => a + b, 0);
-        const debt = Math.max(0, totalDue - totalPaid);
-        
-        // Render KPIs for THIS child only
-        document.getElementById('totalExpected').textContent = formatCurrency(monthlyFee);
+        // Render KPIs for THIS child only - show current month expected in KPI
+        document.getElementById('totalExpected').textContent = formatCurrency(currentMonthExpected);
         document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
         document.getElementById('totalDebt').textContent = formatCurrency(debt);
         document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
@@ -1164,10 +1255,10 @@
             <td>${calculateDebtTill(S)}</td>
             <td>${enrollment.amStop || '—'}</td>
             <td>${enrollment.pmStop || '—'}</td>
-            <td>${formatCurrency(monthlyFee)}</td>
+            <td>${formatCurrency(baseMonthlyFee)}</td>
             <td style="color: var(--accent-success);">${formatCurrency(totalPaid)}</td>
             <td style="color: ${debt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">${formatCurrency(debt)}</td>
-            <td style="font-size: 0.75rem;">${unpaid.length ? unpaid.join(', ') : '—'}</td>
+            <td style="font-size: 0.75rem;">${unpaidMonths.length ? unpaidMonths.join(', ') : '—'}</td>
             <td style="color: ${combinedDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'}; font-weight: 700;">${formatCurrency(combinedDebt)}</td>
             <td class="table-actions">
               <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
@@ -1198,6 +1289,14 @@
           // Parent view mode - render immediately (parents already authenticated via index.html)
           localStorage.setItem('parentFocusStudent', studentParam);
           state.currentPaymentStudentId = studentParam;
+          
+          // Change back button to go to parent.html
+          const backBtn = document.getElementById('backButton');
+          if (backBtn) {
+            backBtn.href = '../parent.html';
+            backBtn.textContent = '← Back to Parent Dashboard';
+          }
+          
           renderParentTransportPayment(studentParam);
           return; // Don't continue with admin check
         }

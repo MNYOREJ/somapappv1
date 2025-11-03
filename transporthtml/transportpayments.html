@@ -1221,10 +1221,19 @@
       statusFilter.addEventListener('change', renderPaymentsTable);
 
       // Update due date display
-      const today = new Date();
-      const dueDay = 27;
-      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
-      document.getElementById('dueDate').textContent = `${dueDay}th ${MONTH_NAMES[nextMonth.getMonth() + 1]} ${nextMonth.getFullYear()}`;
+      (function updateDueDate(){
+        const params = new URLSearchParams(window.location.search);
+        const yearParam = parseInt(params.get('year'), 10);
+        const dueDay = 27;
+        // If year is provided in URL, show 27th December of that year; else show next month's 27th
+        if (Number.isFinite(yearParam)) {
+          document.getElementById('dueDate').textContent = `${dueDay}th December ${yearParam}`;
+        } else {
+          const today = new Date();
+          const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+          document.getElementById('dueDate').textContent = `${dueDay}th ${MONTH_NAMES[nextMonth.getMonth() + 1]} ${nextMonth.getFullYear()}`;
+        }
+      })();
 
       // Parent transport payment renderer - unified view with existing KPIs and table
       async function renderParentTransportPayment(studentId) {
@@ -1580,7 +1589,17 @@
         // No student param: resolve parent context automatically
         const backBtn = document.getElementById('backButton');
         if (backBtn) { backBtn.href = '../parent.html'; backBtn.textContent = '← Back to Parent Dashboard'; }
-
+        
+        // If explicit school is provided in URL, resolve and load ALL data immediately (admin-like view)
+        const schoolParam = urlParams.get('school');
+        if (schoolParam) {
+          state.school = schoolParam;
+          // Initialize year selector if present
+          if (yearSelect && state.year) yearSelect.value = state.year;
+          // Load full registry for the given school/year without requiring auth
+          resolveSchoolIdIfNeeded().then(() => loadAllData());
+          // Skip parent auto-resolution flow below
+        } else {
         const tryResolveAndRender = async (user) => {
           try {
             // Try local sources first
@@ -1639,7 +1658,7 @@
 
         // Use auth state if available, else attempt without
         const current = firebase.auth().currentUser;
-            if (current) {
+        if (current) {
           resolveSchoolIdIfNeeded().then(() => tryResolveAndRender(current));
         } else {
           firebase.auth().onAuthStateChanged((user) => {
@@ -1648,6 +1667,7 @@
               tryResolveAndRender(user);
             });
           });
+        }
         }
       }
       

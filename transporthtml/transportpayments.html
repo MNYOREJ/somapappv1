@@ -1546,32 +1546,64 @@
           if (totalDebtEl) totalDebtEl.textContent = 'Error';
         });
       } else {
-        // Admin view mode - wait for auth state
-        firebase.auth().onAuthStateChanged((user) => {
-          state.user = user;
-          
-          if (user) {
-            firebase.database().ref(`users/${user.uid}/role`).get()
-              .then((snapshot) => {
-                state.role = TransportRoles.normalize(snapshot.val());
-                
-                if (!TransportRoles.isAdmin(state.role)) {
-                  alert('Access denied. Admin privileges required.');
-                  window.location.href = 'transport.html';
-                  return;
-                }
-                
-                loadAllData();
-              })
-              .catch((err) => {
-                console.error(err);
-                alert('Error verifying permissions');
+        // No student param: resolve parent context automatically
+        const backBtn = document.getElementById('backButton');
+        if (backBtn) { backBtn.href = '../parent.html'; backBtn.textContent = '← Back to Parent Dashboard'; }
+
+        const tryResolveAndRender = async (user) => {
+          try {
+            // Try local sources first
+            let sid = localStorage.getItem('parentFocusStudent')
+              || localStorage.getItem('parent_student')
+              || localStorage.getItem('studentKey');
+            if (sid) {
+              state.currentPaymentStudentId = sid;
+              await renderYearScopedStudentView(sid);
+              return;
+            }
+            // Try phone mapping to students
+            const phone = (user && user.phoneNumber) ? String(user.phoneNumber).replace(/\D/g,'') : (localStorage.getItem('parentPhone')||'');
+            const normPhone = phone ? phone.replace(/\D/g,'') : '';
+            if (normPhone) {
+              const snap = await firebase.database().ref('students').once('value');
+              const all = snap.val() || {};
+              const entry = Object.entries(all).find(([k,v]) => {
+                const sp = String(v?.primaryParentContact||v?.parentPhone||'').replace(/\D/g,'');
+                return sp && sp.endsWith(normPhone);
               });
-          } else {
-            alert('Please sign in to access this page');
-            window.location.href = 'transport.html';
+              if (entry) {
+                sid = entry[0];
+                localStorage.setItem('parentFocusStudent', sid);
+                state.currentPaymentStudentId = sid;
+                await renderYearScopedStudentView(sid);
+                return;
+              }
+            }
+            // Fallback: show friendly message
+            renderNoDataStrict('No child found for your account for this year.');
+          } catch (e) {
+            console.error('Parent resolve error', e);
+            renderNoDataStrict('Unable to load transport information.');
           }
-        });
+        };
+
+        const totalExpectedEl = document.getElementById('totalExpected');
+        const totalCollectedEl = document.getElementById('totalCollected');
+        const totalDebtEl = document.getElementById('totalDebt');
+        if (totalExpectedEl) totalExpectedEl.textContent = 'Loading...';
+        if (totalCollectedEl) totalCollectedEl.textContent = 'Loading...';
+        if (totalDebtEl) totalDebtEl.textContent = 'Loading...';
+
+        // Use auth state if available, else attempt without
+        const current = firebase.auth().currentUser;
+        if (current) {
+          tryResolveAndRender(current);
+        } else {
+          firebase.auth().onAuthStateChanged((user) => {
+            if (!user) { tryResolveAndRender(null); return; }
+            tryResolveAndRender(user);
+          });
+        }
       }
       
       // Listen to year changes for parent view

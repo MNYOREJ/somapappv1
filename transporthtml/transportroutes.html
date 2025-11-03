@@ -174,6 +174,53 @@
       { names: ['kiserian','chekereni','duka bovu','tengeru','ngulelo','kwamrefu','shangarai atomic'], price: 44000 }
     ];
 
+    // ===== DEFINE BUTTON HANDLERS EARLY SO ONCLICK WORKS =====
+    console.log('🔧 Defining global handler functions...');
+    
+    // These functions are called by onclick attributes in HTML
+    window.handleAddStop = function() {
+      console.log('➕ Add Stop clicked');
+      const year = Number(window.somapYearContext?.getSelectedYear() || 2025);
+      openEditStopModal(null, year);
+    };
+    
+    window.handleBulkImport = function() {
+      console.log('🚀 Bulk Import clicked');
+      bulkImportAllYears();
+    };
+    
+    window.handleMigrateLegacy = function() {
+      console.log('📦 Import This Year clicked');
+      migrateLegacyRoutes();
+    };
+    
+    window.handleSaveMultipliers = function() {
+      console.log('💾 Save Multipliers clicked');
+      const year = Number(window.somapYearContext?.getSelectedYear() || 2025);
+      const payload = {};
+      
+      Object.entries(multInputs).forEach(([m, id]) => {
+        const elem = document.getElementById(id);
+        if (elem) {
+          const v = Number(elem.value);
+          payload[m] = Number.isFinite(v) ? v : 1.0;
+        }
+      });
+      
+      db.ref(`transportSettings/${year}/monthMultipliers`).set(payload)
+        .then(() => {
+          console.log('✅ Multipliers saved');
+          showToast(`✅ Monthly multipliers saved for ${year}!`);
+        })
+        .catch(error => {
+          console.error('❌ Error saving multipliers:', error);
+          showToast('Failed to save multipliers', 'bad');
+        });
+    };
+    
+    console.log('✅ Global handlers defined');
+    // ===== END HANDLERS =====
+
     function showToast(message, tone = "ok") {
       if (!toast) {
         toast = document.getElementById("toast");
@@ -616,73 +663,7 @@
       }
     }
 
-    // Global handler functions (exposed for both inline onclick and addEventListener)
-    window.handleAddStop = function() {
-      try {
-        console.log('➕ Add Stop handler called');
-        const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-        console.log('📅 Opening modal for year:', year);
-        openEditStopModal(null, year);
-      } catch (error) {
-        console.error('❌ Error in handleAddStop:', error);
-        showToast('Error opening add stop modal', 'bad');
-      }
-    };
-    
-    window.handleBulkImport = function() {
-      try {
-        console.log('🚀 Bulk Import handler called');
-        bulkImportAllYears();
-      } catch (error) {
-        console.error('❌ Error in handleBulkImport:', error);
-        showToast('Error starting bulk import', 'bad');
-      }
-    };
-    
-    window.handleMigrateLegacy = function() {
-      try {
-        console.log('📦 Import This Year handler called');
-        migrateLegacyRoutes();
-      } catch (error) {
-        console.error('❌ Error in handleMigrateLegacy:', error);
-        showToast('Error starting import', 'bad');
-      }
-    };
-    
-    window.handleSaveMultipliers = function() {
-      try {
-        console.log('💾 Save Multipliers handler called');
-        const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-        console.log('📅 Saving multipliers for year:', year);
-        
-        const payload = {};
-        let inputCount = 0;
-        
-        Object.entries(multInputs).forEach(([m, id]) => {
-          const elem = document.getElementById(id);
-          if (elem) {
-            const v = Number(elem.value);
-            payload[m] = Number.isFinite(v) ? v : 1.0;
-            inputCount++;
-          }
-        });
-        
-        console.log(`📊 Saving ${inputCount} multipliers:`, payload);
-
-        db.ref(`transportSettings/${year}/monthMultipliers`).set(payload)
-          .then(() => {
-            console.log('✅ Multipliers saved successfully');
-            showToast(`✅ Monthly multipliers saved for ${year}!`);
-          })
-          .catch(error => {
-            console.error('❌ Error saving multipliers:', error);
-            showToast('Failed to save multipliers', 'bad');
-          });
-      } catch (error) {
-        console.error('❌ Error in handleSaveMultipliers:', error);
-        showToast('Error saving multipliers', 'bad');
-      }
-    };
+    // Handlers already defined at top of script (lines 177-222)
 
     // Event listeners
     function setupEventListeners() {
@@ -717,40 +698,21 @@
         saveMultBtn: !!saveMultBtn
       });
       
-      // Attach event listeners with error handling
+      // Verify buttons exist (onclick already defined in HTML)
       if (addStopBtn) {
-        // Remove old onclick attribute to avoid double-firing
-        addStopBtn.removeAttribute('onclick');
-        addStopBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          console.log('🔘 Add Stop button clicked!');
-          window.handleAddStop();
-        });
-        console.log('✅ Add Stop button listener attached');
+        console.log('✅ Add Stop button found');
       } else {
         console.error('❌ Add Stop button not found!');
       }
 
       if (bulkImportBtn) {
-        bulkImportBtn.removeAttribute('onclick');
-        bulkImportBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          console.log('🔘 Bulk Import button clicked!');
-          window.handleBulkImport();
-        });
-        console.log('✅ Bulk Import button listener attached');
+        console.log('✅ Bulk Import button found');
       } else {
         console.error('❌ Bulk Import button not found!');
       }
 
       if (migrateLegacyBtn) {
-        migrateLegacyBtn.removeAttribute('onclick');
-        migrateLegacyBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          console.log('🔘 Import This Year button clicked!');
-          window.handleMigrateLegacy();
-        });
-        console.log('✅ Import This Year button listener attached');
+        console.log('✅ Import This Year button found');
       } else {
         console.error('❌ Import This Year button not found!');
       }
@@ -788,13 +750,7 @@
       }
 
       if (saveMultBtn) {
-        saveMultBtn.removeAttribute('onclick');
-        saveMultBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          console.log('🔘 Save Multipliers button clicked!');
-          window.handleSaveMultipliers();
-        });
-        console.log('✅ Save Multipliers button listener attached');
+        console.log('✅ Save Multipliers button found');
       } else {
         console.error('❌ Save Multipliers button not found!');
       }

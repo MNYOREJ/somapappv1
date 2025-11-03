@@ -71,6 +71,7 @@
         </div>
         <div class="flex">
           <input id="stopSearch" type="text" placeholder="Search stop..." style="max-width: 250px;" />
+          <button class="btn" id="migrateLegacyBtn" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">📦 Import Legacy Routes</button>
           <button class="btn success" id="addStopBtn">+ Add Stop</button>
         </div>
       </div>
@@ -86,23 +87,25 @@
       <div class="flex space center mb-2">
         <div>
           <h2 style="margin: 0;">📆 Monthly Multipliers (<span id="yrB">—</span>)</h2>
-          <p class="muted" style="margin: 0.5rem 0 0 0;">Set different multipliers for each month (e.g., January = 1.5×, June = 0× for no payment)</p>
+          <p class="muted" style="margin: 0.5rem 0 0 0;">Base Fee × Multiplier = Actual Monthly Fee</p>
         </div>
-        <button class="btn success" id="saveMultBtn">💾 Save Multipliers</button>
+        <button class="btn success" id="saveMultBtn">💾 Save</button>
       </div>
       
-      <div id="multGrid" class="grid four" style="margin-top: 1.5rem; gap: 1rem;">
-        <!-- Populated by JavaScript -->
+      <div style="margin-top: 1rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem;">
+        <div id="multGrid" style="display: contents;">
+          <!-- Populated by JavaScript -->
+        </div>
       </div>
       
-      <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.2);">
-        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.875rem;">How Multipliers Work:</h4>
-        <p style="margin: 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
-          Each month's actual fee = <strong>Base Monthly Fee × Multiplier</strong><br/>
-          Example: If a stop's base fee is TSh 20,000 and January multiplier is 1.5, then January fee = 20,000 × 1.5 = TSh 30,000<br/>
-          Set multiplier to 0 for months with no payment (e.g., June, December for holidays)
+      <details style="margin-top: 1rem; padding: 0.75rem; background: rgba(59, 130, 246, 0.05); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.15);">
+        <summary style="cursor: pointer; font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">ℹ️ How Multipliers Work</summary>
+        <p style="margin: 0.75rem 0 0 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5;">
+          <strong>Formula:</strong> Monthly Fee = Base Fee × Multiplier<br/>
+          <strong>Example:</strong> Base TSh 20,000 × Jan 1.5 = TSh 30,000<br/>
+          <strong>Holidays:</strong> Set to 0 for months with no payment (June, December)
         </p>
-      </div>
+      </details>
     </section>
   </main>
 
@@ -153,12 +156,25 @@
     const stopsList = document.getElementById("stopsList");
     const emptyStops = document.getElementById("emptyStops");
     const addStopBtn = document.getElementById("addStopBtn");
+    const migrateLegacyBtn = document.getElementById("migrateLegacyBtn");
     const stopSearch = document.getElementById("stopSearch");
     const editStopModal = document.getElementById("editStopModal");
     const closeEditStopModal = document.getElementById("closeEditStopModal");
     const saveEditStop = document.getElementById("saveEditStop");
     const cancelEditStop = document.getElementById("cancelEditStop");
     const saveMultBtn = document.getElementById("saveMultBtn");
+
+    // Legacy routes from the old hardcoded system
+    const LEGACY_ROUTES = [
+      { names: ['jirani na shule','mazengo','mbezi','msikitini','mlimani rc','uswahilini kanisani','international','kona dampo','mauwa','mwisho wa fensi','ghati','mnara wa halotel'], price: 17000 },
+      { names: ['sinoni','kidemi','soko mjinga','mnara wa voda','mbugani kwenye lami tu'], price: 18500 },
+      { names: ['glorious','ushirika','tanga kona','njia mtoni','kaburi moja','kwa malaika','savanna','dampo','darajani','kikwete road','boma kubwa','kiwetu pazuri','umoja road','njiro ndogo','king david'], price: 21000 },
+      { names: ['chavda','matokeo','milano','jamhuri','felix mrema','lemara','bonisite','intel','patel','terrati','si mbaoil'], price: 24000 },
+      { names: ['mapambazuko','mkono wa madukani','soweto','mianzini barabarani','eliboru jr','green valley','country coffee','maua','pepsi','majengo'], price: 25000 },
+      { names: ['sanawari','sekei','shabani','kimandolu','kijenge','mkono wa shuleni'], price: 28000 },
+      { names: ['suye','moshono','nado','mwanama reli','kisongo'], price: 38000 },
+      { names: ['kiserian','chekereni','duka bovu','tengeru','ngulelo','kwamrefu','shangarai atomic'], price: 44000 }
+    ];
 
     function showToast(message, tone = "ok") {
       toast.textContent = message;
@@ -357,17 +373,80 @@
         const id = 'mm_' + m;
         multInputs[m] = id;
         
+        // Compact card with color coding
+        const isZero = v === 0;
+        const isHigh = v > 1.2;
+        const bgColor = isZero ? 'rgba(239, 68, 68, 0.1)' : (isHigh ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.05)');
+        const borderColor = isZero ? 'rgba(239, 68, 68, 0.3)' : (isHigh ? 'rgba(16, 185, 129, 0.3)' : 'rgba(100, 116, 139, 0.15)');
+        
         return `
-          <div class="card" style="padding: 1rem;">
-            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.875rem;">${label}</label>
+          <div style="padding: 0.75rem; background: ${bgColor}; border: 1px solid ${borderColor}; border-radius: 8px;">
+            <label style="display: block; margin-bottom: 0.35rem; font-weight: 600; font-size: 0.75rem; color: var(--text-primary);">${label}</label>
             <input id="${id}" type="number" step="0.01" min="0" value="${v}" 
-                   style="width: 100%; padding: 0.5rem; font-size: 1rem; font-weight: 600;" />
-            <div style="margin-top: 0.25rem; font-size: 0.7rem; color: var(--text-muted);">
-              Example: Base 20k × ${v} = ${formatCurrency(20000 * v)}
+                   style="width: 100%; padding: 0.4rem; font-size: 0.95rem; font-weight: 700; border: 1px solid rgba(100, 116, 139, 0.2); border-radius: 6px; background: rgba(255, 255, 255, 0.5);" />
+            <div style="margin-top: 0.25rem; font-size: 0.65rem; color: var(--text-muted);">
+              ${v === 0 ? 'No payment' : `×${v}`}
             </div>
           </div>
         `;
       }).join('');
+    }
+
+    // Migrate legacy routes to database
+    async function migrateLegacyRoutes() {
+      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      
+      // Check if routes already exist
+      const existingSnap = await db.ref(`transportCatalog/${year}/stops`).once('value');
+      const existing = existingSnap.val() || {};
+      
+      if (Object.keys(existing).length > 0) {
+        if (!confirm(`This year (${year}) already has ${Object.keys(existing).length} routes. Do you want to add the legacy routes anyway? (Duplicates will be skipped)`)) {
+          return;
+        }
+      }
+      
+      try {
+        let imported = 0;
+        let skipped = 0;
+        
+        for (const group of LEGACY_ROUTES) {
+          for (const stopName of group.names) {
+            // Check if this stop name already exists
+            const existingStop = Object.values(existing).find(s => 
+              s.name && s.name.toLowerCase().trim() === stopName.toLowerCase().trim()
+            );
+            
+            if (existingStop) {
+              skipped++;
+              continue;
+            }
+            
+            // Capitalize first letter of each word
+            const formattedName = stopName
+              .split(' ')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ');
+            
+            const newRef = db.ref(`transportCatalog/${year}/stops`).push();
+            await newRef.set({
+              name: formattedName,
+              baseFee: group.price,
+              active: true,
+              createdAt: Date.now(),
+              imported: true // Mark as imported from legacy
+            });
+            
+            imported++;
+          }
+        }
+        
+        showToast(`✅ Imported ${imported} routes${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''}`);
+        render(); // Refresh the display
+      } catch (error) {
+        console.error('Error migrating routes:', error);
+        showToast('Failed to import legacy routes', 'bad');
+      }
     }
 
     // Event listeners
@@ -375,6 +454,8 @@
       const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
       openEditStopModal(null, year);
     });
+
+    migrateLegacyBtn.addEventListener('click', migrateLegacyRoutes);
 
     closeEditStopModal.addEventListener('click', () => {
       editStopModal.classList.add('hidden');

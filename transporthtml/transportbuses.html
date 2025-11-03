@@ -504,6 +504,43 @@
         alertsEl.innerHTML = alerts.join("") || "";
       }
 
+      // Resolve school id if a friendly name (e.g., "socrates") is provided
+      async function resolveSchoolIdIfNeeded() {
+        try {
+          const looksLikeId = typeof state.school === 'string' && state.school.startsWith('-');
+          if (looksLikeId) return; // Already an RTDB id
+
+          const schoolsSnap = await firebase.database().ref('schools').get();
+          if (!schoolsSnap.exists()) return;
+          const schools = schoolsSnap.val() || {};
+
+          const target = String(state.school || '').toLowerCase().trim();
+          let matchedId = null;
+
+          // Try match by an explicit slug field, then by name, then by id equality
+          Object.keys(schools).some((id) => {
+            const s = schools[id] || {};
+            const slug = String(s.slug || '').toLowerCase();
+            const name = String(s.name || '').toLowerCase();
+            if (slug === target || name === target || id === state.school) {
+              matchedId = id;
+              return true;
+            }
+            // Fallback contains match for simple aliases like "socrates"
+            if (!matchedId && (name.includes(target) || slug.includes(target))) {
+              matchedId = id;
+            }
+            return false;
+          });
+
+          if (matchedId && matchedId !== state.school) {
+            state.school = matchedId;
+          }
+        } catch (err) {
+          console.warn('Failed to resolve school id', err);
+        }
+      }
+
       function canEdit() {
         // Always allow editing - simplified for now
         return true;
@@ -1203,13 +1240,13 @@
               
               console.log('User role loaded:', state.role, 'Raw:', roleRaw);
               
-              // Load drivers then subscribe to vehicles
-              loadDrivers().then(() => {
+              // Load drivers, resolve school id, then subscribe to vehicles
+              loadDrivers().then(() => resolveSchoolIdIfNeeded()).then(() => {
                 subscribeVehicles();
               }).catch((err) => {
                 console.error('Error loading drivers:', err);
                 // Continue even if drivers fail to load
-                subscribeVehicles();
+                resolveSchoolIdIfNeeded().then(() => subscribeVehicles());
               });
             })
             .catch((err) => {
@@ -1217,11 +1254,11 @@
               showToast("Failed to verify user", "bad");
               // Still allow using the page even if role check fails
               state.role = "admin";
-              loadDrivers().then(() => {
+              loadDrivers().then(() => resolveSchoolIdIfNeeded()).then(() => {
                 subscribeVehicles();
               }).catch((err2) => {
                 console.error('Error loading drivers:', err2);
-                subscribeVehicles();
+                resolveSchoolIdIfNeeded().then(() => subscribeVehicles());
               });
             });
         });

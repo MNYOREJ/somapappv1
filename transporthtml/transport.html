@@ -393,6 +393,7 @@
           if (state.user) {
             studentsLoaded = false; // Reset students cache on year change
             loadCriticalData();
+            loadStopsAndMultipliers(); // Reload stops and multipliers for new year
           }
         };
         synchronizeYear(window.somapYearContext.getSelectedYear());
@@ -410,6 +411,7 @@
           state.year = normalized;
           studentsLoaded = false; // Reset students cache on year change
           loadCriticalData();
+          loadStopsAndMultipliers(); // Reload stops and multipliers for new year
           // Reload students if modal is open
           if (studentsModal && !studentsModal.classList.contains('hidden')) {
             loadStudentsIfNeeded().then(() => renderStudentsTable());
@@ -1261,6 +1263,26 @@
       async function loadAllData() {
         await loadCriticalData();
         await loadStudentsIfNeeded();
+        await loadStopsAndMultipliers();
+      }
+
+      // Load stops and multipliers for current year
+      async function loadStopsAndMultipliers() {
+        try {
+          const year = Number(state.year || SOMAP_DEFAULT_YEAR);
+          const [stops, multipliers] = await Promise.all([
+            TransportPricing.loadStopsForYear(year),
+            TransportPricing.loadYearMultipliers(year)
+          ]);
+          
+          setStopCatalog(stops);
+          state.monthMultipliers = multipliers;
+        } catch (error) {
+          console.error('Error loading stops/multipliers:', error);
+          // Fallback to empty/defaults
+          setStopCatalog([]);
+          state.monthMultipliers = { ...TransportPricing.DEFAULT_MULTIPLIERS };
+        }
       }
 
       // Auth and initialization
@@ -1321,6 +1343,8 @@
         renderStartCards();
         // Load critical data (this will render KPIs when ready)
         loadCriticalData();
+        // Load stops and multipliers for the current year
+        loadStopsAndMultipliers();
         // Preload students in background (they'll load when modal opens anyway)
         setTimeout(() => loadStudentsIfNeeded(), 1000);
       });

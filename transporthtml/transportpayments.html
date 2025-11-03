@@ -357,9 +357,11 @@
       state.month = Number(state.month) || new Date().getMonth() + 1;
 
       const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-      const MONTH_MULTIPLIERS = TransportPricing.MONTH_MULTIPLIERS;
       const CLASS_ORDER = ['Baby Class', 'Middle Class', 'Pre Unit Class', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
       const BASE_YEAR = 2025;
+      
+      // Store loaded multipliers per year
+      let cachedMultipliers = {};
 
       function getFocusedMonth() {
         const today = new Date();
@@ -535,11 +537,15 @@
         return amPrice + pmPrice; // Base fee without multipliers
       }
 
-      // Calculate transport payment status
-      function calculateTransportStatus(enrollment, payments) {
+      // Calculate transport payment status (now year-scoped with DB multipliers)
+      async function calculateTransportStatus(enrollment, payments, yearMultipliers) {
         const amStop = enrollment?.amStop || '';
         const pmStop = enrollment?.pmStop || '';
         const year = Number(state.year) || new Date().getFullYear();
+
+        // Use year-specific multipliers if provided, otherwise load from DB
+        const multipliers = yearMultipliers || cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
+        if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
 
         // Base monthly fee (without multipliers) - for display & calculations
         const baseMonthlyFee = Number(enrollment?.baseMonthlyFee) || calculateBaseMonthlyFee(amStop, pmStop);
@@ -553,7 +559,7 @@
         let totalPaid = 0;
         const unpaidMonths = [];
 
-        // Calculate per month dues using multiplier logic + start date
+        // Calculate per month dues using year-specific multiplier logic + start date
         for (let month = 1; month <= 12; month++) {
           const monthlyExpected = Math.round(
             TransportPricing.dueForMonth({
@@ -561,6 +567,7 @@
               month,
               baseMonthlyFee,
               startDate: startDateIso,
+              multipliers, // Pass year-specific multipliers
             }) || 0
           );
           totalExpected += monthlyExpected;
@@ -588,6 +595,7 @@
             month: selectedMonth,
             baseMonthlyFee,
             startDate: startDateIso,
+            multipliers, // Pass year-specific multipliers
           }) || 0
         );
 
@@ -603,8 +611,8 @@
         };
       }
 
-      // Render KPIs - only for admin view, not parent view
-      function renderKPIs() {
+      // Render KPIs - only for admin view, not parent view (now async for DB multipliers)
+      async function renderKPIs() {
         // Skip if parent view (stat cards already rendered by renderParentTransportPayment)
         const monthForKpi = getFocusedMonth();
         const kpiMonthLabel = MONTH_NAMES[monthForKpi] || ('Month ' + monthForKpi);
@@ -614,19 +622,24 @@
           return; // Don't render KPIs in parent view
         }
         
+        // Load year multipliers once for all calculations
+        const year = Number(state.year);
+        const multipliers = cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
+        if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
+        
         let totalExpected = 0;
         let totalCollected = 0;
         let totalDebt = 0;
 
-        Object.entries(state.transportEnrollments).forEach(([studentId, enrollment]) => {
+        for (const [studentId, enrollment] of Object.entries(state.transportEnrollments)) {
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = calculateTransportStatus(enrollment, payments);
+          const status = await calculateTransportStatus(enrollment, payments, multipliers);
           
           // Use currentMonthExpected for KPI (includes month multiplier)
           totalExpected += status.currentMonthExpected;
           totalCollected += status.totalPaid;
           totalDebt += status.debt;
-        });
+        }
 
         // Calculate expenses
         const expensesArray = Object.values(state.expenses);
@@ -667,16 +680,24 @@
         }
       }
 
-      // Render payments table
-      function renderPaymentsTable() {
+      // Render payments table (now async for DB multipliers)
+      async function renderPaymentsTable() {
         const filterClass = classFilter.value;
         const searchTerm = searchInput.value.toLowerCase();
         const filterStatus = statusFilter.value;
         const yearDelta = state.year - BASE_YEAR;
 
-        const filtered = Object.entries(state.transportEnrollments).filter(([studentId, enrollment]) => {
+        // Load year multipliers once for all calculations
+        const year = Number(state.year);
+        const multipliers = cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
+        if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
+
+        const allEntries = Object.entries(state.transportEnrollments);
+        const filtered = [];
+
+        for (const [studentId, enrollment] of allEntries) {
           const student = state.students[studentId];
-          if (!student) return false;
+          if (!student) continue;
 
           // Calculate class for selected year
           const baseClass = student.classLevel || '';
@@ -684,8 +705,7 @@
           
           // Skip if graduated (for future years)
           if (shiftedClass === 'GRADUATED' && state.year > BASE_YEAR) {
-            // Only show if they have transport data for this year
-            return false;
+            continue;
           }
 
           const matchesClass = !filterClass || shiftedClass === filterClass;
@@ -695,7 +715,7 @@
             (student.admissionNumber || '').toLowerCase().includes(searchTerm);
 
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = calculateTransportStatus(enrollment, payments);
+          const status = await calculateTransportStatus(enrollment, payments, multipliers);
           
           let matchesStatus = true;
           if (filterStatus === 'paid') matchesStatus = status.debt === 0;
@@ -704,8 +724,10 @@
 
           const matchesDebtFilter = !state.showDebtorsOnly || status.debt > 0;
 
-          return matchesClass && matchesSearch && matchesStatus && matchesDebtFilter;
-        });
+          if (matchesClass && matchesSearch && matchesStatus && matchesDebtFilter) {
+            filtered.push([studentId, enrollment, status]);
+          }
+        }
 
         if (filtered.length === 0) {
           paymentsBody.innerHTML = '';
@@ -718,15 +740,9 @@
         document.getElementById('paymentSummary').textContent = `${filtered.length} student(s) on transport`;
 
         // Sort by debt (highest first)
-        filtered.sort((a, b) => {
-          const paymentsA = Object.values(state.transportPayments[a[0]] || {});
-          const paymentsB = Object.values(state.transportPayments[b[0]] || {});
-          const statusA = calculateTransportStatus(a[1], paymentsA);
-          const statusB = calculateTransportStatus(b[1], paymentsB);
-          return statusB.debt - statusA.debt;
-        });
+        filtered.sort((a, b) => b[2].debt - a[2].debt);
 
-        paymentsBody.innerHTML = filtered.map(([studentId, enrollment]) => {
+        paymentsBody.innerHTML = filtered.map(([studentId, enrollment, transportStatus]) => {
           const student = state.students[studentId];
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
           
@@ -734,9 +750,6 @@
           const yearDelta = state.year - BASE_YEAR;
           const baseClass = student.classLevel || '';
           const shiftedClass = shiftClass(baseClass, yearDelta);
-          
-          const payments = Object.values(state.transportPayments[studentId] || {});
-          const transportStatus = calculateTransportStatus(enrollment, payments);
           const selectedMonth = getFocusedMonth();
           const selectedMonthName = MONTH_NAMES[selectedMonth] || 'Current';
           const startDateDisplay = transportStatus.startDateDisplay || 'N/A';
@@ -805,7 +818,7 @@
         renderPaymentsTable();
       }
 
-      // Open payment modal
+      // Open payment modal (with year-scoped multipliers)
       async function openPaymentModal(studentId) {
         state.currentPaymentStudentId = studentId;
         const student = state.students[studentId];
@@ -818,6 +831,11 @@
         
         // Check if we have year-scoped assignment data (parent view)
         const year = String(state.year);
+        
+        // Load year multipliers for accurate calculations
+        const multipliers = cachedMultipliers[Number(year)] || (await TransportPricing.loadYearMultipliers(Number(year)));
+        if (!cachedMultipliers[Number(year)]) cachedMultipliers[Number(year)] = multipliers;
+        
         let status, baseMonthlyFee, currentMonthAmount, currentMonthLabel;
         const focusedMonth = getFocusedMonth();
         const focusedMonthLabel = MONTH_NAMES[focusedMonth] || ('Month ' + focusedMonth);
@@ -837,14 +855,16 @@
               year: Number(year),
               month: focusedMonth,
               baseMonthlyFee,
-              startDate
+              startDate,
+              multipliers // Pass year-specific multipliers
             }));
             
             const ledger = TransportPricing.buildLedger({
               year: Number(year),
               baseMonthlyFee,
               startDate,
-              payments
+              payments,
+              multipliers // Pass year-specific multipliers
             });
             
             status = {
@@ -858,26 +878,28 @@
               startDateDisplay: formatStartDateDisplay(startDate),
             };
           } else {
-            status = calculateTransportStatus(enrollment, payments);
+            status = await calculateTransportStatus(enrollment, payments, multipliers);
             baseMonthlyFee = status.monthlyFee;
             currentMonthLabel = focusedMonthLabel;
             currentMonthAmount = Math.round(TransportPricing.dueForMonth({
               year: Number(year),
               month: focusedMonth,
               baseMonthlyFee,
-              startDate: enrollmentStart
+              startDate: enrollmentStart,
+              multipliers // Pass year-specific multipliers
             }) || status.currentMonthExpected || status.monthlyFee);
           }
         } catch (err) {
           console.warn('Error loading assignment data, using legacy:', err);
-          status = calculateTransportStatus(enrollment, payments);
+          status = await calculateTransportStatus(enrollment, payments, multipliers);
           baseMonthlyFee = status.monthlyFee;
           currentMonthLabel = focusedMonthLabel;
           currentMonthAmount = Math.round(TransportPricing.dueForMonth({
             year: Number(year),
             month: focusedMonth,
             baseMonthlyFee,
-            startDate: enrollmentStart
+            startDate: enrollmentStart,
+            multipliers // Pass year-specific multipliers
           }) || status.currentMonthExpected || status.monthlyFee);
         }
         
@@ -946,9 +968,9 @@
 
           // Also write to transport ledger as pending (for parent view and history)
           const db = firebase.database();
-          const year = String(state.year);
+          const yearStr = String(state.year);
           const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
-          const payRef = db.ref(`${prefix}transportLedgers/${year}/${studentId}/payments`).push();
+          const payRef = db.ref(`${prefix}transportLedgers/${yearStr}/${studentId}/payments`).push();
           
           const paymentData = {
             month: monthName,
@@ -980,12 +1002,12 @@
             status: 'pending',
             createdAt: timestamp
           };
-          await db.ref(`transportPayments/${year}/${studentId}`).push(canonical);
+          await db.ref(`transportPayments/${yearStr}/${studentId}`).push(canonical);
           
           // Queue for approval - include payment key for matching
           const queueRef = db.ref(`${prefix}pendingApprovals/transportPayments/${payRef.key}`);
           await queueRef.set({
-            year,
+            year: yearStr,
             studentId,
             admissionNumber: student.admissionNumber || studentId,
             studentName: fullName,
@@ -1624,6 +1646,11 @@
             return;
           }
         }
+        
+        // Load year multipliers for accurate calculations
+        const multipliers = cachedMultipliers[Number(year)] || (await TransportPricing.loadYearMultipliers(Number(year)));
+        if (!cachedMultipliers[Number(year)]) cachedMultipliers[Number(year)] = multipliers;
+        
         const hasAssignedStart = Boolean(
           assign?.startDate ||
           assign?.start_date ||
@@ -1632,11 +1659,11 @@
         );
         const base = Number(assign?.baseMonthlyFee||0);
         const startDate = normalizeDateInput((assign && (assign.startDate || assign.start_date || assign.startTimestamp || assign.start_time)) || `${year}-01-01`, Number(year));
-        const ledger = TransportPricing.buildLedger({ year: Number(year), baseMonthlyFee: base, startDate, payments });
+        const ledger = TransportPricing.buildLedger({ year: Number(year), baseMonthlyFee: base, startDate, payments, multipliers });
 
         const focusedMonth = getFocusedMonth();
         const selectedMonthLabel = MONTH_NAMES[focusedMonth] || ('Month ' + focusedMonth);
-        const dueThisMonth = TransportPricing.dueForMonth({ year:Number(year), month:focusedMonth, baseMonthlyFee: base, startDate });
+        const dueThisMonth = TransportPricing.dueForMonth({ year:Number(year), month:focusedMonth, baseMonthlyFee: base, startDate, multipliers });
         const startDisplay = hasAssignedStart ? formatStartDateDisplay(startDate) : 'N/A';
 
         // Compute carry-forward debt up to the focused month (exclude future months)

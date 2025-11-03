@@ -1,120 +1,418 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Transport Routes A� AM & PM runs</title>
-    <link rel="stylesheet" href="../css/transport.css" />
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
-    <script>
-      const firebaseConfig = {
-        apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
-        authDomain: "somaptestt.firebaseapp.com",
-        databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
-        projectId: "somaptestt",
-        storageBucket: "somaptestt.appspot.com",
-        messagingSenderId: "105526245138",
-        appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Transport Routes & Pricing Management · SoMAp</title>
+  <link rel="stylesheet" href="./css/transport_dark.css" />
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  </script>
+  <script>
+    // Year selector constants
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+    const SOMAP_DEFAULT_YEAR = 2025;
+
+    // Reuse shared year context if present, else create a light fallback
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR) + '';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected === y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
+          listeners.forEach(fn=>{ try{ fn(y); }catch{} });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
       };
-      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    </script>
-  </head>
-  <body>
-    <div id="contextBar" class="bar"></div>
-    <main style="padding:1.5rem; max-width:1100px; margin:0 auto;">
-      <section class="card">
-        <div class="flex space center">
-          <h2 style="margin:0;">Route planner</h2>
-          <button class="btn" id="refreshBtn" type="button">Refresh</button>
+    })();
+  </script>
+  <script src="./modules/transport_pricing.js"></script>
+</head>
+<body>
+  <!-- Context Bar with Year Selection -->
+  <div id="contextBar" class="bar">
+    <div>
+      <h1>🗺️ Routes & Pricing Management</h1>
+      <small>Manage transport stops, routes, and monthly multipliers</small>
+    </div>
+    <div class="context-selectors">
+      <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;">
+        <label style="font-size: 0.75rem; font-weight: 600;">Academic Year</label>
+        <select data-somap-year-select class="border rounded px-2 py-1 text-sm" style="min-width: 100px; padding: 0.5rem;"></select>
+        <span style="font-size: 0.75rem; color: #94a3b8;">Working year: <b id="somapYearHint">--</b></span>
+      </div>
+      <a href="transport.html" class="btn secondary">← Back to Dashboard</a>
+    </div>
+  </div>
+
+  <main>
+    <!-- Stops & Base Fees Section -->
+    <section class="card">
+      <div class="flex space center mb-2">
+        <div>
+          <h2 style="margin: 0;">🚏 Stops & Base Monthly Fees (<span id="yrA">—</span>)</h2>
+          <p class="muted" style="margin: 0.5rem 0 0 0;">Manage transport stops and their base monthly pricing</p>
         </div>
-        <table class="table mt-2">
-          <thead>
-            <tr>
-              <th>Route</th>
-              <th>AM Stops</th>
-              <th>PM Stops</th>
-              <th>Fare Band</th>
-              <th>Assigned Bus</th>
-            </tr>
-          </thead>
-          <tbody id="routesBody"></tbody>
-        </table>
-        <div id="emptyState" class="empty hidden"></div>
-      </section>
-    </main>
+        <div class="flex">
+          <input id="stopSearch" type="text" placeholder="Search stop..." style="max-width: 250px;" />
+          <button class="btn success" id="addStopBtn">+ Add Stop</button>
+        </div>
+      </div>
+      
+      <div id="stopsList" class="grid two" style="margin-top: 1.5rem; gap: 1rem;">
+        <!-- Populated by JavaScript -->
+      </div>
+      <div id="emptyStops" class="empty hidden">No stops found for this year. Click "+ Add Stop" to create one.</div>
+    </section>
 
-    <script src="../modules/transport_helpers.js"></script>
-    <script src="../modules/transport_context.js"></script>
-    <script>
-      const routesBody = document.getElementById("routesBody");
-      const emptyState = document.getElementById("emptyState");
-      const state = {
-        context: TransportContext.getContext(),
-        unsubscribe: null,
-      };
+    <!-- Monthly Multipliers Section -->
+    <section class="card mt-3">
+      <div class="flex space center mb-2">
+        <div>
+          <h2 style="margin: 0;">📆 Monthly Multipliers (<span id="yrB">—</span>)</h2>
+          <p class="muted" style="margin: 0.5rem 0 0 0;">Set different multipliers for each month (e.g., January = 1.5×, June = 0× for no payment)</p>
+        </div>
+        <button class="btn success" id="saveMultBtn">💾 Save Multipliers</button>
+      </div>
+      
+      <div id="multGrid" class="grid four" style="margin-top: 1.5rem; gap: 1rem;">
+        <!-- Populated by JavaScript -->
+      </div>
+      
+      <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.2);">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.875rem;">How Multipliers Work:</h4>
+        <p style="margin: 0; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
+          Each month's actual fee = <strong>Base Monthly Fee × Multiplier</strong><br/>
+          Example: If a stop's base fee is TSh 20,000 and January multiplier is 1.5, then January fee = 20,000 × 1.5 = TSh 30,000<br/>
+          Set multiplier to 0 for months with no payment (e.g., June, December for holidays)
+        </p>
+      </div>
+    </section>
+  </main>
 
-      function renderRoutes(routes) {
-        if (!routes.length) {
-          emptyState.textContent = `No routes captured for ${state.context.year}.`;
-          emptyState.classList.remove("hidden");
-          routesBody.innerHTML = "";
-          return;
-        }
-        emptyState.classList.add("hidden");
-        routesBody.innerHTML = routes
-          .map((route) => {
-            const amStops = Array.isArray(route.amStops) ? route.amStops.join(", ") : route.amStops || "�?"";
-            const pmStops = Array.isArray(route.pmStops) ? route.pmStops.join(", ") : route.pmStops || "�?"";
-            return `
-              <tr>
-                <td>
-                  ${route.name || route.id || "Route"}
-                  <div class="muted text-sm">${route.description || ""}</div>
-                </td>
-                <td>${amStops}</td>
-                <td>${pmStops}</td>
-                <td>${route.fareBand || "�?""}</td>
-                <td>${route.vehicleId || "�?""}</td>
-              </tr>
-            `;
-          })
-          .join("");
+  <!-- Edit Stop Modal -->
+  <div id="editStopModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="flex space center mb-2">
+        <h2 style="margin: 0;" id="editStopTitle">Edit Stop</h2>
+        <button class="btn secondary" id="closeEditStopModal">Close</button>
+      </div>
+
+      <div style="display: grid; gap: 1rem; margin-top: 1.5rem;">
+        <div>
+          <label for="editStopName">Stop Name <span style="color: red;">*</span></label>
+          <input id="editStopName" type="text" placeholder="e.g., Sinoni, Dampo, etc." required />
+        </div>
+
+        <div>
+          <label for="editStopFee">Base Monthly Fee (TSh) <span style="color: red;">*</span></label>
+          <input id="editStopFee" type="number" min="0" step="500" placeholder="e.g., 18500" required />
+        </div>
+
+        <div>
+          <label style="display: flex; align-items: center; gap: 0.5rem;">
+            <input id="editStopActive" type="checkbox" />
+            <span>Active (students can be assigned to this stop)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex mt-2" style="justify-content: flex-end; gap: 1rem;">
+        <button class="btn secondary" id="cancelEditStop">Cancel</button>
+        <button class="btn success" id="saveEditStop">💾 Save Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const db = firebase.database();
+    const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    
+    let currentEditStopId = null;
+    let multInputs = {};
+
+    const toast = document.getElementById("toast");
+    const stopsList = document.getElementById("stopsList");
+    const emptyStops = document.getElementById("emptyStops");
+    const addStopBtn = document.getElementById("addStopBtn");
+    const stopSearch = document.getElementById("stopSearch");
+    const editStopModal = document.getElementById("editStopModal");
+    const closeEditStopModal = document.getElementById("closeEditStopModal");
+    const saveEditStop = document.getElementById("saveEditStop");
+    const cancelEditStop = document.getElementById("cancelEditStop");
+    const saveMultBtn = document.getElementById("saveMultBtn");
+
+    function showToast(message, tone = "ok") {
+      toast.textContent = message;
+      toast.classList.remove("hidden");
+      toast.style.background = tone === "bad" ? "#ef4444" : "#10b981";
+      setTimeout(() => toast.classList.add("hidden"), 3500);
+    }
+
+    function formatCurrency(amount) {
+      return new Intl.NumberFormat('en-TZ', { style: 'currency', currency: 'TZS', minimumFractionDigits: 0 }).format(amount || 0);
+    }
+
+    // Initialize year selector
+    (function initYearSel(){
+      const sel = document.querySelector('[data-somap-year-select]');
+      const hint = document.getElementById('somapYearHint');
+      if (!sel) return;
+      sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      const cur = window.somapYearContext.getSelectedYear();
+      sel.value = cur;
+      if (hint) hint.textContent = cur;
+      sel.addEventListener('change', e=>{
+        const y = String(e.target.value);
+        window.somapYearContext.setSelectedYear(y);
+        if (hint) hint.textContent = y;
+      });
+    })();
+
+    // Render main UI
+    async function render(){
+      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      document.getElementById('yrA').textContent = year;
+      document.getElementById('yrB').textContent = year;
+
+      // Load stops
+      const stops = await TransportPricing.loadStopsForYear(year);
+      drawStops(stops, year);
+
+      // Load multipliers
+      const mult = await TransportPricing.loadYearMultipliers(year);
+      drawMultipliers(mult);
+    }
+
+    function drawStops(stops, year){
+      const q = (stopSearch.value || '').toLowerCase().trim();
+      const filtered = !q ? stops : stops.filter(s => s.name.toLowerCase().includes(q));
+
+      if (filtered.length === 0) {
+        stopsList.innerHTML = '';
+        emptyStops.classList.remove('hidden');
+        return;
       }
 
-      function subscribeRoutes() {
-        if (state.unsubscribe) state.unsubscribe();
-        const path = `transport/${state.context.school}/${state.context.year}/routes`;
-        const ref = firebase.database().ref(path);
-        const listener = ref.on(
-          "value",
-          (snapshot) => {
-            const rows = [];
-            snapshot.forEach((child) => {
-              rows.push({ id: child.key, ...(child.val() || {}) });
-            });
-            renderRoutes(rows);
-          },
-          (err) => {
-            console.error(err);
-            emptyState.textContent = "Failed to load routes.";
-            emptyState.classList.remove("hidden");
+      emptyStops.classList.add('hidden');
+
+      // Sort stops by name
+      filtered.sort((a, b) => a.name.localeCompare(b.name));
+
+      stopsList.innerHTML = filtered.map(s => {
+        const statusBadge = s.active 
+          ? '<span class="chip ok" style="font-size: 0.75rem;">Active</span>'
+          : '<span class="chip warn" style="font-size: 0.75rem;">Inactive</span>';
+        
+        return `
+          <div class="card" data-id="${s.id}" style="position: relative;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+              <h3 style="margin: 0; font-size: 1.125rem;">${s.name}</h3>
+              ${statusBadge}
+            </div>
+            <div style="font-size: 1.25rem; font-weight: 700; color: var(--accent-success); margin-bottom: 1rem;">
+              ${formatCurrency(s.baseFee)}
+              <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/month</span>
+            </div>
+            <div class="flex" style="gap: 0.5rem;">
+              <button class="btn secondary" data-act="edit" data-id="${s.id}" style="flex: 1;">✏️ Edit</button>
+              <button class="btn" data-act="toggle" data-id="${s.id}" style="flex: 1;">
+                ${s.active ? '🚫 Deactivate' : '✅ Activate'}
+              </button>
+              <button class="btn" data-act="del" data-id="${s.id}" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Attach event listeners
+      stopsList.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const act = e.target.dataset.act;
+          const id = e.target.dataset.id;
+          
+          if (act === 'edit') {
+            const stop = stops.find(s => s.id === id);
+            if (stop) openEditStopModal(stop, year);
+          } else if (act === 'toggle') {
+            const stop = stops.find(s => s.id === id);
+            if (stop) await toggleStopActive(id, !stop.active, year);
+          } else if (act === 'del') {
+            if (confirm('Are you sure you want to delete this stop? This action cannot be undone.')) {
+              await deleteStop(id, year);
+            }
           }
-        );
-        state.unsubscribe = () => ref.off("value", listener);
+        });
+      });
+    }
+
+    function openEditStopModal(stop, year) {
+      currentEditStopId = stop ? stop.id : null;
+      document.getElementById('editStopTitle').textContent = stop ? 'Edit Stop' : 'Add New Stop';
+      document.getElementById('editStopName').value = stop ? stop.name : '';
+      document.getElementById('editStopFee').value = stop ? stop.baseFee : '';
+      document.getElementById('editStopActive').checked = stop ? stop.active : true;
+      editStopModal.classList.remove('hidden');
+    }
+
+    async function saveStop() {
+      const name = document.getElementById('editStopName').value.trim();
+      const fee = parseFloat(document.getElementById('editStopFee').value);
+      const active = document.getElementById('editStopActive').checked;
+
+      if (!name) {
+        showToast('Please enter stop name', 'bad');
+        return;
       }
 
-      document.getElementById("refreshBtn").addEventListener("click", subscribeRoutes);
+      if (!fee || fee < 0) {
+        showToast('Please enter a valid base fee', 'bad');
+        return;
+      }
 
-      TransportContext.attachContextSelectors(
-        document.getElementById("contextBar"),
-        (ctx) => {
-          state.context = ctx;
-          subscribeRoutes();
+      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+
+      try {
+        const stopData = {
+          name,
+          baseFee: fee,
+          active,
+          updatedAt: Date.now()
+        };
+
+        if (currentEditStopId) {
+          // Update existing
+          await db.ref(`transportCatalog/${year}/stops/${currentEditStopId}`).update(stopData);
+          showToast('Stop updated successfully!');
+        } else {
+          // Create new
+          const newRef = db.ref(`transportCatalog/${year}/stops`).push();
+          await newRef.set({
+            ...stopData,
+            createdAt: Date.now()
+          });
+          showToast('Stop created successfully!');
         }
-      );
-      subscribeRoutes();
-    </script>
-  </body>
+
+        editStopModal.classList.add('hidden');
+        render();
+      } catch (error) {
+        console.error('Error saving stop:', error);
+        showToast('Failed to save stop', 'bad');
+      }
+    }
+
+    async function toggleStopActive(id, active, year) {
+      try {
+        await db.ref(`transportCatalog/${year}/stops/${id}`).update({
+          active,
+          updatedAt: Date.now()
+        });
+        showToast(`Stop ${active ? 'activated' : 'deactivated'} successfully!`);
+        render();
+      } catch (error) {
+        console.error('Error toggling stop:', error);
+        showToast('Failed to update stop', 'bad');
+      }
+    }
+
+    async function deleteStop(id, year) {
+      try {
+        await db.ref(`transportCatalog/${year}/stops/${id}`).remove();
+        showToast('Stop deleted successfully!');
+        render();
+      } catch (error) {
+        console.error('Error deleting stop:', error);
+        showToast('Failed to delete stop', 'bad');
+      }
+    }
+
+    function drawMultipliers(mult) {
+      multInputs = {};
+      const grid = document.getElementById('multGrid');
+      
+      grid.innerHTML = months.slice(1).map((label, idx) => {
+        const m = idx + 1;
+        const v = mult[m] ?? TransportPricing.DEFAULT_MULTIPLIERS[m] ?? 1.0;
+        const id = 'mm_' + m;
+        multInputs[m] = id;
+        
+        return `
+          <div class="card" style="padding: 1rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.875rem;">${label}</label>
+            <input id="${id}" type="number" step="0.01" min="0" value="${v}" 
+                   style="width: 100%; padding: 0.5rem; font-size: 1rem; font-weight: 600;" />
+            <div style="margin-top: 0.25rem; font-size: 0.7rem; color: var(--text-muted);">
+              Example: Base 20k × ${v} = ${formatCurrency(20000 * v)}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Event listeners
+    addStopBtn.addEventListener('click', () => {
+      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      openEditStopModal(null, year);
+    });
+
+    closeEditStopModal.addEventListener('click', () => {
+      editStopModal.classList.add('hidden');
+    });
+
+    cancelEditStop.addEventListener('click', () => {
+      editStopModal.classList.add('hidden');
+    });
+
+    saveEditStop.addEventListener('click', saveStop);
+
+    stopSearch.addEventListener('input', () => {
+      render();
+    });
+
+    saveMultBtn.addEventListener('click', async () => {
+      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      const payload = {};
+      
+      Object.entries(multInputs).forEach(([m, id]) => {
+        const v = Number(document.getElementById(id).value);
+        payload[m] = Number.isFinite(v) ? v : 1.0;
+      });
+
+      try {
+        await db.ref(`transportSettings/${year}/monthMultipliers`).set(payload);
+        showToast('Monthly multipliers saved for ' + year);
+      } catch (error) {
+        console.error('Error saving multipliers:', error);
+        showToast('Failed to save multipliers', 'bad');
+      }
+    });
+
+    // Listen to year changes
+    window.somapYearContext.onYearChanged(() => render());
+
+    // Initial render
+    document.addEventListener('DOMContentLoaded', () => render());
+  </script>
+</body>
 </html>

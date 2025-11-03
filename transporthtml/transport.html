@@ -1270,16 +1270,20 @@
       async function loadStopsAndMultipliers() {
         try {
           const year = Number(state.year || SOMAP_DEFAULT_YEAR);
-          const [stops, multipliers] = await Promise.all([
-            TransportPricing.loadStopsForYear(year),
-            TransportPricing.loadYearMultipliers(year)
-          ]);
           
-          setStopCatalog(stops);
-          state.monthMultipliers = multipliers;
+          // Load stops - if none exist, it returns empty array (safe)
+          const stops = await TransportPricing.loadStopsForYear(year).catch(() => []);
+          
+          // Load multipliers - if none exist, returns defaults (safe)
+          const multipliers = await TransportPricing.loadYearMultipliers(year).catch(() => TransportPricing.DEFAULT_MULTIPLIERS);
+          
+          console.log(`Loaded ${stops.length} stops and multipliers for year ${year}`);
+          
+          setStopCatalog(stops || []);
+          state.monthMultipliers = multipliers || { ...TransportPricing.DEFAULT_MULTIPLIERS };
         } catch (error) {
           console.error('Error loading stops/multipliers:', error);
-          // Fallback to empty/defaults
+          // Fallback to empty/defaults - page should still work
           setStopCatalog([]);
           state.monthMultipliers = { ...TransportPricing.DEFAULT_MULTIPLIERS };
         }

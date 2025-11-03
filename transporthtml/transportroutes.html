@@ -70,8 +70,9 @@
           <p class="muted" style="margin: 0.5rem 0 0 0;">Manage transport stops and their base monthly pricing</p>
         </div>
         <div class="flex">
-          <input id="stopSearch" type="text" placeholder="Search stop..." style="max-width: 250px;" />
-          <button class="btn" id="migrateLegacyBtn" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">📦 Import Legacy Routes</button>
+          <input id="stopSearch" type="text" placeholder="Search stop..." style="max-width: 200px;" />
+          <button class="btn" id="bulkImportBtn" style="background: rgba(147, 51, 234, 0.2); color: #a78bfa; border: 1px solid rgba(147, 51, 234, 0.3);">🚀 Import All Years</button>
+          <button class="btn" id="migrateLegacyBtn" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">📦 Import This Year</button>
           <button class="btn success" id="addStopBtn">+ Add Stop</button>
         </div>
       </div>
@@ -79,7 +80,7 @@
       <div id="stopsList" class="grid two" style="margin-top: 1.5rem; gap: 1rem;">
         <!-- Populated by JavaScript -->
       </div>
-      <div id="emptyStops" class="empty hidden">No stops found for this year. Click "+ Add Stop" to create one.</div>
+      <div id="emptyStops" class="empty hidden">No stops found for this year. Click a button above to import routes.</div>
     </section>
 
     <!-- Monthly Multipliers Section -->
@@ -156,6 +157,7 @@
     const stopsList = document.getElementById("stopsList");
     const emptyStops = document.getElementById("emptyStops");
     const addStopBtn = document.getElementById("addStopBtn");
+    const bulkImportBtn = document.getElementById("bulkImportBtn");
     const migrateLegacyBtn = document.getElementById("migrateLegacyBtn");
     const stopSearch = document.getElementById("stopSearch");
     const editStopModal = document.getElementById("editStopModal");
@@ -220,7 +222,20 @@
 
     function drawStops(stops, year){
       const q = (stopSearch.value || '').toLowerCase().trim();
-      const filtered = !q ? stops : stops.filter(s => s.name.toLowerCase().includes(q));
+      
+      // Remove duplicates by name (case-insensitive)
+      const uniqueStops = [];
+      const seenNames = new Set();
+      
+      stops.forEach(s => {
+        const normalizedName = s.name.toLowerCase().trim();
+        if (!seenNames.has(normalizedName)) {
+          seenNames.add(normalizedName);
+          uniqueStops.push(s);
+        }
+      });
+      
+      const filtered = !q ? uniqueStops : uniqueStops.filter(s => s.name.toLowerCase().includes(q));
 
       if (filtered.length === 0) {
         stopsList.innerHTML = '';
@@ -268,10 +283,10 @@
           const id = e.target.dataset.id;
           
           if (act === 'edit') {
-            const stop = stops.find(s => s.id === id);
+            const stop = filtered.find(s => s.id === id);
             if (stop) openEditStopModal(stop, year);
           } else if (act === 'toggle') {
-            const stop = stops.find(s => s.id === id);
+            const stop = filtered.find(s => s.id === id);
             if (stop) await toggleStopActive(id, !stop.active, year);
           } else if (act === 'del') {
             if (confirm('Are you sure you want to delete this stop? This action cannot be undone.')) {
@@ -344,7 +359,7 @@
           active,
           updatedAt: Date.now()
         });
-        showToast(`Stop ${active ? 'activated' : 'deactivated'} successfully!`);
+        showToast(`Stop ${active ? 'activated' : 'deactivated'} successfully!');
         render();
       } catch (error) {
         console.error('Error toggling stop:', error);
@@ -392,41 +407,120 @@
       }).join('');
     }
 
-    // Migrate legacy routes to database
-    async function migrateLegacyRoutes() {
-      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+    // Bulk import for ALL years (2024-2029)
+    async function bulkImportAllYears() {
+      const yearsToImport = [2024, 2025, 2026, 2027, 2028, 2029];
       
-      // Check if routes already exist
-      const existingSnap = await db.ref(`transportCatalog/${year}/stops`).once('value');
-      const existing = existingSnap.val() || {};
-      
-      if (Object.keys(existing).length > 0) {
-        if (!confirm(`This year (${year}) already has ${Object.keys(existing).length} routes. Do you want to add the legacy routes anyway? (Duplicates will be skipped)`)) {
-          return;
-        }
+      if (!confirm(`🚀 This will import 67 routes for ${yearsToImport.length} years (${yearsToImport.join(', ')}). Continue?`)) {
+        return;
       }
       
+      showToast('🔄 Bulk importing for all years... Please wait', 'ok');
+      console.log('Starting bulk import for years:', yearsToImport);
+      
       try {
+        let totalImported = 0;
+        let totalSkipped = 0;
+        
+        for (const year of yearsToImport) {
+          console.log(`\n=== Importing for year ${year} ===`);
+          
+          // Check existing routes
+          const existingSnap = await db.ref(`transportCatalog/${year}/stops`).once('value');
+          const existing = existingSnap.val() || {};
+          
+          for (const group of LEGACY_ROUTES) {
+            for (const stopName of group.names) {
+              // Check if exists
+              const existingStop = Object.values(existing).find(s => 
+                s.name && s.name.toLowerCase().trim() === stopName.toLowerCase().trim()
+              );
+              
+              if (existingStop) {
+                totalSkipped++;
+                continue;
+              }
+              
+              // Format name
+              const formattedName = stopName
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+              
+              // Save to database
+              const newRef = db.ref(`transportCatalog/${year}/stops`).push();
+              await newRef.set({
+                name: formattedName,
+                baseFee: group.price,
+                active: true,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                imported: true,
+                bulkImported: true
+              });
+              
+              totalImported++;
+            }
+          }
+          
+          console.log(`Year ${year} complete`);
+        }
+        
+        console.log(`\nBulk import complete!`);
+        console.log(`Total imported: ${totalImported}`);
+        console.log(`Total skipped: ${totalSkipped}`);
+        
+        showToast(`✅ Bulk import complete! Imported ${totalImported} routes across ${yearsToImport.length} years!`);
+        
+        // Refresh display
+        setTimeout(() => render(), 500);
+      } catch (error) {
+        console.error('Error in bulk import:', error);
+        showToast('❌ Bulk import failed: ' + error.message, 'bad');
+      }
+    }
+
+    // Migrate legacy routes for current year only
+    async function migrateLegacyRoutes() {
+      console.log('Migration started...');
+      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      console.log('Importing for year:', year);
+      
+      showToast('🔄 Importing routes for ' + year + '...', 'ok');
+      
+      try {
+        const existingSnap = await db.ref(`transportCatalog/${year}/stops`).once('value');
+        const existing = existingSnap.val() || {};
+        console.log('Existing routes:', Object.keys(existing).length);
+        
+        if (Object.keys(existing).length > 0) {
+          if (!confirm(`Year ${year} already has ${Object.keys(existing).length} routes. Add more? (Duplicates skipped)`)) {
+            showToast('Import cancelled', 'bad');
+            return;
+          }
+        }
+        
         let imported = 0;
         let skipped = 0;
         
         for (const group of LEGACY_ROUTES) {
           for (const stopName of group.names) {
-            // Check if this stop name already exists
             const existingStop = Object.values(existing).find(s => 
               s.name && s.name.toLowerCase().trim() === stopName.toLowerCase().trim()
             );
             
             if (existingStop) {
+              console.log('Skipping duplicate:', stopName);
               skipped++;
               continue;
             }
             
-            // Capitalize first letter of each word
             const formattedName = stopName
               .split(' ')
               .map(word => word.charAt(0).toUpperCase() + word.slice(1))
               .join(' ');
+            
+            console.log('Importing:', formattedName, '- TSh', group.price);
             
             const newRef = db.ref(`transportCatalog/${year}/stops`).push();
             await newRef.set({
@@ -434,18 +528,21 @@
               baseFee: group.price,
               active: true,
               createdAt: Date.now(),
-              imported: true // Mark as imported from legacy
+              updatedAt: Date.now(),
+              imported: true
             });
             
             imported++;
           }
         }
         
-        showToast(`✅ Imported ${imported} routes${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''}`);
-        render(); // Refresh the display
+        console.log('Import complete. Imported:', imported, 'Skipped:', skipped);
+        showToast(`✅ Imported ${imported} routes for ${year}${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''}!`);
+        
+        setTimeout(() => render(), 500);
       } catch (error) {
         console.error('Error migrating routes:', error);
-        showToast('Failed to import legacy routes', 'bad');
+        showToast('❌ Failed to import: ' + error.message, 'bad');
       }
     }
 
@@ -455,7 +552,13 @@
       openEditStopModal(null, year);
     });
 
-    migrateLegacyBtn.addEventListener('click', migrateLegacyRoutes);
+    if (bulkImportBtn) {
+      bulkImportBtn.addEventListener('click', bulkImportAllYears);
+    }
+
+    if (migrateLegacyBtn) {
+      migrateLegacyBtn.addEventListener('click', migrateLegacyRoutes);
+    }
 
     closeEditStopModal.addEventListener('click', () => {
       editStopModal.classList.add('hidden');

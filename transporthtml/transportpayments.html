@@ -1281,17 +1281,15 @@
         const debt = Math.max(0, totalExpected - totalPaid);
         
         // Render KPIs for THIS child only - show current month expected in KPI
-        // Use requestAnimationFrame to prevent flashing
-        requestAnimationFrame(() => {
-          document.getElementById('totalExpected').textContent = formatCurrency(currentMonthExpected);
-          document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
-          document.getElementById('totalDebt').textContent = formatCurrency(debt);
-          document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
-          
-          // Hide expense/balance KPIs for parents
-          document.getElementById('totalExpenses').parentElement.parentElement.style.display = 'none';
-          document.getElementById('netBalance').parentElement.parentElement.style.display = 'none';
-        });
+        // Update stat cards directly (no need for requestAnimationFrame since data is ready)
+        document.getElementById('totalExpected').textContent = formatCurrency(currentMonthExpected);
+        document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
+        document.getElementById('totalDebt').textContent = formatCurrency(debt);
+        document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
+        
+        // Hide expense/balance KPIs for parents
+        document.getElementById('totalExpenses').parentElement.parentElement.style.display = 'none';
+        document.getElementById('netBalance').parentElement.parentElement.style.display = 'none';
         
         // Calculate school fees
         const feePerYear = Number(S.feePerYear || 0);
@@ -1335,53 +1333,58 @@
         document.getElementById('debtorsBtnText').parentElement.style.display = 'none';
       }
 
-      // Auth and initialization
-      firebase.auth().onAuthStateChanged((user) => {
-        state.user = user;
+      // Check for parent view IMMEDIATELY (before auth state) - parents already authenticated
+      const urlParams = new URLSearchParams(window.location.search);
+      const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
+      
+      if (studentParam) {
+        // Parent view mode - render immediately without waiting for auth
+        localStorage.setItem('parentFocusStudent', studentParam);
+        state.currentPaymentStudentId = studentParam;
         
-        // Check if parent view (via URL param or localStorage from parent.html)
-        const urlParams = new URLSearchParams(window.location.search);
-        const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
+        // Change back button to go to parent.html
+        const backBtn = document.getElementById('backButton');
+        if (backBtn) {
+          backBtn.href = '../parent.html';
+          backBtn.textContent = '← Back to Parent Dashboard';
+        }
         
-        if (studentParam) {
-          // Parent view mode - render immediately (parents already authenticated via index.html)
-          localStorage.setItem('parentFocusStudent', studentParam);
-          state.currentPaymentStudentId = studentParam;
+        // Initialize stat cards with loading state to prevent flashing
+        document.getElementById('totalExpected').textContent = '—';
+        document.getElementById('totalCollected').textContent = '—';
+        document.getElementById('totalDebt').textContent = '—';
+        document.getElementById('monthLabel').textContent = '';
+        
+        // Load and render immediately
+        renderParentTransportPayment(studentParam);
+      } else {
+        // Admin view mode - wait for auth state
+        firebase.auth().onAuthStateChanged((user) => {
+          state.user = user;
           
-          // Change back button to go to parent.html
-          const backBtn = document.getElementById('backButton');
-          if (backBtn) {
-            backBtn.href = '../parent.html';
-            backBtn.textContent = '← Back to Parent Dashboard';
+          if (user) {
+            firebase.database().ref(`users/${user.uid}/role`).get()
+              .then((snapshot) => {
+                state.role = TransportRoles.normalize(snapshot.val());
+                
+                if (!TransportRoles.isAdmin(state.role)) {
+                  alert('Access denied. Admin privileges required.');
+                  window.location.href = 'transport.html';
+                  return;
+                }
+                
+                loadAllData();
+              })
+              .catch((err) => {
+                console.error(err);
+                alert('Error verifying permissions');
+              });
+          } else {
+            alert('Please sign in to access this page');
+            window.location.href = 'transport.html';
           }
-          
-          renderParentTransportPayment(studentParam);
-          return; // Don't continue with admin check
-        }
-        
-        // Admin view mode (only if no student param)
-        if (user) {
-          firebase.database().ref(`users/${user.uid}/role`).get()
-            .then((snapshot) => {
-              state.role = TransportRoles.normalize(snapshot.val());
-              
-              if (!TransportRoles.isAdmin(state.role)) {
-                alert('Access denied. Admin privileges required.');
-                window.location.href = 'transport.html';
-                return;
-              }
-              
-              loadAllData();
-            })
-            .catch((err) => {
-              console.error(err);
-              alert('Error verifying permissions');
-            });
-        } else {
-          alert('Please sign in to access this page');
-          window.location.href = 'transport.html';
-        }
-      });
+        });
+      }
       
       // Listen to year changes for parent view
       if (window.somapYearContext) {

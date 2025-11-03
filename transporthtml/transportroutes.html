@@ -147,6 +147,8 @@
   <div id="toast" class="toast hidden"></div>
 
   <script>
+    console.log('🚀 Transport Routes Script Loading...');
+    
     const db = firebase.database();
     const auth = firebase.auth();
     const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -173,6 +175,13 @@
     ];
 
     function showToast(message, tone = "ok") {
+      if (!toast) {
+        toast = document.getElementById("toast");
+      }
+      if (!toast) {
+        console.warn('Toast element not found!');
+        return;
+      }
       toast.textContent = message;
       toast.classList.remove("hidden");
       toast.style.background = tone === "bad" ? "#ef4444" : "#10b981";
@@ -183,47 +192,77 @@
       return new Intl.NumberFormat('en-TZ', { style: 'currency', currency: 'TZS', minimumFractionDigits: 0 }).format(amount || 0);
     }
 
-    // Initialize year selector
-    (function initYearSel(){
+    // Initialize year selector - Now called from DOMContentLoaded
+    function initYearSelector(){
+      console.log('📅 Initializing year selector...');
       const sel = document.querySelector('[data-somap-year-select]');
       const hint = document.getElementById('somapYearHint');
-      if (!sel) return;
+      
+      if (!sel) {
+        console.error('❌ Year selector not found!');
+        return;
+      }
+      
+      console.log('✅ Year selector found, populating with years:', SOMAP_ALLOWED_YEARS);
+      
+      // Populate years
       sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      
+      // Set current year
       const cur = window.somapYearContext.getSelectedYear();
       sel.value = cur;
       if (hint) hint.textContent = cur;
+      
+      console.log('✅ Year selector initialized with current year:', cur);
+      
+      // Listen for changes
       sel.addEventListener('change', e=>{
         const y = String(e.target.value);
+        console.log('📅 Year changed to:', y);
         window.somapYearContext.setSelectedYear(y);
         if (hint) hint.textContent = y;
       });
-    })();
+      
+      // Update year display in sections
+      document.getElementById('yrA').textContent = cur;
+      document.getElementById('yrB').textContent = cur;
+    }
 
     // Render main UI
     async function render(){
       try {
-        console.log('Rendering transport routes page...');
+        console.log('🎨 Rendering transport routes page...');
         const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-        console.log('Selected year:', year);
+        console.log('📅 Selected year:', year);
         
-        document.getElementById('yrA').textContent = year;
-        document.getElementById('yrB').textContent = year;
+        // Update year display
+        const yrA = document.getElementById('yrA');
+        const yrB = document.getElementById('yrB');
+        if (yrA) yrA.textContent = year;
+        if (yrB) yrB.textContent = year;
+
+        // Check if TransportPricing module is available
+        if (!window.TransportPricing) {
+          console.error('❌ TransportPricing module not loaded!');
+          showToast('Error: TransportPricing module not loaded', 'bad');
+          return;
+        }
 
         // Load stops
-        console.log('Loading stops for year:', year);
+        console.log('🚏 Loading stops for year:', year);
         const stops = await TransportPricing.loadStopsForYear(year);
-        console.log('Loaded stops:', stops.length);
+        console.log(`✅ Loaded ${stops.length} stops:`, stops);
         drawStops(stops, year);
 
         // Load multipliers
-        console.log('Loading multipliers for year:', year);
+        console.log('📊 Loading multipliers for year:', year);
         const mult = await TransportPricing.loadYearMultipliers(year);
-        console.log('Loaded multipliers:', mult);
+        console.log('✅ Loaded multipliers:', mult);
         drawMultipliers(mult);
         
-        console.log('Render complete!');
+        console.log('✨ Render complete!');
       } catch (error) {
-        console.error('Error rendering page:', error);
+        console.error('❌ Error rendering page:', error);
         showToast('Error loading data: ' + error.message, 'bad');
       }
     }
@@ -417,25 +456,31 @@
 
     // Bulk import for ALL years (2024-2029)
     async function bulkImportAllYears() {
+      console.log('🚀 bulkImportAllYears function called');
       const yearsToImport = [2024, 2025, 2026, 2027, 2028, 2029];
       
-      if (!confirm(`🚀 This will import 67 routes for ${yearsToImport.length} years (${yearsToImport.join(', ')}). Continue?`)) {
+      const totalRoutes = LEGACY_ROUTES.reduce((sum, group) => sum + group.names.length, 0);
+      console.log(`📊 Will import ${totalRoutes} routes across ${yearsToImport.length} years`);
+      
+      if (!confirm(`🚀 This will import ${totalRoutes} routes for ${yearsToImport.length} years (${yearsToImport.join(', ')}).\n\nContinue?`)) {
+        console.log('❌ User cancelled bulk import');
         return;
       }
       
       showToast('🔄 Bulk importing for all years... Please wait', 'ok');
-      console.log('Starting bulk import for years:', yearsToImport);
+      console.log('✅ Starting bulk import for years:', yearsToImport);
       
       try {
         let totalImported = 0;
         let totalSkipped = 0;
         
         for (const year of yearsToImport) {
-          console.log(`\n=== Importing for year ${year} ===`);
+          console.log(`\n📅 === Importing for year ${year} ===`);
           
           // Check existing routes
           const existingSnap = await db.ref(`transportCatalog/${year}/stops`).once('value');
           const existing = existingSnap.val() || {};
+          console.log(`   Found ${Object.keys(existing).length} existing routes`);
           
           for (const group of LEGACY_ROUTES) {
             for (const stopName of group.names) {
@@ -468,41 +513,52 @@
               });
               
               totalImported++;
+              
+              // Log progress every 10 routes
+              if (totalImported % 10 === 0) {
+                console.log(`   ⏳ Progress: ${totalImported} imported...`);
+              }
             }
           }
           
-          console.log(`Year ${year} complete`);
+          console.log(`✅ Year ${year} complete`);
         }
         
-        console.log(`\nBulk import complete!`);
-        console.log(`Total imported: ${totalImported}`);
-        console.log(`Total skipped: ${totalSkipped}`);
+        console.log(`\n✨ Bulk import complete!`);
+        console.log(`   ✅ Total imported: ${totalImported}`);
+        console.log(`   ⏭️  Total skipped: ${totalSkipped}`);
         
         showToast(`✅ Bulk import complete! Imported ${totalImported} routes across ${yearsToImport.length} years!`);
         
         // Refresh display
+        console.log('🔄 Refreshing display...');
         setTimeout(() => render(), 500);
       } catch (error) {
-        console.error('Error in bulk import:', error);
+        console.error('❌ Error in bulk import:', error);
         showToast('❌ Bulk import failed: ' + error.message, 'bad');
       }
     }
 
     // Migrate legacy routes for current year only
     async function migrateLegacyRoutes() {
-      console.log('Migration started...');
+      console.log('📦 migrateLegacyRoutes function called');
       const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-      console.log('Importing for year:', year);
+      console.log('📅 Importing for year:', year);
       
-      showToast('🔄 Importing routes for ' + year + '...', 'ok');
+      const totalRoutes = LEGACY_ROUTES.reduce((sum, group) => sum + group.names.length, 0);
+      console.log(`📊 Will import ${totalRoutes} routes`);
+      
+      showToast(`🔄 Importing ${totalRoutes} routes for ${year}...`, 'ok');
       
       try {
         const existingSnap = await db.ref(`transportCatalog/${year}/stops`).once('value');
         const existing = existingSnap.val() || {};
-        console.log('Existing routes:', Object.keys(existing).length);
+        const existingCount = Object.keys(existing).length;
+        console.log('📊 Existing routes:', existingCount);
         
-        if (Object.keys(existing).length > 0) {
-          if (!confirm(`Year ${year} already has ${Object.keys(existing).length} routes. Add more? (Duplicates skipped)`)) {
+        if (existingCount > 0) {
+          if (!confirm(`Year ${year} already has ${existingCount} routes.\n\nAdd more? (Duplicates will be skipped)`)) {
+            console.log('❌ User cancelled import');
             showToast('Import cancelled', 'bad');
             return;
           }
@@ -512,13 +568,15 @@
         let skipped = 0;
         
         for (const group of LEGACY_ROUTES) {
+          console.log(`\n💰 Processing price group: TSh ${group.price.toLocaleString()}`);
+          
           for (const stopName of group.names) {
             const existingStop = Object.values(existing).find(s => 
               s.name && s.name.toLowerCase().trim() === stopName.toLowerCase().trim()
             );
             
             if (existingStop) {
-              console.log('Skipping duplicate:', stopName);
+              console.log(`   ⏭️  Skipping duplicate: ${stopName}`);
               skipped++;
               continue;
             }
@@ -528,7 +586,7 @@
               .map(word => word.charAt(0).toUpperCase() + word.slice(1))
               .join(' ');
             
-            console.log('Importing:', formattedName, '- TSh', group.price);
+            console.log(`   ✅ Importing: ${formattedName} - TSh ${group.price.toLocaleString()}`);
             
             const newRef = db.ref(`transportCatalog/${year}/stops`).push();
             await newRef.set({
@@ -544,56 +602,91 @@
           }
         }
         
-        console.log('Import complete. Imported:', imported, 'Skipped:', skipped);
+        console.log('\n✨ Import complete!');
+        console.log(`   ✅ Imported: ${imported}`);
+        console.log(`   ⏭️  Skipped: ${skipped}`);
+        
         showToast(`✅ Imported ${imported} routes for ${year}${skipped > 0 ? ` (${skipped} duplicates skipped)` : ''}!`);
         
+        console.log('🔄 Refreshing display...');
         setTimeout(() => render(), 500);
       } catch (error) {
-        console.error('Error migrating routes:', error);
+        console.error('❌ Error migrating routes:', error);
         showToast('❌ Failed to import: ' + error.message, 'bad');
       }
     }
 
-    // Global handler functions (exposed for inline onclick)
+    // Global handler functions (exposed for both inline onclick and addEventListener)
     window.handleAddStop = function() {
-      console.log('🔘 Add Stop clicked (inline handler)');
-      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-      openEditStopModal(null, year);
+      try {
+        console.log('➕ Add Stop handler called');
+        const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+        console.log('📅 Opening modal for year:', year);
+        openEditStopModal(null, year);
+      } catch (error) {
+        console.error('❌ Error in handleAddStop:', error);
+        showToast('Error opening add stop modal', 'bad');
+      }
     };
     
     window.handleBulkImport = function() {
-      console.log('🔘 Bulk Import clicked (inline handler)');
-      bulkImportAllYears();
+      try {
+        console.log('🚀 Bulk Import handler called');
+        bulkImportAllYears();
+      } catch (error) {
+        console.error('❌ Error in handleBulkImport:', error);
+        showToast('Error starting bulk import', 'bad');
+      }
     };
     
     window.handleMigrateLegacy = function() {
-      console.log('🔘 Import This Year clicked (inline handler)');
-      migrateLegacyRoutes();
+      try {
+        console.log('📦 Import This Year handler called');
+        migrateLegacyRoutes();
+      } catch (error) {
+        console.error('❌ Error in handleMigrateLegacy:', error);
+        showToast('Error starting import', 'bad');
+      }
     };
     
     window.handleSaveMultipliers = function() {
-      console.log('🔘 Save Multipliers clicked (inline handler)');
-      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-      const payload = {};
-      
-      Object.entries(multInputs).forEach(([m, id]) => {
-        const v = Number(document.getElementById(id).value);
-        payload[m] = Number.isFinite(v) ? v : 1.0;
-      });
-
-      db.ref(`transportSettings/${year}/monthMultipliers`).set(payload)
-        .then(() => {
-          showToast('Monthly multipliers saved for ' + year);
-        })
-        .catch(error => {
-          console.error('Error saving multipliers:', error);
-          showToast('Failed to save multipliers', 'bad');
+      try {
+        console.log('💾 Save Multipliers handler called');
+        const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+        console.log('📅 Saving multipliers for year:', year);
+        
+        const payload = {};
+        let inputCount = 0;
+        
+        Object.entries(multInputs).forEach(([m, id]) => {
+          const elem = document.getElementById(id);
+          if (elem) {
+            const v = Number(elem.value);
+            payload[m] = Number.isFinite(v) ? v : 1.0;
+            inputCount++;
+          }
         });
+        
+        console.log(`📊 Saving ${inputCount} multipliers:`, payload);
+
+        db.ref(`transportSettings/${year}/monthMultipliers`).set(payload)
+          .then(() => {
+            console.log('✅ Multipliers saved successfully');
+            showToast(`✅ Monthly multipliers saved for ${year}!`);
+          })
+          .catch(error => {
+            console.error('❌ Error saving multipliers:', error);
+            showToast('Failed to save multipliers', 'bad');
+          });
+      } catch (error) {
+        console.error('❌ Error in handleSaveMultipliers:', error);
+        showToast('Error saving multipliers', 'bad');
+      }
     };
 
     // Event listeners
     function setupEventListeners() {
-      console.log('Setting up event listeners...');
+      console.log('🔧 Setting up event listeners...');
       
       // Initialize DOM elements
       toast = document.getElementById("toast");
@@ -609,57 +702,104 @@
       cancelEditStop = document.getElementById("cancelEditStop");
       saveMultBtn = document.getElementById("saveMultBtn");
       
-      console.log('DOM elements initialized:', {
+      console.log('📋 DOM elements check:', {
+        toast: !!toast,
+        stopsList: !!stopsList,
+        emptyStops: !!emptyStops,
         addStopBtn: !!addStopBtn,
         bulkImportBtn: !!bulkImportBtn,
         migrateLegacyBtn: !!migrateLegacyBtn,
+        stopSearch: !!stopSearch,
+        editStopModal: !!editStopModal,
+        closeEditStopModal: !!closeEditStopModal,
+        saveEditStop: !!saveEditStop,
+        cancelEditStop: !!cancelEditStop,
         saveMultBtn: !!saveMultBtn
       });
       
-      // Also attach addEventListener as backup
+      // Attach event listeners with error handling
       if (addStopBtn) {
-        addStopBtn.addEventListener('click', window.handleAddStop);
+        // Remove old onclick attribute to avoid double-firing
+        addStopBtn.removeAttribute('onclick');
+        addStopBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          console.log('🔘 Add Stop button clicked!');
+          window.handleAddStop();
+        });
         console.log('✅ Add Stop button listener attached');
+      } else {
+        console.error('❌ Add Stop button not found!');
       }
 
       if (bulkImportBtn) {
-        bulkImportBtn.addEventListener('click', window.handleBulkImport);
+        bulkImportBtn.removeAttribute('onclick');
+        bulkImportBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          console.log('🔘 Bulk Import button clicked!');
+          window.handleBulkImport();
+        });
         console.log('✅ Bulk Import button listener attached');
+      } else {
+        console.error('❌ Bulk Import button not found!');
       }
 
       if (migrateLegacyBtn) {
-        migrateLegacyBtn.addEventListener('click', window.handleMigrateLegacy);
+        migrateLegacyBtn.removeAttribute('onclick');
+        migrateLegacyBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          console.log('🔘 Import This Year button clicked!');
+          window.handleMigrateLegacy();
+        });
         console.log('✅ Import This Year button listener attached');
+      } else {
+        console.error('❌ Import This Year button not found!');
       }
 
       if (closeEditStopModal) {
         closeEditStopModal.addEventListener('click', () => {
+          console.log('🔘 Close modal clicked');
           editStopModal.classList.add('hidden');
         });
+        console.log('✅ Close modal button listener attached');
       }
 
       if (cancelEditStop) {
         cancelEditStop.addEventListener('click', () => {
+          console.log('🔘 Cancel edit clicked');
           editStopModal.classList.add('hidden');
         });
+        console.log('✅ Cancel edit button listener attached');
       }
 
       if (saveEditStop) {
-        saveEditStop.addEventListener('click', saveStop);
+        saveEditStop.addEventListener('click', () => {
+          console.log('🔘 Save stop clicked');
+          saveStop();
+        });
+        console.log('✅ Save stop button listener attached');
       }
 
       if (stopSearch) {
         stopSearch.addEventListener('input', () => {
+          console.log('🔍 Search input changed');
           render();
         });
+        console.log('✅ Search input listener attached');
       }
 
       if (saveMultBtn) {
-        saveMultBtn.addEventListener('click', window.handleSaveMultipliers);
+        saveMultBtn.removeAttribute('onclick');
+        saveMultBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          console.log('🔘 Save Multipliers button clicked!');
+          window.handleSaveMultipliers();
+        });
         console.log('✅ Save Multipliers button listener attached');
+      } else {
+        console.error('❌ Save Multipliers button not found!');
       }
       
-      console.log('All event listeners set up');
+      console.log('✨ All event listeners successfully set up!');
     }
 
     // Listen to year changes
@@ -669,26 +809,31 @@
 
     // Initialize authentication and app
     function initializeApp() {
-      console.log('Initializing Transport Routes app...');
+      console.log('✨ Initializing Transport Routes app...');
       
-      // Setup event listeners first
+      // Initialize year selector FIRST
+      initYearSelector();
+      
+      // Setup event listeners
       setupEventListeners();
       
       // Check authentication (non-blocking)
       auth.onAuthStateChanged(user => {
-        console.log('Auth state changed:', user ? user.email : 'No user');
+        console.log('🔐 Auth state changed:', user ? user.email : 'No user');
         currentUser = user;
         
         if (!user) {
-          console.warn('No user logged in, but continuing anyway...');
+          console.warn('⚠️ No user logged in, but continuing anyway...');
           // Don't block the page, just show a warning
-          showToast('⚠️ Not logged in - changes may not persist', 'bad');
+          setTimeout(() => {
+            showToast('⚠️ Not logged in - changes may not persist', 'bad');
+          }, 1000);
         }
         
         // Initialize the page regardless of auth status
         if (!isInitialized) {
           isInitialized = true;
-          console.log('Initializing page...');
+          console.log('🎯 First-time initialization, rendering page...');
           render();
         }
       });
@@ -696,7 +841,8 @@
 
     // Initial render
     document.addEventListener('DOMContentLoaded', () => {
-      console.log('DOM loaded, initializing...');
+      console.log('📄 DOM Content Loaded!');
+      console.log('🚀 Starting app initialization...');
       initializeApp();
     });
   </script>

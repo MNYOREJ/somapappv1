@@ -148,10 +148,13 @@
 
   <script>
     const db = firebase.database();
+    const auth = firebase.auth();
     const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     
     let currentEditStopId = null;
     let multInputs = {};
+    let currentUser = null;
+    let isInitialized = false;
 
     const toast = document.getElementById("toast");
     const stopsList = document.getElementById("stopsList");
@@ -207,17 +210,31 @@
 
     // Render main UI
     async function render(){
-      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-      document.getElementById('yrA').textContent = year;
-      document.getElementById('yrB').textContent = year;
+      try {
+        console.log('Rendering transport routes page...');
+        const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+        console.log('Selected year:', year);
+        
+        document.getElementById('yrA').textContent = year;
+        document.getElementById('yrB').textContent = year;
 
-      // Load stops
-      const stops = await TransportPricing.loadStopsForYear(year);
-      drawStops(stops, year);
+        // Load stops
+        console.log('Loading stops for year:', year);
+        const stops = await TransportPricing.loadStopsForYear(year);
+        console.log('Loaded stops:', stops.length);
+        drawStops(stops, year);
 
-      // Load multipliers
-      const mult = await TransportPricing.loadYearMultipliers(year);
-      drawMultipliers(mult);
+        // Load multipliers
+        console.log('Loading multipliers for year:', year);
+        const mult = await TransportPricing.loadYearMultipliers(year);
+        console.log('Loaded multipliers:', mult);
+        drawMultipliers(mult);
+        
+        console.log('Render complete!');
+      } catch (error) {
+        console.error('Error rendering page:', error);
+        showToast('Error loading data: ' + error.message, 'bad');
+      }
     }
 
     function drawStops(stops, year){
@@ -547,56 +564,130 @@
     }
 
     // Event listeners
-    addStopBtn.addEventListener('click', () => {
-      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-      openEditStopModal(null, year);
-    });
-
-    if (bulkImportBtn) {
-      bulkImportBtn.addEventListener('click', bulkImportAllYears);
-    }
-
-    if (migrateLegacyBtn) {
-      migrateLegacyBtn.addEventListener('click', migrateLegacyRoutes);
-    }
-
-    closeEditStopModal.addEventListener('click', () => {
-      editStopModal.classList.add('hidden');
-    });
-
-    cancelEditStop.addEventListener('click', () => {
-      editStopModal.classList.add('hidden');
-    });
-
-    saveEditStop.addEventListener('click', saveStop);
-
-    stopSearch.addEventListener('input', () => {
-      render();
-    });
-
-    saveMultBtn.addEventListener('click', async () => {
-      const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
-      const payload = {};
+    function setupEventListeners() {
+      console.log('Setting up event listeners...');
       
-      Object.entries(multInputs).forEach(([m, id]) => {
-        const v = Number(document.getElementById(id).value);
-        payload[m] = Number.isFinite(v) ? v : 1.0;
-      });
-
-      try {
-        await db.ref(`transportSettings/${year}/monthMultipliers`).set(payload);
-        showToast('Monthly multipliers saved for ' + year);
-      } catch (error) {
-        console.error('Error saving multipliers:', error);
-        showToast('Failed to save multipliers', 'bad');
+      if (addStopBtn) {
+        addStopBtn.addEventListener('click', () => {
+          console.log('Add Stop button clicked');
+          const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+          openEditStopModal(null, year);
+        });
+        console.log('Add Stop button listener attached');
+      } else {
+        console.error('Add Stop button not found!');
       }
-    });
+
+      if (bulkImportBtn) {
+        bulkImportBtn.addEventListener('click', () => {
+          console.log('Bulk Import button clicked');
+          bulkImportAllYears();
+        });
+        console.log('Bulk Import button listener attached');
+      } else {
+        console.error('Bulk Import button not found!');
+      }
+
+      if (migrateLegacyBtn) {
+        migrateLegacyBtn.addEventListener('click', () => {
+          console.log('Import This Year button clicked');
+          migrateLegacyRoutes();
+        });
+        console.log('Import This Year button listener attached');
+      } else {
+        console.error('Import This Year button not found!');
+      }
+
+      if (closeEditStopModal) {
+        closeEditStopModal.addEventListener('click', () => {
+          editStopModal.classList.add('hidden');
+        });
+      }
+
+      if (cancelEditStop) {
+        cancelEditStop.addEventListener('click', () => {
+          editStopModal.classList.add('hidden');
+        });
+      }
+
+      if (saveEditStop) {
+        saveEditStop.addEventListener('click', saveStop);
+      }
+
+      if (stopSearch) {
+        stopSearch.addEventListener('input', () => {
+          render();
+        });
+      }
+
+      if (saveMultBtn) {
+        saveMultBtn.addEventListener('click', async () => {
+          console.log('Save Multipliers button clicked');
+          const year = Number(window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+          const payload = {};
+          
+          Object.entries(multInputs).forEach(([m, id]) => {
+            const v = Number(document.getElementById(id).value);
+            payload[m] = Number.isFinite(v) ? v : 1.0;
+          });
+
+          try {
+            console.log('Saving multipliers:', payload);
+            await db.ref(`transportSettings/${year}/monthMultipliers`).set(payload);
+            showToast('Monthly multipliers saved for ' + year);
+          } catch (error) {
+            console.error('Error saving multipliers:', error);
+            showToast('Failed to save multipliers', 'bad');
+          }
+        });
+        console.log('Save Multipliers button listener attached');
+      } else {
+        console.error('Save Multipliers button not found!');
+      }
+      
+      console.log('All event listeners set up');
+    }
 
     // Listen to year changes
-    window.somapYearContext.onYearChanged(() => render());
+    window.somapYearContext.onYearChanged(() => {
+      if (isInitialized) render();
+    });
+
+    // Initialize authentication and app
+    function initializeApp() {
+      console.log('Initializing Transport Routes app...');
+      
+      // Setup event listeners first
+      setupEventListeners();
+      
+      // Check authentication
+      auth.onAuthStateChanged(user => {
+        console.log('Auth state changed:', user ? user.email : 'No user');
+        currentUser = user;
+        
+        if (!user) {
+          console.warn('No user logged in, redirecting to login...');
+          showToast('Please log in to access this page', 'bad');
+          setTimeout(() => {
+            window.location.href = 'transport.html';
+          }, 2000);
+          return;
+        }
+        
+        // User is authenticated, initialize the page
+        if (!isInitialized) {
+          isInitialized = true;
+          console.log('User authenticated, rendering page...');
+          render();
+        }
+      });
+    }
 
     // Initial render
-    document.addEventListener('DOMContentLoaded', () => render());
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('DOM loaded, initializing...');
+      initializeApp();
+    });
   </script>
 </body>
 </html>

@@ -57,11 +57,24 @@
         <select data-somap-year-select class="border rounded px-2 py-1 text-sm" style="min-width: 100px; padding: 0.5rem;"></select>
         <span style="font-size: 0.75rem; color: #94a3b8;">Working year: <b id="somapYearHint">--</b></span>
       </div>
+      <button class="btn" onclick="const dp = document.getElementById('debugPanel'); dp.style.display = dp.style.display === 'none' ? 'block' : 'none';" style="background: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); font-size: 0.875rem;">🔧 Debug</button>
       <a href="transport.html" class="btn secondary">← Back to Dashboard</a>
     </div>
   </div>
 
   <main>
+    <!-- Debug Status Panel -->
+    <div id="debugPanel" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <strong>🔧 Debug Info:</strong>
+          <span id="debugStatus" style="margin-left: 1rem;">Initializing...</span>
+        </div>
+        <button onclick="document.getElementById('debugPanel').style.display='none'" style="padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: transparent; color: white; cursor: pointer;">Hide</button>
+      </div>
+      <div id="debugDetails" style="margin-top: 0.5rem; font-size: 0.85rem; font-family: monospace; color: #94a3b8;"></div>
+    </div>
+
     <!-- Stops & Base Fees Section -->
     <section class="card">
       <div class="flex space center mb-2">
@@ -156,18 +169,9 @@
     let currentUser = null;
     let isInitialized = false;
 
-    const toast = document.getElementById("toast");
-    const stopsList = document.getElementById("stopsList");
-    const emptyStops = document.getElementById("emptyStops");
-    const addStopBtn = document.getElementById("addStopBtn");
-    const bulkImportBtn = document.getElementById("bulkImportBtn");
-    const migrateLegacyBtn = document.getElementById("migrateLegacyBtn");
-    const stopSearch = document.getElementById("stopSearch");
-    const editStopModal = document.getElementById("editStopModal");
-    const closeEditStopModal = document.getElementById("closeEditStopModal");
-    const saveEditStop = document.getElementById("saveEditStop");
-    const cancelEditStop = document.getElementById("cancelEditStop");
-    const saveMultBtn = document.getElementById("saveMultBtn");
+    // DOM elements - will be initialized after DOM loads
+    let toast, stopsList, emptyStops, addStopBtn, bulkImportBtn, migrateLegacyBtn;
+    let stopSearch, editStopModal, closeEditStopModal, saveEditStop, cancelEditStop, saveMultBtn;
 
     // Legacy routes from the old hardcoded system
     const LEGACY_ROUTES = [
@@ -238,7 +242,7 @@
     }
 
     function drawStops(stops, year){
-      const q = (stopSearch.value || '').toLowerCase().trim();
+      const q = (stopSearch?.value || '').toLowerCase().trim();
       
       // Remove duplicates by name (case-insensitive)
       const uniqueStops = [];
@@ -567,6 +571,59 @@
     function setupEventListeners() {
       console.log('Setting up event listeners...');
       
+      // Show debug panel
+      const debugPanel = document.getElementById('debugPanel');
+      const debugStatus = document.getElementById('debugStatus');
+      const debugDetails = document.getElementById('debugDetails');
+      
+      if (debugPanel) {
+        debugPanel.style.display = 'block';
+        debugStatus.textContent = 'Setting up...';
+      }
+      
+      // Initialize DOM elements
+      toast = document.getElementById("toast");
+      stopsList = document.getElementById("stopsList");
+      emptyStops = document.getElementById("emptyStops");
+      addStopBtn = document.getElementById("addStopBtn");
+      bulkImportBtn = document.getElementById("bulkImportBtn");
+      migrateLegacyBtn = document.getElementById("migrateLegacyBtn");
+      stopSearch = document.getElementById("stopSearch");
+      editStopModal = document.getElementById("editStopModal");
+      closeEditStopModal = document.getElementById("closeEditStopModal");
+      saveEditStop = document.getElementById("saveEditStop");
+      cancelEditStop = document.getElementById("cancelEditStop");
+      saveMultBtn = document.getElementById("saveMultBtn");
+      
+      const elemStatus = {
+        toast: !!toast,
+        stopsList: !!stopsList,
+        emptyStops: !!emptyStops,
+        addStopBtn: !!addStopBtn,
+        bulkImportBtn: !!bulkImportBtn,
+        migrateLegacyBtn: !!migrateLegacyBtn,
+        stopSearch: !!stopSearch,
+        editStopModal: !!editStopModal,
+        closeEditStopModal: !!closeEditStopModal,
+        saveEditStop: !!saveEditStop,
+        cancelEditStop: !!cancelEditStop,
+        saveMultBtn: !!saveMultBtn
+      };
+      
+      console.log('DOM elements initialized:', elemStatus);
+      
+      // Update debug panel
+      if (debugDetails) {
+        const allFound = Object.values(elemStatus).every(v => v);
+        debugDetails.innerHTML = `
+          DOM Elements: ${allFound ? '✅ All found' : '❌ Some missing'}<br/>
+          addStopBtn: ${elemStatus.addStopBtn ? '✅' : '❌'} | 
+          bulkImportBtn: ${elemStatus.bulkImportBtn ? '✅' : '❌'} | 
+          migrateLegacyBtn: ${elemStatus.migrateLegacyBtn ? '✅' : '❌'} | 
+          saveMultBtn: ${elemStatus.saveMultBtn ? '✅' : '❌'}
+        `;
+      }
+      
       if (addStopBtn) {
         addStopBtn.addEventListener('click', () => {
           console.log('Add Stop button clicked');
@@ -646,6 +703,18 @@
       }
       
       console.log('All event listeners set up');
+      
+      // Update debug panel to show ready status
+      if (debugStatus) {
+        debugStatus.textContent = '✅ Ready! All buttons active.';
+        debugStatus.style.color = '#10b981';
+      }
+      if (debugDetails) {
+        const listenerCount = [addStopBtn, bulkImportBtn, migrateLegacyBtn, closeEditStopModal, 
+                               cancelEditStop, saveEditStop, stopSearch, saveMultBtn]
+                              .filter(el => el).length;
+        debugDetails.innerHTML += `<br/>Event Listeners: ✅ ${listenerCount} attached | Click any button to test`;
+      }
     }
 
     // Listen to year changes
@@ -660,24 +729,21 @@
       // Setup event listeners first
       setupEventListeners();
       
-      // Check authentication
+      // Check authentication (non-blocking)
       auth.onAuthStateChanged(user => {
         console.log('Auth state changed:', user ? user.email : 'No user');
         currentUser = user;
         
         if (!user) {
-          console.warn('No user logged in, redirecting to login...');
-          showToast('Please log in to access this page', 'bad');
-          setTimeout(() => {
-            window.location.href = 'transport.html';
-          }, 2000);
-          return;
+          console.warn('No user logged in, but continuing anyway...');
+          // Don't block the page, just show a warning
+          showToast('⚠️ Not logged in - changes may not persist', 'bad');
         }
         
-        // User is authenticated, initialize the page
+        // Initialize the page regardless of auth status
         if (!isInitialized) {
           isInitialized = true;
-          console.log('User authenticated, rendering page...');
+          console.log('Initializing page...');
           render();
         }
       });

@@ -479,8 +479,15 @@
         };
       }
 
-      // Render KPIs
+      // Render KPIs - only for admin view, not parent view
       function renderKPIs() {
+        // Skip if parent view (stat cards already rendered by renderParentTransportPayment)
+        const urlParams = new URLSearchParams(window.location.search);
+        const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
+        if (studentParam) {
+          return; // Don't render KPIs in parent view
+        }
+        
         let totalExpected = 0;
         let totalCollected = 0;
         let totalDebt = 0;
@@ -1176,14 +1183,22 @@
 
       // Parent transport payment renderer - unified view with existing KPIs and table
       async function renderParentTransportPayment(studentId) {
-        const y = String(state.year);
-        const prefix = currentSchoolPrefix();
-        
-        // Hide ONLY expenses (keep KPIs and table for parent's child)
-        document.querySelector('section.card.mt-3:has([id="fuelExpenses"])')?.classList.add('hidden'); // Expense stats
-        
-        // Get parent phone (parents logged in via index.html with studentKey)
-        const parentPhone = normalizePhone(localStorage.getItem('parentPhone') || '');
+        try {
+          const y = String(state.year);
+          const prefix = currentSchoolPrefix();
+          
+          // Ensure expenses/balance cards are hidden (already done on init, but double-check)
+          const expCard = document.getElementById('totalExpenses')?.closest('.stat-card');
+          const netCard = document.getElementById('netBalance')?.closest('.stat-card');
+          if (expCard) expCard.style.display = 'none';
+          if (netCard) netCard.style.display = 'none';
+          
+          // Hide expenses section completely
+          const expSection = document.querySelector('section.card.mt-3:has([id="fuelExpenses"])');
+          if (expSection) expSection.style.display = 'none';
+          
+          // Get parent phone (parents logged in via index.html with studentKey)
+          const parentPhone = normalizePhone(localStorage.getItem('parentPhone') || '');
         
         // Load ONLY this specific student's data (fast!)
         // Use same data source as admin view (transportLedgers)
@@ -1281,15 +1296,33 @@
         const debt = Math.max(0, totalExpected - totalPaid);
         
         // Render KPIs for THIS child only - show current month expected in KPI
-        // Update stat cards directly (no need for requestAnimationFrame since data is ready)
-        document.getElementById('totalExpected').textContent = formatCurrency(currentMonthExpected);
-        document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
-        document.getElementById('totalDebt').textContent = formatCurrency(debt);
-        document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
+        // Update stat cards directly with the child's data
+        const totalExpectedEl = document.getElementById('totalExpected');
+        const totalCollectedEl = document.getElementById('totalCollected');
+        const totalDebtEl = document.getElementById('totalDebt');
+        const monthLabelEl = document.getElementById('monthLabel');
         
-        // Hide expense/balance KPIs for parents
-        document.getElementById('totalExpenses').parentElement.parentElement.style.display = 'none';
-        document.getElementById('netBalance').parentElement.parentElement.style.display = 'none';
+        if (totalExpectedEl) {
+          totalExpectedEl.textContent = formatCurrency(currentMonthExpected);
+          totalExpectedEl.style.opacity = '1';
+        }
+        if (totalCollectedEl) {
+          totalCollectedEl.textContent = formatCurrency(totalPaid);
+          totalCollectedEl.style.opacity = '1';
+        }
+        if (totalDebtEl) {
+          totalDebtEl.textContent = formatCurrency(debt);
+          totalDebtEl.style.opacity = '1';
+        }
+        if (monthLabelEl) {
+          monthLabelEl.textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
+        }
+        
+        // Ensure expense/balance cards stay hidden
+        const expCardFinal = document.getElementById('totalExpenses')?.closest('.stat-card');
+        const netCardFinal = document.getElementById('netBalance')?.closest('.stat-card');
+        if (expCardFinal) expCardFinal.style.display = 'none';
+        if (netCardFinal) netCardFinal.style.display = 'none';
         
         // Calculate school fees
         const feePerYear = Number(S.feePerYear || 0);
@@ -1327,20 +1360,52 @@
         document.getElementById('paymentSummary').textContent = '1 student on transport';
         
         // Hide search/filter controls
-        classFilter.style.display = 'none';
-        searchInput.style.display = 'none';
-        statusFilter.style.display = 'none';
-        document.getElementById('debtorsBtnText').parentElement.style.display = 'none';
+        if (classFilter) classFilter.style.display = 'none';
+        if (searchInput) searchInput.style.display = 'none';
+        if (statusFilter) statusFilter.style.display = 'none';
+        const debtorsBtn = document.getElementById('debtorsBtnText')?.parentElement;
+        if (debtorsBtn) debtorsBtn.style.display = 'none';
+        } catch (error) {
+          console.error('Error in renderParentTransportPayment:', error);
+          showToast('Error loading student data', 'bad');
+          // Still show error in stat cards
+          const totalExpectedEl = document.getElementById('totalExpected');
+          const totalCollectedEl = document.getElementById('totalCollected');
+          const totalDebtEl = document.getElementById('totalDebt');
+          if (totalExpectedEl) totalExpectedEl.textContent = 'Error';
+          if (totalCollectedEl) totalCollectedEl.textContent = 'Error';
+          if (totalDebtEl) totalDebtEl.textContent = 'Error';
+        }
       }
 
       // Check for parent view IMMEDIATELY (before auth state) - parents already authenticated
       const urlParams = new URLSearchParams(window.location.search);
       const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
+      const yearParam = urlParams.get('year');
+      
+      // Initialize year from URL or context
+      if (yearParam) {
+        state.year = parseInt(yearParam) || state.year;
+      } else if (window.somapYearContext) {
+        const currentYear = window.somapYearContext.getSelectedYear();
+        if (currentYear) state.year = parseInt(currentYear) || state.year;
+      }
+      if (yearSelect && state.year) yearSelect.value = state.year;
       
       if (studentParam) {
         // Parent view mode - render immediately without waiting for auth
         localStorage.setItem('parentFocusStudent', studentParam);
         state.currentPaymentStudentId = studentParam;
+        
+        // Hide expense/balance cards IMMEDIATELY for parent view
+        const expensesCard = document.getElementById('totalExpenses')?.closest('.stat-card');
+        const netBalanceCard = document.getElementById('netBalance')?.closest('.stat-card');
+        if (expensesCard) expensesCard.style.display = 'none';
+        if (netBalanceCard) netBalanceCard.style.display = 'none';
+        
+        // Hide expenses section completely
+        const expensesSection = document.querySelector('section.card.mt-3:has([id="fuelExpenses"])');
+        if (expensesSection) expensesSection.style.display = 'none';
         
         // Change back button to go to parent.html
         const backBtn = document.getElementById('backButton');
@@ -1350,13 +1415,23 @@
         }
         
         // Initialize stat cards with loading state to prevent flashing
-        document.getElementById('totalExpected').textContent = '—';
-        document.getElementById('totalCollected').textContent = '—';
-        document.getElementById('totalDebt').textContent = '—';
-        document.getElementById('monthLabel').textContent = '';
+        const totalExpectedEl = document.getElementById('totalExpected');
+        const totalCollectedEl = document.getElementById('totalCollected');
+        const totalDebtEl = document.getElementById('totalDebt');
+        const monthLabelEl = document.getElementById('monthLabel');
+        
+        if (totalExpectedEl) totalExpectedEl.textContent = 'Loading...';
+        if (totalCollectedEl) totalCollectedEl.textContent = 'Loading...';
+        if (totalDebtEl) totalDebtEl.textContent = 'Loading...';
+        if (monthLabelEl) monthLabelEl.textContent = '';
         
         // Load and render immediately
-        renderParentTransportPayment(studentParam);
+        renderParentTransportPayment(studentParam).catch(err => {
+          console.error('Error rendering parent transport payment:', err);
+          if (totalExpectedEl) totalExpectedEl.textContent = 'Error';
+          if (totalCollectedEl) totalCollectedEl.textContent = 'Error';
+          if (totalDebtEl) totalDebtEl.textContent = 'Error';
+        });
       } else {
         // Admin view mode - wait for auth state
         firebase.auth().onAuthStateChanged((user) => {

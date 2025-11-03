@@ -522,12 +522,48 @@
     const paymentData = record.modulePayload?.payment;
     if (!studentKey || !paymentData) throw new Error('Missing transport payload.');
 
-    const pushRef = db.ref(`transport_payments/${studentKey}`).push();
-    await pushRef.set({
+    const year = String(paymentData.year || new Date().getFullYear());
+    const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
+    
+    const updates = {};
+    
+    // Find the payment key in transportLedgers
+    // First try to use paymentRef from record (saved when payment was queued)
+    let paymentKey = record.paymentRef || record.modulePayload?.paymentRef;
+    
+    if (!paymentKey) {
+      // Fallback: Search by reference code
+      const referenceCode = record.paymentReferenceCode || paymentData.reference;
+      if (referenceCode) {
+        const ledgersSnap = await db.ref(`${prefix}transportLedgers/${year}/${studentKey}/payments`).once('value').catch(() => ({ val: () => null }));
+        const ledgerPayments = ledgersSnap.val() || {};
+        
+        // Find payment by reference code
+        Object.entries(ledgerPayments).forEach(([key, payment]) => {
+          if (payment && (payment.ref === referenceCode || payment.reference === referenceCode)) {
+            paymentKey = key;
+          }
+        });
+      }
+    }
+    
+    if (paymentKey) {
+      // Update the ledger entry to mark as approved
+      updates[`${prefix}transportLedgers/${year}/${studentKey}/payments/${paymentKey}/approved`] = true;
+      updates[`${prefix}transportLedgers/${year}/${studentKey}/payments/${paymentKey}/approvedBy`] = state.user?.email || ADMIN_EMAIL;
+      updates[`${prefix}transportLedgers/${year}/${studentKey}/payments/${paymentKey}/approvedAt`] = firebase.database.ServerValue.TIMESTAMP;
+    }
+    
+    // Also write to legacy path for backward compatibility
+    const pushRef = db.ref(`${prefix}transport_payments/${studentKey}`).push();
+    updates[`${prefix}transport_payments/${studentKey}/${pushRef.key}`] = {
       ...paymentData,
+      approved: true,
       approvedAt: firebase.database.ServerValue.TIMESTAMP,
       approvedBy: state.user?.email || ADMIN_EMAIL,
-    });
+    };
+    
+    await db.ref().update(updates);
   }
 
   async function commitPrefonePayment(record) {

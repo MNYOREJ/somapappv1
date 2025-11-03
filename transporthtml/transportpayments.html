@@ -763,7 +763,7 @@
           
           await payRef.set(paymentData);
           
-          // Queue for approval
+          // Queue for approval - include payment key for matching
           const queueRef = db.ref(`${prefix}pendingApprovals/transportPayments/${payRef.key}`);
           await queueRef.set({
             year,
@@ -771,6 +771,7 @@
             admissionNumber: student.admissionNumber || studentId,
             studentName: fullName,
             parentPhone: student.primaryParentContact || student.primaryContact || student.guardianPhone || '--',
+            paymentRef: payRef.key, // Store the ledger payment key for approval matching
             ...paymentData,
             queuedAt: timestamp
           });
@@ -840,8 +841,8 @@
         }
       }
 
-      // View payment history
-      function viewPaymentHistory(studentId) {
+      // View payment history - with real-time approval status
+      async function viewPaymentHistory(studentId) {
         const student = state.students[studentId];
         if (!student) {
           showToast('Student not found', 'bad');
@@ -859,6 +860,59 @@
           payments = [];
         }
         
+        // Also check pendingApprovals to get latest approval status
+        const prefix = currentSchoolPrefix();
+        try {
+          const pendingSnap = await firebase.database().ref(`${prefix}pendingApprovals/transportPayments`).once('value');
+          const pendingApprovals = pendingSnap.val() || {};
+          
+          // Create a map of payment keys to approval status
+          const approvalMap = {};
+          Object.entries(pendingApprovals).forEach(([key, approval]) => {
+            if (approval && approval.studentId === studentId && approval.ref) {
+              // Match by reference code for accurate matching
+              approvalMap[approval.ref] = {
+                approved: false,
+                pending: true
+              };
+            }
+          });
+          
+          // Also check approvalsHistory for approved payments
+          const year = String(state.year);
+          const historySnap = await firebase.database().ref(`approvalsHistory/${year}`).once('value').catch(() => ({ val: () => null }));
+          const history = historySnap.val() || {};
+          Object.values(history).forEach(months => {
+            Object.values(months || {}).forEach(records => {
+              Object.values(records || {}).forEach(record => {
+                if (record && record.sourceModule === 'transport' && record.modulePayload?.studentKey === studentId) {
+                  const ref = record.paymentReferenceCode || record.modulePayload?.payment?.reference;
+                  if (ref) {
+                    approvalMap[ref] = {
+                      approved: record.finalStatus === 'approved',
+                      pending: false
+                    };
+                  }
+                }
+              });
+            });
+          });
+          
+          // Update payment approval status from map
+          payments = payments.map(p => {
+            const ref = p.ref || p.reference;
+            if (ref && approvalMap[ref]) {
+              return {
+                ...p,
+                approved: approvalMap[ref].approved ? true : (p.approved || false)
+              };
+            }
+            return p;
+          });
+        } catch (err) {
+          console.warn('Error checking approval status:', err);
+        }
+        
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         const admissionNo = student.admissionNumber || 'N/A';
         
@@ -874,7 +928,8 @@
         } else {
           historyEmpty.classList.add('hidden');
           historyBody.innerHTML = payments.map(p => {
-            const isApproved = p.approved === true || p.approved === 'true';
+            // Check approval status more thoroughly
+            const isApproved = p.approved === true || p.approved === 'true' || p.approvedAt || (p.approvedBy && !p.approvedBy.includes('pending'));
             const statusBadge = isApproved 
               ? '<span class="chip ok" style="background: rgba(16, 185, 129, 0.15); color: #86efac; border: 1px solid rgba(16, 185, 129, 0.35); padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">✅ Approved</span>'
               : '<span class="chip warn" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.35); padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700;">⏳ Pending</span>';
@@ -1226,14 +1281,17 @@
         const debt = Math.max(0, totalExpected - totalPaid);
         
         // Render KPIs for THIS child only - show current month expected in KPI
-        document.getElementById('totalExpected').textContent = formatCurrency(currentMonthExpected);
-        document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
-        document.getElementById('totalDebt').textContent = formatCurrency(debt);
-        document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
-        
-        // Hide expense/balance KPIs for parents
-        document.getElementById('totalExpenses').parentElement.parentElement.style.display = 'none';
-        document.getElementById('netBalance').parentElement.parentElement.style.display = 'none';
+        // Use requestAnimationFrame to prevent flashing
+        requestAnimationFrame(() => {
+          document.getElementById('totalExpected').textContent = formatCurrency(currentMonthExpected);
+          document.getElementById('totalCollected').textContent = formatCurrency(totalPaid);
+          document.getElementById('totalDebt').textContent = formatCurrency(debt);
+          document.getElementById('monthLabel').textContent = `${MONTH_NAMES[state.month]} ${state.year}`;
+          
+          // Hide expense/balance KPIs for parents
+          document.getElementById('totalExpenses').parentElement.parentElement.style.display = 'none';
+          document.getElementById('netBalance').parentElement.parentElement.style.display = 'none';
+        });
         
         // Calculate school fees
         const feePerYear = Number(S.feePerYear || 0);

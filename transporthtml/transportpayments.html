@@ -371,6 +371,37 @@
         return s.replace(/(?!^\+)[^\d]/g, '');
       }
 
+      // Resolve school id if a friendly name (e.g., "socrates") is present and set window.currentSchoolId
+      async function resolveSchoolIdIfNeeded() {
+        try {
+          // If already an RTDB id, keep it and set global
+          const looksLikeId = typeof state.school === 'string' && state.school.startsWith('-');
+          if (looksLikeId) {
+            window.currentSchoolId = state.school;
+            return;
+          }
+          const snap = await firebase.database().ref('schools').get();
+          if (!snap.exists()) return;
+          const schools = snap.val() || {};
+          const target = String(state.school || '').toLowerCase().trim();
+          let matchedId = null;
+          Object.keys(schools).some((id) => {
+            const s = schools[id] || {};
+            const slug = String(s.slug || '').toLowerCase();
+            const name = String(s.name || '').toLowerCase();
+            if (slug === target || name === target || id === state.school) { matchedId = id; return true; }
+            if (!matchedId && (name.includes(target) || slug.includes(target))) { matchedId = id; }
+            return false;
+          });
+          if (matchedId) {
+            state.school = matchedId;
+            window.currentSchoolId = matchedId;
+          }
+        } catch (err) {
+          console.warn('Failed to resolve school id', err);
+        }
+      }
+
       // School prefix helper
       function currentSchoolPrefix() {
         return window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
@@ -1158,7 +1189,7 @@
 
       function refreshData() {
         showToast('Refreshing data...');
-        loadAllData();
+        resolveSchoolIdIfNeeded().then(() => loadAllData());
       }
 
       // Event listeners
@@ -1539,7 +1570,7 @@
         if (monthLabelEl) monthLabelEl.textContent = '';
         
         // Load and render immediately using strict year-scoped data
-        renderYearScopedStudentView(studentParam).catch(err => {
+        resolveSchoolIdIfNeeded().then(() => renderYearScopedStudentView(studentParam)).catch(err => {
           console.error('Error rendering parent transport payment:', err);
           if (totalExpectedEl) totalExpectedEl.textContent = 'Error';
           if (totalCollectedEl) totalCollectedEl.textContent = 'Error';
@@ -1608,12 +1639,14 @@
 
         // Use auth state if available, else attempt without
         const current = firebase.auth().currentUser;
-        if (current) {
-          tryResolveAndRender(current);
+            if (current) {
+          resolveSchoolIdIfNeeded().then(() => tryResolveAndRender(current));
         } else {
           firebase.auth().onAuthStateChanged((user) => {
-            if (!user) { tryResolveAndRender(null); return; }
-            tryResolveAndRender(user);
+            resolveSchoolIdIfNeeded().then(() => {
+              if (!user) { tryResolveAndRender(null); return; }
+              tryResolveAndRender(user);
+            });
           });
         }
       }

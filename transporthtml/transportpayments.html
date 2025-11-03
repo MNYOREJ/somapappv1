@@ -686,7 +686,7 @@
               <td style="color: ${combinedDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'}; font-weight: 700;">
                 ${formatCurrency(combinedDebt)}
               </td>
-              <td class="table-actions">
+              <td class="table-actions" style="justify-content: flex-end;">
                 <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
                 <button class="btn secondary" onclick="viewPaymentHistory('${studentId}')">📋 History</button>
               </td>
@@ -715,7 +715,7 @@
         
         // Check if we have year-scoped assignment data (parent view)
         const year = String(state.year);
-        let status, baseMonthlyFee, currentMonthAmount;
+        let status, baseMonthlyFee, currentMonthAmount, currentMonthLabel;
         
         try {
           const assignSnap = await firebase.database().ref(`transportAssignments/${year}/${studentId}`).once('value');
@@ -728,6 +728,7 @@
             
             const now = new Date();
             const currentMonth = (now.getFullYear() === Number(year)) ? (now.getMonth() + 1) : 1;
+            currentMonthLabel = MONTH_NAMES[currentMonth];
             currentMonthAmount = Math.round(TransportPricing.dueForMonth({ 
               year: Number(year), 
               month: currentMonth, 
@@ -754,13 +755,19 @@
           } else {
             // Fallback to legacy calculation
             status = calculateTransportStatus(enrollment, payments);
-            currentMonthAmount = status.currentMonthExpected || status.monthlyFee;
+            const now = new Date();
+            const cm = (now.getFullYear() === Number(year)) ? (now.getMonth() + 1) : 1;
+            currentMonthLabel = MONTH_NAMES[cm];
+            currentMonthAmount = TransportPricing.expectedForMonth(enrollment.amStop||'', enrollment.pmStop||'', cm) || status.currentMonthExpected || status.monthlyFee;
             baseMonthlyFee = status.monthlyFee;
           }
         } catch (err) {
           console.warn('Error loading assignment data, using legacy:', err);
           status = calculateTransportStatus(enrollment, payments);
-          currentMonthAmount = status.currentMonthExpected || status.monthlyFee;
+          const now = new Date();
+          const cm = (now.getFullYear() === Number(state.year)) ? (now.getMonth() + 1) : 1;
+          currentMonthLabel = MONTH_NAMES[cm];
+          currentMonthAmount = TransportPricing.expectedForMonth(enrollment.amStop||'', enrollment.pmStop||'', cm) || status.currentMonthExpected || status.monthlyFee;
           baseMonthlyFee = status.monthlyFee;
         }
         
@@ -770,14 +777,18 @@
             <div><strong>Admission No:</strong> ${student.admissionNumber}</div>
             <div><strong>Class:</strong> ${student.classLevel}</div>
             <div><strong>Base Monthly Fee:</strong> ${formatCurrency(baseMonthlyFee)}</div>
-            <div><strong>Current Month Fee (${MONTH_NAMES[state.month]}):</strong> ${formatCurrency(currentMonthAmount)}</div>
+            <div><strong>Current Month Fee (${currentMonthLabel || MONTH_NAMES[state.month]}):</strong> ${formatCurrency(currentMonthAmount)}</div>
             <div><strong>Total Debt:</strong> <span style="color: var(--accent-danger);">${formatCurrency(status.debt)}</span></div>
             <div><strong>Unpaid Months:</strong> ${status.unpaidMonths}</div>
           </div>
         `;
         
-        // Set current month as default
-        document.getElementById('paymentMonth').value = state.month;
+        // Set current month as default (actual current calendar month when year matches)
+        (function setDefaultMonth(){
+          const now = new Date();
+          const cm = (now.getFullYear() === Number(state.year)) ? (now.getMonth() + 1) : 1;
+          document.getElementById('paymentMonth').value = String(cm);
+        })();
         document.getElementById('paymentAmount').value = currentMonthAmount;
         document.getElementById('paymentDate').valueAsDate = new Date();
         document.getElementById('paymentReference').value = '';
@@ -1470,7 +1481,7 @@
             <td style="color: ${debt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'};">${formatCurrency(debt)}</td>
             <td style="font-size: 0.75rem;">${unpaidMonths.length ? unpaidMonths.join(', ') : '—'}</td>
             <td style="color: ${combinedDebt > 0 ? 'var(--accent-danger)' : 'var(--accent-success)'}; font-weight: 700;">${formatCurrency(combinedDebt)}</td>
-            <td class="table-actions">
+            <td class="table-actions" style="justify-content: flex-end;">
               <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
               <button class="btn secondary" onclick="viewPaymentHistory('${studentId}')">📋 History</button>
             </td>
@@ -1602,7 +1613,7 @@
               <td style="color: ${ledger.totals.balance>0?'var(--accent-danger)':'var(--accent-success)'};">${formatCurrency(ledger.totals.balance)}</td>
               <td style="font-size: 0.75rem;">${unpaid}</td>
               <td style="color: ${combinedDebt>0?'var(--accent-danger)':'var(--accent-success)'}; font-weight: 700;">${formatCurrency(combinedDebt)}</td>
-              <td class="table-actions">
+              <td class="table-actions" style="justify-content: flex-end;">
                 <button class="btn success" onclick="openPaymentModal('${studentId}')">💵 Pay</button>
                 <button class="btn secondary" onclick="viewPaymentHistory('${studentId}')">📋 History</button>
               </td>

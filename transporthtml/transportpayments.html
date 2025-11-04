@@ -531,10 +531,9 @@
       }
 
       // Calculate base monthly fee (without month multipliers) - for display in table
-      function calculateBaseMonthlyFee(amStop, pmStop) {
-        const amPrice = amStop ? TransportPricing.priceForStop(amStop) : 0;
-        const pmPrice = pmStop ? TransportPricing.priceForStop(pmStop) : 0;
-        return amPrice + pmPrice; // Base fee without multipliers
+      // Now date-aware: uses priceHistory for the selected month
+      async function calculateBaseMonthlyFee(amStop, pmStop, year, month) {
+        return await TransportPricing.computeBaseMonthlyFeeOnMonth({ year, month, amStop, pmStop });
       }
 
       // Calculate transport payment status (now year-scoped with DB multipliers)
@@ -548,10 +547,12 @@
         if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
 
         // Base monthly fee (without multipliers) - for display & calculations
-        const baseMonthlyFee = Number(enrollment?.baseMonthlyFee) || calculateBaseMonthlyFee(amStop, pmStop);
+        // Use date-aware pricing: compute base fee for focused month
+        const selectedMonth = getFocusedMonth();
+        const baseMonthlyFee = Number(enrollment?.baseMonthlyFee) || 
+          (await calculateBaseMonthlyFee(amStop, pmStop, year, selectedMonth));
         const startDateIso = resolveStartDate(enrollment);
         const hasExplicitStart = Boolean(enrollment?.startDate || enrollment?.start_date || enrollment?.startTimestamp || enrollment?.start_time);
-        const selectedMonth = getFocusedMonth();
 
         const paymentsArray = Array.isArray(payments) ? payments : Object.values(payments || {});
 
@@ -559,13 +560,15 @@
         let totalPaid = 0;
         const unpaidMonths = [];
 
-        // Calculate per month dues using year-specific multiplier logic + start date
+        // Calculate per month dues using year-specific multiplier logic + start date + date-aware pricing
         for (let month = 1; month <= 12; month++) {
           const monthlyExpected = Math.round(
-            TransportPricing.dueForMonth({
+            await TransportPricing.dueForMonth({
               year,
               month,
-              baseMonthlyFee,
+              amStop,
+              pmStop,
+              baseMonthlyFee, // Fallback for legacy
               startDate: startDateIso,
               multipliers, // Pass year-specific multipliers
             }) || 0
@@ -590,10 +593,12 @@
 
         // Current month expected (with multiplier) - for KPI calculations
         const currentMonthExpected = Math.round(
-          TransportPricing.dueForMonth({
+          await TransportPricing.dueForMonth({
             year,
             month: selectedMonth,
-            baseMonthlyFee,
+            amStop,
+            pmStop,
+            baseMonthlyFee, // Fallback for legacy
             startDate: startDateIso,
             multipliers, // Pass year-specific multipliers
           }) || 0
@@ -660,13 +665,13 @@
         document.getElementById('otherExpenses').textContent = formatCurrency(otherExp);
 
         // Critical alerts for unpaid students
-        const criticalDebtors = Object.entries(state.transportEnrollments)
-          .filter(([studentId, enrollment]) => {
+        const criticalDebtors = await Promise.all(
+          Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
             const payments = Object.values(state.transportPayments[studentId] || {});
-            const status = calculateTransportStatus(enrollment, payments);
+            const status = await calculateTransportStatus(enrollment, payments, multipliers);
             return status.debt > 0;
           })
-          .length;
+        ).then(results => results.filter(Boolean).length);
 
         if (criticalDebtors > 0) {
           document.getElementById('criticalAlerts').innerHTML = `
@@ -851,16 +856,20 @@
         const hasAssignedStart = Boolean(assign?.startDate || assign?.start_date || assign?.startTimestamp || assign?.start_time);
             
             currentMonthLabel = focusedMonthLabel;
-            currentMonthAmount = Math.round(TransportPricing.dueForMonth({
+            currentMonthAmount = Math.round(await TransportPricing.dueForMonth({
               year: Number(year),
               month: focusedMonth,
+              amStop: assign?.amStop || enrollment?.amStop,
+              pmStop: assign?.pmStop || enrollment?.pmStop,
               baseMonthlyFee,
               startDate,
               multipliers // Pass year-specific multipliers
             }));
             
-            const ledger = TransportPricing.buildLedger({
+            const ledger = await TransportPricing.buildLedger({
               year: Number(year),
+              amStop: assign?.amStop || enrollment?.amStop,
+              pmStop: assign?.pmStop || enrollment?.pmStop,
               baseMonthlyFee,
               startDate,
               payments,
@@ -881,9 +890,11 @@
             status = await calculateTransportStatus(enrollment, payments, multipliers);
             baseMonthlyFee = status.monthlyFee;
             currentMonthLabel = focusedMonthLabel;
-            currentMonthAmount = Math.round(TransportPricing.dueForMonth({
+            currentMonthAmount = Math.round(await TransportPricing.dueForMonth({
               year: Number(year),
               month: focusedMonth,
+              amStop: enrollment?.amStop,
+              pmStop: enrollment?.pmStop,
               baseMonthlyFee,
               startDate: enrollmentStart,
               multipliers // Pass year-specific multipliers
@@ -894,9 +905,11 @@
           status = await calculateTransportStatus(enrollment, payments, multipliers);
           baseMonthlyFee = status.monthlyFee;
           currentMonthLabel = focusedMonthLabel;
-          currentMonthAmount = Math.round(TransportPricing.dueForMonth({
+          currentMonthAmount = Math.round(await TransportPricing.dueForMonth({
             year: Number(year),
             month: focusedMonth,
+            amStop: enrollment?.amStop,
+            pmStop: enrollment?.pmStop,
             baseMonthlyFee,
             startDate: enrollmentStart,
             multipliers // Pass year-specific multipliers
@@ -954,7 +967,9 @@
           const enrollment = state.transportEnrollments[studentId];
           if (!student || !enrollment) throw new Error('Student transport enrollment not found.');
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = calculateTransportStatus(enrollment, payments);
+          const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
+          if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
+          const status = await calculateTransportStatus(enrollment, payments, multipliers);
           const recorder = resolveRecorder();
           // Convert payment date to timestamp (local timezone - Africa/Nairobi)
           const paidAt = new Date(paymentDate + 'T12:00:00').getTime();
@@ -1275,13 +1290,18 @@
       }
 
       // Export to Excel
-      function exportToExcel() {
-        const data = Object.entries(state.transportEnrollments).map(([studentId, enrollment]) => {
+      async function exportToExcel() {
+        const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
+        if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
+        
+        const data = await Promise.all(Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
           const student = state.students[studentId];
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
           
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const transportStatus = calculateTransportStatus(enrollment, payments);
+          const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
+          if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
+          const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers);
           
           const feePerYear = Number(student.feePerYear) || 0;
           const schoolPayments = student.payments || {};
@@ -1306,7 +1326,7 @@
             'Unpaid Months': transportStatus.unpaidMonths,
             'Total Combined Debt': schoolDebt + transportStatus.debt,
           };
-        });
+        }));
         
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
@@ -1659,11 +1679,29 @@
         );
         const base = Number(assign?.baseMonthlyFee||0);
         const startDate = normalizeDateInput((assign && (assign.startDate || assign.start_date || assign.startTimestamp || assign.start_time)) || `${year}-01-01`, Number(year));
-        const ledger = TransportPricing.buildLedger({ year: Number(year), baseMonthlyFee: base, startDate, payments, multipliers });
+        const amStop = assign?.amStop || assign?.morningRouteId || '';
+        const pmStop = assign?.pmStop || assign?.eveningRouteId || '';
+        const ledger = await TransportPricing.buildLedger({ 
+          year: Number(year), 
+          amStop,
+          pmStop,
+          baseMonthlyFee: base, 
+          startDate, 
+          payments, 
+          multipliers 
+        });
 
         const focusedMonth = getFocusedMonth();
         const selectedMonthLabel = MONTH_NAMES[focusedMonth] || ('Month ' + focusedMonth);
-        const dueThisMonth = TransportPricing.dueForMonth({ year:Number(year), month:focusedMonth, baseMonthlyFee: base, startDate, multipliers });
+        const dueThisMonth = await TransportPricing.dueForMonth({ 
+          year:Number(year), 
+          month:focusedMonth, 
+          amStop,
+          pmStop,
+          baseMonthlyFee: base, 
+          startDate, 
+          multipliers 
+        });
         const startDisplay = hasAssignedStart ? formatStartDateDisplay(startDate) : 'N/A';
 
         // Compute carry-forward debt up to the focused month (exclude future months)

@@ -6,7 +6,16 @@
   const parseYMD = s => { const [y,m,d] = String(s||'').split('-').map(n=>parseInt(n,10)); return {y,m,d}; };
 
   // Unmultiplied baseMonthlyFee = sum(morning+evening) before month multiplier
-  function dueForMonth({year, month, baseMonthlyFee, startDate, multipliers}){
+  // Now supports date-aware pricing via amStop/pmStop OR legacy baseMonthlyFee
+  async function dueForMonth({year, month, baseMonthlyFee, amStop, pmStop, startDate, multipliers}){
+    // If stops provided, compute base fee for that month using priceHistory
+    let base = baseMonthlyFee;
+    if (amStop || pmStop) {
+      base = await computeBaseMonthlyFeeOnMonth({year, month, amStop, pmStop});
+    } else {
+      base = Number(baseMonthlyFee||0);
+    }
+    
     const multMap = multipliers && typeof multipliers==='object' ? multipliers : DEFAULT_MULTIPLIERS;
     const mult = multMap[month] ?? 1.0;
     if (mult <= 0) return 0;
@@ -19,12 +28,12 @@
 
     if (year === start.y && month === start.m){
       const activeDays = Math.max(0, dim - (start.d - 1));
-      return (baseMonthlyFee * mult) * (activeDays / dim);
+      return (base * mult) * (activeDays / dim);
     }
-    return baseMonthlyFee * mult;
+    return base * mult;
   }
 
-  function buildLedger({year, baseMonthlyFee, startDate, payments, multipliers}){
+  async function buildLedger({year, baseMonthlyFee, amStop, pmStop, startDate, payments, multipliers}){
     const paidByMonth = {};
     (payments||[]).forEach(p => {
       const m = parseInt(p.month,10);
@@ -34,7 +43,7 @@
     const months = [];
     let totalDue=0, totalPaid=0;
     for(let m=1; m<=12; m++){
-      const due = dueForMonth({year, month:m, baseMonthlyFee, startDate, multipliers});
+      const due = await dueForMonth({year, month:m, baseMonthlyFee, amStop, pmStop, startDate, multipliers});
       const paid = paidByMonth[m] || 0;
       const balance = Math.max(0, +(due - paid).toFixed(2));
       const status = (due===0) ? 'SKIP' : (paid<=0 ? 'UNPAID' : (balance>0?'PARTIAL':'PAID'));
@@ -75,6 +84,99 @@
     return map;
   }
 
+  // === Date-aware pricing functions ===
+  const NAME = s => String(s||'').trim().toLowerCase();
+
+  // Load stops map by name (with priceHistory)
+  async function loadStopsMap(year){
+    const snap = await firebase.database().ref(`transportCatalog/${year}/stops`).once('value');
+    const data = snap.val() || {};
+    const byName = {};
+    Object.entries(data).forEach(([id, s])=>{
+      const key = NAME(s.name);
+      byName[key] = { id, ...s, priceHistory: s.priceHistory || {} };
+    });
+    return byName;
+  }
+
+  // Pick price for a specific date from priceHistory
+  function pickPriceForDate(stop, onDateIso){
+    // if no history => fallback to baseFee
+    const list = Object.values(stop.priceHistory||{}).map(r=>({
+      amount: Number(r.amount)||0,
+      eff: String(r.effectiveFrom||'1970-01-01')
+    })).sort((a,b)=> a.eff.localeCompare(b.eff));
+    
+    const target = String(onDateIso||new Date().toISOString().slice(0,10));
+    let price = Number(stop.baseFee)||0;
+    
+    for (const r of list) {
+      if (r.eff <= target) price = r.amount;
+      else break;
+    }
+    
+    return price;
+  }
+
+  // Get base fee for a stop on a specific date
+  async function baseFeeOnDate({year, stopName, onDate}){
+    if (!stopName) return 0;
+    try {
+      const map = await loadStopsMap(year);
+      const stop = map[NAME(stopName)];
+      if (!stop) {
+        // Fallback to legacy synchronous priceForStop (defined later)
+        return getLegacyPriceForStop(stopName);
+      }
+      
+      const d = onDate ? new Date(onDate) : new Date();
+      const iso = d.toISOString().slice(0,10);
+      return pickPriceForDate(stop, iso);
+    } catch (err) {
+      console.warn('Error in baseFeeOnDate, using legacy:', err);
+      return getLegacyPriceForStop(stopName);
+    }
+  }
+
+  // Helper to get legacy price (synchronous, used as fallback)
+  function getLegacyPriceForStop(stopName){
+    const key = String(stopName||'').toLowerCase().trim();
+    const legacyMap = {
+      'jirani na shule':17000, 'mazengo':17000, 'mbezi':17000, 'msikitini':17000, 'mlimani rc':17000,
+      'uswahilini kanisani':17000, 'international':17000, 'kona dampo':17000, 'mauwa':17000, 'mwisho wa fensi':17000,
+      'ghati':17000, 'mnara wa halotel':17000,
+      'sinoni':18500, 'kidemi':18500, 'soko mjinga':18500, 'mnara wa voda':18500, 'mbugani kwenye lami tu':18500,
+      'glorious':21000, 'ushirika':21000, 'tanga kona':21000, 'njia mtoni':21000, 'kaburi moja':21000,
+      'kwa malaika':21000, 'savanna':21000, 'dampo':21000, 'darajani':21000, 'kikwete road':21000,
+      'boma kubwa':21000, 'kiwetu pazuri':21000, 'umoja road':21000, 'njiro ndogo':21000, 'king david':21000,
+      'chavda':24000, 'matokeo':24000, 'milano':24000, 'jamhuri':24000, 'felix mrema':24000, 'lemara':24000,
+      'bonisite':24000, 'intel':24000, 'patel':24000, 'terrati':24000, 'si mbaoil':24000,
+      'mapambazuko':25000, 'mkono wa madukani':25000, 'soweto':25000, 'mianzini barabarani':25000, 'eliboru jr':25000,
+      'green valley':25000, 'country coffee':25000, 'maua':25000, 'pepsi':25000, 'majengo':25000,
+      'sanawari':28000, 'sekei':28000, 'shabani':28000, 'kimandolu':28000, 'kijenge':28000, 'mkono wa shuleni':28000,
+      'suye':38000, 'moshono':38000, 'nado':38000, 'mwanama reli':38000, 'kisongo':38000,
+      'kiserian':44000, 'chekereni':44000, 'duka bovu':44000, 'tengeru':44000, 'ngulelo':44000, 'kwamrefu':44000, 'shangarai atomic':44000
+    };
+    if (legacyMap[key]) return legacyMap[key];
+    const hit = Object.keys(legacyMap).find(k => key.includes(k));
+    return hit ? legacyMap[hit] : 28000;
+  }
+
+  // Get month start ISO date
+  function monthStartIso(year, month){ 
+    return new Date(year, month-1, 1).toISOString().slice(0,10); 
+  }
+
+  // Compute base monthly fee for a specific month (using priceHistory)
+  async function computeBaseMonthlyFeeOnMonth({year, month, amStop, pmStop}){
+    const onDate = monthStartIso(year, month);
+    const [am, pm] = await Promise.all([
+      baseFeeOnDate({year, stopName: amStop, onDate}),
+      baseFeeOnDate({year, stopName: pmStop, onDate})
+    ]);
+    return (am + pm);
+  }
+
   // Legacy compatibility: keep old priceForStop and expectedForMonth for backward compat
   const LEGACY_STOP_PRICE = (function(){
     const map = Object.create(null);
@@ -90,7 +192,13 @@
     return map;
   })();
 
-  function priceForStop(stopName){
+  function priceForStop(stopName, opts){
+    // Backward-compatible: allow priceForStop(stop, {year, onDate})
+    if (opts && (opts.year || opts.onDate)) {
+      return baseFeeOnDate({year: opts.year, stopName, onDate: opts.onDate});
+    }
+    
+    // Legacy synchronous fallback
     const key = String(stopName||'').toLowerCase().trim();
     if (LEGACY_STOP_PRICE[key]) return LEGACY_STOP_PRICE[key];
     // Fuzzy contains match fallback
@@ -128,6 +236,12 @@
     scheduleForYear,
     loadYearMultipliers,
     loadStopsForYear,
-    indexStopsById
+    indexStopsById,
+    // Date-aware pricing functions
+    loadStopsMap,
+    pickPriceForDate,
+    baseFeeOnDate,
+    computeBaseMonthlyFeeOnMonth,
+    monthStartIso
   };
 })();

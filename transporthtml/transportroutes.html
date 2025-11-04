@@ -268,6 +268,19 @@
     </section>
   </main>
 
+  <!-- Price History Modal -->
+  <div id="priceHistoryModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="priceHistoryTitle">
+      <div class="flex space center mb-2">
+        <h2 style="margin: 0;" id="priceHistoryTitle">Price History</h2>
+        <button class="btn secondary" id="closePriceHistoryModal" type="button">Close</button>
+      </div>
+      <div id="priceHistoryContent" style="margin-top: 1.5rem;">
+        <!-- Populated by JavaScript -->
+      </div>
+    </div>
+  </div>
+
   <!-- Edit Stop Modal -->
   <div id="editStopModal" class="modal hidden" aria-hidden="true">
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="editStopTitle">
@@ -285,6 +298,14 @@
         <div>
           <label for="editStopFee">Base Monthly Fee (TSh) <span style="color: red;">*</span></label>
           <input id="editStopFee" type="number" min="0" step="500" placeholder="e.g., 18500" required />
+        </div>
+
+        <div id="effectiveDateSection" style="display: none;">
+          <label for="editStopEffectiveFrom">Effective From Date <span style="color: red;">*</span></label>
+          <input id="editStopEffectiveFrom" type="date" required />
+          <small style="display: block; margin-top: 0.25rem; color: var(--text-muted); font-size: 0.75rem;">
+            Price change takes effect from this date (year-scoped)
+          </small>
         </div>
 
         <div>
@@ -522,9 +543,40 @@
           try { await window.TransportPricing.ensureYearStructure(year); } catch {}
         }
 
-        // Load stops
+        // Load stops (with priceHistory)
         console.log('🚏 Loading stops for year:', year);
-        const stops = await window.TransportPricing.loadStopsForYear(year);
+        const stopsRaw = await window.TransportPricing.loadStopsForYear(year);
+        // Also load priceHistory for each stop and migrate if missing
+        const stops = await Promise.all(stopsRaw.map(async (stop) => {
+          try {
+            const stopRef = db.ref(`transportCatalog/${year}/stops/${stop.id}`);
+            const stopSnap = await stopRef.once('value');
+            const stopData = stopSnap.val() || {};
+            
+            // Auto-migrate: seed priceHistory if missing
+            if (!stopData.priceHistory || Object.keys(stopData.priceHistory || {}).length === 0) {
+              const baseFee = Number(stopData.baseFee || stop.baseFee || 0);
+              if (baseFee > 0) {
+                await stopRef.child('priceHistory').push({
+                  amount: baseFee,
+                  effectiveFrom: `${year}-01-01`,
+                  changedAt: Date.now(),
+                  changedBy: 'system',
+                  note: 'Auto-migrated from baseFee'
+                });
+                // Reload to get updated data
+                const updatedSnap = await stopRef.once('value');
+                const updatedData = updatedSnap.val() || {};
+                return { ...stop, priceHistory: updatedData.priceHistory || {} };
+              }
+            }
+            
+            return { ...stop, priceHistory: stopData.priceHistory || {} };
+          } catch (e) {
+            console.warn('Error loading/migrating stop:', stop.id, e);
+            return { ...stop, priceHistory: {} };
+          }
+        }));
         console.log(`✅ Loaded ${stops.length} stops:`, stops);
         drawStops(stops, year);
 
@@ -580,18 +632,37 @@
             ? '<span class="chip ok" style="font-size: 0.75rem;">Active</span>'
             : '<span class="chip warn" style="font-size: 0.75rem;">Inactive</span>';
 
+          // Get latest effective date from priceHistory
+          let latestEffectiveFrom = '';
+          if (s.priceHistory && typeof s.priceHistory === 'object') {
+            const history = Object.values(s.priceHistory).sort((a, b) => {
+              const dateA = String(a.effectiveFrom || '').localeCompare(String(b.effectiveFrom || ''));
+              return dateA;
+            });
+            if (history.length > 0) {
+              latestEffectiveFrom = history[history.length - 1].effectiveFrom || '';
+            }
+          }
+          const effectiveDateDisplay = latestEffectiveFrom 
+            ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                 Effective from: ${latestEffectiveFrom}
+               </div>`
+            : '';
+
           return `
             <div class="card" data-id="${s.id}" style="position: relative;">
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
                 <h3 style="margin: 0; font-size: 1.125rem;">${(s.name||'').replace(/</g,'&lt;')}</h3>
                 ${statusBadge}
               </div>
-              <div style="font-size: 1.25rem; font-weight: 700; color: var(--accent-success); margin-bottom: 1rem;">
+              <div style="font-size: 1.25rem; font-weight: 700; color: var(--accent-success); margin-bottom: 0.5rem;">
                 ${formatCurrency(s.baseFee)}
                 <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;">/month</span>
               </div>
-              <div class="flex" style="gap: 0.5rem;">
+              ${effectiveDateDisplay}
+              <div class="flex" style="gap: 0.5rem; margin-top: 1rem;">
                 <button class="btn secondary" data-act="edit" data-id="${s.id}" style="flex: 1;">✏️ Edit</button>
+                <button class="btn secondary" data-act="history" data-id="${s.id}" style="flex: 1;">📜 History</button>
                 <button class="btn" data-act="toggle" data-id="${s.id}" style="flex: 1;">
                   ${s.active ? '🚫 Deactivate' : '✅ Activate'}
                 </button>
@@ -615,6 +686,8 @@
 
               if (act === 'edit') {
                 if (stop) openEditStopModal(stop, year);
+              } else if (act === 'history') {
+                if (stop) await showPriceHistory(stop, year);
               } else if (act === 'toggle') {
                 if (stop) await toggleStopActive(id, !stop.active, year);
               } else if (act === 'del') {
@@ -641,11 +714,46 @@
         const nameEl  = document.getElementById('editStopName');
         const feeEl   = document.getElementById('editStopFee');
         const actEl   = document.getElementById('editStopActive');
+        const effDateEl = document.getElementById('editStopEffectiveFrom');
+        const effDateSection = document.getElementById('effectiveDateSection');
 
         if (titleEl) titleEl.textContent = stop ? 'Edit Stop' : 'Add New Stop';
         if (nameEl)  nameEl.value = stop ? (stop.name||'') : '';
         if (feeEl)   feeEl.value = stop ? (Number(stop.baseFee)||'') : '';
         if (actEl)   actEl.checked = stop ? !!stop.active : true;
+        
+        // Hide effective date section initially (show when fee changes)
+        if (effDateSection) effDateSection.style.display = 'none';
+        if (effDateEl) {
+          effDateEl.value = new Date().toISOString().slice(0,10); // Default to today
+          effDateEl.required = false;
+        }
+
+        // Show effective date when fee field changes (for edits)
+        if (feeEl && stop) {
+          const originalFee = Number(stop.baseFee)||0;
+          
+          // Use a flag to prevent duplicate listeners
+          if (!feeEl.dataset.listenerAdded) {
+            feeEl.dataset.listenerAdded = 'true';
+            feeEl.addEventListener('input', function() {
+              const newFee = parseFloat(feeEl.value) || 0;
+              if (effDateSection && effDateEl) {
+                if (newFee !== originalFee && newFee > 0) {
+                  effDateSection.style.display = 'block';
+                  effDateEl.required = true;
+                } else {
+                  effDateSection.style.display = 'none';
+                  effDateEl.required = false;
+                }
+              }
+            });
+          }
+        } else if (feeEl && !stop) {
+          // New stop - no listener needed
+          feeEl.dataset.listenerAdded = 'false';
+        }
+        
         if (editStopModal) {
           editStopModal.classList.remove('hidden');
           editStopModal.setAttribute('aria-hidden', 'false');
@@ -661,6 +769,7 @@
         const name = (document.getElementById('editStopName')?.value || '').trim();
         const fee  = parseFloat(document.getElementById('editStopFee')?.value || 'NaN');
         const active = !!document.getElementById('editStopActive')?.checked;
+        const effectiveFrom = document.getElementById('editStopEffectiveFrom')?.value || '';
 
         if (!name) {
           showToast('Please enter stop name', 'bad');
@@ -686,16 +795,46 @@
         };
 
         if (currentEditStopId) {
-          // Update existing
-          await db.ref(`transportCatalog/${year}/stops/${currentEditStopId}`).update(stopData);
+          // Update existing - check if price changed
+          const stopRef = db.ref(`transportCatalog/${year}/stops/${currentEditStopId}`);
+          const prevSnap = await stopRef.once('value');
+          const prev = prevSnap.val() || {};
+          
+          await stopRef.update(stopData);
+          
+          // If price changed, add to priceHistory
+          if (Number(prev.baseFee) !== Number(fee)) {
+            const eff = effectiveFrom || new Date().toISOString().slice(0,10);
+            const changedBy = (auth?.currentUser?.email || auth?.currentUser?.uid || 'unknown');
+            
+            await stopRef.child('priceHistory').push({
+              amount: Number(fee),
+              effectiveFrom: eff,
+              changedAt: Date.now(),
+              changedBy: changedBy,
+              note: 'Edited in Routes'
+            });
+          }
+          
           showToast('Stop updated successfully!');
         } else {
-          // Create new
+          // Create new - seed priceHistory
           const newRef = db.ref(`transportCatalog/${year}/stops`).push();
           await newRef.set({
             ...stopData,
             createdAt: Date.now()
           });
+          
+          // Seed initial priceHistory entry
+          const changedBy = (auth?.currentUser?.email || auth?.currentUser?.uid || 'unknown');
+          await newRef.child('priceHistory').push({
+            amount: Number(fee),
+            effectiveFrom: `${year}-01-01`,
+            changedAt: Date.now(),
+            changedBy: changedBy,
+            note: 'Initial price'
+          });
+          
           showToast('Stop created successfully!');
         }
 
@@ -724,6 +863,73 @@
       } catch (error) {
         console.error('Error toggling stop:', error);
         showToast('Failed to update stop', 'bad');
+      }
+    }
+
+    async function showPriceHistory(stop, year) {
+      try {
+        const modal = document.getElementById('priceHistoryModal');
+        const title = document.getElementById('priceHistoryTitle');
+        const content = document.getElementById('priceHistoryContent');
+        
+        if (!modal || !title || !content) {
+          showToast('Price history modal not found', 'bad');
+          return;
+        }
+
+        title.textContent = `Price History - ${stop.name || 'Stop'}`;
+        
+        const stopRef = db.ref(`transportCatalog/${year}/stops/${stop.id}`);
+        const snap = await stopRef.once('value');
+        const data = snap.val() || {};
+        const history = data.priceHistory || {};
+        
+        const historyList = Object.entries(history)
+          .map(([key, entry]) => ({
+            key,
+            ...entry,
+            changedAt: entry.changedAt || 0,
+            effectiveFrom: entry.effectiveFrom || 'N/A',
+            amount: Number(entry.amount) || 0,
+            changedBy: entry.changedBy || 'Unknown',
+            note: entry.note || ''
+          }))
+          .sort((a, b) => b.changedAt - a.changedAt); // Most recent first
+
+        if (historyList.length === 0) {
+          content.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 2rem;">No price history available</p>';
+        } else {
+          content.innerHTML = `
+            <table class="table" style="margin-top: 1rem;">
+              <thead>
+                <tr>
+                  <th>Effective From</th>
+                  <th>Amount</th>
+                  <th>Changed At</th>
+                  <th>Changed By</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${historyList.map(h => `
+                  <tr>
+                    <td><strong>${h.effectiveFrom}</strong></td>
+                    <td style="font-weight: 700; color: var(--accent-success);">${formatCurrency(h.amount)}</td>
+                    <td>${h.changedAt ? new Date(h.changedAt).toLocaleDateString('en-GB') : 'N/A'}</td>
+                    <td>${h.changedBy}</td>
+                    <td>${h.note}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        }
+
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+      } catch (error) {
+        console.error('Error showing price history:', error);
+        showToast('Failed to load price history', 'bad');
       }
     }
 
@@ -833,6 +1039,15 @@
                 imported: true,
                 bulkImported: true
               });
+              
+              // Seed initial priceHistory
+              await newRef.child('priceHistory').push({
+                amount: Number(group.price),
+                effectiveFrom: `${year}-01-01`,
+                changedAt: Date.now(),
+                changedBy: 'system',
+                note: 'Bulk imported'
+              });
 
               totalImported++;
             }
@@ -902,6 +1117,15 @@
               updatedAt: Date.now(),
               imported: true
             });
+            
+            // Seed initial priceHistory
+            await newRef.child('priceHistory').push({
+              amount: Number(group.price),
+              effectiveFrom: `${year}-01-01`,
+              changedAt: Date.now(),
+              changedBy: 'system',
+              note: 'Legacy import'
+            });
 
             imported++;
           }
@@ -932,6 +1156,8 @@
       saveEditStop = document.getElementById("saveEditStop");
       cancelEditStop = document.getElementById("cancelEditStop");
       saveMultBtn = document.getElementById("saveMultBtn");
+      const priceHistoryModal = document.getElementById("priceHistoryModal");
+      const closePriceHistoryModal = document.getElementById("closePriceHistoryModal");
 
       // Verify presence (logs help debug CSS/DOM issues)
       console.log('📋 DOM elements check:', {
@@ -982,11 +1208,35 @@
         });
       }
 
-      // Esc to close modal
+      // Price history modal controls
+      if (closePriceHistoryModal) {
+        closePriceHistoryModal.addEventListener('click', () => {
+          if (priceHistoryModal) {
+            priceHistoryModal.classList.add('hidden');
+            priceHistoryModal.setAttribute('aria-hidden','true');
+          }
+        });
+      }
+      if (priceHistoryModal) {
+        priceHistoryModal.addEventListener('click', (e) => {
+          if (e.target === priceHistoryModal) {
+            priceHistoryModal.classList.add('hidden');
+            priceHistoryModal.setAttribute('aria-hidden','true');
+          }
+        });
+      }
+
+      // Esc to close modals
       document.addEventListener('keydown', (e)=>{
-        if (e.key === 'Escape' && editStopModal && !editStopModal.classList.contains('hidden')) {
-          editStopModal.classList.add('hidden');
-          editStopModal.setAttribute('aria-hidden','true');
+        if (e.key === 'Escape') {
+          if (editStopModal && !editStopModal.classList.contains('hidden')) {
+            editStopModal.classList.add('hidden');
+            editStopModal.setAttribute('aria-hidden','true');
+          }
+          if (priceHistoryModal && !priceHistoryModal.classList.contains('hidden')) {
+            priceHistoryModal.classList.add('hidden');
+            priceHistoryModal.setAttribute('aria-hidden','true');
+          }
         }
       });
 

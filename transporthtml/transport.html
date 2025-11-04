@@ -730,13 +730,13 @@
           assignPeriod.value = enrollment.period || '';
           if (enrollment.amStop) assignMorningDrop.value = enrollment.amStop;
           if (enrollment.pmStop) assignEveningDrop.value = enrollment.pmStop;
-          calculateFare();
+          await calculateFare();
           updateSaveButtonState();
         }
       }
 
       // Period change handler
-      assignPeriod.addEventListener('change', () => {
+      assignPeriod.addEventListener('change', async () => {
         const period = assignPeriod.value;
         const dropSection = document.getElementById('dropOffSection');
         const morningSection = document.getElementById('morningDropSection');
@@ -760,33 +760,33 @@
           dropSection.style.display = 'none';
         }
 
-        calculateFare();
+        await calculateFare();
         // reveal start date when period/routes selected
         const hasAny = assignMorningDrop.value || assignEveningDrop.value;
         document.getElementById('startDateSection').style.display = hasAny ? 'block' : 'none';
         updateSaveButtonState();
       });
 
-      assignMorningDrop.addEventListener('change', () => {
-        calculateFare();
+      assignMorningDrop.addEventListener('change', async () => {
+        await calculateFare();
         const hasAny = assignMorningDrop.value || assignEveningDrop.value;
         document.getElementById('startDateSection').style.display = hasAny ? 'block' : 'none';
         updateSaveButtonState();
       });
-      assignEveningDrop.addEventListener('change', () => {
-        calculateFare();
+      assignEveningDrop.addEventListener('change', async () => {
+        await calculateFare();
         const hasAny = assignMorningDrop.value || assignEveningDrop.value;
         document.getElementById('startDateSection').style.display = hasAny ? 'block' : 'none';
         updateSaveButtonState();
       });
 
       // Recalculate when start date changes (to update proration preview)
-      document.getElementById('transportStartDate')?.addEventListener('change', () => {
-        calculateFare();
+      document.getElementById('transportStartDate')?.addEventListener('change', async () => {
+        await calculateFare();
       });
 
       // Calculate and display fare with vehicle/driver info
-      function calculateFare() {
+      async function calculateFare() {
         const period = assignPeriod.value;
         if (!period) {
           document.getElementById('farePreview').style.display = 'none';
@@ -796,10 +796,33 @@
 
         const morningRoute = assignMorningDrop.value;
         const eveningRoute = assignEveningDrop.value;
-
-        const morningPrice = morningRoute ? TransportPricing.priceForStop(morningRoute) : 0;
-        const eveningPrice = eveningRoute ? TransportPricing.priceForStop(eveningRoute) : 0;
-        const baseFee = morningPrice + eveningPrice;
+        const year = Number(state.year);
+        
+        // Get start date to determine which month's price to use
+        const startDateInput = document.getElementById('transportStartDate');
+        const focusedMonth = startDateInput?.value 
+          ? (new Date(startDateInput.value)).getMonth() + 1
+          : (new Date()).getMonth() + 1;
+        
+        // Use date-aware pricing
+        const baseFee = await TransportPricing.computeBaseMonthlyFeeOnMonth({
+          year,
+          month: focusedMonth,
+          amStop: morningRoute,
+          pmStop: eveningRoute
+        });
+        
+        // For display breakdown, get individual prices
+        const morningPrice = morningRoute ? await TransportPricing.baseFeeOnDate({
+          year,
+          stopName: morningRoute,
+          onDate: TransportPricing.monthStartIso(year, focusedMonth)
+        }) : 0;
+        const eveningPrice = eveningRoute ? await TransportPricing.baseFeeOnDate({
+          year,
+          stopName: eveningRoute,
+          onDate: TransportPricing.monthStartIso(year, focusedMonth)
+        }) : 0;
 
         let breakdown = '<div style="display: grid; gap: 0.5rem;">';
         if (morningRoute) {
@@ -831,7 +854,16 @@
         const y = state.year;
         if (sd) {
           const { y: sy, m: sm } = (function(s){ const a=String(s).split('-'); return { y:Number(a[0]||y), m:Number(a[1]||1) }; })(sd);
-          const due = TransportPricing.dueForMonth({ year: sy, month: sm, baseMonthlyFee: baseFee, startDate: sd });
+          const multipliers = await TransportPricing.loadYearMultipliers(sy);
+          const due = await TransportPricing.dueForMonth({ 
+            year: sy, 
+            month: sm, 
+            amStop: morningRoute,
+            pmStop: eveningRoute,
+            baseMonthlyFee: baseFee, 
+            startDate: sd,
+            multipliers
+          });
           const wrap = document.getElementById('startMonthDueWrap');
           const disp = document.getElementById('startMonthDueDisplay');
           if (wrap && disp) { wrap.style.display='block'; disp.textContent = formatCurrency(Math.round(due)); }

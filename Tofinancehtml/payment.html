@@ -420,11 +420,12 @@
         db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}/${studentId}`).once('value'),
         db.ref(`enrollments/${targetYearStr}/${studentId}`).once('value'),
         db.ref(`feesStructure/${targetYearStr}`).once('value'),
-        db.ref(`studentFees/${targetYearStr}/${studentId}`).once('value'),
+        db.ref(`studentOverrides/${targetYearStr}/${studentId}`).once('value'),
+        db.ref(`installmentPlans/${targetYearStr}`).once('value'),
         db.ref(`financeLedgers/${targetYearStr}/${studentId}/payments`).once('value'),
         db.ref(`financeCarryForward/${targetYearStr}/${studentId}`).once('value'),
       ])
-        .then(async ([studentSnap, anchorSnap, enrollmentSnap, classFeesSnap, overrideSnap, ledgerSnap, carrySnap]) => {
+        .then(async ([studentSnap, anchorSnap, enrollmentSnap, classFeesSnap, overrideSnap, plansSnap, ledgerSnap, carrySnap]) => {
           const baseStudent = studentSnap.val();
           if (!baseStudent) { err('Student not found.'); return; }
 
@@ -432,6 +433,7 @@
           const enrollment = enrollmentSnap.val() || {};
           const classFees = classFeesSnap.val() || {};
           const override = overrideSnap.val() || {};
+          const plans = plansSnap.val() || {};
           const carry = carrySnap.val() || {};
 
           let paymentsSource = extractPaymentsMap(ledgerSnap.val(), targetYear);
@@ -471,6 +473,8 @@
           const deltaYears = targetYear - SOMAP_DEFAULT_YEAR;
           const classLevel = shiftClass(baseClass, deltaYears);
           const classDefaults = classFees[classLevel] || classFees[baseClass] || {};
+          const resolvedPlanId = override.planId || classDefaults.defaultPlanId || null;
+          const resolvedPlan = resolvedPlanId ? plans[resolvedPlanId] : null;
 
           const baseFeeCandidate =
             override.feePerYear ??
@@ -505,6 +509,7 @@
             carryAmount > 0;
 
           const planName =
+            (resolvedPlan && resolvedPlan.name) ||
             override.planName ||
             override.paymentPlan ||
             enrollment.planName ||
@@ -526,6 +531,13 @@
             isGraduated: classLevel === 'GRADUATED',
             admissionNumber: enrollment.admissionNumber || enrollment.admissionNo || baseStudent.admissionNumber || studentId,
           };
+
+          // Attach custom schedule or plan schedule for builder to use
+          if (Array.isArray(override.customSchedule) && override.customSchedule.length) {
+            prepared._customSchedule = override.customSchedule;
+          } else if (resolvedPlan && Array.isArray(resolvedPlan.schedule)) {
+            prepared._planSchedule = resolvedPlan.schedule; // [{label, from, to, weight}]
+          }
 
           render(prepared);
         })

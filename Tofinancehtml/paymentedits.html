@@ -14,19 +14,24 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
 
   <style>
-    /* subtle glass */
+    /* dark glass tuning */
     .glass {
-      background: rgba(255,255,255,0.55);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.3);
+      background: rgba(17, 24, 39, 0.4);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
     }
     .glass-dark {
-      background: rgba(15, 23, 42, 0.55);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, rgba(2,6,23,0.55), rgba(15,23,42,0.55));
+      backdrop-filter: blur(14px) saturate(130%);
+      -webkit-backdrop-filter: blur(14px) saturate(130%);
+      border: 1px solid rgba(148,163,184,0.12);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
     }
+    .btn {
+      transition: transform .08s ease, box-shadow .2s ease;
+    }
+    .btn:active { transform: translateY(1px) scale(0.99); }
   </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-purple-900 text-slate-100">
@@ -48,9 +53,9 @@
     <!-- Toolbar -->
     <div class="glass-dark rounded-2xl p-4 mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div class="flex gap-2 items-center">
-        <input id="searchClass" type="text" placeholder="Search class..." class="w-56 text-sm bg-slate-800 border border-slate-700 rounded px-3 py-2 placeholder-slate-500" />
-        <button id="btnImportAllYears" class="text-xs bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded shadow">🚀 Import All Years</button>
-        <button id="btnImportThisYear" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded shadow">📦 Import This Year</button>
+        <input id="searchClass" type="text" placeholder="Search class..." class="w-56 text-sm bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-2 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40" />
+        <button id="btnImportAllYears" class="btn text-xs bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-lg shadow">🚀 Import All Years</button>
+        <button id="btnImportThisYear" class="btn text-xs bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg shadow">📦 Import This Year</button>
       </div>
       <div class="flex gap-2">
         <button id="btnAddClass" class="text-xs bg-fuchsia-600 hover:bg-fuchsia-500 px-3 py-2 rounded shadow">+ Add Class Pricing</button>
@@ -85,7 +90,7 @@
   <!-- Simple modal root -->
   <div id="modalRoot" class="fixed inset-0 hidden items-center justify-center z-50">
     <div class="absolute inset-0 bg-black/50"></div>
-    <div class="relative glass-dark rounded-2xl p-5 w-full max-w-lg shadow-xl"></div>
+    <div class="relative glass-dark rounded-2xl p-5 w-full max-w-2xl shadow-xl"></div>
   </div>
 
   <script>
@@ -324,20 +329,158 @@
       });
     });
 
-    // Import buttons (skeleton)
-    document.getElementById('btnImportAllYears').addEventListener('click', ()=>{
-      openModal(`<div class="space-y-3 text-sm">
-        <div class="font-semibold">Import All Years (skeleton)</div>
-        <div>Feature stub. We will add options to copy structures from previous years.</div>
-        <div class="flex justify-end"><button class="bg-slate-700 px-3 py-2 rounded" onclick="(${closeModal.toString()})();">Close</button></div>
-      </div>`);
+    // Import logic
+    async function listAvailableYears(){
+      const snaps = await Promise.all(SOMAP_ALLOWED_YEARS.map(y=>p(`feesStructure/${y}`)));
+      const out = [];
+      snaps.forEach((val, idx)=>{ if (val && Object.keys(val).length) out.push(SOMAP_ALLOWED_YEARS[idx]); });
+      return out;
+    }
+    async function findNearestSourceYear(y){
+      const yi = Number(y);
+      for (let yr = yi-1; yr >= SOMAP_ALLOWED_YEARS[0]; yr--){
+        const v = await p(`feesStructure/${yr}`);
+        if (v && Object.keys(v).length) return yr;
+      }
+      return null;
+    }
+    function renderPreviewTable(data){
+      const rows = Object.entries(data||{}).map(([cls,rec])=>{
+        const count = Object.keys(rec?.installments||{}).length;
+        const fee = Number(rec?.feePerYear||0);
+        const plan = rec?.defaultPlan||'';
+        return `<tr>
+          <td class="p-2 border border-slate-700">${cls}</td>
+          <td class="p-2 border border-slate-700 text-right">TSh ${fmt(fee)}</td>
+          <td class="p-2 border border-slate-700">${plan}</td>
+          <td class="p-2 border border-slate-700 text-center">${count}</td>
+        </tr>`;
+      }).join('') || '<tr><td class="p-3 text-center text-slate-400" colspan="4">No classes found.</td></tr>';
+      return `<div class="overflow-auto max-h-80 border border-slate-700 rounded-lg">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-800/60">
+            <tr>
+              <th class="p-2 border border-slate-700 text-left">Class</th>
+              <th class="p-2 border border-slate-700 text-right">Fee/Year</th>
+              <th class="p-2 border border-slate-700 text-left">Plan</th>
+              <th class="p-2 border border-slate-700 text-center">Installments</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    }
+    function stripAmounts(data){
+      const out = {};
+      Object.entries(data||{}).forEach(([cls,rec])=>{
+        const insts = {};
+        Object.entries(rec?.installments||{}).forEach(([id,it])=>{
+          const { amount, ...rest } = it||{};
+          insts[id] = { ...rest };
+        });
+        const { feePerYear, ...restCls } = rec||{};
+        out[cls] = { ...restCls, installments: insts };
+      });
+      return out;
+    }
+    async function performImport(sourceYear, targetYear, opts){
+      const src = await p(`feesStructure/${sourceYear}`) || {};
+      const payload = opts.copyAmounts ? src : stripAmounts(src);
+      const updates = {};
+      Object.entries(payload).forEach(([cls,rec])=>{
+        updates[`feesStructure/${targetYear}/${cls}`] = {
+          ...rec,
+          active: rec?.active!==false,
+          updatedAt: now(),
+          updatedBy: (window.currentUserId||'admin')
+        };
+      });
+      await db.ref().update(updates);
+      // history summary entry
+      await writeHistory(String(targetYear), 'class', '_bulk_import_', 'import', { sourceYear }, { classes: Object.keys(payload).length });
+    }
+    document.getElementById('btnImportThisYear').addEventListener('click', async ()=>{
+      const y = String(window.somapYearContext.getSelectedYear());
+      const nearest = await findNearestSourceYear(y);
+      const srcYear = nearest || SOMAP_ALLOWED_YEARS[0];
+      const data = await p(`feesStructure/${srcYear}`) || {};
+      openModal(`
+        <div class="space-y-4 text-sm">
+          <div class="flex items-center justify-between">
+            <div class="font-semibold">📦 Import This Year</div>
+            <button class="text-slate-300 hover:text-white" onclick="(${closeModal.toString()})();"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label class="text-xs">Source year</label>
+              <select id="impSource" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2"></select>
+            </div>
+            <div class="md:col-span-2 flex items-end gap-4">
+              <label class="inline-flex items-center gap-2 text-xs"><input id="optCopyAmounts" type="checkbox" class="accent-indigo-500" checked /> Copy amounts</label>
+              <label class="inline-flex items-center gap-2 text-xs"><input id="optOnlyStructure" type="checkbox" class="accent-indigo-500" /> Structure only</label>
+            </div>
+          </div>
+          <div id="impPreview">${renderPreviewTable(data)}</div>
+          <div class="flex justify-end gap-2">
+            <button class="px-3 py-2 text-xs" onclick="(${closeModal.toString()})();">Cancel</button>
+            <button id="impDo" class="btn bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded text-xs">Import into ${y}</button>
+          </div>
+        </div>`);
+      // populate sources
+      const select = document.getElementById('impSource');
+      const have = await listAvailableYears();
+      select.innerHTML = have.map(yr=>`<option ${yr===srcYear?'selected':''}>${yr}</option>`).join('');
+      select.addEventListener('change', async (e)=>{
+        const sy = e.target.value;
+        const d = await p(`feesStructure/${sy}`) || {};
+        document.getElementById('impPreview').innerHTML = renderPreviewTable(d);
+      });
+      // options toggles coherence
+      const copyCbx = document.getElementById('optCopyAmounts');
+      const structCbx = document.getElementById('optOnlyStructure');
+      structCbx.addEventListener('change', ()=>{ if (structCbx.checked) copyCbx.checked = false; });
+      copyCbx.addEventListener('change', ()=>{ if (copyCbx.checked) structCbx.checked = false; });
+      document.getElementById('impDo').addEventListener('click', async ()=>{
+        const sy = select.value;
+        const opts = { copyAmounts: copyCbx.checked && !structCbx.checked };
+        await performImport(sy, y, opts);
+        closeModal();
+        renderClasses();
+      });
     });
-    document.getElementById('btnImportThisYear').addEventListener('click', ()=>{
-      openModal(`<div class="space-y-3 text-sm">
-        <div class="font-semibold">Import This Year (skeleton)</div>
-        <div>Feature stub. Copy from previous year with structure/amount options.</div>
-        <div class="flex justify-end"><button class="bg-slate-700 px-3 py-2 rounded" onclick="(${closeModal.toString()})();">Close</button></div>
-      </div>`);
+    document.getElementById('btnImportAllYears').addEventListener('click', async ()=>{
+      const y = String(window.somapYearContext.getSelectedYear());
+      const have = await listAvailableYears();
+      openModal(`
+        <div class="space-y-4 text-sm">
+          <div class="flex items-center justify-between">
+            <div class="font-semibold">🚀 Import From Any Year</div>
+            <button class="text-slate-300 hover:text-white" onclick="(${closeModal.toString()})();"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div>
+            <label class="text-xs">Source year</label>
+            <select id="impAnySource" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2">${have.map(yr=>`<option>${yr}</option>`).join('')}</select>
+          </div>
+          <div class="flex items-center gap-4">
+            <label class="inline-flex items-center gap-2 text-xs"><input id="optAnyCopy" type="checkbox" class="accent-indigo-500" checked /> Copy amounts</label>
+            <label class="inline-flex items-center gap-2 text-xs"><input id="optAnyStruct" type="checkbox" class="accent-indigo-500" /> Structure only</label>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button class="px-3 py-2 text-xs" onclick="(${closeModal.toString()})();">Cancel</button>
+            <button id="impAnyDo" class="btn bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded text-xs">Import into ${y}</button>
+          </div>
+        </div>`);
+      const copy = document.getElementById('optAnyCopy');
+      const stru = document.getElementById('optAnyStruct');
+      stru.addEventListener('change', ()=>{ if (stru.checked) copy.checked = false; });
+      copy.addEventListener('change', ()=>{ if (copy.checked) stru.checked = false; });
+      document.getElementById('impAnyDo').addEventListener('click', async ()=>{
+        const sy = document.getElementById('impAnySource').value;
+        const opts = { copyAmounts: copy.checked && !stru.checked };
+        await performImport(sy, y, opts);
+        closeModal();
+        renderClasses();
+      });
     });
 
     // Delegated actions for class/inst controls

@@ -3,6 +3,660 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Payments & Installments Management</title>
+
+  <!-- Tailwind (for quick glassmorphism) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"/>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <style>
+    /* subtle glass */
+    .glass {
+      background: rgba(255,255,255,0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .glass-dark {
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-purple-900 text-slate-100">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="glass-dark rounded-2xl p-5 mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h1 class="text-xl font-semibold">💳 Payments & Installments Management</h1>
+        <p class="text-xs text-slate-300">Manage class fees, installment templates, and per-student overrides per academic year.</p>
+      </div>
+      <!-- Year selector -->
+      <div id="somapYearWrap" class="flex gap-2 items-center">
+        <label class="text-xs font-semibold">Academic Year</label>
+        <select data-somap-year-select class="text-slate-100 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm"></select>
+        <span class="text-xs text-slate-300">Working year: <b id="somapYearHint">--</b></span>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="glass-dark rounded-2xl p-4 mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div class="flex gap-2 items-center">
+        <input id="searchClass" type="text" placeholder="Search class..." class="w-56 text-sm bg-slate-800 border border-slate-700 rounded px-3 py-2 placeholder-slate-500" />
+        <button id="btnImportAllYears" class="text-xs bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded shadow">🚀 Import All Years</button>
+        <button id="btnImportThisYear" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded shadow">📦 Import This Year</button>
+      </div>
+      <div class="flex gap-2">
+        <button id="btnAddClass" class="text-xs bg-fuchsia-600 hover:bg-fuchsia-500 px-3 py-2 rounded shadow">+ Add Class Pricing</button>
+      </div>
+    </div>
+
+    <!-- Content layout -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Left: Class pricing cards -->
+      <div class="lg:col-span-2">
+        <div id="classesWrap" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        <div id="emptyState" class="hidden glass-dark rounded-xl p-6 text-center text-sm text-slate-300">
+          No fee structure found for this year. Use Import or + Add Class Pricing to begin.
+        </div>
+      </div>
+
+      <!-- Right: Per-student overrides -->
+      <div class="glass-dark rounded-2xl p-4">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="font-semibold text-sm">Per-Student Overrides</h2>
+          <button id="btnClearStudent" class="text-xs text-slate-300 hover:text-white">Clear</button>
+        </div>
+        <div class="mb-3 flex gap-2">
+          <input id="studentQuery" type="text" placeholder="Search admission/name..." class="flex-1 text-sm bg-slate-800 border border-slate-700 rounded px-3 py-2 placeholder-slate-500" />
+          <button id="btnFindStudent" class="text-xs bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded">Find</button>
+        </div>
+        <div id="studentPanel" class="space-y-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simple modal root -->
+  <div id="modalRoot" class="fixed inset-0 hidden items-center justify-center z-50">
+    <div class="absolute inset-0 bg-black/50"></div>
+    <div class="relative glass-dark rounded-2xl p-5 w-full max-w-lg shadow-xl"></div>
+  </div>
+
+  <script>
+    /** Year range + anchor **/
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+    const SOMAP_DEFAULT_YEAR = 2025;
+    /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+    const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    const L = s => String(s||'').trim().toLowerCase();
+    function shiftClass(baseClass, deltaYears){
+      const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+      if (i<0) return baseClass||'';
+      const j = i + Number(deltaYears||0);
+      if (j < 0) return 'PRE-ADMISSION';
+      if (j >= CLASS_ORDER.length) return 'GRADUATED';
+      return CLASS_ORDER[j];
+    }
+
+    /** Reuse shared year context if present, else create a light fallback. */
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected===y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
+          listeners.forEach(fn=>{ try{ fn(y); }catch{} });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+      };
+    })();
+
+    (function initYearSelector(){
+      const sel = document.querySelector('[data-somap-year-select]');
+      const hint = document.getElementById('somapYearHint');
+      if (!sel) return;
+      sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      const current = window.somapYearContext.getSelectedYear();
+      sel.value = current; if (hint) hint.textContent = current;
+      sel.addEventListener('change', e=>{
+        const y = String(e.target.value);
+        window.somapYearContext.setSelectedYear(y);
+        if (hint) hint.textContent = y;
+      });
+    })();
+
+    // Firebase init (standalone to avoid external deps)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+    try { if (!firebase?.apps?.length) firebase.initializeApp(firebaseConfig); } catch(e) { console.error(e); }
+    const db = (()=>{ try { return firebase.database(); } catch { return null; } })();
+    if (!db) console.error('DB not initialized; ensure internet connection.');
+
+    // Helpers
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+    const fmt = n => (Number(n)||0).toLocaleString();
+    const now = () => Date.now();
+    function openModal(html){
+      const root = document.getElementById('modalRoot');
+      const box = root.querySelector('div.relative');
+      box.innerHTML = html;
+      root.classList.remove('hidden');
+      root.classList.add('flex');
+    }
+    function closeModal(){
+      const root = document.getElementById('modalRoot');
+      root.classList.add('hidden');
+      root.classList.remove('flex');
+      const box = root.querySelector('div.relative');
+      box.innerHTML = '';
+    }
+    document.getElementById('modalRoot').addEventListener('click', (e)=>{
+      if (e.target.id==='modalRoot') closeModal();
+    });
+
+    function writer(path, payload){
+      return db.ref(path).set(payload);
+    }
+    function updater(path, payload){
+      return db.ref(path).update(payload);
+    }
+    function p(path){ return db.ref(path).once('value').then(s=>s.val()); }
+    function histPath(y, type, id){ return `paymentEditHistory/${y}/${type}/${id}`; }
+    async function writeHistory(y, type, id, action, before, after){
+      const hId = db.ref().push().key;
+      const rec = { action, before: before||null, after: after||null, at: now(), by: (window.currentUserId||'admin') };
+      await writer(`${histPath(y,type,id)}/${hId}`, rec);
+    }
+
+    // Load and render class cards
+    async function loadYearFees(y){
+      const data = await p(`feesStructure/${y}`) || {};
+      return data;
+    }
+
+    function renderInstallmentCard(y, className, instId, inst){
+      const activeBadge = inst?.active===false ? '<span class="text-rose-300 text-[10px] border border-rose-400/30 px-2 py-0.5 rounded-full">Inactive</span>' : '<span class="text-emerald-300 text-[10px] border border-emerald-400/30 px-2 py-0.5 rounded-full">Active</span>';
+      const label = inst?.label || instId;
+      const amount = Number(inst?.amount||0);
+      const win = inst?.window ? `${inst.window.from?.join('/')} - ${inst.window.to?.join('/')}` : '';
+      return `
+        <div class="glass-dark rounded-xl p-3 text-xs space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="font-semibold">${label}</div>
+            <div class="flex gap-2 items-center">${activeBadge}
+              <button class="text-sky-300 hover:text-white" data-action="inst-history" data-class="${className}" data-id="${instId}"><i class="fa-regular fa-clock"></i></button>
+              <button class="text-amber-300 hover:text-white" data-action="inst-edit" data-class="${className}" data-id="${instId}"><i class="fa-solid fa-pen"></i></button>
+              <button class="text-rose-300 hover:text-white" data-action="inst-deactivate" data-class="${className}" data-id="${instId}"><i class="fa-solid fa-ban"></i></button>
+              <button class="text-rose-400 hover:text-white" data-action="inst-delete" data-class="${className}" data-id="${instId}"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-3 text-slate-300">
+            <div>Amount: <b class="text-slate-100">TSh ${fmt(amount)}</b></div>
+            <div>${win}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderClassCard(y, className, rec){
+      const fee = Number(rec?.feePerYear||0);
+      const plan = rec?.defaultPlan || '6-instalments';
+      const isActive = rec?.active!==false;
+      const badge = isActive ? '<span class="text-emerald-300 text-[10px] border border-emerald-400/30 px-2 py-0.5 rounded-full">Active</span>' : '<span class="text-rose-300 text-[10px] border border-rose-400/30 px-2 py-0.5 rounded-full">Inactive</span>';
+      const insts = Object.entries(rec?.installments||{});
+      const instCards = insts.length ? insts.map(([id,inst])=>renderInstallmentCard(y,className,id,inst)).join('') : '<div class="text-xs text-slate-300">No installments. Add one.</div>';
+      return `
+        <div class="glass-dark rounded-2xl p-4 space-y-3" data-class-card="${className}">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-semibold">${className}</div>
+              <div class="text-[11px] text-slate-300">Year ${y} • Plan: <b class="text-slate-100">${plan}</b></div>
+            </div>
+            <div class="flex gap-2 items-center">${badge}
+              <button class="text-sky-300 hover:text-white" data-action="class-history" data-class="${className}"><i class="fa-regular fa-clock"></i></button>
+              <button class="text-amber-300 hover:text-white" data-action="class-edit" data-class="${className}"><i class="fa-solid fa-pen"></i></button>
+              <button class="text-rose-300 hover:text-white" data-action="class-deactivate" data-class="${className}"><i class="fa-solid fa-ban"></i></button>
+              <button class="text-rose-400 hover:text-white" data-action="class-delete" data-class="${className}"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-4 text-xs text-slate-300">
+            <div>Fee (year): <b class="text-slate-100">TSh ${fmt(fee)}</b></div>
+            <div>Installments: <b class="text-slate-100">${insts.length}</b></div>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="text-[12px] text-slate-300">Installments</div>
+              <button class="text-xs bg-sky-600 hover:bg-sky-500 px-2 py-1 rounded" data-action="inst-add" data-class="${className}">+ Add Installment</button>
+            </div>
+            <div class="grid grid-cols-1 gap-2">${instCards}</div>
+          </div>
+        </div>`;
+    }
+
+    function renderEmpty(show){
+      const empty = document.getElementById('emptyState');
+      empty.classList.toggle('hidden', !show);
+    }
+
+    async function renderClasses(){
+      const y = String(window.somapYearContext.getSelectedYear());
+      const wrap = document.getElementById('classesWrap');
+      wrap.innerHTML = '<div class="text-sm text-slate-300">Loading...</div>';
+      const data = await loadYearFees(y);
+      const entries = Object.entries(data||{});
+      if (!entries.length){
+        wrap.innerHTML = '';
+        renderEmpty(true);
+        return;
+      }
+      renderEmpty(false);
+      // search filter
+      const q = L(document.getElementById('searchClass').value||'');
+      const filtered = q ? entries.filter(([name])=>L(name).includes(q)) : entries;
+      wrap.innerHTML = filtered.map(([name, rec])=>renderClassCard(y, name, rec)).join('');
+    }
+
+    // Year change wire
+    window.somapYearContext.onYearChanged(()=>{ renderClasses(); clearStudentPanel(); });
+
+    // Toolbar actions
+    document.getElementById('searchClass').addEventListener('input', ()=> renderClasses());
+    document.getElementById('btnAddClass').addEventListener('click', ()=>{
+      const y = String(window.somapYearContext.getSelectedYear());
+      openModal(`
+        <div class="space-y-3">
+          <div class="text-sm font-semibold">Add Class Pricing (${y})</div>
+          <div class="space-y-2 text-sm">
+            <div>
+              <label class="text-xs">Class Name</label>
+              <select id="mClassName" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2">
+                ${CLASS_ORDER.map(c=>`<option>${c}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="text-xs">Fee per Year (TSh)</label>
+              <input id="mFee" type="number" min="0" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+            </div>
+            <div>
+              <label class="text-xs">Default Plan</label>
+              <select id="mPlan" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2">
+                <option>6-instalments</option>
+                <option>4-instalments</option>
+                <option>monthly</option>
+                <option>2inst</option>
+                <option>full</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 text-xs">
+            <button class="px-3 py-2" onclick="(${closeModal.toString()})();">Cancel</button>
+            <button id="mSave" class="bg-fuchsia-600 hover:bg-fuchsia-500 px-3 py-2 rounded">Save</button>
+          </div>
+        </div>`);
+      document.getElementById('mSave').addEventListener('click', async ()=>{
+        const name = document.getElementById('mClassName').value;
+        const fee = Math.max(0, Number(document.getElementById('mFee').value||0));
+        const plan = document.getElementById('mPlan').value;
+        const before = await p(`feesStructure/${y}/${name}`) || null;
+        const rec = { feePerYear: fee, defaultPlan: plan, active: true, updatedAt: now(), updatedBy: (window.currentUserId||'admin') };
+        await updater(`feesStructure/${y}/${name}`, rec);
+        await writeHistory(y, 'class', name, before ? 'update' : 'create', before, rec);
+        closeModal();
+        renderClasses();
+      });
+    });
+
+    // Import buttons (skeleton)
+    document.getElementById('btnImportAllYears').addEventListener('click', ()=>{
+      openModal(`<div class="space-y-3 text-sm">
+        <div class="font-semibold">Import All Years (skeleton)</div>
+        <div>Feature stub. We will add options to copy structures from previous years.</div>
+        <div class="flex justify-end"><button class="bg-slate-700 px-3 py-2 rounded" onclick="(${closeModal.toString()})();">Close</button></div>
+      </div>`);
+    });
+    document.getElementById('btnImportThisYear').addEventListener('click', ()=>{
+      openModal(`<div class="space-y-3 text-sm">
+        <div class="font-semibold">Import This Year (skeleton)</div>
+        <div>Feature stub. Copy from previous year with structure/amount options.</div>
+        <div class="flex justify-end"><button class="bg-slate-700 px-3 py-2 rounded" onclick="(${closeModal.toString()})();">Close</button></div>
+      </div>`);
+    });
+
+    // Delegated actions for class/inst controls
+    document.addEventListener('click', async (e)=>{
+      const a = e.target.closest('[data-action]'); if (!a) return;
+      const y = String(window.somapYearContext.getSelectedYear());
+      const act = a.getAttribute('data-action');
+      const className = a.getAttribute('data-class');
+      const instId = a.getAttribute('data-id');
+
+      if (act==='class-edit'){
+        const before = await p(`feesStructure/${y}/${className}`) || {};
+        openModal(`
+          <div class="space-y-3">
+            <div class="text-sm font-semibold">Edit Class (${className})</div>
+            <div class="space-y-2 text-sm">
+              <div>
+                <label class="text-xs">Fee per Year (TSh)</label>
+                <input id="mFee" type="number" min="0" value="${before.feePerYear||0}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Default Plan</label>
+                <select id="mPlan" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2">
+                  ${['6-instalments','4-instalments','monthly','2inst','full'].map(pn=>`<option ${pn===(before.defaultPlan||'6-instalments')?'selected':''}>${pn}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="flex justify-end gap-2 text-xs">
+              <button class="px-3 py-2" onclick="(${closeModal.toString()})();">Cancel</button>
+              <button id="mSave" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded">Save</button>
+            </div>
+          </div>`);
+        document.getElementById('mSave').addEventListener('click', async ()=>{
+          const fee = Math.max(0, Number(document.getElementById('mFee').value||0));
+          const plan = document.getElementById('mPlan').value;
+          const after = { ...before, feePerYear: fee, defaultPlan: plan, updatedAt: now(), updatedBy: (window.currentUserId||'admin') };
+          await updater(`feesStructure/${y}/${className}`, after);
+          await writeHistory(y, 'class', className, 'update', before, after);
+          closeModal(); renderClasses();
+        });
+      }
+
+      if (act==='class-deactivate'){
+        const before = await p(`feesStructure/${y}/${className}`) || {};
+        const after = { ...before, active: false, updatedAt: now(), updatedBy: (window.currentUserId||'admin') };
+        await updater(`feesStructure/${y}/${className}`, after);
+        await writeHistory(y, 'class', className, 'deactivate', before, after);
+        renderClasses();
+      }
+
+      if (act==='class-delete'){
+        const before = await p(`feesStructure/${y}/${className}`) || {};
+        if (!confirm('Delete this class pricing?')) return;
+        await writer(`feesStructure/${y}/${className}`, null);
+        await writeHistory(y, 'class', className, 'delete', before, null);
+        renderClasses();
+      }
+
+      if (act==='class-history'){
+        const hist = await p(histPath(y,'class',className)) || {};
+        const items = Object.values(hist).sort((a,b)=>a.at-b.at).map(h=>`<li class="py-1">${new Date(h.at).toLocaleString()} — ${h.action}</li>`).join('') || '<li class="py-1 text-slate-400">No history.</li>';
+        openModal(`<div class="space-y-3 text-sm"><div class="font-semibold">History — ${className}</div><ul>${items}</ul><div class="flex justify-end"><button class="bg-slate-700 px-3 py-2 rounded" onclick="(${closeModal.toString()})();">Close</button></div></div>`);
+      }
+
+      if (act==='inst-add'){
+        openModal(`
+          <div class="space-y-3">
+            <div class="text-sm font-semibold">Add Installment (${className})</div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="col-span-2">
+                <label class="text-xs">Label</label>
+                <input id="iLabel" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Amount (TSh)</label>
+                <input id="iAmount" type="number" min="0" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Active</label>
+                <select id="iActive" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2"><option value="true">true</option><option value="false">false</option></select>
+              </div>
+              <div>
+                <label class="text-xs">From (m,d)</label>
+                <input id="iFrom" placeholder="12,1" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">To (m,d)</label>
+                <input id="iTo" placeholder="1,10" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+            </div>
+            <div class="flex justify-end gap-2 text-xs">
+              <button class="px-3 py-2" onclick="(${closeModal.toString()})();">Cancel</button>
+              <button id="iSave" class="bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded">Save</button>
+            </div>
+          </div>`);
+        document.getElementById('iSave').addEventListener('click', async ()=>{
+          const label = document.getElementById('iLabel').value.trim();
+          const amount = Math.max(0, Number(document.getElementById('iAmount').value||0));
+          const active = document.getElementById('iActive').value==='true';
+          const from = (document.getElementById('iFrom').value||'').split(',').map(s=>Number(s.trim()));
+          const to = (document.getElementById('iTo').value||'').split(',').map(s=>Number(s.trim()));
+          const id = db.ref().push().key;
+          const before = null;
+          const inst = { label, amount, active, window: { from, to }, createdAt: now(), createdBy: (window.currentUserId||'admin') };
+          await updater(`feesStructure/${y}/${className}/installments/${id}`, inst);
+          await writeHistory(y, 'installment', `${className}::${id}`, 'create', before, inst);
+          closeModal(); renderClasses();
+        });
+      }
+
+      if (act==='inst-edit'){
+        const before = await p(`feesStructure/${y}/${className}/installments/${instId}`) || {};
+        openModal(`
+          <div class="space-y-3">
+            <div class="text-sm font-semibold">Edit Installment (${className})</div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="col-span-2">
+                <label class="text-xs">Label</label>
+                <input id="iLabel" value="${before.label||''}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Amount (TSh)</label>
+                <input id="iAmount" type="number" min="0" value="${before.amount||0}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Active</label>
+                <select id="iActive" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2">
+                  <option value="true" ${before.active!==false?'selected':''}>true</option>
+                  <option value="false" ${before.active===false?'selected':''}>false</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs">From (m,d)</label>
+                <input id="iFrom" value="${(before.window?.from||[]).join(',')}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">To (m,d)</label>
+                <input id="iTo" value="${(before.window?.to||[]).join(',')}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+            </div>
+            <div class="flex justify-end gap-2 text-xs">
+              <button class="px-3 py-2" onclick="(${closeModal.toString()})();">Cancel</button>
+              <button id="iSave" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded">Save</button>
+            </div>
+          </div>`);
+        document.getElementById('iSave').addEventListener('click', async ()=>{
+          const label = document.getElementById('iLabel').value.trim();
+          const amount = Math.max(0, Number(document.getElementById('iAmount').value||0));
+          const active = document.getElementById('iActive').value==='true';
+          const from = (document.getElementById('iFrom').value||'').split(',').map(s=>Number(s.trim()));
+          const to = (document.getElementById('iTo').value||'').split(',').map(s=>Number(s.trim()));
+          const after = { ...before, label, amount, active, window: { from, to }, updatedAt: now(), updatedBy: (window.currentUserId||'admin') };
+          await updater(`feesStructure/${y}/${className}/installments/${instId}`, after);
+          await writeHistory(y, 'installment', `${className}::${instId}`, 'update', before, after);
+          closeModal(); renderClasses();
+        });
+      }
+
+      if (act==='inst-deactivate'){
+        const before = await p(`feesStructure/${y}/${className}/installments/${instId}`) || {};
+        const after = { ...before, active: false, updatedAt: now(), updatedBy: (window.currentUserId||'admin') };
+        await updater(`feesStructure/${y}/${className}/installments/${instId}`, after);
+        await writeHistory(y, 'installment', `${className}::${instId}`, 'deactivate', before, after);
+        renderClasses();
+      }
+
+      if (act==='inst-delete'){
+        const before = await p(`feesStructure/${y}/${className}/installments/${instId}`) || {};
+        if (!confirm('Delete this installment?')) return;
+        await writer(`feesStructure/${y}/${className}/installments/${instId}`, null);
+        await writeHistory(y, 'installment', `${className}::${instId}`, 'delete', before, null);
+        renderClasses();
+      }
+
+      if (act==='inst-history'){
+        const hist = await p(histPath(y,'installment',`${className}::${instId}`)) || {};
+        const items = Object.values(hist).sort((a,b)=>a.at-b.at).map(h=>`<li class=\"py-1\">${new Date(h.at).toLocaleString()} — ${h.action}</li>`).join('') || '<li class="py-1 text-slate-400">No history.</li>';
+        openModal(`<div class="space-y-3 text-sm"><div class="font-semibold">History — ${className}/${instId}</div><ul>${items}</ul><div class="flex justify-end"><button class="bg-slate-700 px-3 py-2 rounded" onclick="(${closeModal.toString()})();">Close</button></div></div>`);
+      }
+    });
+
+    // Student overrides (skeleton)
+    async function findStudentByQuery(q){
+      q = L(q);
+      const students = await p('students') || {};
+      const id = Object.keys(students).find(k=>{
+        const s = students[k]||{};
+        const name = `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.trim();
+        return L(s.admissionNumber||k)===q || L(name).includes(q);
+      });
+      return id || null;
+    }
+    function clearStudentPanel(){ document.getElementById('studentPanel').innerHTML = '<div class="text-xs text-slate-300">No student selected.</div>'; }
+    async function renderStudentPanel(studentId){
+      const y = String(window.somapYearContext.getSelectedYear());
+      if (!studentId){ clearStudentPanel(); return; }
+      const [S, anchor, overlay, override] = await Promise.all([
+        p(`students/${studentId}`),
+        p(`enrollments/${SOMAP_DEFAULT_YEAR}/${studentId}`),
+        p(`enrollments/${y}/${studentId}`),
+        p(`studentFees/${y}/${studentId}`)
+      ]);
+      if (!S){ document.getElementById('studentPanel').innerHTML = '<div class="text-xs text-rose-300">Student not found.</div>'; return; }
+      const baseClass = (overlay?.className||overlay?.classLevel) || (anchor?.className||anchor?.classLevel) || S.classLevel || '';
+      const displayClass = shiftClass(baseClass, Number(y)-SOMAP_DEFAULT_YEAR);
+      const identity = `${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`.replace(/\s+/g,' ').trim();
+      const feeOverride = Number(override?.feePerYear||0);
+      const planOverride = override?.planName || '';
+      const insts = Object.entries(override?.installments||{});
+      const instHtml = insts.length? insts.map(([id,it])=>`<li class="flex justify-between py-1"><span>${it.label||id}</span><span>TSh ${fmt(it.amount||0)}</span></li>`).join('') : '<li class="py-1 text-slate-400">No overrides.</li>';
+      document.getElementById('studentPanel').innerHTML = `
+        <div class="glass-dark rounded-xl p-3">
+          <div class="text-sm font-semibold">${identity} <span class="text-[10px] ml-2 border border-slate-600 rounded-full px-2">${S.admissionNumber||studentId}</span></div>
+          <div class="text-[12px] text-slate-300">Class ${displayClass} • Year ${y}</div>
+          <div class="mt-3 space-y-2 text-xs">
+            <div>Fee override: <b class="text-slate-100">TSh ${fmt(feeOverride)}</b></div>
+            <div>Plan override: <b class="text-slate-100">${planOverride||'—'}</b></div>
+            <div class="flex items-center justify-between">
+              <div>Installment overrides</div>
+              <div class="flex gap-2">
+                <button id="btnEditStudentFee" class="text-xs bg-amber-600 hover:bg-amber-500 px-2 py-1 rounded">✏️ Edit</button>
+                <button id="btnAddStudInst" class="text-xs bg-sky-600 hover:bg-sky-500 px-2 py-1 rounded">+ Add</button>
+              </div>
+            </div>
+            <ul>${instHtml}</ul>
+          </div>
+        </div>`;
+
+      document.getElementById('btnEditStudentFee').addEventListener('click', ()=>{
+        openModal(`
+          <div class="space-y-3">
+            <div class="text-sm font-semibold">Edit Student Override</div>
+            <div class="space-y-2 text-sm">
+              <div>
+                <label class="text-xs">Fee per Year (TSh)</label>
+                <input id="sFee" type="number" min="0" value="${feeOverride||0}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Plan Name</label>
+                <input id="sPlan" value="${planOverride||''}" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+            </div>
+            <div class="flex justify-end gap-2 text-xs">
+              <button class="px-3 py-2" onclick="(${closeModal.toString()})();">Cancel</button>
+              <button id="sSave" class="bg-amber-600 hover:bg-amber-500 px-3 py-2 rounded">Save</button>
+            </div>
+          </div>`);
+        document.getElementById('sSave').addEventListener('click', async ()=>{
+          const fee = Math.max(0, Number(document.getElementById('sFee').value||0));
+          const plan = String(document.getElementById('sPlan').value||'');
+          const before = override || null;
+          const after = { ...(before||{}), feePerYear: fee, planName: plan, updatedAt: now(), updatedBy: (window.currentUserId||'admin') };
+          await updater(`studentFees/${y}/${studentId}`, after);
+          await writeHistory(y, 'studentOverride', studentId, before ? 'update' : 'create', before, after);
+          closeModal(); renderStudentPanel(studentId);
+        });
+      });
+
+      document.getElementById('btnAddStudInst').addEventListener('click', ()=>{
+        openModal(`
+          <div class="space-y-3">
+            <div class="text-sm font-semibold">Add Student Installment</div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="col-span-2">
+                <label class="text-xs">Label</label>
+                <input id="stLabel" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Amount (TSh)</label>
+                <input id="stAmount" type="number" min="0" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2" />
+              </div>
+              <div>
+                <label class="text-xs">Active</label>
+                <select id="stActive" class="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2"><option value="true">true</option><option value="false">false</option></select>
+              </div>
+            </div>
+            <div class="flex justify-end gap-2 text-xs">
+              <button class="px-3 py-2" onclick="(${closeModal.toString()})();">Cancel</button>
+              <button id="stSave" class="bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded">Save</button>
+            </div>
+          </div>`);
+        document.getElementById('stSave').addEventListener('click', async ()=>{
+          const id = db.ref().push().key;
+          const label = document.getElementById('stLabel').value.trim();
+          const amount = Math.max(0, Number(document.getElementById('stAmount').value||0));
+          const active = document.getElementById('stActive').value==='true';
+          const inst = { label, amount, active, createdAt: now(), createdBy: (window.currentUserId||'admin') };
+          const before = override || null;
+          await updater(`studentFees/${y}/${studentId}/installments/${id}`, inst);
+          await writeHistory(y, 'studentOverride', `${studentId}::${id}`, 'create', before, inst);
+          closeModal(); renderStudentPanel(studentId);
+        });
+      });
+    }
+
+    document.getElementById('btnFindStudent').addEventListener('click', async ()=>{
+      const q = document.getElementById('studentQuery').value;
+      const id = await findStudentByQuery(q);
+      renderStudentPanel(id);
+    });
+    document.getElementById('btnClearStudent').addEventListener('click', ()=>{
+      document.getElementById('studentQuery').value='';
+      clearStudentPanel();
+    });
+
+    // Boot
+    document.addEventListener('DOMContentLoaded', ()=>{
+      renderClasses();
+      clearStudentPanel();
+    });
+  </script>
+</body>
+</html>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Payments Config — Plans, Class Fees & Overrides</title>
   
   <!-- Tailwind -->

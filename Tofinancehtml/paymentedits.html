@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Payments Config — Plans, Class Fees & Overrides</title>
+  
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+
+  <!-- Firebase (v9 compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+
+  <style>
+    .card { @apply bg-white rounded-2xl shadow border border-slate-200 p-4; }
+    .chip { @apply inline-block text-xs px-2 py-0.5 rounded-full border; }
+    .btn { @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium; }
+    .btn-primary { @apply bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700; }
+    .btn-ghost { @apply border-slate-200 hover:bg-slate-50; }
+    .btn-danger { @apply bg-rose-600 text-white border-rose-600 hover:bg-rose-700; }
+    .input { @apply border rounded-lg px-3 py-2 text-sm w-full; }
+    .label { @apply text-xs font-semibold text-slate-600; }
+    .toolbar { @apply flex flex-wrap items-center gap-2; }
+    .tab-btn { @apply px-3 py-1.5 rounded-lg text-sm font-medium border; }
+    .tab-btn.active { @apply bg-indigo-600 text-white border-indigo-600; }
+    .kbd { @apply px-1.5 py-0.5 text-xs border rounded bg-slate-50; }
+    .pill { @apply px-2 py-0.5 text-[11px] font-semibold rounded-full; }
+  </style>
+</head>
+<body class="bg-slate-50">
+  <div class="max-w-7xl mx-auto p-4">
+
+    <!-- Header / Year Selector -->
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <h1 class="text-xl font-semibold text-slate-800">💳 Payments Config</h1>
+        <p class="text-slate-500 text-sm">Define instalment plans, set per-class fees & defaults, and add student overrides. All changes are scoped to the selected academic year.</p>
+      </div>
+      <div id="somapYearWrap" class="toolbar">
+        <label class="label">Academic Year</label>
+        <select data-somap-year-select class="input !w-auto"></select>
+        <span class="text-xs text-slate-600">Working year: <b id="somapYearHint">--</b></span>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex items-center gap-2 mb-4">
+      <button class="tab-btn" data-tab="plans">Plans & Instalments</button>
+      <button class="tab-btn" data-tab="classes">Class Fees & Defaults</button>
+      <button class="tab-btn" data-tab="overrides">Student Overrides</button>
+      <div class="ml-auto flex items-center gap-2">
+        <button id="btnRefresh" class="btn btn-ghost"><i class="fa fa-rotate"></i> Refresh</button>
+        <a href="../dashboard.html" class="btn btn-ghost"><i class="fa fa-arrow-left"></i> Back to Dashboard</a>
+      </div>
+    </div>
+
+    <!-- Plans Panel -->
+    <section id="panel-plans" class="hidden">
+      <div class="card mb-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-semibold">Plans & Instalments (<span id="plansYear"></span>)</h2>
+            <p class="text-xs text-slate-500">Create reusable instalment plans (6-instalments, 4-instalments, monthly, etc). Assign them to classes or individual students.</p>
+          </div>
+          <div class="toolbar">
+            <button id="btnAddPlan" class="btn btn-primary"><i class="fa fa-plus"></i> Add Plan</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-3" id="plansGrid"></div>
+    </section>
+
+    <!-- Classes Panel -->
+    <section id="panel-classes" class="hidden">
+      <div class="card mb-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-semibold">Class Fees & Defaults (<span id="classesYear"></span>)</h2>
+            <p class="text-xs text-slate-500">Set each class’ feePerYear and default plan for the selected year. This does <b>not</b> change other years.</p>
+          </div>
+          <div class="toolbar">
+            <button id="btnImportFromPrev" class="btn btn-ghost"><i class="fa fa-box-archive"></i> Import from previous year</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-3" id="classesGrid"></div>
+    </section>
+
+    <!-- Overrides Panel -->
+    <section id="panel-overrides" class="hidden">
+      <div class="card mb-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-semibold">Student Overrides (<span id="overridesYear"></span>)</h2>
+            <p class="text-xs text-slate-500">Search a student, then override their <b>feePerYear</b>, select a different plan, or assign a <b>custom schedule</b> (e.g., TSh 10,000 weekly).</p>
+          </div>
+          <div class="toolbar">
+            <input id="studentSearch" class="input" placeholder="Search by name or admission no..." />
+          </div>
+        </div>
+      </div>
+
+      <div id="studentResults" class="grid md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-3 right-3 hidden">
+      <div class="bg-slate-900 text-white px-3 py-2 rounded-lg shadow text-sm" id="toastMsg"></div>
+    </div>
+  </div>
+
+  <script>
+    /*********************
+     * 1) Year context
+     *********************/
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i);
+    const SOMAP_DEFAULT_YEAR = 2025;
+    const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    const L = s => String(s||'').trim().toLowerCase();
+
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected===y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
+          listeners.forEach(fn=>{ try{ fn(y); }catch{} });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+      };
+    })();
+
+    (function initYearSelector(){
+      const sel = document.querySelector('[data-somap-year-select]');
+      const hint = document.getElementById('somapYearHint');
+      sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      const current = window.somapYearContext.getSelectedYear();
+      sel.value = current; if (hint) hint.textContent = current;
+      sel.addEventListener('change', e=>{
+        const y = String(e.target.value);
+        window.somapYearContext.setSelectedYear(y);
+        if (hint) hint.textContent = y;
+      });
+    })();
+
+    /*********************
+     * 2) Firebase init
+     *********************/
+    const firebaseConfig = {
+      apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
+      authDomain: "somaptestt.firebaseapp.com",
+      databaseURL: "https://somaptestt-default-rtdb.firebaseio.com",
+      projectId: "somaptestt",
+      storageBucket: "somaptestt.appspot.com",
+      messagingSenderId: "105526245138",
+      appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
+      measurementId: "G-4HKX7KN6Q3"
+    };
+    try { if (!firebase?.apps?.length) firebase.initializeApp(firebaseConfig); } catch(e){ console.error(e); }
+    const db = (()=>{ try { return firebase.database(); } catch { return null; }})();
+    if (!db) alert('Firebase DB failed to initialize.');
+
+    /*********************
+     * 3) RTDB paths (by year)
+     *********************/
+    function pathPlans(y){ return `installmentPlans/${y}`; }
+    function pathFees(y){ return `feesStructure/${y}`; }              // { [className]: { feePerYear, defaultPlanId } }
+    function pathStudentOverrides(y){ return `studentOverrides/${y}`; } // { [studentId]: { feePerYear?, planId?, customSchedule? } }
+    function pathConfigHistory(y){ return `financeConfigHistory/${y}`; }
+
+    /*********************
+     * 4) Utils
+     *********************/
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+    const money = n => (Number(n)||0).toLocaleString();
+    const toast = (msg) => {
+      const t = $('#toast'); const m = $('#toastMsg');
+      m.textContent = msg; t.classList.remove('hidden');
+      setTimeout(()=> t.classList.add('hidden'), 1800);
+    };
+
+    function uid(prefix='id'){ return `${prefix}-${Math.random().toString(36).slice(2,9)}`; }
+
+    function today(){ const d = new Date(); const m = String(d.getMonth()+1).padStart(2,'0'); const day=String(d.getDate()).padStart(2,'0'); return `${d.getFullYear()}-${m}-${day}`; }
+
+    /*********************
+     * 5) Tabs
+     *********************/
+    const tabs = ['plans','classes','overrides'];
+    function activateTab(key){
+      tabs.forEach(t => {
+        const btn = document.querySelector(`.tab-btn[data-tab="${t}"]`);
+        const panel = document.getElementById(`panel-${t}`);
+        if (t===key){ btn.classList.add('active'); panel.classList.remove('hidden'); }
+        else { btn.classList.remove('active'); panel.classList.add('hidden'); }
+      });
+    }
+    $$('.tab-btn').forEach(b=> b.addEventListener('click', ()=> activateTab(b.dataset.tab)));
+
+    /*********************
+     * 6) Plans — CRUD
+     *********************/
+    async function fetchPlans(y){
+      const snap = await db.ref(pathPlans(y)).once('value');
+      return snap.val() || {};
+    }
+
+    async function savePlan(y, planId, data){
+      const path = `${pathPlans(y)}/${planId}`;
+      const beforeSnap = await db.ref(path).once('value');
+      const before = beforeSnap.val();
+      await db.ref(path).set(data);
+      // history
+      const hist = {
+        at: Date.now(),
+        by: 'unknown', // TODO: wire to auth.email if available
+        action: before ? 'update' : 'create',
+        before: before || null,
+        after: data
+      };
+      await db.ref(`${pathConfigHistory(y)}/plans/${planId}`).push(hist);
+    }
+
+    async function deactivatePlan(y, planId, isActive){
+      const path = `${pathPlans(y)}/${planId}/isActive`;
+      await db.ref(path).set(isActive);
+      await db.ref(`${pathConfigHistory(y)}/plans/${planId}`).push({ at: Date.now(), by: 'unknown', action: isActive?'activate':'deactivate' });
+    }
+
+    function planCard(planId, P){
+      const labels = (P.schedule||[]).map(s=>s.label).join(' · ');
+      const status = P.isActive!==false ? '<span class="pill bg-emerald-100 text-emerald-700 border-emerald-200">Active</span>' : '<span class="pill bg-rose-100 text-rose-700 border-rose-200">Inactive</span>';
+      return `
+        <div class="card" data-plan="${planId}">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-semibold">${P.name||'Unnamed plan'}</h3>
+                ${status}
+              </div>
+              <div class="text-xs text-slate-500">${P.description||''}</div>
+              <div class="mt-1 text-xs"><span class="chip border-slate-200">${(P.appliesTo||[]).length} classes</span> <span class="chip border-slate-200">${(P.schedule||[]).length} instalments</span></div>
+              <div class="mt-2 text-xs text-slate-600">${labels}</div>
+            </div>
+            <div class="toolbar">
+              <button class="btn btn-ghost" data-act="edit"><i class="fa fa-pen"></i> Edit</button>
+              <button class="btn btn-ghost" data-act="history"><i class="fa fa-scroll"></i> History</button>
+              ${P.isActive!==false ? `<button class="btn btn-danger" data-act="deactivate"><i class="fa fa-ban"></i> Deactivate</button>` : `<button class="btn btn-primary" data-act="activate"><i class="fa fa-check"></i> Activate</button>`}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function renderPlans(){
+      const y = String(window.somapYearContext.getSelectedYear());
+      $('#plansYear').textContent = y;
+      const grid = $('#plansGrid'); grid.innerHTML = '<div class="text-sm text-slate-500">Loading plans...</div>';
+      const plans = await fetchPlans(y);
+      const ids = Object.keys(plans);
+      grid.innerHTML = ids.length ? ids.map(id => planCard(id, plans[id])).join('') : '<div class="text-sm text-slate-500">No plans yet for this year.</div>';
+      // wire actions
+      $$('#plansGrid [data-plan]').forEach(card => {
+        const id = card.getAttribute('data-plan');
+        card.querySelector('[data-act="edit"]').addEventListener('click', ()=> openPlanEditor(id, plans[id]));
+        card.querySelector('[data-act="history"]').addEventListener('click', ()=> openPlanHistory(id));
+        const deact = card.querySelector('[data-act="deactivate"]');
+        const act = card.querySelector('[data-act="activate"]');
+        if (deact) deact.addEventListener('click', async ()=>{ await deactivatePlan(y, id, false); toast('Plan deactivated'); renderPlans(); });
+        if (act) act.addEventListener('click', async ()=>{ await deactivatePlan(y, id, true); toast('Plan activated'); renderPlans(); });
+      });
+    }
+
+    function openPlanEditor(planId=null, P={}){
+      const y = String(window.somapYearContext.getSelectedYear());
+      // Minimal modal via prompt() to keep file compact. You can replace with a proper dialog later.
+      const name = prompt('Plan name (e.g., 6-instalments monthly):', P.name || '6-instalments');
+      if (name==null) return;
+      // Schedule editor: CSV lines "label|from|to|weight"; dates in MM-DD (year inferred)
+      const existing = (P.schedule||[]).map(s => `${s.label}|${s.from||''}|${s.to||''}|${s.weight||1}`).join('\n');
+      const help = 'Enter instalments, one per line as: LABEL|MM-DD|MM-DD|WEIGHT\nExample:\nInst 1|12-01|01-10|44\nInst 2|03-01|03-15|13';
+      const lines = prompt(help, existing || 'Inst 1|12-01|01-10|44\nInst 2|03-01|03-15|13\nInst 3|04-01|04-15|12\nInst 4|05-01|05-15|22\nInst 5|07-01|07-15|22\nInst 6|09-01|09-15|16');
+      if (lines==null) return;
+      const schedule = String(lines).split(/\n+/).map(row => {
+        const [label, fromMD, toMD, weight] = row.split('|').map(s=>String(s||'').trim());
+        const from = fromMD ? `${y}-${fromMD}` : '';
+        const to   = toMD ? `${y}-${toMD}` : '';
+        return { label: label||'Inst', from, to, weight: Number(weight)||1 };
+      }).filter(x=>x.label);
+
+      // Applies-to classes (CSV)
+      const applies = prompt('Comma-separated classes this plan applies to (leave empty to assign per-class later)\nOptions: '+CLASS_ORDER.join(', '), (P.appliesTo||[]).join(', '));
+      const appliesTo = String(applies||'').split(',').map(s=>s.trim()).filter(Boolean);
+
+      const plan = {
+        name,
+        description: P.description || '',
+        isActive: P.isActive!==false,
+        appliesTo,
+        schedule
+      };
+      const id = planId || uid('plan');
+      savePlan(y, id, plan).then(()=>{ toast('Plan saved'); renderPlans(); }).catch(e=> alert('Save failed: '+e.message));
+    }
+
+    async function openPlanHistory(planId){
+      const y = String(window.somapYearContext.getSelectedYear());
+      const snap = await db.ref(`${pathConfigHistory(y)}/plans/${planId}`).limitToLast(25).once('value');
+      const rows = Object.values(snap.val()||{}).sort((a,b)=> (a.at||0)-(b.at||0)).map(h=>{
+        const d = new Date(h.at||Date.now()).toLocaleString();
+        return `• ${d}: ${h.action||'edit'} by ${h.by||'unknown'}`;
+      }).join('\n') || 'No history.';
+      alert(`History for ${planId}:\n\n${rows}`);
+    }
+
+    /*********************
+     * 7) Classes — feePerYear + defaultPlanId
+     *********************/
+    async function fetchClassFees(y){
+      const snap = await db.ref(pathFees(y)).once('value');
+      return snap.val() || {};
+    }
+
+    async function saveClassFee(y, className, data){
+      const path = `${pathFees(y)}/${className}`;
+      const beforeSnap = await db.ref(path).once('value');
+      await db.ref(path).set(data);
+      await db.ref(`${pathConfigHistory(y)}/classes/${className}`).push({ at: Date.now(), by: 'unknown', action: 'upsert', after: data, before: beforeSnap.val()||null });
+    }
+
+    function classCard(className, cfg, plans){
+      const fee = money(cfg.feePerYear||0);
+      const plan = cfg.defaultPlanId ? (plans[cfg.defaultPlanId]?.name || cfg.defaultPlanId) : '—';
+      return `
+        <div class="card" data-class="${className}">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-semibold">${className}</h3>
+                <span class="chip border-slate-200">Fee: TSh ${fee}</span>
+                <span class="chip border-slate-200">Default Plan: ${plan}</span>
+              </div>
+              <p class="text-xs text-slate-500 mt-1">Changes apply only to <b>${$('#classesYear').textContent}</b>.</p>
+            </div>
+            <div class="toolbar">
+              <button class="btn btn-ghost" data-act="edit"><i class="fa fa-pen"></i> Edit</button>
+              <button class="btn btn-ghost" data-act="history"><i class="fa fa-scroll"></i> History</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function renderClasses(){
+      const y = String(window.somapYearContext.getSelectedYear());
+      $('#classesYear').textContent = y;
+      const grid = $('#classesGrid'); grid.innerHTML = '<div class="text-sm text-slate-500">Loading classes...</div>';
+      const [plans, fees] = await Promise.all([ fetchPlans(y), fetchClassFees(y) ]);
+      const classNames = CLASS_ORDER;
+      grid.innerHTML = classNames.map(cn => classCard(cn, fees[cn]||{}, plans)).join('');
+      // wire actions
+      $$('#classesGrid [data-class]').forEach(card => {
+        const cn = card.getAttribute('data-class');
+        card.querySelector('[data-act="edit"]').addEventListener('click', ()=> openClassEditor(cn, fees[cn]||{}, plans));
+        card.querySelector('[data-act="history"]').addEventListener('click', ()=> openClassHistory(cn));
+      });
+    }
+
+    function openClassEditor(className, cfg={}, plans={}){
+      const y = String(window.somapYearContext.getSelectedYear());
+      const feeStr = prompt(`Fee per year for ${className} (TSh):`, cfg.feePerYear ?? '0');
+      if (feeStr==null) return;
+      const feePerYear = Math.max(0, Number(feeStr)||0);
+      const planKeys = Object.keys(plans);
+      const pick = prompt(`Default plan id for ${className}:\n\n` + planKeys.map(k=>`${k} — ${plans[k].name}`).join('\n') + `\n\n(Leave empty to keep ${cfg.defaultPlanId||'none'})`, cfg.defaultPlanId||'');
+      const defaultPlanId = String(pick||'').trim() || (cfg.defaultPlanId||'');
+      saveClassFee(y, className, { feePerYear, defaultPlanId }).then(()=>{ toast('Class updated'); renderClasses(); }).catch(e=> alert('Save failed: '+e.message));
+    }
+
+    async function openClassHistory(className){
+      const y = String(window.somapYearContext.getSelectedYear());
+      const snap = await db.ref(`${pathConfigHistory(y)}/classes/${className}`).limitToLast(25).once('value');
+      const rows = Object.values(snap.val()||{}).sort((a,b)=> (a.at||0)-(b.at||0)).map(h=>{
+        const d = new Date(h.at||Date.now()).toLocaleString();
+        return `• ${d}: ${h.action||'edit'} by ${h.by||'unknown'} — feePerYear: ${h.after?.feePerYear||0}, defaultPlanId: ${h.after?.defaultPlanId||'—'}`;
+      }).join('\n') || 'No history.';
+      alert(`History for ${className}:\n\n${rows}`);
+    }
+
+    // Import from previous year
+    $('#btnImportFromPrev').addEventListener('click', async ()=>{
+      const y = Number(window.somapYearContext.getSelectedYear());
+      const prev = y-1; if (!confirm(`Copy fees & defaults from ${prev} → ${y}?`)) return;
+      const [prevFees, curFees] = await Promise.all([
+        db.ref(pathFees(prev)).once('value').then(s=>s.val()||{}),
+        db.ref(pathFees(y)).once('value').then(s=>s.val()||{})
+      ]);
+      const merged = { ...prevFees, ...curFees }; // do not overwrite things already set in current year
+      await db.ref(pathFees(y)).set(merged);
+      await db.ref(`${pathConfigHistory(y)}/imports`).push({ at: Date.now(), by: 'unknown', from: prev, target: y, type: 'feesStructure' });
+      toast('Imported from previous year');
+      renderClasses();
+    });
+
+    /*********************
+     * 8) Student Overrides — search + edit
+     *********************/
+    async function searchStudents(query){
+      // Simple client-side search: load all students; in large schools, replace with server-side paging
+      const snap = await db.ref('students').once('value');
+      const map = snap.val()||{}; const q = L(query);
+      const res = Object.entries(map).filter(([id,S])=>{
+        const name = `${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`.toLowerCase();
+        const adm = String(S.admissionNumber||id).toLowerCase();
+        return name.includes(q) || adm.includes(q);
+      }).slice(0, 30);
+      return res.map(([id,S])=>({ id, S }));
+    }
+
+    function studentCard(stu){
+      const { id, S, yCfg } = stu;
+      const nm = `${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`.replace(/\s+/g,' ').trim();
+      const fee = money(yCfg?.feePerYear||0);
+      const plan = yCfg?.planId || '—';
+      return `
+        <div class="card" data-stu="${id}">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="font-semibold">${nm}</div>
+              <div class="text-xs text-slate-500">Adm: ${S.admissionNumber||id} · Mother: ${S.motherPhone||S.parentPhone||'—'}</div>
+              <div class="mt-1 text-xs"><span class="chip border-slate-200">Fee override: TSh ${fee}</span> <span class="chip border-slate-200">Plan: ${plan}</span></div>
+            </div>
+            <div class="toolbar">
+              <button class="btn btn-ghost" data-act="override"><i class="fa fa-sliders"></i> Edit Override</button>
+              <button class="btn btn-ghost" data-act="custom"><i class="fa fa-calendar-week"></i> Custom Schedule</button>
+              <button class="btn btn-ghost" data-act="clear"><i class="fa fa-eraser"></i> Clear Override</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function fetchStudentOverride(y, studentId){
+      const snap = await db.ref(`${pathStudentOverrides(y)}/${studentId}`).once('value');
+      return snap.val()||{};
+    }
+
+    async function setStudentOverride(y, studentId, payload){
+      const path = `${pathStudentOverrides(y)}/${studentId}`;
+      const before = (await db.ref(path).once('value')).val()||null;
+      await db.ref(path).update(payload);
+      await db.ref(`${pathConfigHistory(y)}/studentOverrides/${studentId}`).push({ at: Date.now(), by: 'unknown', action: 'update', before, after: payload });
+    }
+
+    async function clearStudentOverride(y, studentId){
+      await db.ref(`${pathStudentOverrides(y)}/${studentId}`).remove();
+      await db.ref(`${pathConfigHistory(y)}/studentOverrides/${studentId}`).push({ at: Date.now(), by: 'unknown', action: 'clear' });
+    }
+
+    async function renderOverrides(query=''){
+      const y = String(window.somapYearContext.getSelectedYear());
+      $('#overridesYear').textContent = y;
+      const container = $('#studentResults');
+      if (!query){ container.innerHTML = '<div class="text-sm text-slate-500">Search a student to override.</div>'; return; }
+      container.innerHTML = '<div class="text-sm text-slate-500">Searching...</div>';
+      const results = await searchStudents(query);
+      // attach per-student year override
+      for (const r of results){ r.yCfg = await fetchStudentOverride(y, r.id); }
+      container.innerHTML = results.length ? results.map(r => studentCard(r)).join('') : '<div class="text-sm text-slate-500">No results.</div>';
+      // wire actions
+      $$('#studentResults [data-stu]').forEach(card => {
+        const id = card.getAttribute('data-stu');
+        card.querySelector('[data-act="override"]').addEventListener('click', async ()=>{
+          const fee = prompt('Fee override (TSh). Leave empty to keep current:', '');
+          const planId = prompt('Plan ID override (optional):', '');
+          const payload = {};
+          if (fee!==null && fee!=='') payload.feePerYear = Math.max(0, Number(fee)||0);
+          if (planId!==null && planId!=='') payload.planId = planId;
+          if (!Object.keys(payload).length) return;
+          await setStudentOverride(y, id, payload);
+          toast('Override saved');
+          renderOverrides($('#studentSearch').value);
+        });
+        card.querySelector('[data-act="custom"]').addEventListener('click', async ()=>{
+          alert('Custom Schedule: enter lines as LABEL|YYYY-MM-DD|YYYY-MM-DD|AMOUNT');
+          const lines = prompt('One per line. Example: Week 1|2026-01-07|2026-01-13|10000');
+          if (lines==null) return;
+          const customSchedule = String(lines).split(/\n+/).map(row=>{
+            const [label, from, to, amount] = row.split('|').map(s=>String(s||'').trim());
+            return { label: label||'Item', from, to, amount: Math.max(0, Number(amount)||0) };
+          }).filter(x=>x.label && x.from && x.to);
+          if (!customSchedule.length) return;
+          await setStudentOverride(y, id, { customSchedule });
+          toast('Custom schedule saved');
+          renderOverrides($('#studentSearch').value);
+        });
+        card.querySelector('[data-act="clear"]').addEventListener('click', async ()=>{
+          if (!confirm('Clear override for this year?')) return;
+          await clearStudentOverride(y, id);
+          toast('Override cleared');
+          renderOverrides($('#studentSearch').value);
+        });
+      });
+    }
+
+    $('#studentSearch').addEventListener('input', (e)=>{
+      const q = e.target.value.trim();
+      if (q.length<2){ renderOverrides(''); return; }
+      renderOverrides(q);
+    });
+
+    /*********************
+     * 9) Initializers & wiring
+     *********************/
+    function refreshAll(){ renderPlans(); renderClasses(); renderOverrides($('#studentSearch').value||''); }
+    $('#btnAddPlan').addEventListener('click', ()=> openPlanEditor());
+    $('#btnRefresh').addEventListener('click', refreshAll);
+    window.somapYearContext.onYearChanged(refreshAll);
+    document.addEventListener('DOMContentLoaded', ()=>{ activateTab('plans'); refreshAll(); });
+  </script>
+</body>
+</html>

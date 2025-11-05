@@ -12,6 +12,8 @@
   <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <!-- Unified Finance Plans Service -->
+  <script src="../js/finance_plans.js"></script>
 
   <style>
     :root {
@@ -829,20 +831,31 @@
         const active = $('#modalActive').value === 'true';
         const path = `${pathFees(year)}/${className}`;
         const before = await reader(path) || {};
-        const payload = {
-          ...before,
-          feePerYear,
-          defaultPlanId,
-          defaultPlan: defaultPlanId,
-          active,
-          updatedAt: now(),
-          updatedBy: currentUser()
-        };
-        await writer(path, payload);
-        await writeHistory(year, 'classes', className, before ? 'update' : 'create', before, payload);
-        closeModal();
-        toast('Class saved');
-        await refreshAll();
+        
+        // Use unified service to write class defaults
+        try {
+          await window.financePlansService.setClassFeePerYear(className, feePerYear, { by: currentUser() });
+          await window.financePlansService.setClassDefaultPlanId(className, defaultPlanId, { by: currentUser() });
+          
+          // Also update old structure for backward compatibility
+          const payload = {
+            ...before,
+            feePerYear,
+            defaultPlanId,
+            defaultPlan: defaultPlanId,
+            active,
+            updatedAt: now(),
+            updatedBy: currentUser()
+          };
+          await writer(path, payload);
+          await writeHistory(year, 'classes', className, before ? 'update' : 'create', before, payload);
+          closeModal();
+          toast('Class saved');
+          await refreshAll();
+        } catch (err) {
+          console.error('Error saving class:', err);
+          toast('Error saving class', 'error');
+        }
       });
     }
 
@@ -1121,11 +1134,20 @@
         if (!id) {
           id = state.plans[name] ? `${DEFAULT_PLAN_ID}-${Date.now()}` : name.toLowerCase().replace(/\s+/g, '-');
         }
-        await writer(`${pathPlans(year)}/${id}`, payload);
-        await writeHistory(year, 'plans', id, planId ? 'update' : 'create', planId ? existing : null, payload);
-        closeModal();
-        toast('Plan saved');
-        await refreshAll();
+        
+        // Use unified service to write plan
+        try {
+          await window.financePlansService.upsertPlan(id, payload);
+          // Also write to old structure for backward compatibility
+          await writer(`${pathPlans(year)}/${id}`, payload);
+          await writeHistory(year, 'plans', id, planId ? 'update' : 'create', planId ? existing : null, payload);
+          closeModal();
+          toast('Plan saved');
+          await refreshAll();
+        } catch (err) {
+          console.error('Error saving plan:', err);
+          toast('Error saving plan', 'error');
+        }
       });
     }
 
@@ -1392,31 +1414,56 @@
       }
       const year = state.year;
       const overrides = await reader(`${pathOverrides(year)}`) || {};
-      panel.innerHTML = results.map(({ id, data }) => {
+      panel.innerHTML = (await Promise.all(results.map(async ({ id, data }) => {
         const ov = overrides[id] || {};
-        const planName = ov.planId ? (state.plans[ov.planId]?.name || ov.planId) : 'Default plan';
+        const studentClass = data.classLevel || data.className || '';
+        
+        // Get defaults from unified service
+        const classFee = await window.financePlansService.getClassFeePerYear(studentClass);
+        const classPlanId = await window.financePlansService.getClassDefaultPlanId(studentClass);
+        const classPlan = classPlanId ? (await window.financePlansService.getPlan(classPlanId)) : null;
+        
+        // Get overrides
+        const feeOverride = await window.financePlansService.getStudentFee(id);
+        const planOverrideId = await window.financePlansService.getStudentPlan(id);
+        const customSchedule = await window.financePlansService.getCustomSchedule(id);
+        
+        const effectiveFee = feeOverride !== null ? feeOverride : classFee;
+        const effectivePlanId = planOverrideId || classPlanId;
+        const effectivePlan = effectivePlanId ? (state.plans[effectivePlanId] || await window.financePlansService.getPlan(effectivePlanId)) : null;
+        const planName = effectivePlan?.name || effectivePlanId || 'No plan set';
+        
+        const hasCustomSchedule = customSchedule && Array.isArray(customSchedule.rows) && customSchedule.rows.length > 0;
+        
         return `
           <article class="glass-panel-light border border-slate-700/45 space-y-3" data-student="${id}">
             <div class="flex items-start justify-between gap-3">
               <div>
                 <h3 class="text-sm font-semibold text-slate-100">${data.firstName || ''} ${data.lastName || ''}</h3>
                 <p class="text-xs text-slate-400">Adm: ${data.admissionNumber || id}</p>
-                <p class="text-xs text-slate-400">Class: ${data.classLevel || data.className || '—'}</p>
+                <p class="text-xs text-slate-400">Class: ${studentClass || '—'}</p>
               </div>
               <button class="btn btn-ghost px-3 text-xs" data-action="override-clear" data-student="${id}"><i class="fa-solid fa-eraser"></i> Clear</button>
             </div>
-            <div class="bg-slate-900/30 border border-slate-700/45 rounded-lg px-3 py-2 text-xs text-slate-200 space-y-1">
-              <p>Fee Override: <span class="font-semibold text-indigo-200">TSh ${fmtMoney(ov.feePerYear ?? '-')}</span></p>
-              <p>Plan Override: <span class="font-semibold text-indigo-200">${planName}</span></p>
+            <div class="bg-slate-900/30 border border-slate-700/45 rounded-lg px-3 py-2 text-xs text-slate-200 space-y-2">
+              <div>
+                <p class="text-slate-400 mb-1">Default Fee (Class): <span class="text-slate-300">TSh ${fmtMoney(classFee)}</span></p>
+                <p class="${feeOverride !== null ? 'text-indigo-300' : 'text-slate-400'}">Fee Override: <span class="font-semibold">${feeOverride !== null ? `TSh ${fmtMoney(feeOverride)}` : 'None (using class default)'}</span></p>
+              </div>
+              <div>
+                <p class="text-slate-400 mb-1">Default Plan (Class): <span class="text-slate-300">${classPlan?.name || classPlanId || 'Not set'}</span></p>
+                <p class="${planOverrideId ? 'text-indigo-300' : 'text-slate-400'}">Plan Override: <span class="font-semibold">${planOverrideId ? (effectivePlan?.name || planOverrideId) : 'None (using class default)'}</span></p>
+              </div>
+              ${hasCustomSchedule ? `<p class="text-amber-300"><i class="fa-solid fa-calendar-check"></i> Custom Schedule: ${customSchedule.rows.length} payment(s) defined</p>` : ''}
             </div>
             <div class="flex flex-wrap gap-2 text-xs">
               <button class="btn btn-ghost px-3" data-action="override-fee" data-student="${id}"><i class="fa-solid fa-money-bill"></i> Set Fee</button>
               <button class="btn btn-ghost px-3" data-action="override-plan" data-student="${id}"><i class="fa-solid fa-diagram-project"></i> Set Plan</button>
-              <button class="btn btn-ghost px-3" data-action="override-custom" data-student="${id}"><i class="fa-solid fa-calendar-days"></i> Custom Schedule</button>
+              <button class="btn btn-ghost px-3" data-action="override-custom" data-student="${id}"><i class="fa-solid fa-calendar-days"></i> ${hasCustomSchedule ? 'Edit' : 'Custom'} Schedule</button>
             </div>
           </article>
         `;
-      }).join('');
+      }))).join('');
     }
 
     async function setStudentOverride(studentId, payload) {
@@ -1443,32 +1490,227 @@
     }
 
     async function setOverrideFee(studentId) {
-      const value = prompt('Enter fee override amount (TSh):');
+      const year = state.year;
+      const student = await db.ref(`students/${studentId}`).once('value').then(s => s.val());
+      const studentClass = student?.classLevel || student?.className || '';
+      const classFee = await window.financePlansService.getClassFeePerYear(studentClass);
+      const currentOverride = await window.financePlansService.getStudentFee(studentId);
+      
+      const defaultText = currentOverride !== null ? `Current override: ${fmtMoney(currentOverride)}` : `Class default: ${fmtMoney(classFee)}`;
+      const value = prompt(`Enter fee override amount (TSh):\n${defaultText}\n\nLeave empty to use class default.`);
       if (value == null) return;
-      const fee = Math.max(0, Number(value) || 0);
-      await setStudentOverride(studentId, { feePerYear: fee });
+      
+      if (value.trim() === '') {
+        // Clear override - remove from new structure, keep in old for history
+        const path = `${pathOverrides(year)}/${studentId}`;
+        const before = await reader(path) || {};
+        const updated = { ...before };
+        delete updated.feePerYear;
+        await writer(path, updated);
+        await writeHistory(year, 'overrides', studentId, 'update', before, updated);
+        toast('Fee override cleared');
+      } else {
+        const fee = Math.max(0, Number(value) || 0);
+        // Use unified service
+        await window.financePlansService.setStudentFee(studentId, fee, { by: currentUser() });
+        // Also update old structure
+        await setStudentOverride(studentId, { feePerYear: fee });
+        toast('Fee override saved');
+      }
+      const q = $('#studentQuery').value;
+      renderOverrides(q);
     }
 
     async function setOverridePlan(studentId) {
-      const planOptions = Object.keys(state.plans).map((id) => `${id} · ${state.plans[id].name || id}`).join('\n');
-      const pick = prompt(`Enter plan id:\n${planOptions}`);
+      const year = state.year;
+      const student = await db.ref(`students/${studentId}`).once('value').then(s => s.val());
+      const studentClass = student?.classLevel || student?.className || '';
+      const classPlanId = await window.financePlansService.getClassDefaultPlanId(studentClass);
+      const classPlan = classPlanId ? (await window.financePlansService.getPlan(classPlanId)) : null;
+      const currentOverride = await window.financePlansService.getStudentPlan(studentId);
+      
+      const planOptions = Object.keys(state.plans).map((id) => {
+        const plan = state.plans[id];
+        const isDefault = id === classPlanId;
+        const isCurrent = id === currentOverride;
+        return `${isCurrent ? '→ ' : ''}${id} · ${plan.name || id}${isDefault ? ' (Class Default)' : ''}`;
+      }).join('\n');
+      
+      const defaultText = classPlan ? `\nClass default: ${classPlan.name || classPlanId}\n` : '';
+      const currentText = currentOverride ? `Current override: ${currentOverride}\n` : '';
+      const pick = prompt(`Select plan ID:\n${currentText}${defaultText}\n${planOptions}\n\nLeave empty to use class default.`);
       if (pick == null) return;
-      const id = pick.trim();
-      if (!id) return;
-      await setStudentOverride(studentId, { planId: id });
+      
+      if (pick.trim() === '') {
+        // Clear override
+        const path = `${pathOverrides(year)}/${studentId}`;
+        const before = await reader(path) || {};
+        const updated = { ...before };
+        delete updated.planId;
+        await writer(path, updated);
+        await writeHistory(year, 'overrides', studentId, 'update', before, updated);
+        toast('Plan override cleared');
+      } else {
+        const id = pick.trim();
+        if (!id) return;
+        // Use unified service
+        await window.financePlansService.assignStudentPlan(studentId, id, { by: currentUser() });
+        // Also update old structure
+        await setStudentOverride(studentId, { planId: id });
+        toast('Plan override saved');
+      }
+      const q = $('#studentQuery').value;
+      renderOverrides(q);
     }
 
     async function setOverrideCustom(studentId) {
-      alert('Enter custom schedule lines as LABEL|YYYY-MM-DD|YYYY-MM-DD|AMOUNT');
-      const text = prompt('One installment per line:\nExample: Term 1|2026-01-10|2026-01-20|250000');
-      if (text == null) return;
-      const lines = String(text).split(/\n+/).map((line) => {
-        const [label, from, to, amount] = line.split('|').map((s) => String(s || '').trim());
-        if (!label || !from || !to) return null;
-        return { label, from, to, amount: Math.max(0, Number(amount) || 0) };
-      }).filter(Boolean);
-      if (!lines.length) return;
-      await setStudentOverride(studentId, { customSchedule: lines });
+      const year = state.year;
+      const customData = await window.financePlansService.getCustomSchedule(studentId);
+      const existingRows = customData?.rows || [];
+      
+      // Build table editor UI
+      const rowsHTML = existingRows.map((row, idx) => `
+        <tr data-row="${idx}">
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="text" class="custom-label input bg-slate-900/40 border-slate-700/60 text-xs" value="${(row.label || '').replace(/"/g, '&quot;')}" placeholder="Label" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="date" class="custom-from input bg-slate-900/40 border-slate-700/60 text-xs" value="${row.from || ''}" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="date" class="custom-to input bg-slate-900/40 border-slate-700/60 text-xs" value="${row.to || ''}" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="number" class="custom-amount input bg-slate-900/40 border-slate-700/60 text-xs" value="${row.amount || 0}" min="0" placeholder="Amount" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40 text-center">
+            <button type="button" class="btn btn-danger px-2 py-1 text-xs remove-row" data-row="${idx}"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
+      
+      openModal(`
+        <div class="space-y-4 text-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-lg font-semibold text-slate-100">Custom Payment Schedule</h3>
+              <p class="text-xs text-slate-400">Define individual payment windows for this student. This overrides the class plan.</p>
+            </div>
+            <button class="text-slate-400 hover:text-slate-100" onclick="(${closeModal.toString()})();"><i class="fa-solid fa-xmark text-lg"></i></button>
+          </div>
+          
+          <div class="bg-slate-900/30 border border-slate-700/40 rounded-lg p-3 text-xs text-slate-300">
+            <p><strong>Instructions:</strong></p>
+            <ul class="list-disc list-inside mt-1 space-y-1">
+              <li>Label: Name for this payment (e.g., "Term 1", "First Installment")</li>
+              <li>From/To: Payment window dates</li>
+              <li>Amount: Payment amount in TSh</li>
+              <li>Click "Add Row" to add more payments</li>
+            </ul>
+          </div>
+          
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs border border-slate-700/40">
+              <thead>
+                <tr class="bg-slate-900/50">
+                  <th class="px-2 py-2 border border-slate-700/40 text-left">Label</th>
+                  <th class="px-2 py-2 border border-slate-700/40 text-left">From Date</th>
+                  <th class="px-2 py-2 border border-slate-700/40 text-left">To Date</th>
+                  <th class="px-2 py-2 border border-slate-700/40 text-left">Amount (TSh)</th>
+                  <th class="px-2 py-2 border border-slate-700/40 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="customScheduleRows">
+                ${rowsHTML || '<tr><td colspan="5" class="px-2 py-4 text-center text-slate-400 border border-slate-700/40">No rows yet. Click "Add Row" to start.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+          
+          <div class="flex justify-between items-center">
+            <button type="button" class="btn btn-primary px-3" id="addCustomRow"><i class="fa-solid fa-plus"></i> Add Row</button>
+            <div class="flex gap-2">
+              <button class="btn btn-ghost" onclick="(${closeModal.toString()})();">Cancel</button>
+              <button class="btn btn-primary" id="saveCustomSchedule">Save Custom Schedule</button>
+            </div>
+          </div>
+        </div>
+      `);
+      
+      // Add row functionality
+      let rowCounter = existingRows.length;
+      $('#addCustomRow').addEventListener('click', () => {
+        const tbody = document.getElementById('customScheduleRows');
+        if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+        const tr = document.createElement('tr');
+        tr.setAttribute('data-row', rowCounter);
+        tr.innerHTML = `
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="text" class="custom-label input bg-slate-900/40 border-slate-700/60 text-xs" placeholder="Label" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="date" class="custom-from input bg-slate-900/40 border-slate-700/60 text-xs" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="date" class="custom-to input bg-slate-900/40 border-slate-700/60 text-xs" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40">
+            <input type="number" class="custom-amount input bg-slate-900/40 border-slate-700/60 text-xs" value="0" min="0" placeholder="Amount" />
+          </td>
+          <td class="px-2 py-1 border border-slate-700/40 text-center">
+            <button type="button" class="btn btn-danger px-2 py-1 text-xs remove-row" data-row="${rowCounter}"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+        rowCounter++;
+      });
+      
+      // Remove row functionality
+      document.getElementById('modalRoot').addEventListener('click', (ev) => {
+        if (ev.target.closest('.remove-row')) {
+          const btn = ev.target.closest('.remove-row');
+          const rowIdx = btn.getAttribute('data-row');
+          const row = document.querySelector(`tr[data-row="${rowIdx}"]`);
+          if (row) row.remove();
+          const tbody = document.getElementById('customScheduleRows');
+          if (!tbody.children.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="px-2 py-4 text-center text-slate-400 border border-slate-700/40">No rows yet. Click "Add Row" to start.</td></tr>';
+          }
+        }
+      });
+      
+      // Save functionality
+      $('#saveCustomSchedule').addEventListener('click', async () => {
+        const rows = [];
+        document.querySelectorAll('#customScheduleRows tr[data-row]').forEach((tr) => {
+          const label = tr.querySelector('.custom-label')?.value?.trim();
+          const from = tr.querySelector('.custom-from')?.value?.trim();
+          const to = tr.querySelector('.custom-to')?.value?.trim();
+          const amount = Math.max(0, Number(tr.querySelector('.custom-amount')?.value || 0));
+          if (label && from && to) {
+            rows.push({ label, from, to, amount });
+          }
+        });
+        
+        if (rows.length === 0) {
+          // Clear custom schedule
+          await window.financePlansService.setCustomSchedule(studentId, [], 'Cleared', { by: currentUser() });
+          const path = `${pathOverrides(year)}/${studentId}`;
+          const before = await reader(path) || {};
+          const updated = { ...before };
+          delete updated.customSchedule;
+          await writer(path, updated);
+          await writeHistory(year, 'overrides', studentId, 'update', before, updated);
+          toast('Custom schedule cleared');
+        } else {
+          // Save custom schedule
+          await window.financePlansService.setCustomSchedule(studentId, rows, 'Custom schedule', { by: currentUser() });
+          await setStudentOverride(studentId, { customSchedule: rows });
+          toast('Custom schedule saved');
+        }
+        closeModal();
+        const q = $('#studentQuery').value;
+        renderOverrides(q);
+      });
     }
 
     $('#studentQuery').addEventListener('input', (ev) => {

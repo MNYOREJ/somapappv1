@@ -31,7 +31,8 @@
     </div>
   </div>
 
-  <script>
+  <script type="module">
+    import { resolveEffectiveInstallments } from '../js/financeplans.js';
     (function () {
       const SOMAP_DEFAULT_YEAR = 2025;
       const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
@@ -237,32 +238,150 @@
         return installmentConfigs.lower;
       }
 
-      function buildSchedule(student) {
+      function buildLegacySchedule(student) {
         if (!student || student.isGraduated) {
-          return { items: [], academicYear: targetYear, feeBase: 0 };
+          return { items: [], academicYear: targetYear, feeBase: 0, planName: student?.paymentPlan || '' };
         }
         const config = getConfig(student);
         const feeBase = Math.max(0, Math.round(Number(student.baseFee ?? (student.feePerYear - (student.carryAmount || 0))) || 0));
         const carryAmount = Math.max(0, Number(student.carryAmount || 0));
+        const weights = Array.isArray(config?.weights) ? config.weights : [];
+        const labels = Array.isArray(config?.labels) ? config.labels : [];
+        const windows = Array.isArray(config?.windows) ? config.windows : [];
 
-        const amounts = apportion(feeBase, config.weights);
+        const amounts = apportion(feeBase, weights);
         if (carryAmount > 0) {
           if (amounts.length) amounts[0] += carryAmount;
           else amounts.push(carryAmount);
         }
-        const items = config.labels.map((label, idx) => {
-          const [fromM, fromD] = config.windows[idx].from;
-          const [toM, toD] = config.windows[idx].to;
+
+        const items = labels.map((label, idx) => {
+          const win = windows[idx] || windows[windows.length - 1] || { from: [1, 1], to: [1, 10] };
+          const [fromM, fromD] = win.from;
+          const [toM, toD] = win.to;
           return {
             label,
             amount: amounts[idx] || 0,
             fromTS: ymdToTS(targetYear, fromM, fromD, false),
-            toTS:   ymdToTS(targetYear, toM, toD, true),
+            toTS: ymdToTS(targetYear, toM, toD, true),
             paidAllocated: 0,
-            status: 'Pending'
+            status: 'Pending',
           };
         });
-        return { items, academicYear: targetYear, feeBase };
+        return { items, academicYear: targetYear, feeBase, planName: student.paymentPlan || '' };
+      }
+
+      function fallbackWindow(config, idx) {
+        if (!config || !Array.isArray(config.windows) || !config.windows.length) return null;
+        return config.windows[idx] || config.windows[config.windows.length - 1];
+      }
+
+      function resolveWindowPair(row, key, fallbackPair) {
+        if (!row) return fallbackPair || null;
+        const monthKey = `${key}Month`;
+        const dayKey = `${key}Day`;
+        if (row[monthKey] !== undefined && row[dayKey] !== undefined) {
+          const m = Number(row[monthKey]);
+          const d = Number(row[dayKey]);
+          if (Number.isFinite(m) && Number.isFinite(d) && m > 0 && d > 0) return [m, d];
+        }
+        const direct = row[key] || row[`${key}Date`];
+        if (direct) {
+          const match = String(direct).match(/(\d{1,2})\D*(\d{1,2})/);
+          if (match) {
+            const m = Number(match[1]);
+            const d = Number(match[2]);
+            if (Number.isFinite(m) && Number.isFinite(d) && m > 0 && d > 0) return [m, d];
+          }
+        }
+        if (row.windowText) {
+          const segments = String(row.windowText).split('–');
+          const idx = key === 'from' ? 0 : 1;
+          if (segments[idx]) {
+            const match = segments[idx].match(/(\d{1,2})\D*(\d{1,2})/);
+            if (match) {
+              const m = Number(match[1]);
+              const d = Number(match[2]);
+              if (Number.isFinite(m) && Number.isFinite(d) && m > 0 && d > 0) return [m, d];
+            }
+          }
+        }
+        return fallbackPair || null;
+      }
+
+      function toAcademicTS(pair, endOfDay) {
+        let [month, day] = Array.isArray(pair) ? pair : [1, 1];
+        month = Number(month);
+        day = Number(day);
+        if (!Number.isFinite(month) || month <= 0 || month > 12) month = 1;
+        if (!Number.isFinite(day) || day <= 0 || day > 31) day = endOfDay ? 10 : 1;
+        return ymdToTS(targetYear, month, day, endOfDay);
+      }
+
+      async function buildSchedule(student) {
+        if (!student || student.isGraduated) {
+          return { items: [], academicYear: targetYear, feeBase: 0, planName: student?.paymentPlan || '' };
+        }
+        const config = getConfig(student);
+        let breakdown = null;
+        try {
+          breakdown = await resolveEffectiveInstallments(
+            studentId,
+            student.classLevel || student.className || student.class || '',
+            { year: targetYearStr }
+          );
+        } catch (err) {
+          console.warn('resolveEffectiveInstallments error', err);
+        }
+        const rows = Array.isArray(breakdown?.rows) ? breakdown.rows : [];
+        if (!rows.length) {
+          return buildLegacySchedule(student);
+        }
+
+        const items = rows.map((row, idx) => {
+          const fallback = fallbackWindow(config, idx) || { from: [1, 1], to: [1, 10] };
+          const fromPair = resolveWindowPair(row, 'from', fallback.from);
+          const toPair = resolveWindowPair(row, 'to', fallback.to);
+          const amount = Math.max(0, Math.round(Number(row.amount) || 0));
+          const label = row.label || (config?.labels?.[idx] || `Inst ${idx + 1}`);
+          return {
+            label,
+            amount,
+            fromTS: toAcademicTS(fromPair, false),
+            toTS: toAcademicTS(toPair, true),
+            paidAllocated: 0,
+            status: 'Pending',
+            weight: Number(row.weight || 0),
+            windowText: row.windowText || '',
+          };
+        });
+
+        const carryAmount = Math.max(0, Number(student.carryAmount || 0));
+        if (carryAmount > 0) {
+          if (items.length) {
+            items[0].amount += carryAmount;
+          } else {
+            const fallback = fallbackWindow(config, 0) || { from: [1, 1], to: [1, 10] };
+            items.push({
+              label: 'Carry Forward',
+              amount: carryAmount,
+              fromTS: toAcademicTS(fallback.from, false),
+              toTS: toAcademicTS(fallback.to, true),
+              paidAllocated: 0,
+              status: 'Pending',
+              weight: 0,
+              windowText: '',
+            });
+          }
+        }
+
+        return {
+          items,
+          academicYear: targetYear,
+          feeBase: breakdown?.fee ?? 0,
+          planName: breakdown?.planName || breakdown?.planId || student.paymentPlan || '',
+          planId: breakdown?.planId || '',
+        };
       }
 
       function allocatePayments(schedule, student) {
@@ -296,7 +415,7 @@
         return { credit, totalPaid, debtTillNow };
       }
 
-      function render(student) {
+      async function render(student) {
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         if (student.isGraduated) {
           mount(`
@@ -315,7 +434,9 @@
           return;
         }
 
-        const schedule = buildSchedule(student);
+        const schedule = await buildSchedule(student);
+        schedule.items = Array.isArray(schedule?.items) ? schedule.items : [];
+        const planDisplay = schedule.planName || student.paymentPlan || '';
         const allocation = allocatePayments(schedule, student);
         const hasYearData = Boolean(student.hasYearData);
 
@@ -385,7 +506,7 @@
           <div class="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <h2 class="font-semibold text-indigo-700">Installment Breakdown - ${fullName} (${student.admissionNumber || ''})</h2>
             <div class="text-xs">
-              <span class="mr-3">Plan: <strong>${student.paymentPlan || ''}</strong></span>
+              <span class="mr-3">Plan: <strong>${planDisplay}</strong></span>
               <span class="mr-3">Class: <strong>${student.classLevel || ''}</strong></span>
               <span>Year: <strong>${targetYearStr}</strong></span>
             </div>
@@ -539,7 +660,7 @@
             prepared._planSchedule = resolvedPlan.schedule; // [{label, from, to, weight}]
           }
 
-          render(prepared);
+          await render(prepared);
         })
         .catch(e => { console.error(e); err('Error loading student data.'); });
 
@@ -552,6 +673,3 @@
   </script>
 </body>
 </html>
-
-
-

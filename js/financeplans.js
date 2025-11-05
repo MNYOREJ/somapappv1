@@ -10,6 +10,7 @@
 
 export const SOMAP_ALLOWED_YEARS = Array.from({ length: 20 }, (_, i) => 2023 + i); // 2023..2042
 export const SOMAP_DEFAULT_YEAR = 2025;
+export const CLASSES_FULL = ['Baby Class','Middle Class','Pre Unit','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
 
 const financeCache = new Map(); // year -> { data } or { promise }
 
@@ -44,6 +45,15 @@ function getFirebaseDB() {
   throw new Error('Firebase database not initialized. Ensure firebase compat SDK + firebase.js loaded.');
 }
 
+export function db() {
+  try {
+    return getFirebaseDB();
+  } catch (err) {
+    console.error('financeplans: database access error', err);
+    return null;
+  }
+}
+
 export function getSelectedYear() {
   const fallback = SOMAP_DEFAULT_YEAR;
   try {
@@ -57,9 +67,17 @@ export function getSelectedYear() {
   return String(fallback);
 }
 
+export function getYear() {
+  return getSelectedYear();
+}
+
 export function pathFinance(year = getSelectedYear()) {
   const yearStr = toYearString(year);
   return withSchoolPrefix(`finance/${yearStr}`);
+}
+
+export function financeRoot(year = getYear()) {
+  return pathFinance(year);
 }
 
 function pathFinanceLedgers(year = getSelectedYear()) {
@@ -172,9 +190,78 @@ export async function readPlan(planId, options = {}) {
   return val;
 }
 
+export async function getClassCfg(className, options = {}) {
+  const cfg = await readClassConfig(className, options);
+  return cfg ? { ...cfg } : null;
+}
+
+export async function getStudentPlanOv(studentId, options = {}) {
+  return readStudentPlanOverride(studentId, options);
+}
+
+export async function getStudentCustomSched(studentId, options = {}) {
+  if (!studentId) return null;
+  const custom = await getCustomSchedule(studentId, options);
+  if (!custom || !Array.isArray(custom.rows) || !custom.rows.length) return null;
+  return custom.rows.map((row) => ({ ...row }));
+}
+
+export async function getPlan(planId, options = {}) {
+  if (!planId) return null;
+  const plan = await readPlan(planId, options);
+  return plan ? { ...plan } : null;
+}
+
 function coerceNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function round10(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round(num / 10) * 10;
+}
+
+function sumValues(list, mapper = (v) => v) {
+  if (!Array.isArray(list) || !list.length) return 0;
+  return list.reduce((total, item, index) => {
+    const raw = mapper(item, index);
+    const num = Number(raw);
+    return total + (Number.isFinite(num) ? num : 0);
+  }, 0);
+}
+
+function parseScheduleRow(raw = {}) {
+  const label = raw.label ?? raw.title ?? '';
+  const from = raw.from ?? raw.start ?? '';
+  const to = raw.to ?? raw.end ?? '';
+  const weightRaw = raw.weight ?? raw.liveWeight ?? raw.weightValue ?? 0;
+  const weight = Number(weightRaw);
+  const hasAmount = raw.amount !== undefined && raw.amount !== null && raw.amount !== '';
+  const amountVal = hasAmount ? Number(raw.amount) : NaN;
+  return {
+    label: String(label || ''),
+    from: from || '',
+    to: to || '',
+    weight: Number.isFinite(weight) ? weight : 0,
+    amount: Number.isFinite(amountVal) ? amountVal : null,
+  };
+}
+
+function formatWindowFragment(value) {
+  if (!value) return '';
+  return String(value).trim().replace(/-/g, '/');
+}
+
+function normalizeWindows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => {
+    const fromText = formatWindowFragment(row.from || row.start);
+    const toText = formatWindowFragment(row.to || row.end);
+    const windowText = fromText && toText ? `${fromText} – ${toText}` : '';
+    return { ...row, windowText };
+  });
 }
 
 export async function resolveEffectiveFinance(studentId, className, options = {}) {
@@ -201,6 +288,105 @@ export async function resolveEffectiveFinance(studentId, className, options = {}
     feeOverride: override ? { ...override } : null,
     planOverride: planOverride ? { ...planOverride } : null,
     year,
+  };
+}
+
+export async function resolveEffectiveInstallments(studentId, className, options = {}) {
+  const year = options.year ? toYearString(options.year) : getSelectedYear();
+  const anchorClass = options.anchorClass || null;
+  const finance = await resolveEffectiveFinance(studentId, className, { year, anchorClass });
+
+  const fee = coerceNumber(finance?.fee, 0);
+  let planId = finance?.planId || '';
+  let planName =
+    finance?.planOverride?.planName ||
+    finance?.planOverride?.name ||
+    finance?.classCfg?.defaultPlanName ||
+    planId ||
+    '';
+
+  let rows = [];
+  let source = 'PLAN';
+
+  const customRows = await getStudentCustomSched(studentId, { year });
+  if (Array.isArray(customRows) && customRows.length) {
+    rows = customRows.map(parseScheduleRow);
+    source = 'CUSTOM';
+    if (!planName) planName = 'Custom Schedule';
+    planId = planId || 'CUSTOM';
+  } else if (planId) {
+    const plan = await getPlan(planId, { year });
+    if (plan && Array.isArray(plan.schedule)) {
+      rows = plan.schedule.map(parseScheduleRow);
+      if (plan?.name) planName = plan.name;
+    } else {
+      rows = [];
+    }
+  } else {
+    rows = [];
+    source = 'NONE';
+  }
+
+  if (!Array.isArray(rows) || !rows.length) {
+    return {
+      fee,
+      planId,
+      planName,
+      rows: [],
+      source,
+    };
+  }
+
+  const prepared = rows.map((row) => ({ ...row }));
+  const explicitTotal = sumValues(prepared, (row) => (row.amount !== null ? row.amount : 0));
+  const missingIndexes = prepared
+    .map((row, idx) => (row.amount === null ? idx : -1))
+    .filter((idx) => idx >= 0);
+  const remainingFee = fee - explicitTotal;
+
+  if (missingIndexes.length) {
+    const weights = missingIndexes.map((idx) => {
+      const w = prepared[idx]?.weight;
+      return Number.isFinite(w) && w > 0 ? w : null;
+    });
+    const hasPositive = weights.some((w) => w !== null);
+    const denominator = hasPositive
+      ? weights.reduce((sum, w) => sum + (w !== null ? w : 1), 0)
+      : missingIndexes.length;
+
+    let computed = 0;
+    missingIndexes.forEach((idx, position) => {
+      const effectiveWeight = hasPositive ? (weights[position] ?? 1) : 1;
+      const share = denominator > 0 ? effectiveWeight / denominator : 0;
+      let amount = remainingFee * share;
+      amount = round10(amount);
+      prepared[idx].amount = amount;
+      computed += amount;
+    });
+
+    const diffMissing = remainingFee - computed;
+    if (missingIndexes.length) {
+      const lastIdx = missingIndexes[missingIndexes.length - 1];
+      prepared[lastIdx].amount = (prepared[lastIdx].amount || 0) + diffMissing;
+    }
+  }
+
+  const totalAfter = sumValues(prepared, (row) => row.amount || 0);
+  if (prepared.length) {
+    const diffTotal = fee - totalAfter;
+    prepared[prepared.length - 1].amount = (prepared[prepared.length - 1].amount || 0) + diffTotal;
+  }
+
+  return {
+    fee,
+    planId,
+    planName,
+    rows: normalizeWindows(prepared).map((row) => ({
+      ...row,
+      amount: coerceNumber(row.amount, 0),
+      weight: coerceNumber(row.weight, 0),
+    })),
+    source,
   };
 }
 
@@ -292,9 +478,13 @@ export async function setStudentFee(studentId, feePerYear, meta = {}) {
 }
 
 export async function getStudentFee(studentId, options = {}) {
-  const override = await readStudentFeeOverride(studentId, options);
-  if (!override) return null;
-  return override.feePerYear !== undefined ? coerceNumber(override.feePerYear, 0) : null;
+  return readStudentFeeOverride(studentId, options);
+}
+
+export async function getStudentFeeAmount(studentId, options = {}) {
+  const record = await getStudentFee(studentId, options);
+  if (!record) return null;
+  return record.feePerYear !== undefined ? coerceNumber(record.feePerYear, 0) : null;
 }
 
 export async function assignStudentPlan(studentId, planId, meta = {}) {
@@ -370,9 +560,14 @@ export async function getStudentCarryForward(studentId, options = {}) {
 export const financePlansService = {
   SOMAP_ALLOWED_YEARS,
   SOMAP_DEFAULT_YEAR,
+  CLASSES_FULL,
+  db,
   getSelectedYear,
+  getYear,
   pathFinance,
+  financeRoot,
   readClassConfig,
+  getClassCfg,
   readStudentFeeOverride,
   readStudentPlanOverride,
   readPlan,
@@ -384,11 +579,17 @@ export const financePlansService = {
   setStudentFeeOverride,
   setStudentPlanOverride,
   setStudentFee,
-  getStudentFee,
+  getStudentFee: getStudentFeeAmount,
+  getStudentFeeAmount,
+  getStudentFeeRecord: getStudentFee,
   assignStudentPlan,
   getStudentPlan,
+  getStudentPlanOv,
+  getStudentCustomSched,
   resolveEffectiveFinance,
+  resolveEffectiveInstallments,
   upsertPlan,
+  getPlan,
   getAllPlans,
   readPlanById: readPlan,
   setCustomSchedule,
@@ -406,4 +607,3 @@ if (typeof window !== 'undefined') {
 }
 
 export default financePlansService;
-

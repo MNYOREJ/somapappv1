@@ -291,6 +291,52 @@
     <div class="modal-card"></div>
   </div>
 
+  <!-- Monthly Plan Modal (hidden by default) -->
+  <div id="monthlyPlanModal" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50" style="display: none;">
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-4 mx-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-base font-semibold text-slate-900">Build Monthly Plan</h3>
+        <button id="mpClose" class="text-slate-500 hover:text-slate-700 text-xl">✕</button>
+      </div>
+      <div id="mpContext" class="text-xs text-slate-600 mb-3"></div>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <label class="text-sm text-slate-700">Plan ID
+          <input id="mpPlanId" class="border rounded px-2 py-1 w-full text-sm" placeholder="monthly-40k-standard"/>
+        </label>
+        <label class="text-sm text-slate-700">Plan Name
+          <input id="mpPlanName" class="border rounded px-2 py-1 w-full text-sm" placeholder="Monthly (40k) — Standard"/>
+        </label>
+        <label class="text-sm text-slate-700">Monthly Amount (TSh)
+          <input id="mpAmount" type="number" inputmode="numeric" class="border rounded px-2 py-1 w-full text-sm" placeholder="40000"/>
+        </label>
+        <label class="text-sm text-slate-700">Due Day Start
+          <input id="mpFromDay" type="number" class="border rounded px-2 py-1 w-full text-sm" value="1" min="1" max="28"/>
+        </label>
+        <label class="text-sm text-slate-700">Window Length (days)
+          <input id="mpWindowLen" type="number" class="border rounded px-2 py-1 w-full text-sm" value="10" min="3" max="20"/>
+        </label>
+        <div class="text-sm text-slate-700 col-span-2">
+          Double Months (cover 2 months in one payment)
+          <div class="grid grid-cols-3 gap-1 mt-1 text-xs" id="mpDoubles">
+            <!-- checkboxes will be populated by JS -->
+          </div>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="text-sm inline-flex items-center gap-2 text-slate-700">
+          <input id="mpAssignClass" type="checkbox" class="scale-110">
+          Assign as default plan to this class
+        </label>
+      </div>
+      <div class="flex items-center gap-2 mb-3">
+        <button id="mpPreview" class="px-3 py-1 text-xs rounded bg-slate-700 text-white hover:bg-slate-800">Preview</button>
+        <button id="mpSave" class="px-3 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700">Save Plan</button>
+        <button id="mpSaveAndApply" class="px-3 py-1 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700">Save + Apply to Student</button>
+      </div>
+      <div id="mpPreviewBox" class="mt-3 max-h-48 overflow-auto text-sm border rounded p-2 hidden"></div>
+    </div>
+  </div>
+
   <script>
     (function () {
     const SOMAP_ALLOWED_YEARS = Array.from({ length: 20 }, (_, i) => 2023 + i);
@@ -693,7 +739,10 @@
           </div>
           <div class="flex items-center justify-between">
             <h4 class="text-sm font-semibold text-slate-200">Installments</h4>
-            <button class="btn btn-primary px-3" data-action="inst-add" data-class="${className}"><i class="fa-solid fa-plus"></i> Add installment</button>
+            <div class="flex gap-2">
+              <button class="btn btn-ghost px-3 bg-amber-600/20 text-amber-200" data-action="class-monthly" data-class="${className}"><i class="fa-solid fa-calendar-alt"></i> Monthly Plan…</button>
+              <button class="btn btn-primary px-3" data-action="inst-add" data-class="${className}"><i class="fa-solid fa-plus"></i> Add installment</button>
+            </div>
           </div>
           <div class="space-y-3">${instMarkup}</div>
         </article>
@@ -1210,6 +1259,7 @@
       if (action === 'class-history' && className) showClassHistory(className);
       if (action === 'class-toggle' && className) toggleClassActive(className);
       if (action === 'class-delete' && className) deleteClass(className);
+      if (action === 'class-monthly' && className) openMonthlyPlanModal({ attachTo: 'class', className });
       if (action === 'inst-add' && className) addInstallment(className);
       if (action === 'inst-edit' && className && instId) editInstallment(className, instId);
       if (action === 'inst-toggle' && className && instId) toggleInstallment(className, instId);
@@ -1412,85 +1462,125 @@
     $('#searchClass').addEventListener('input', () => renderClasses());
     $('#classPicker').addEventListener('change', () => renderClasses());
 
-    async function searchStudents(query) {
-      const snap = await reader('students');
-      const map = snap || {};
-      const q = norm(query);
-      const results = Object.entries(map).map(([id, data]) => {
-        const fullName = `${data.firstName || ''} ${data.middleName || ''} ${data.lastName || ''}`.trim();
-        const admission = String(data.admissionNumber || id);
-        const combined = `${fullName} ${admission}`.toLowerCase();
-        if (!combined.includes(q)) return null;
-        return { id, data, display: fullName || admission };
-      }).filter(Boolean);
-      return results.slice(0, 30);
+    // Cache for student search (60s TTL)
+    let studentsCache = { data: null, ts: 0 };
+    let lastSearchToken = 0;
+
+    async function loadStudentsCache() {
+      const now = Date.now();
+      if (studentsCache.data && (now - studentsCache.ts) < 60000) return studentsCache.data;
+      try {
+        const data = await window.financePlansService.fetchStudentsAll();
+        studentsCache = { data, ts: now };
+        return data;
+      } catch (err) {
+        console.error('Error loading students cache:', err);
+        return {};
+      }
+    }
+
+    function matchStudent(S, q) {
+      const ql = q.toLowerCase();
+      const name = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.toLowerCase();
+      const adm = String(S.admissionNumber || '').toLowerCase();
+      const phone = String(S.motherPhone || S.parentPhone || '').toLowerCase();
+      return name.includes(ql) || adm.includes(ql) || phone.includes(ql);
     }
 
     async function renderOverrides(query) {
       const panel = $('#studentPanel');
       if (!panel) return;
-      if (!query || query.length < 2) {
+      if (!query || query.trim().length < 2) {
         panel.innerHTML = '<div class="text-sm text-slate-400">Type at least 2 characters to search.</div>';
         return;
       }
+      
+      const token = ++lastSearchToken;
       panel.innerHTML = '<div class="text-sm text-slate-300">Searching…</div>';
-      const results = await searchStudents(query);
-      if (!results.length) {
-        panel.innerHTML = '<div class="text-sm text-slate-400">No students found.</div>';
-        return;
+      
+      try {
+        const students = await loadStudentsCache();
+        if (token !== lastSearchToken) return; // Stale response
+        
+        const q = norm(query);
+        const list = Object.entries(students)
+          .filter(([, S]) => matchStudent(S, q))
+          .slice(0, 30);
+        
+        if (!list.length) {
+          panel.innerHTML = '<div class="text-sm text-slate-400">No matches found.</div>';
+          return;
+        }
+        
+        // Compute class for selected year and render rows
+        const year = state.year || window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR;
+        const rows = await Promise.all(list.map(async ([id, S]) => {
+          const cls = await window.financePlansService.resolveClassForYearSimple(id, year);
+          const full = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim();
+          return { id, full, cls, adm: (S.admissionNumber || id), data: S };
+        }));
+        
+        if (token !== lastSearchToken) return; // Stale response
+        rows.sort((a, b) => a.full.localeCompare(b.full));
+        
+        // Get overrides for the year
+        const overrides = await reader(`${pathOverrides(year)}`) || {};
+        
+        panel.innerHTML = (await Promise.all(rows.map(async (r) => {
+          const { id, full, cls, adm, data } = r;
+          const ov = overrides[id] || {};
+          
+          // Get defaults from unified service using resolved class
+          const classFee = await window.financePlansService.getClassFeePerYear(cls);
+          const classPlanId = await window.financePlansService.getClassDefaultPlanId(cls);
+          const classPlan = classPlanId ? (await window.financePlansService.getPlan(classPlanId)) : null;
+          
+          // Get overrides
+          const feeOverride = await window.financePlansService.getStudentFee(id);
+          const planOverrideId = await window.financePlansService.getStudentPlan(id);
+          const customSchedule = await window.financePlansService.getCustomSchedule(id);
+          
+          const effectiveFee = feeOverride !== null ? feeOverride : classFee;
+          const effectivePlanId = planOverrideId || classPlanId;
+          const effectivePlan = effectivePlanId ? (state.plans[effectivePlanId] || await window.financePlansService.getPlan(effectivePlanId)) : null;
+          const planName = effectivePlan?.name || effectivePlanId || 'No plan set';
+          
+          const hasCustomSchedule = customSchedule && Array.isArray(customSchedule.rows) && customSchedule.rows.length > 0;
+          
+          return `
+            <article class="glass-panel-light border border-slate-700/45 space-y-3" data-student="${id}">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-sm font-semibold text-slate-100">${full || adm}</h3>
+                  <p class="text-xs text-slate-400">Adm: ${adm}</p>
+                  <p class="text-xs text-slate-400">Class: ${cls || '—'} · Year: ${year}</p>
+                </div>
+                <button class="btn btn-ghost px-3 text-xs" data-action="override-clear" data-student="${id}"><i class="fa-solid fa-eraser"></i> Clear</button>
+              </div>
+              <div class="bg-slate-900/30 border border-slate-700/45 rounded-lg px-3 py-2 text-xs text-slate-200 space-y-2">
+                <div>
+                  <p class="text-slate-400 mb-1">Default Fee (Class): <span class="text-slate-300">TSh ${fmtMoney(classFee)}</span></p>
+                  <p class="${feeOverride !== null ? 'text-indigo-300' : 'text-slate-400'}">Fee Override: <span class="font-semibold">${feeOverride !== null ? `TSh ${fmtMoney(feeOverride)}` : 'None (using class default)'}</span></p>
+                </div>
+                <div>
+                  <p class="text-slate-400 mb-1">Default Plan (Class): <span class="text-slate-300">${classPlan?.name || classPlanId || 'Not set'}</span></p>
+                  <p class="${planOverrideId ? 'text-indigo-300' : 'text-slate-400'}">Plan Override: <span class="font-semibold">${planOverrideId ? (effectivePlan?.name || planOverrideId) : 'None (using class default)'}</span></p>
+                </div>
+                ${hasCustomSchedule ? `<p class="text-amber-300"><i class="fa-solid fa-calendar-check"></i> Custom Schedule: ${customSchedule.rows.length} payment(s) defined</p>` : ''}
+              </div>
+              <div class="flex flex-wrap gap-2 text-xs">
+                <button class="btn btn-ghost px-3" data-action="override-fee" data-student="${id}"><i class="fa-solid fa-money-bill"></i> Set Fee</button>
+                <button class="btn btn-ghost px-3" data-action="override-plan" data-student="${id}"><i class="fa-solid fa-diagram-project"></i> Set Plan</button>
+                <button class="btn btn-ghost px-3" data-action="override-custom" data-student="${id}"><i class="fa-solid fa-calendar-days"></i> ${hasCustomSchedule ? 'Edit' : 'Custom'} Schedule</button>
+                <button class="btn btn-ghost px-3 bg-amber-600/20 text-amber-200" data-action="override-monthly" data-student="${id}"><i class="fa-solid fa-calendar-alt"></i> Monthly Plan…</button>
+              </div>
+            </article>
+          `;
+        }))).join('');
+      } catch (err) {
+        console.error('Error in renderOverrides:', err);
+        panel.innerHTML = '<div class="text-sm text-red-300">Error searching. Check console.</div>';
       }
-      const year = state.year;
-      const overrides = await reader(`${pathOverrides(year)}`) || {};
-      panel.innerHTML = (await Promise.all(results.map(async ({ id, data }) => {
-        const ov = overrides[id] || {};
-        const studentClass = data.classLevel || data.className || '';
-        
-        // Get defaults from unified service
-        const classFee = await window.financePlansService.getClassFeePerYear(studentClass);
-        const classPlanId = await window.financePlansService.getClassDefaultPlanId(studentClass);
-        const classPlan = classPlanId ? (await window.financePlansService.getPlan(classPlanId)) : null;
-        
-        // Get overrides
-        const feeOverride = await window.financePlansService.getStudentFee(id);
-        const planOverrideId = await window.financePlansService.getStudentPlan(id);
-        const customSchedule = await window.financePlansService.getCustomSchedule(id);
-        
-        const effectiveFee = feeOverride !== null ? feeOverride : classFee;
-        const effectivePlanId = planOverrideId || classPlanId;
-        const effectivePlan = effectivePlanId ? (state.plans[effectivePlanId] || await window.financePlansService.getPlan(effectivePlanId)) : null;
-        const planName = effectivePlan?.name || effectivePlanId || 'No plan set';
-        
-        const hasCustomSchedule = customSchedule && Array.isArray(customSchedule.rows) && customSchedule.rows.length > 0;
-        
-        return `
-          <article class="glass-panel-light border border-slate-700/45 space-y-3" data-student="${id}">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h3 class="text-sm font-semibold text-slate-100">${data.firstName || ''} ${data.lastName || ''}</h3>
-                <p class="text-xs text-slate-400">Adm: ${data.admissionNumber || id}</p>
-                <p class="text-xs text-slate-400">Class: ${studentClass || '—'}</p>
-              </div>
-              <button class="btn btn-ghost px-3 text-xs" data-action="override-clear" data-student="${id}"><i class="fa-solid fa-eraser"></i> Clear</button>
-            </div>
-            <div class="bg-slate-900/30 border border-slate-700/45 rounded-lg px-3 py-2 text-xs text-slate-200 space-y-2">
-              <div>
-                <p class="text-slate-400 mb-1">Default Fee (Class): <span class="text-slate-300">TSh ${fmtMoney(classFee)}</span></p>
-                <p class="${feeOverride !== null ? 'text-indigo-300' : 'text-slate-400'}">Fee Override: <span class="font-semibold">${feeOverride !== null ? `TSh ${fmtMoney(feeOverride)}` : 'None (using class default)'}</span></p>
-              </div>
-              <div>
-                <p class="text-slate-400 mb-1">Default Plan (Class): <span class="text-slate-300">${classPlan?.name || classPlanId || 'Not set'}</span></p>
-                <p class="${planOverrideId ? 'text-indigo-300' : 'text-slate-400'}">Plan Override: <span class="font-semibold">${planOverrideId ? (effectivePlan?.name || planOverrideId) : 'None (using class default)'}</span></p>
-              </div>
-              ${hasCustomSchedule ? `<p class="text-amber-300"><i class="fa-solid fa-calendar-check"></i> Custom Schedule: ${customSchedule.rows.length} payment(s) defined</p>` : ''}
-            </div>
-            <div class="flex flex-wrap gap-2 text-xs">
-              <button class="btn btn-ghost px-3" data-action="override-fee" data-student="${id}"><i class="fa-solid fa-money-bill"></i> Set Fee</button>
-              <button class="btn btn-ghost px-3" data-action="override-plan" data-student="${id}"><i class="fa-solid fa-diagram-project"></i> Set Plan</button>
-              <button class="btn btn-ghost px-3" data-action="override-custom" data-student="${id}"><i class="fa-solid fa-calendar-days"></i> ${hasCustomSchedule ? 'Edit' : 'Custom'} Schedule</button>
-            </div>
-          </article>
-        `;
-      }))).join('');
     }
 
     async function setStudentOverride(studentId, payload) {
@@ -1772,6 +1862,15 @@
       if (action === 'override-fee') setOverrideFee(studentId);
       if (action === 'override-plan') setOverridePlan(studentId);
       if (action === 'override-custom') setOverrideCustom(studentId);
+      if (action === 'override-monthly') {
+        (async () => {
+          const studentData = await db.ref(`students/${studentId}`).once('value').then(s => s.val()).catch(() => null);
+          const studentName = studentData ? `${studentData.firstName || ''} ${studentData.lastName || ''}`.trim() : studentId;
+          const year = state.year || window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR;
+          const studentClass = await window.financePlansService.resolveClassForYearSimple(studentId, year);
+          openMonthlyPlanModal({ attachTo: 'student', studentId, studentName, className: studentClass });
+        })();
+      }
     });
 
     // Ensure year context is initialized before using service
@@ -1793,9 +1892,200 @@
       })();
     }
 
-    window.somapYearContext.onYearChanged(() => refreshAll());
+    window.somapYearContext.onYearChanged(() => {
+      refreshAll();
+      // Re-run search if there's a query
+      const q = $('#studentQuery')?.value?.trim();
+      if (q && q.length >= 2) {
+        renderOverrides(q);
+      }
+    });
+
+    // Monthly Plan Modal functionality
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    let modal, ctx, elPlanId, elPlanName, elAmt, elFrom, elLen, elDbl, elAssignClass, prevBtn, saveBtn, saveApplyBtn, prevBox;
+    let MP_STATE = { attachTo: null, className: null, studentId: null, studentName: null };
+
+    function initMonthlyPlanModal() {
+      modal = document.getElementById('monthlyPlanModal');
+      ctx = document.getElementById('mpContext');
+      elPlanId = document.getElementById('mpPlanId');
+      elPlanName = document.getElementById('mpPlanName');
+      elAmt = document.getElementById('mpAmount');
+      elFrom = document.getElementById('mpFromDay');
+      elLen = document.getElementById('mpWindowLen');
+      elDbl = document.getElementById('mpDoubles');
+      elAssignClass = document.getElementById('mpAssignClass');
+      prevBtn = document.getElementById('mpPreview');
+      saveBtn = document.getElementById('mpSave');
+      saveApplyBtn = document.getElementById('mpSaveAndApply');
+      prevBox = document.getElementById('mpPreviewBox');
+      
+      fillDoubleMonthChecks();
+      
+      if (document.getElementById('mpClose')) {
+        document.getElementById('mpClose').onclick = closeMonthlyPlanModal;
+      }
+      
+      if (modal) {
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) {
+            closeMonthlyPlanModal();
+          }
+        });
+      }
+      
+      if (prevBtn) {
+        prevBtn.onclick = () => previewSchedule();
+      }
+      
+      if (saveBtn) {
+        saveBtn.onclick = () => savePlan({ applyToStudent: false });
+      }
+      
+      if (saveApplyBtn) {
+        saveApplyBtn.onclick = () => savePlan({ applyToStudent: true });
+      }
+    }
+
+    function fillDoubleMonthChecks() {
+      if (!elDbl) return;
+      elDbl.innerHTML = MONTHS.map((m, i) => `
+        <label class="inline-flex items-center gap-1 text-xs">
+          <input type="checkbox" value="${i + 1}" class="mpDbl">
+          ${m}
+        </label>
+      `).join('');
+    }
+
+    function openMonthlyPlanModal({ attachTo, className = null, studentId = null, studentName = null }) {
+      MP_STATE = { attachTo, className, studentId, studentName };
+      const year = state.year || window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR;
+      
+      if (ctx) {
+        ctx.textContent = attachTo === 'class'
+          ? `Target: Class ${className} · Year ${year}`
+          : `Target: Student ${studentName} (${studentId}) · Year ${year}`;
+      }
+      
+      if (elPlanId) elPlanId.value = elPlanId.value || 'monthly-40k-standard';
+      if (elPlanName) elPlanName.value = elPlanName.value || 'Monthly (40k) — Standard';
+      if (elAmt) elAmt.value = elAmt.value || 40000;
+      if (elFrom) elFrom.value = elFrom.value || 1;
+      if (elLen) elLen.value = elLen.value || 10;
+      if (elAssignClass) elAssignClass.checked = (attachTo === 'class');
+      if (prevBox) prevBox.classList.add('hidden');
+      
+      fillDoubleMonthChecks();
+      
+      if (modal) {
+        modal.style.display = 'flex';
+        modal.classList.remove('hidden');
+      }
+    }
+    window.openMonthlyPlanModal = openMonthlyPlanModal;
+
+    function closeMonthlyPlanModal() {
+      if (modal) {
+        modal.style.display = 'none';
+        modal.classList.add('hidden');
+      }
+    }
+
+    function getSelectedDoubleMonths() {
+      if (!elDbl) return [];
+      return Array.from(elDbl.querySelectorAll('.mpDbl'))
+        .filter(x => x.checked)
+        .map(x => Number(x.value)); // 1..12
+    }
+
+    function buildMonthlySchedule(monthlyAmount, fromDay, winLen, doubleMonths) {
+      const pad = (n) => String(n).padStart(2, '0');
+      const rows = [];
+      for (let m = 1; m <= 12; m++) {
+        const amt = monthlyAmount * (doubleMonths.includes(m) ? 2 : 1);
+        const from = `${pad(m)}-${pad(fromDay)}`;
+        const toDay = Math.min(fromDay + winLen - 1, 28);
+        const to = `${pad(m)}-${pad(toDay)}`;
+        rows.push({
+          label: `Monthly: ${MONTHS[m - 1]}`,
+          from, to, amount: amt, weight: 1
+        });
+      }
+      return rows;
+    }
+
+    function previewSchedule() {
+      if (!elPlanId || !elPlanName || !elAmt || !elFrom || !elLen || !prevBox) return null;
+      
+      const planId = elPlanId.value.trim();
+      const planName = elPlanName.value.trim();
+      const monthlyAmount = Number(elAmt.value || 0);
+      const fromDay = Math.max(1, Math.min(28, Number(elFrom.value || 1)));
+      const winLen = Math.max(3, Math.min(20, Number(elLen.value || 10)));
+      const dbl = getSelectedDoubleMonths();
+      const rows = buildMonthlySchedule(monthlyAmount, fromDay, winLen, dbl);
+      const total = rows.reduce((a, b) => a + Number(b.amount || 0), 0);
+      
+      prevBox.innerHTML = `
+        <div class="text-xs text-slate-600 mb-1">Plan ID: <b>${planId}</b> · Name: <b>${planName}</b> · Rows: ${rows.length} · Total: ${total.toLocaleString('en-KE')}</div>
+        <table class="w-full text-xs border">
+          <thead><tr class="bg-slate-100"><th class="p-1 text-left">Label</th><th class="p-1">Window</th><th class="p-1">Amount</th></tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr><td class="p-1">${r.label}</td><td class="p-1">${r.from} → ${r.to}</td><td class="p-1">${Number(r.amount).toLocaleString('en-KE')}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      `;
+      prevBox.classList.remove('hidden');
+      return { planId, planName, rows };
+    }
+
+    async function savePlan({ applyToStudent = false } = {}) {
+      const preview = previewSchedule();
+      if (!preview) return;
+      
+      const { planId, planName, rows } = preview;
+      const year = state.year || window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR;
+      
+      try {
+        // Save plan blueprint
+        const payload = {
+          name: planName,
+          isActive: true,
+          schedule: rows,
+          updatedAt: Date.now(),
+          updatedBy: currentUser()
+        };
+        
+        await window.financePlansService.upsertPlan(planId, payload, { year });
+        await writer(`${pathPlans(year)}/${planId}`, payload);
+        
+        if (MP_STATE.attachTo === 'class' && elAssignClass?.checked && MP_STATE.className) {
+          await window.financePlansService.upsertClassFeeAndPlan(MP_STATE.className, null, planId, { year, by: currentUser() });
+        }
+        
+        if (applyToStudent && MP_STATE.studentId) {
+          await window.financePlansService.setStudentPlanOverride(MP_STATE.studentId, planId, { year, by: currentUser() });
+        }
+        
+        toast('Monthly plan saved.');
+        
+        closeMonthlyPlanModal();
+        
+        await refreshAll();
+        const q = $('#studentQuery')?.value?.trim();
+        if (q && q.length >= 2) {
+          renderOverrides(q);
+        }
+      } catch (err) {
+        console.error('Error saving monthly plan:', err);
+        toast('Error saving plan', 'error');
+      }
+    }
 
     document.addEventListener('DOMContentLoaded', async () => {
+      // Initialize Monthly Plan Modal
+      initMonthlyPlanModal();
       try {
         // Ensure year selector is initialized
         const select = document.querySelector('[data-somap-year-select]');

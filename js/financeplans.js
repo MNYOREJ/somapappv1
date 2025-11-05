@@ -782,6 +782,66 @@ export async function getStudentCarryForward(studentId, options = {}) {
   return coerceNumber(val.amount ?? val.balance ?? 0, 0);
 }
 
+/**
+ * Fetch all students (identity only, non-year-specific)
+ * Returns a map of studentId -> student data
+ */
+export async function fetchStudentsAll() {
+  const db = getFirebaseDB();
+  if (!db) return {};
+  try {
+    const snap = await db.ref('students').once('value');
+    return snap.val() || {};
+  } catch (err) {
+    console.error('Error fetching students:', err);
+    return {};
+  }
+}
+
+/**
+ * Resolve class for a student in target year
+ * Uses 2025 as anchor year; prefers explicit overrides if present
+ * Computes class progression based on year delta
+ */
+export async function resolveClassForYearSimple(studentId, targetYear) {
+  if (!studentId) return '';
+  const db = getFirebaseDB();
+  if (!db) return '';
+  
+  const anchorY = 2025;
+  const targetY = Number(targetYear) || anchorY;
+  
+  try {
+    // Try to get explicit enrollment for target year first
+    const targetSnap = await db.ref(`enrollments/${targetY}/${studentId}`).once('value').catch(() => null);
+    const targetRec = targetSnap?.val();
+    if (targetRec && (targetRec.className || targetRec.classLevel)) {
+      return targetRec.className || targetRec.classLevel || '';
+    }
+    
+    // Fall back to anchor year and compute progression
+    const anchorSnap = await db.ref(`enrollments/${anchorY}/${studentId}`).once('value').catch(() => null);
+    const anchor = anchorSnap?.val() || {};
+    
+    const base = anchor.className || anchor.classLevel || 'Baby Class';
+    const L = (s) => String(s || '').trim().toLowerCase();
+    const i = CLASSES_FULL.findIndex(c => L(c) === L(base));
+    
+    if (i < 0) return base || '';
+    
+    const delta = targetY - anchorY;
+    const j = i + delta;
+    
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASSES_FULL.length) return 'GRADUATED';
+    
+    return CLASSES_FULL[j];
+  } catch (err) {
+    console.error('Error resolving class for year:', err);
+    return '';
+  }
+}
+
 export const financePlansService = {
   SOMAP_ALLOWED_YEARS,
   SOMAP_DEFAULT_YEAR,
@@ -821,6 +881,8 @@ export const financePlansService = {
   getCustomSchedule,
   getStudentLedger,
   getStudentCarryForward,
+  fetchStudentsAll,
+  resolveClassForYearSimple,
   invalidateCache: invalidateFinanceCache,
   getDB: () => {
     try { return getFirebaseDB(); } catch (err) { console.error(err); return null; }

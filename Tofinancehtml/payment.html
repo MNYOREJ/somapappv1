@@ -318,11 +318,81 @@
         return ymdToTS(targetYear, month, day, endOfDay);
       }
 
-      async function buildSchedule(student) {
+      async function buildSchedule(student, classDefaults, override) {
         if (!student || student.isGraduated) {
           return { items: [], academicYear: targetYear, feeBase: 0, planName: student?.paymentPlan || '' };
         }
         const config = getConfig(student);
+        
+        // PRIORITY 1: Check for student custom schedule (highest priority override)
+        if (override && Array.isArray(override.customSchedule) && override.customSchedule.length > 0) {
+          // Student has custom schedule - let resolveEffectiveInstallments handle it
+          // Fall through to PRIORITY 2
+        }
+        
+        // PRIORITY 2: Check if class-level edited installments exist (from paymentedits.html)
+        // These are stored in feesStructure/{year}/{Class}/installments
+        // Only use if student doesn't have a custom schedule or plan override
+        const hasStudentOverride = override && (
+          (Array.isArray(override.customSchedule) && override.customSchedule.length > 0) ||
+          override.planId
+        );
+        
+        if (!hasStudentOverride && classDefaults && classDefaults.installments && typeof classDefaults.installments === 'object') {
+          const installmentsObj = classDefaults.installments;
+          const entries = Object.values(installmentsObj).filter(inst => inst && inst.active !== false);
+          
+          if (entries.length > 0) {
+            // Sort by window date (from month/day)
+            const sorted = entries.slice().sort((a, b) => {
+              const af = (a?.window?.from || []);
+              const bf = (b?.window?.from || []);
+              if (!af.length && !bf.length) return 0;
+              if (!af.length) return 1;
+              if (!bf.length) return -1;
+              if (af[0] !== bf[0]) return af[0] - bf[0];
+              return af[1] - bf[1];
+            });
+            
+            const items = sorted.map((inst, idx) => {
+              const win = inst?.window || {};
+              const fromPair = Array.isArray(win.from) ? win.from : null;
+              const toPair = Array.isArray(win.to) ? win.to : null;
+              const fallback = fallbackWindow(config, idx) || { from: [1, 1], to: [1, 10] };
+              const amount = Math.max(0, Math.round(Number(inst?.amount) || 0));
+              const label = inst?.label || (config?.labels?.[idx] || `Inst ${idx + 1}`);
+              
+              return {
+                label,
+                amount,
+                fromTS: toAcademicTS(fromPair || fallback.from, false),
+                toTS: toAcademicTS(toPair || fallback.to, true),
+                paidAllocated: 0,
+                status: 'Pending',
+                weight: Number(inst?.weight || 0),
+                windowText: inst?.windowText || ''
+              };
+            });
+            
+            // Add carry forward if exists
+            const carryAmount = Math.max(0, Number(student.carryAmount || 0));
+            if (carryAmount > 0 && items.length) {
+              items[0].amount += carryAmount;
+            }
+            
+            const feeBase = Math.max(0, Math.round(Number(classDefaults.feePerYear || student.baseFee || student.feePerYear || 0)));
+            
+            return {
+              items,
+              academicYear: targetYear,
+              feeBase,
+              planName: classDefaults.defaultPlan || classDefaults.defaultPlanId || student.paymentPlan || '',
+              planId: classDefaults.defaultPlanId || ''
+            };
+          }
+        }
+        
+        // PRIORITY 3: Try resolveEffectiveInstallments (handles student overrides, custom schedules, plan overrides)
         let breakdown = null;
         try {
           breakdown = await resolveEffectiveInstallments(
@@ -335,6 +405,7 @@
         }
         const rows = Array.isArray(breakdown?.rows) ? breakdown.rows : [];
         if (!rows.length) {
+          // PRIORITY 4: Fall back to legacy apportioning
           return buildLegacySchedule(student);
         }
 
@@ -415,7 +486,7 @@
         return { credit, totalPaid, debtTillNow };
       }
 
-      async function render(student) {
+      async function render(student, classDefaults, override) {
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         if (student.isGraduated) {
           mount(`
@@ -434,7 +505,7 @@
           return;
         }
 
-        const schedule = await buildSchedule(student);
+        const schedule = await buildSchedule(student, classDefaults, override);
         schedule.items = Array.isArray(schedule?.items) ? schedule.items : [];
         const planDisplay = schedule.planName || student.paymentPlan || '';
         const allocation = allocatePayments(schedule, student);
@@ -660,7 +731,7 @@
             prepared._planSchedule = resolvedPlan.schedule; // [{label, from, to, weight}]
           }
 
-          await render(prepared);
+          await render(prepared, classDefaults, override);
         })
         .catch(e => { console.error(e); err('Error loading student data.'); });
 

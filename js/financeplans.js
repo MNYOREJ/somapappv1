@@ -120,25 +120,129 @@ async function ensureFinanceData(year = getSelectedYear()) {
   if (!entry.promise) {
     const db = getFirebaseDB();
     const basePath = pathFinance(key);
-    const promise = Promise.all([
-      db.ref(`${basePath}/classes`).once('value'),
-      db.ref(`${basePath}/plans`).once('value'),
-      db.ref(`${basePath}/studentFees`).once('value'),
-      db.ref(`${basePath}/studentPlans`).once('value'),
-    ]).then(([classesSnap, plansSnap, feesSnap, planSnap]) => {
-      const data = {
-        classes: classesSnap.val() || {},
-        plans: plansSnap.val() || {},
-        studentFees: feesSnap.val() || {},
-        studentPlans: planSnap.val() || {},
-      };
-      entry.data = data;
-      delete entry.promise;
-      return data;
-    }).catch((err) => {
-      financeCache.delete(key);
-      throw err;
-    });
+    const promise = (async () => {
+      try {
+        const [classesSnap, plansSnap, feesSnap, planSnap] = await Promise.all([
+          db.ref(`${basePath}/classes`).once('value'),
+          db.ref(`${basePath}/plans`).once('value'),
+          db.ref(`${basePath}/studentFees`).once('value'),
+          db.ref(`${basePath}/studentPlans`).once('value'),
+        ]);
+
+        let classesVal = classesSnap.val() || {};
+        let plansVal = plansSnap.val() || {};
+        let studentFeesVal = feesSnap.val() || {};
+        let studentPlansVal = planSnap.val() || {};
+
+        if (!Object.keys(classesVal).length) {
+          const legacyClassesSnap = await db.ref(withSchoolPrefix(`feesStructure/${key}`)).once('value');
+          classesVal = legacyClassesSnap.val() || {};
+        }
+
+        if (!Object.keys(plansVal).length) {
+          const legacyPlansSnap = await db.ref(withSchoolPrefix(`installmentPlans/${key}`)).once('value');
+          plansVal = legacyPlansSnap.val() || {};
+        }
+
+        if (!Object.keys(studentFeesVal).length || !Object.keys(studentPlansVal).length) {
+          const legacyOverridesSnap = await db.ref(withSchoolPrefix(`studentOverrides/${key}`)).once('value');
+          const legacyOverrides = legacyOverridesSnap.val() || {};
+          if (!Object.keys(studentFeesVal).length) {
+            const mappedFees = {};
+            Object.entries(legacyOverrides).forEach(([id, record]) => {
+              if (!record) return;
+              if (record.feePerYear !== undefined) {
+                mappedFees[id] = {
+                  feePerYear: coerceNumber(record.feePerYear, 0),
+                  locked: record.locked === undefined ? true : Boolean(record.locked),
+                  updatedAt: record.updatedAt || record.lastUpdated || null,
+                  updatedBy: record.updatedBy || record.updatedById || null,
+                };
+              }
+            });
+            if (Object.keys(mappedFees).length) studentFeesVal = mappedFees;
+          }
+          if (!Object.keys(studentPlansVal).length) {
+            const mappedPlans = {};
+            Object.entries(legacyOverrides).forEach(([id, record]) => {
+              if (!record) return;
+              const planId = record.planId || record.defaultPlanId || record.paymentPlanId || null;
+              if (planId) {
+                mappedPlans[id] = {
+                  planId,
+                  updatedAt: record.updatedAt || record.lastUpdated || null,
+                  updatedBy: record.updatedBy || record.updatedById || null,
+                };
+              }
+            });
+            if (Object.keys(mappedPlans).length) studentPlansVal = mappedPlans;
+          }
+        }
+
+        const normalizedClasses = {};
+        Object.entries(classesVal).forEach(([name, cfg]) => {
+          if (!cfg || typeof cfg !== 'object') {
+            normalizedClasses[name] = cfg;
+            return;
+          }
+          const next = { ...cfg };
+          if (next.feePerYear === undefined) {
+            if (next.fee !== undefined) next.feePerYear = coerceNumber(next.fee, 0);
+            else if (next.yearFee !== undefined) next.feePerYear = coerceNumber(next.yearFee, 0);
+          } else {
+            next.feePerYear = coerceNumber(next.feePerYear, 0);
+          }
+          if (!next.defaultPlanId && next.defaultPlan) next.defaultPlanId = next.defaultPlan;
+          normalizedClasses[name] = next;
+        });
+
+        const normalizedPlans = {};
+        Object.entries(plansVal).forEach(([id, plan]) => {
+          if (!plan || typeof plan !== 'object') {
+            normalizedPlans[id] = plan;
+            return;
+          }
+          const next = { ...plan };
+          if (!next.planId) next.planId = plan.planId || plan.id || id;
+          if (!next.name && next.title) next.name = next.title;
+          normalizedPlans[id] = next;
+        });
+
+        const normalizedStudentFees = {};
+        Object.entries(studentFeesVal).forEach(([sid, rec]) => {
+          if (!rec || typeof rec !== 'object') return;
+          normalizedStudentFees[sid] = {
+            ...rec,
+            feePerYear: rec.feePerYear !== undefined ? coerceNumber(rec.feePerYear, 0) : undefined,
+            locked: rec.locked === undefined ? true : Boolean(rec.locked),
+          };
+        });
+
+        const normalizedStudentPlans = {};
+        Object.entries(studentPlansVal).forEach(([sid, rec]) => {
+          if (!rec || typeof rec !== 'object') return;
+          const planId = rec.planId || rec.id || rec.defaultPlanId;
+          if (!planId) return;
+          normalizedStudentPlans[sid] = {
+            ...rec,
+            planId,
+          };
+        });
+
+        const data = {
+          classes: normalizedClasses,
+          plans: normalizedPlans,
+          studentFees: normalizedStudentFees,
+          studentPlans: normalizedStudentPlans,
+        };
+        entry.data = data;
+        delete entry.promise;
+        return data;
+      } catch (err) {
+        financeCache.delete(key);
+        throw err;
+      }
+    })();
     entry.promise = promise;
   }
   return entry.promise;
@@ -181,8 +285,13 @@ export async function readPlan(planId, options = {}) {
   }
   const db = getFirebaseDB();
   const basePath = pathFinance(year);
+  let val = null;
   const snap = await db.ref(`${basePath}/plans/${planId}`).once('value');
-  const val = snap.val() || null;
+  val = snap.val() || null;
+  if (!val) {
+    const legacySnap = await db.ref(withSchoolPrefix(`installmentPlans/${toYearString(year)}/${planId}`)).once('value');
+    val = legacySnap.val() || null;
+  }
   if (entry.data) {
     entry.data.plans = entry.data.plans || {};
     entry.data.plans[planId] = val || null;
@@ -240,13 +349,18 @@ function parseScheduleRow(raw = {}) {
   const weight = Number(weightRaw);
   const hasAmount = raw.amount !== undefined && raw.amount !== null && raw.amount !== '';
   const amountVal = hasAmount ? Number(raw.amount) : NaN;
-  return {
+  const out = {
     label: String(label || ''),
     from: from || '',
     to: to || '',
     weight: Number.isFinite(weight) ? weight : 0,
     amount: Number.isFinite(amountVal) ? amountVal : null,
   };
+  ['fromMonth','fromDay','toMonth','toDay','startMonth','startDay','endMonth','endDay'].forEach((key) => {
+    if (raw[key] !== undefined) out[key] = raw[key];
+  });
+  if (raw.windowText) out.windowText = raw.windowText;
+  return out;
 }
 
 function formatWindowFragment(value) {
@@ -316,9 +430,81 @@ export async function resolveEffectiveInstallments(studentId, className, options
     planId = planId || 'CUSTOM';
   } else if (planId) {
     const plan = await getPlan(planId, { year });
-    if (plan && Array.isArray(plan.schedule)) {
-      rows = plan.schedule.map(parseScheduleRow);
-      if (plan?.name) planName = plan.name;
+    if (plan) {
+      let scheduleRows = [];
+      if (Array.isArray(plan.schedule)) {
+        scheduleRows = plan.schedule.slice();
+      } else if (plan.schedule && typeof plan.schedule === 'object') {
+        const orderingKeys = ['order','index','sort','position','seq','sequence','weightIndex','liveOrder'];
+        const entries = Object.entries(plan.schedule).map(([key, value]) => ({
+          ...(value || {}),
+          __key: key,
+        }));
+        const resolveOrderValue = (row) => {
+          for (const k of orderingKeys) {
+            if (row[k] !== undefined) {
+              const num = Number(row[k]);
+              if (Number.isFinite(num)) return num;
+            }
+          }
+          const keyNum = Number(row.__key);
+          if (Number.isFinite(keyNum)) return keyNum;
+          return Number.POSITIVE_INFINITY;
+        };
+        const resolveMonthDayValue = (row) => {
+          const monthKeys = ['fromMonth','startMonth','dueFromMonth','month','start_month','from_month'];
+          const dayKeys = ['fromDay','startDay','dueFromDay','day','start_day','from_day'];
+          let month = null;
+          let day = null;
+          for (const key of monthKeys) {
+            if (row[key] !== undefined) {
+              const num = Number(row[key]);
+              if (Number.isFinite(num)) {
+                month = num;
+                break;
+              }
+            }
+          }
+          for (const key of dayKeys) {
+            if (row[key] !== undefined) {
+              const num = Number(row[key]);
+              if (Number.isFinite(num)) {
+                day = num;
+                break;
+              }
+            }
+          }
+          if (month === null) return Number.POSITIVE_INFINITY;
+          return month * 100 + (Number.isFinite(day) ? day : 0);
+        };
+        entries.sort((a, b) => {
+          const valA = resolveOrderValue(a);
+          const valB = resolveOrderValue(b);
+          if (Number.isFinite(valA) && Number.isFinite(valB) && valA !== valB) {
+            return valA - valB;
+          }
+          if (Number.isFinite(valA) && !Number.isFinite(valB)) return -1;
+          if (!Number.isFinite(valA) && Number.isFinite(valB)) return 1;
+          const dateA = resolveMonthDayValue(a);
+          const dateB = resolveMonthDayValue(b);
+          if (Number.isFinite(dateA) && Number.isFinite(dateB) && dateA !== dateB) {
+            return dateA - dateB;
+          }
+          return String(a.__key).localeCompare(String(b.__key));
+        });
+        scheduleRows = entries.map(({ __key, ...rest }) => rest);
+      }
+
+      if (Array.isArray(scheduleRows) && scheduleRows.length) {
+        rows = scheduleRows.map(parseScheduleRow);
+        const planLabel = plan.name || plan.title || plan.displayName || plan.label;
+        if (planLabel) planName = planLabel;
+        if (!planId) {
+          planId = plan.planId || plan.id || plan.slug || plan.key || planId;
+        }
+      } else {
+        rows = [];
+      }
     } else {
       rows = [];
     }
@@ -339,10 +525,11 @@ export async function resolveEffectiveInstallments(studentId, className, options
 
   const prepared = rows.map((row) => ({ ...row }));
   const explicitTotal = sumValues(prepared, (row) => (row.amount !== null ? row.amount : 0));
+  const targetFee = fee > 0 ? fee : explicitTotal;
   const missingIndexes = prepared
     .map((row, idx) => (row.amount === null ? idx : -1))
     .filter((idx) => idx >= 0);
-  const remainingFee = fee - explicitTotal;
+  const remainingFee = targetFee - explicitTotal;
 
   if (missingIndexes.length) {
     const weights = missingIndexes.map((idx) => {
@@ -373,14 +560,17 @@ export async function resolveEffectiveInstallments(studentId, className, options
 
   const totalAfter = sumValues(prepared, (row) => row.amount || 0);
   if (prepared.length) {
-    const diffTotal = fee - totalAfter;
+    const diffTotal = targetFee - totalAfter;
     prepared[prepared.length - 1].amount = (prepared[prepared.length - 1].amount || 0) + diffTotal;
   }
 
+  const resolvedFee = targetFee;
+  const finalPlanName = planName || planId || '';
+
   return {
-    fee,
+    fee: resolvedFee,
     planId,
-    planName,
+    planName: finalPlanName,
     rows: normalizeWindows(prepared).map((row) => ({
       ...row,
       amount: coerceNumber(row.amount, 0),
@@ -535,7 +725,19 @@ export async function getCustomSchedule(studentId, options = {}) {
   const year = options.year ? toYearString(options.year) : getSelectedYear();
   const db = getFirebaseDB();
   const snap = await db.ref(`${pathFinance(year)}/studentCustomSchedules/${studentId}`).once('value');
-  const val = snap.val() || null;
+  let val = snap.val() || null;
+  if (!val || !Array.isArray(val.rows) || !val.rows.length) {
+    const legacySnap = await db.ref(withSchoolPrefix(`studentOverrides/${year}/${studentId}/customSchedule`)).once('value');
+    const legacyVal = legacySnap.val();
+    if (Array.isArray(legacyVal) && legacyVal.length) {
+      val = { rows: legacyVal };
+    } else if (legacyVal && Array.isArray(legacyVal.rows) && legacyVal.rows.length) {
+      val = { rows: legacyVal.rows };
+    } else if (legacyVal && typeof legacyVal === 'object') {
+      const rows = Object.values(legacyVal).filter(Boolean);
+      if (rows.length) val = { rows };
+    }
+  }
   if (!val || !Array.isArray(val.rows) || !val.rows.length) return null;
   return val;
 }

@@ -23,6 +23,45 @@
     .hint { font-size:12px; color:#6b7280; }
     .btn { display:inline-flex; align-items:center; gap:8px; padding:.5rem .85rem; border-radius:.5rem; }
   </style>
+
+  <script>
+  /** Year range + anchor **/
+  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+  const SOMAP_DEFAULT_YEAR = 2025;
+
+  /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const L = s => String(s||'').trim().toLowerCase();
+
+  /** Shift a base class by delta years relative to anchor (2025). */
+  function shiftClass(baseClass, deltaYears){
+    const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+    if (i<0) return baseClass||'';
+    const j = i + Number(deltaYears||0);
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASS_ORDER.length) return 'GRADUATED';
+    return CLASS_ORDER[j];
+  }
+  </script>
+
+  <script>
+  /** Reuse shared year context if present, else create a light fallback. */
+  window.somapYearContext = window.somapYearContext || (function(){
+    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    const listeners = new Set();
+    return {
+      getSelectedYear(){ return selected; },
+      setSelectedYear(y){
+        y = String(y);
+        if (selected===y) return;
+        selected = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
+        listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+      },
+      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+    };
+  })();
+  </script>
 </head>
 <body class="bg-gray-50 p-4">
 
@@ -35,6 +74,29 @@
 
   <!-- Admissions Content -->
   <div class="bg-white rounded-lg shadow p-4">
+    <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem;">
+      <label class="text-xs font-semibold">Academic Year</label>
+      <select data-somap-year-select class="border rounded px-2 py-1 text-sm"></select>
+      <span class="text-xs text-slate-600">Working year: <b id="somapYearHint">--</b></span>
+    </div>
+
+    <script>
+    (function initYearSelector(){
+      const sel = document.querySelector('[data-somap-year-select]');
+      const hint = document.getElementById('somapYearHint');
+      if (!sel) return;
+      sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      const current = window.somapYearContext.getSelectedYear();
+      sel.value = current;
+      if (hint) hint.textContent = current;
+      sel.addEventListener('change', e=>{
+        const y = String(e.target.value);
+        window.somapYearContext.setSelectedYear(y);
+        if (hint) hint.textContent = y;
+      });
+    })();
+    </script>
+
     <div class="space-y-4">
       <div>
         <h3 class="font-medium text-gray-800">New Applications</h3>
@@ -286,8 +348,15 @@
 
   <!-- Admissions Logic -->
  <!-- Admissions Logic (extended with Edit functionality) -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
+  <script type="module">
+    import {
+      resolveEffectiveFinance,
+      readPlan,
+      readClassConfig,
+      setStudentFeeOverride
+    } from '../js/financeplans.js';
+
+    document.addEventListener('DOMContentLoaded', function() {
   console.log('admission.editable.html loaded'); // Debug log to confirm script execution
 
   // ---- Password for restricted actions ----
@@ -365,6 +434,83 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   if (!storage) {
     console.warn('Firebase Storage not available. File uploads will be skipped.');
+  }
+
+  const getWorkingYear = () => window.somapYearContext?.getSelectedYear?.() || SOMAP_DEFAULT_YEAR;
+
+  let cachedStudents = [];
+  const cachedStudentsById = new Map();
+  let shiftReports = {};
+  let anchorEnrollments = {};
+  let yearEnrollments = {};
+  let anchorEnrollRef = null;
+  let yearEnrollRef = null;
+  let renderGeneration = 0;
+  const planLabelCache = new Map();
+  const currencyFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 0 });
+
+  const queueRender = () => {
+    renderSearchList(cachedStudents).catch(err => console.error('Render error', err));
+  };
+
+  function resolveClassForStudentYear(studentKey, fallbackClass, targetYear) {
+    const override = yearEnrollments[studentKey] || {};
+    if (override && (override.className || override.classLevel)) {
+      return override.className || override.classLevel;
+    }
+    const anchor = anchorEnrollments[studentKey] || {};
+    const baseClass = anchor.className || anchor.classLevel || fallbackClass || '';
+    const delta = Number(targetYear) - SOMAP_DEFAULT_YEAR;
+    return shiftClass(baseClass, delta);
+  }
+
+  async function planLabelFor(planId, year) {
+    if (!planId) return '';
+    const key = `${year}::${planId}`;
+    if (planLabelCache.has(key)) return planLabelCache.get(key);
+    try {
+      const plan = await readPlan(planId, { year });
+      const label = plan?.name || planId;
+      planLabelCache.set(key, label);
+      return label;
+    } catch (err) {
+      console.warn('Failed to load plan details', planId, err);
+      return planId;
+    }
+  }
+
+  async function syncFinanceAfterUpsert(studentKey, studentData) {
+    if (!studentKey || !studentData) return;
+    const workingYear = getWorkingYear();
+    const className = studentData.classLevel || studentData.className || '';
+    if (!className) return;
+    try {
+      const classCfg = await readClassConfig(className, { year: workingYear });
+      const defaultFee =
+        classCfg && classCfg.feePerYear !== undefined ? Number(classCfg.feePerYear) : null;
+      const enteredFee = Number(studentData.feePerYear);
+      if (defaultFee !== null && Number.isFinite(enteredFee)) {
+        const sameFee = Math.round(enteredFee) === Math.round(defaultFee);
+        if (sameFee) {
+          await setStudentFeeOverride(studentKey, null, false, { by: 'admissions', year: workingYear });
+        } else {
+          await setStudentFeeOverride(studentKey, enteredFee, true, { by: 'admissions', year: workingYear });
+        }
+      }
+    } catch (err) {
+      console.warn('Finance sync failed', studentKey, err);
+    }
+  }
+
+  function attachYearEnrollmentListener(year) {
+    if (!db) return;
+    const yearStr = String(year);
+    if (yearEnrollRef) yearEnrollRef.off();
+    yearEnrollRef = db.ref(`enrollments/${yearStr}`);
+    yearEnrollRef.on('value', (snap) => {
+      yearEnrollments = snap.val() || {};
+      queueRender();
+    });
   }
 
   // ---- Required fields -> enable/disable register ----
@@ -533,6 +679,7 @@ document.addEventListener('DOMContentLoaded', function() {
           studentData.joiningLetterUrl = await uploadMaybe("joiningLetterUpload", "joiningLetter", newKey, null);
           studentData.medicalDocsUrl = await uploadMaybe("medicalDocsUpload", "medicalDocs", newKey, null);
           await newRef.set({ createdAt: firebase.database.ServerValue.TIMESTAMP, ...studentData });
+          await syncFinanceAfterUpsert(newKey, studentData);
           alert('✅ Student registered successfully!');
           closeRegistrationModal();
         } else {
@@ -552,6 +699,7 @@ document.addEventListener('DOMContentLoaded', function() {
           studentData.medicalDocsUrl = await uploadMaybe("medicalDocsUpload", "medicalDocs", keyToUpdate, existing.medicalDocsUrl || null);
           // Do an update (preserves existing createdAt if present)
           await db.ref('students/' + keyToUpdate).update({ ...studentData, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+          await syncFinanceAfterUpsert(keyToUpdate, studentData);
           // Clean up unused files after update
           await cleanupUnusedFiles(keyToUpdate);
           // Fetch fresh data from Firebase to ensure latest state
@@ -573,33 +721,88 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ---- Live cache + rendering for search (and edit buttons) ----
-  let cachedStudents = [];
-  let shiftReports = {};
   if (db) {
     db.ref('students').on('value', (snapshot) => {
       const raw = snapshot.val() || {};
-      cachedStudents = Object.entries(raw).map(([key, s]) => ({ key, ...s }));
-      renderSearchList(cachedStudents);
+      cachedStudentsById.clear();
+      cachedStudents = Object.entries(raw).map(([key, s]) => {
+        const rec = { key, ...(s || {}) };
+        cachedStudentsById.set(key, rec);
+        return rec;
+      });
+      queueRender();
     });
     db.ref(SHIFT_REPORT_PATH).on('value', (snapshot) => {
       shiftReports = snapshot.exists() ? snapshot.val() : {};
-      renderSearchList(cachedStudents);
+      queueRender();
     });
+    anchorEnrollRef = db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}`);
+    anchorEnrollRef.on('value', (snapshot) => {
+      anchorEnrollments = snapshot.val() || {};
+      queueRender();
+    });
+    attachYearEnrollmentListener(getWorkingYear());
   }
 
-  function renderSearchList(students) {
+  window.somapYearContext.onYearChanged((newYear) => {
+    planLabelCache.clear();
+    attachYearEnrollmentListener(newYear);
+    const selectEl = document.querySelector('[data-somap-year-select]');
+    const hintEl = document.getElementById('somapYearHint');
+    if (selectEl) selectEl.value = String(newYear);
+    if (hintEl) hintEl.textContent = String(newYear);
+    queueRender();
+  });
+
+  queueRender();
+
+  async function renderSearchList(students) {
     const searchList = document.getElementById('student-list');
     const searchBox = document.getElementById('search-box');
     if (!searchList) return;
-    const term = (searchBox ? searchBox.value || '' : '').toLowerCase();
-    const filtered = !term ? students : students.filter(s =>
-      ((s.firstName || '').toLowerCase().includes(term)) ||
-      ((s.lastName || '').toLowerCase().includes(term)) ||
-      ((s.pupilId || '').toLowerCase().includes(term)) ||
-      ((s.admissionNumber || '').toLowerCase().includes(term))
-    );
+    const term = (searchBox ? searchBox.value || '' : '').toLowerCase().trim();
+    const filtered = !term ? students : students.filter((s) => {
+      const full = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.toLowerCase();
+      return (
+        full.includes(term) ||
+        (String(s.pupilId || '').toLowerCase().includes(term)) ||
+        (String(s.admissionNumber || '').toLowerCase().includes(term))
+      );
+    });
     searchList.innerHTML = '';
-    filtered.forEach(stu => {
+    if (!filtered.length) {
+      searchList.innerHTML = '<div class="text-sm text-slate-500">No students match the current filter or year.</div>';
+      return;
+    }
+
+    const currentYear = getWorkingYear();
+    const generation = ++renderGeneration;
+    const enriched = await Promise.all(filtered.map(async (stu) => {
+      const fallbackClass = stu.classLevel || stu.className || '';
+      const displayClass = resolveClassForStudentYear(stu.key, fallbackClass, currentYear) || fallbackClass || 'N/A';
+      const anchorClass = anchorEnrollments[stu.key]?.className || anchorEnrollments[stu.key]?.classLevel || fallbackClass;
+      let finance = { fee: 0, planId: null, feeOverride: null };
+      try {
+        finance = await resolveEffectiveFinance(stu.key, displayClass, { anchorClass, year: currentYear });
+      } catch (err) {
+        console.error('resolveEffectiveFinance error', stu.key, err);
+      }
+      let planLabel = '';
+      try {
+        planLabel = await planLabelFor(finance.planId, currentYear);
+      } catch (err) {
+        console.warn('Plan label fetch failed', finance.planId, err);
+      }
+      const isOverrideLocked = finance.feeOverride && (finance.feeOverride.locked !== false);
+      const formattedFee = currencyFormatter.format(Number(finance.fee || 0));
+      const feeLabel = `TSh ${formattedFee}${isOverrideLocked ? ' (override)' : ''}`;
+      const classLabel = displayClass === 'GRADUATED' ? `Graduated (${currentYear})` : displayClass;
+      return { stu, finance, feeLabel, classLabel, planLabel };
+    }));
+
+    if (generation !== renderGeneration) return;
+
+    enriched.forEach(({ stu, finance, feeLabel, classLabel, planLabel }) => {
       const div = document.createElement('div');
       div.className = 'student-card';
       const shiftInfo = (shiftReports && shiftReports[stu.key]) ? shiftReports[stu.key] : null;
@@ -614,13 +817,16 @@ document.addEventListener('DOMContentLoaded', function() {
           ${shiftInfo.reason ? ` • Reason: ${escapeHtml(shiftInfo.reason)}` : ''}
         </div>
       ` : '';
+      const studentFullName = `${stu.firstName || ''} ${stu.middleName || ''} ${stu.lastName || ''}`.replace(/\s+/g, ' ').trim();
+      const planDisplay = planLabel || (finance.planId ? finance.planId : 'Class default');
       div.innerHTML = `
         <div class="flex justify-between items-start">
           <div>
-            <strong>${escapeHtml((stu.firstName || '') + ' ' + (stu.lastName || ''))}</strong><br>
-            ID: ${escapeHtml(stu.pupilId || stu.admissionNumber || 'N/A')}<br>
-            Class: ${escapeHtml(stu.classLevel || 'N/A')}<br>
-            Fee: ${escapeHtml(String(stu.feePerYear || 0))}<br>
+            <strong>${escapeHtml(studentFullName || 'Unnamed Student')}</strong><br>
+            Admission: ${escapeHtml(stu.admissionNumber || stu.pupilId || 'N/A')}<br>
+            Class (${escapeHtml(String(currentYear))}): ${escapeHtml(classLabel || 'N/A')}<br>
+            Fee (${escapeHtml(String(currentYear))}): ${escapeHtml(feeLabel)}<br>
+            Plan: ${escapeHtml(planDisplay)}
           </div>
           <div class="flex gap-2">
             <button class="btn edit-btn bg-yellow-100 text-yellow-800 px-3 py-1 rounded" data-key="${stu.key}">Edit</button>
@@ -668,7 +874,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Search input
   const searchBox = document.getElementById('search-box');
-  if (searchBox) searchBox.addEventListener('input', () => renderSearchList(cachedStudents));
+  if (searchBox) searchBox.addEventListener('input', queueRender);
 
   // ---- Edit flow ----
   function startEditForKey(key) {

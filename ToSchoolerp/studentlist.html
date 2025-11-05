@@ -26,6 +26,45 @@
       border-radius:10px; width:95%; max-width:920px; height:90vh; overflow-y:auto; margin-top:20px; }
     .close { position:absolute; top:10px; right:16px; font-size:24px; cursor:pointer; }
   </style>
+
+  <script>
+  /** Year range + anchor **/
+  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+  const SOMAP_DEFAULT_YEAR = 2025;
+
+  /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const L = s => String(s||'').trim().toLowerCase();
+
+  /** Shift a base class by delta years relative to anchor (2025). */
+  function shiftClass(baseClass, deltaYears){
+    const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+    if (i<0) return baseClass||'';
+    const j = i + Number(deltaYears||0);
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASS_ORDER.length) return 'GRADUATED';
+    return CLASS_ORDER[j];
+  }
+  </script>
+
+  <script>
+  /** Reuse shared year context if present, else create a light fallback. */
+  window.somapYearContext = window.somapYearContext || (function(){
+    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    const listeners = new Set();
+    return {
+      getSelectedYear(){ return selected; },
+      setSelectedYear(y){
+        y = String(y);
+        if (selected===y) return;
+        selected = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
+        listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+      },
+      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+    };
+  })();
+  </script>
 </head>
 <body class="bg-gray-50 p-4">
 
@@ -40,6 +79,29 @@
   <div class="bg-white rounded-lg shadow p-4">
     <h3 class="font-medium text-gray-800">Student List</h3>
     <p class="text-sm text-gray-500 mb-3">Filter by class and download the list.</p>
+
+    <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem;">
+      <label class="text-xs font-semibold">Academic Year</label>
+      <select data-somap-year-select class="border rounded px-2 py-1 text-sm"></select>
+      <span class="text-xs text-slate-600">Working year: <b id="somapYearHint">--</b></span>
+    </div>
+
+    <script>
+    (function initYearSelector(){
+      const sel = document.querySelector('[data-somap-year-select]');
+      const hint = document.getElementById('somapYearHint');
+      if (!sel) return;
+      sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      const current = window.somapYearContext.getSelectedYear();
+      sel.value = current;
+      if (hint) hint.textContent = current;
+      sel.addEventListener('change', e=>{
+        const y = String(e.target.value);
+        window.somapYearContext.setSelectedYear(y);
+        if (hint) hint.textContent = y;
+      });
+    })();
+    </script>
 
     <div class="mb-3 md:flex md:items-center md:gap-3">
       <select id="student-list-class" class="w-full md:w-1/3 p-2 border rounded-lg mb-2 md:mb-0">
@@ -179,227 +241,352 @@
   <script src="../firebase.js"></script> <!-- Adjusted path to firebase.js in root -->
 
   <!-- Students List Logic -->
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      console.log('studentlist.html loaded'); // Debug log
+  <script type="module">
+    import { resolveEffectiveFinance, readPlan } from '../js/financeplans.js';
 
-      // ---- Resolve Firebase handles gracefully ----
+    document.addEventListener('DOMContentLoaded', () => {
       const db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
-
       if (!db) {
         console.error('Firebase Realtime Database not available. Ensure ../firebase.js and Firebase SDKs are loaded.');
-      } else {
-        console.log('Firebase DB initialized successfully');
+        return;
       }
 
-      // ---- Live cache + rendering ----
-      let cachedStudents = []; // array of { key, ...data }
+      const elements = {
+        listBody: document.getElementById('studentListBody'),
+        schoolReportBody: document.getElementById('schoolReportBody'),
+        reportFormBody: document.getElementById('reportFormBody'),
+        classFilter: document.getElementById('student-list-class'),
+        downloadCsvBtn: document.getElementById('downloadCsvBtn'),
+        downloadPdfBtn: document.getElementById('downloadPdfBtn'),
+        schoolDownloadCsv: document.getElementById('schoolDownloadCsv'),
+        schoolDownloadPdf: document.getElementById('schoolDownloadPdf'),
+        reportDownloadCsv: document.getElementById('reportDownloadCsv'),
+        reportDownloadPdf: document.getElementById('reportDownloadPdf'),
+      };
 
-      if (db) {
-        db.ref('students').on('value', (snapshot) => {
-          console.log('Students data received:', snapshot.val()); // Debug log
-          const raw = snapshot.val() || {};
-          cachedStudents = Object.entries(raw).map(([key, s]) => ({ key, ...s }));
-          console.log('Cached students:', cachedStudents.length); // Debug log
-          renderAllTables(); // render with current cache + filter
-        });
-      } else {
-        console.warn('No DB, using empty students list');
-        renderAllTables();
-      }
+      const withSchool = (path) => window.currentSchoolId ? `schools/${window.currentSchoolId}/${path}` : path;
+      const currencyFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 0 });
+      const fmtCurrency = (value) => `TSh ${currencyFormatter.format(Number(value) || 0)}`;
+      const normalize = (value) => String(value || '').trim().toLowerCase();
+      const getWorkingYear = () => window.somapYearContext?.getSelectedYear?.() || SOMAP_DEFAULT_YEAR;
 
-      // Utility to calculate paid amount from payments (matching finance.html)
-      function calculatePaidAmount(student) {
-        if (!student.payments) return 0;
-        return Object.values(student.payments).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-      }
+      const state = {
+        students: new Map(),
+        anchorEnrollments: {},
+        yearEnrollments: {},
+        ledger: {},
+        planCache: new Map(),
+        latestRecords: [],
+        latestYear: getWorkingYear(),
+        renderToken: 0,
+        yearEnrollRef: null,
+        ledgerRef: null,
+      };
 
-      // Utility to calculate debt
-      function calculateDebt(student) {
-        const feePerYear = Number(student.feePerYear) || 0;
-        const paidAmount = calculatePaidAmount(student);
-        return Math.max(0, feePerYear - paidAmount);
-      }
+      const queueRender = () => {
+        renderAllTables().catch((err) => console.error('Render error', err));
+      };
 
-      // ---- Students rendering ----
-      function renderAllTables() {
-        console.log('Rendering tables with', cachedStudents.length, 'students'); // Debug log
-        const classFilter = document.getElementById('student-list-class') ? document.getElementById('student-list-class').value || '' : '';
-        const listBody = document.getElementById('studentListBody');
-        const schoolReportBody = document.getElementById('schoolReportBody');
-        const reportFormBody = document.getElementById('reportFormBody');
-        if (!listBody || !schoolReportBody || !reportFormBody) {
-          console.error('Table bodies not found');
-          return;
+      function resolveClassForYear(studentId, fallbackClass, year) {
+        const override = state.yearEnrollments[studentId] || {};
+        if (override && (override.className || override.classLevel)) {
+          return override.className || override.classLevel;
         }
+        const anchor = state.anchorEnrollments[studentId] || {};
+        const baseClass = anchor.className || anchor.classLevel || fallbackClass || '';
+        const delta = Number(year) - SOMAP_DEFAULT_YEAR;
+        return shiftClass(baseClass, delta);
+      }
 
-        listBody.innerHTML = '';
-        const filtered = cachedStudents.filter(s => !classFilter || s.classLevel === classFilter);
+      async function planLabelFor(planId, year) {
+        if (!planId) return '';
+        const key = `${year}::${planId}`;
+        if (state.planCache.has(key)) return state.planCache.get(key);
+        try {
+          const plan = await readPlan(planId, { year });
+          const label = plan?.name || planId;
+          state.planCache.set(key, label);
+          return label;
+        } catch (err) {
+          console.warn('Plan lookup failed', planId, err);
+          return planId;
+        }
+      }
 
-        filtered.forEach(s => {
-          const paidAmount = calculatePaidAmount(s);
-          const debt = calculateDebt(s);
-          const tr = document.createElement('tr');
-          const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-          const dateReg = s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
-                          s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A';
-          const photoURL = s.passportPhotoURL || 'https://via.placeholder.com/50';
-          tr.innerHTML = `
-  <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
-  <td>${escapeHtml(fullName)}</td>
-  <td>${escapeHtml(s.classLevel || 'N/A')}</td>
-  <td>${escapeHtml(dateReg)}</td>
-  <td><img src="${escapeHtml(photoURL)}" alt="photo" style="width:50px;height:50px;object-fit:cover;border-radius:4px"/></td>
-  <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
-  <td>${escapeHtml(String(s.feePerYear || 0))}</td>
-  <td>${escapeHtml(String(paidAmount))}</td>
-  <td>${escapeHtml(String(debt))}</td>
-  <td>${escapeHtml(s.paymentPlan || 'N/A')}</td>
+      function sumPayments(ledgerEntry) {
+        if (!ledgerEntry || typeof ledgerEntry !== 'object') return 0;
+        const source = ledgerEntry.payments || ledgerEntry.entries || ledgerEntry.records || ledgerEntry;
+        return Object.values(source || {}).reduce((total, entry) => {
+          const amount = Number(entry?.amount ?? entry?.value ?? entry?.paid ?? entry?.total ?? 0);
+          return Number.isFinite(amount) && amount > 0 ? total + amount : total;
+        }, 0);
+      }
+
+      function escapeHtml(text) {
+        if (text === undefined || text === null) return '';
+        return String(text).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
+      }
+
+      function attachYearListeners(year) {
+        const yearStr = String(year);
+        if (state.yearEnrollRef) state.yearEnrollRef.off();
+        if (state.ledgerRef) state.ledgerRef.off();
+
+        state.yearEnrollRef = db.ref(`enrollments/${yearStr}`);
+        state.yearEnrollRef.on('value', (snap) => {
+          state.yearEnrollments = snap.val() || {};
+          queueRender();
+        });
+
+        state.ledgerRef = db.ref(withSchool(`financeLedgers/${yearStr}`));
+        state.ledgerRef.on('value', (snap) => {
+          state.ledger = snap.val() || {};
+          queueRender();
+        });
+      }
+
+      db.ref('students').on('value', (snapshot) => {
+        const raw = snapshot.val() || {};
+        state.students.clear();
+        Object.entries(raw).forEach(([key, value]) => {
+          state.students.set(key, { key, ...(value || {}) });
+        });
+        queueRender();
+      });
+
+      db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}`).on('value', (snapshot) => {
+        state.anchorEnrollments = snapshot.val() || {};
+        queueRender();
+      });
+
+      attachYearListeners(getWorkingYear());
+
+      window.somapYearContext.onYearChanged((newYear) => {
+        const year = String(newYear);
+        state.planCache.clear();
+        attachYearListeners(year);
+        state.latestYear = year;
+        const sel = document.querySelector('[data-somap-year-select]');
+        const hint = document.getElementById('somapYearHint');
+        if (sel) sel.value = year;
+        if (hint) hint.textContent = year;
+        queueRender();
+      });
+
+      if (elements.classFilter) {
+        elements.classFilter.addEventListener('change', queueRender);
+      }
+
+      [
+        [elements.downloadCsvBtn, () => downloadCSV('student-list')],
+        [elements.downloadPdfBtn, () => downloadPDF('student-list')],
+        [elements.schoolDownloadCsv, () => downloadCSV('school-reports')],
+        [elements.schoolDownloadPdf, () => downloadPDF('school-reports')],
+        [elements.reportDownloadCsv, () => downloadCSV('report-forms')],
+        [elements.reportDownloadPdf, () => downloadPDF('report-forms')],
+      ].forEach(([btn, handler]) => {
+        if (btn) btn.addEventListener('click', handler);
+      });
+
+      queueRender();
+
+      async function renderAllTables() {
+        const listBody = elements.listBody;
+        const schoolReportBody = elements.schoolReportBody;
+        const reportFormBody = elements.reportFormBody;
+        if (!listBody || !schoolReportBody || !reportFormBody) return;
+
+        const year = getWorkingYear();
+        state.latestYear = year;
+        const generation = ++state.renderToken;
+
+        const studentsArray = Array.from(state.students.values());
+        const records = await Promise.all(studentsArray.map(async (stu) => {
+          const fallbackClass = stu.classLevel || stu.className || '';
+          const resolvedClass = resolveClassForYear(stu.key, fallbackClass, year) || fallbackClass || 'N/A';
+          const anchorClass = state.anchorEnrollments[stu.key]?.className || state.anchorEnrollments[stu.key]?.classLevel || fallbackClass;
+          let finance = { fee: 0, planId: null, feeOverride: null };
+          try {
+            finance = await resolveEffectiveFinance(stu.key, resolvedClass, { anchorClass, year });
+          } catch (err) {
+            console.error('resolveEffectiveFinance error', stu.key, err);
+          }
+          const planLabel = await planLabelFor(finance.planId, year);
+          const ledgerEntry = state.ledger?.[stu.key] || {};
+          const paidAmount = sumPayments(ledgerEntry);
+          const feeValue = Number(finance.fee || 0);
+          const debtAmount = Math.max(0, feeValue - paidAmount);
+          const fullName = `${stu.firstName || ''} ${stu.middleName || ''} ${stu.lastName || ''}`.replace(/\s+/g, ' ').trim();
+          const registrationDate = stu.timestamp
+            ? new Date(stu.timestamp).toLocaleDateString()
+            : (stu.createdAt ? new Date(stu.createdAt).toLocaleDateString() : 'N/A');
+          const photoURL = stu.passportPhotoURL || 'https://via.placeholder.com/50';
+          const isOverrideLocked = finance.feeOverride && (finance.feeOverride.locked !== false);
+          const feeSource = isOverrideLocked ? 'Override' : 'Class default';
+          return {
+            key: stu.key,
+            admissionNo: stu.admissionNumber || 'N/A',
+            fullName: fullName || 'N/A',
+            classLabel: resolvedClass === 'GRADUATED' ? `Graduated (${year})` : resolvedClass,
+            rawClass: resolvedClass,
+            registrationDate,
+            photoURL,
+            contact: stu.primaryParentContact || 'N/A',
+            fee: feeValue,
+            paid: paidAmount,
+            debt: debtAmount,
+            planId: finance.planId || null,
+            planLabel,
+            isGraduated: resolvedClass === 'GRADUATED',
+            feeSource,
+          };
+        }));
+
+        if (generation !== state.renderToken) return;
+
+        state.latestRecords = records;
+
+        const filterValue = elements.classFilter ? elements.classFilter.value || '' : '';
+        const filteredRecords = records.filter((rec) => {
+          if (rec.isGraduated) return false;
+          if (!filterValue) return true;
+          return normalize(rec.classLabel) === normalize(filterValue);
+        });
+
+        const buildRow = (rec) => `
+  <td>${escapeHtml(rec.admissionNo)}</td>
+  <td>${escapeHtml(rec.fullName)}</td>
+  <td>${escapeHtml(rec.classLabel)}</td>
+  <td>${escapeHtml(rec.registrationDate)}</td>
+  <td><img src="${escapeHtml(rec.photoURL)}" alt="photo" style="width:50px;height:50px;object-fit:cover;border-radius:4px"/></td>
+  <td>${escapeHtml(rec.contact)}</td>
+  <td>${escapeHtml(fmtCurrency(rec.fee))}</td>
+  <td>${escapeHtml(fmtCurrency(rec.paid))}</td>
+  <td>${escapeHtml(fmtCurrency(rec.debt))}</td>
+  <td>${escapeHtml(rec.planLabel || rec.planId || 'Class default')}</td>
   <td>
-    <a href="generateid.html?key=${encodeURIComponent(s.key)}" target="_blank"
+    <a href="generateid.html?key=${encodeURIComponent(rec.key)}" target="_blank"
        class="py-1 px-2 border rounded text-indigo-600 inline-block" title="Open details & generate ID">
       <i class="fas fa-eye"></i>
     </a>
   </td>
 `;
-listBody.appendChild(tr);
-          listBody.appendChild(tr);
-        });
 
-               // School Reports + Report Forms (same structure, with calculated payments)
-        schoolReportBody.innerHTML = '';
-        reportFormBody.innerHTML = '';
-        cachedStudents.forEach(s => {
-          const paidAmount = calculatePaidAmount(s);
-          const debt = calculateDebt(s);
-          const rowHtml = `
-            <td>${escapeHtml(s.admissionNumber || 'N/A')}</td>
-            <td>${escapeHtml((s.firstName || '') + ' ' + (s.lastName || ''))}</td>
-            <td>${escapeHtml(s.classLevel || 'N/A')}</td>
-            <td>${escapeHtml(s.primaryParentContact || 'N/A')}</td>
-            <td>${escapeHtml(String(s.feePerYear || 0))}</td>
-            <td>${escapeHtml(String(paidAmount))}</td>
-            <td>${escapeHtml(String(debt))}</td>
-          `;
-          const tr1 = document.createElement('tr'); tr1.innerHTML = rowHtml;
-          const tr2 = document.createElement('tr'); tr2.innerHTML = rowHtml;
-          schoolReportBody.appendChild(tr1);
-          reportFormBody.appendChild(tr2);
+        listBody.innerHTML = '';
+        if (!filteredRecords.length) {
+          listBody.innerHTML = `<tr><td colspan="11" class="text-center text-sm text-slate-500 py-4">No students for ${escapeHtml(String(year))} yet.</td></tr>`;
+        } else {
+          filteredRecords.forEach((rec) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = buildRow(rec);
+            listBody.appendChild(tr);
+          });
+        }
+
+        const simpleRow = (rec) => `
+          <td>${escapeHtml(rec.admissionNo)}</td>
+          <td>${escapeHtml(rec.fullName)}</td>
+          <td>${escapeHtml(rec.classLabel)}</td>
+          <td>${escapeHtml(rec.contact)}</td>
+          <td>${escapeHtml(fmtCurrency(rec.fee))}</td>
+          <td>${escapeHtml(fmtCurrency(rec.paid))}</td>
+          <td>${escapeHtml(fmtCurrency(rec.debt))}</td>
+        `;
+
+        const activeRecords = records.filter((rec) => !rec.isGraduated);
+
+        [schoolReportBody, reportFormBody].forEach((tbody) => {
+          tbody.innerHTML = '';
+          if (!activeRecords.length) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-sm text-slate-500 py-4">No student data for ${escapeHtml(String(year))}.</td></tr>`;
+          } else {
+            activeRecords.forEach((rec) => {
+              const tr = document.createElement('tr');
+              tr.innerHTML = simpleRow(rec);
+              tbody.appendChild(tr);
+            });
+          }
         });
       }
 
-      document.getElementById('student-list-class')
-        .addEventListener('change', renderAllTables);
-
-      function escapeHtml(text) {
-        if (text === undefined || text === null) return '';
-        return String(text).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
+      function getRecordsForExport(kind) {
+        const year = state.latestYear || getWorkingYear();
+        const filterValue = elements.classFilter ? elements.classFilter.value || '' : '';
+        let records = state.latestRecords.filter((rec) => !rec.isGraduated);
+        if (!records.length) return { year, records: [] };
+        if (kind === 'student-list' && filterValue) {
+          records = records.filter((rec) => normalize(rec.classLabel) === normalize(filterValue));
+        }
+        return { year, records };
       }
 
-      // Initial render
-      renderAllTables();
-
-        // ---- CSV & PDF downloads for tables ----
-      async function downloadCSVforTab(filenameBase) {
-        console.log('Download CSV clicked for:', filenameBase); // Debug log
-        if (!cachedStudents.length) {
-          alert('No data to download');
+      function downloadCSV(kind) {
+        const { year, records } = getRecordsForExport(kind);
+        if (!records.length) {
+          alert('No data to download for the selected year.');
           return;
         }
-        const classFilter = document.getElementById('student-list-class') ? document.getElementById('student-list-class').value || '' : '';
-        const list = (filenameBase === 'student-list')
-          ? cachedStudents.filter(s => !classFilter || s.classLevel === classFilter)
-          : cachedStudents;
-
-        const arr = list.map(s => {
-          const paidAmount = calculatePaidAmount(s);
-          const debt = calculateDebt(s);
-          return {
-            'Admission No': s.admissionNumber || 'N/A',
-            'Full Name': `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
-            'Class': s.classLevel || 'N/A',
-            'Date of Registration': s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
-                                   (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'),
-            'Parent Contact': s.primaryParentContact || 'N/A',
-            'Fee Total': s.feePerYear || 0,
-            'Paid Amount': paidAmount,
-            'Debt': debt,
-            'Payment Plan': s.paymentPlan || 'N/A'
-          };
-        });
-
-        const csv = Papa.unparse(arr);
+        if (!window.Papa) {
+          alert('CSV library not loaded.');
+          return;
+        }
+        const rows = records.map((rec) => ({
+          'Admission No': rec.admissionNo,
+          'Full Name': rec.fullName,
+          'Class': rec.classLabel,
+          'Date of Registration': rec.registrationDate,
+          'Parent Contact': rec.contact,
+          'Fee Total': rec.fee,
+          'Paid Amount': rec.paid,
+          'Debt': rec.debt,
+          'Payment Plan': rec.planLabel || rec.planId || 'Class default',
+          'Fee Source': rec.feeSource,
+        }));
+        const csv = window.Papa.unparse(rows);
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${filenameBase}.csv`;
+        a.download = `${kind}_${year}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        console.log('CSV downloaded'); // Debug log
       }
 
-      async function downloadPDFforTab(filenameBase) {
-        console.log('Download PDF clicked for:', filenameBase); // Debug log
-        if (!cachedStudents.length) {
-          alert('No data to download');
+      function downloadPDF(kind) {
+        const { year, records } = getRecordsForExport(kind);
+        if (!records.length) {
+          alert('No data to download for the selected year.');
           return;
         }
-        const classFilter = document.getElementById('student-list-class') ? document.getElementById('student-list-class').value || '' : '';
-        const list = (filenameBase === 'student-list')
-          ? cachedStudents.filter(s => !classFilter || s.classLevel === classFilter)
-          : cachedStudents;
-
-        const rows = list.map(s => {
-          const paidAmount = calculatePaidAmount(s);
-          const debt = calculateDebt(s);
-          return [
-            s.admissionNumber || 'N/A',
-            `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim(),
-            s.classLevel || 'N/A',
-            s.timestamp ? new Date(s.timestamp).toLocaleDateString() :
-              (s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'N/A'),
-            s.primaryParentContact || 'N/A',
-            s.feePerYear || 0,
-            paidAmount,
-            debt,
-            s.paymentPlan || 'N/A'
-          ];
-        });
-        const { jsPDF } = window.jspdf;
-        if (!jsPDF) {
+        const jsPDFLib = window.jspdf?.jsPDF;
+        if (!jsPDFLib) {
           alert('jsPDF not loaded');
           return;
         }
-        const doc = new jsPDF({ orientation: 'landscape' });
+        const doc = new jsPDFLib({ orientation: 'landscape' });
         doc.setFontSize(14);
-        doc.text(`${filenameBase.replace('-', ' ')} Report`, 14, 10);
+        doc.text(`${kind.replace('-', ' ')} Report (${year})`, 14, 10);
+        const body = records.map((rec) => [
+          rec.admissionNo,
+          rec.fullName,
+          rec.classLabel,
+          rec.registrationDate,
+          rec.contact,
+          fmtCurrency(rec.fee),
+          fmtCurrency(rec.paid),
+          fmtCurrency(rec.debt),
+          rec.planLabel || rec.planId || 'Class default',
+        ]);
         doc.autoTable({
           head: [['Admission No','Full Name','Class','Date of Registration','Parent Contact','Fee Total','Paid Amount','Debt','Payment Plan']],
-          body: rows,
+          body,
           startY: 18,
-          styles: { fontSize: 8 }
+          styles: { fontSize: 8 },
         });
-        doc.save(`${filenameBase}.pdf`);
-        console.log('PDF downloaded'); // Debug log
+        doc.save(`${kind}_${year}.pdf`);
       }
-
-      // Event listeners for download buttons
-      const downloadCsvBtn = document.getElementById('downloadCsvBtn');
-      const downloadPdfBtn = document.getElementById('downloadPdfBtn');
-      const schoolDownloadCsv = document.getElementById('schoolDownloadCsv');
-      const schoolDownloadPdf = document.getElementById('schoolDownloadPdf');
-      const reportDownloadCsv = document.getElementById('reportDownloadCsv');
-      const reportDownloadPdf = document.getElementById('reportDownloadPdf');
-
-      if (downloadCsvBtn) downloadCsvBtn.addEventListener('click', () => downloadCSVforTab('student-list'));
-      if (downloadPdfBtn) downloadPdfBtn.addEventListener('click', () => downloadPDFforTab('student-list'));
-      if (schoolDownloadCsv) schoolDownloadCsv.addEventListener('click', () => downloadCSVforTab('school-reports'));
-      if (schoolDownloadPdf) schoolDownloadPdf.addEventListener('click', () => downloadPDFforTab('school-reports'));
-      if (reportDownloadCsv) reportDownloadCsv.addEventListener('click', () => downloadCSVforTab('report-forms'));
-      if (reportDownloadPdf) reportDownloadPdf.addEventListener('click', () => downloadPDFforTab('report-forms'));
     });
   </script>
 </body>

@@ -731,7 +731,13 @@ function buildFinanceStudents(
 
       const resolvedPlanId = override.planId || classDefaults.defaultPlanId || null;
       const resolvedPlan = resolvedPlanId ? plans[resolvedPlanId] : null;
-      const paymentPlan =
+      
+      // Check if this is a monthly plan (schedule has "Monthly:" labels)
+      const isMonthlyPlan = resolvedPlan?.schedule && Array.isArray(resolvedPlan.schedule) && 
+        resolvedPlan.schedule.length > 0 && 
+        resolvedPlan.schedule.some(row => String(row.label || '').includes('Monthly:'));
+      
+      let paymentPlan =
         (resolvedPlan && resolvedPlan.name) ||
         override.planName ||
         override.paymentPlan ||
@@ -740,14 +746,28 @@ function buildFinanceStudents(
         classDefaults.defaultPlan ||
         base.paymentPlan ||
         '6-instalments';
+      
+      // Override plan name for monthly plans
+      if (isMonthlyPlan) {
+        paymentPlan = 'Malipo kwa mwezi';
+      }
 
-      const baseFeeCandidate =
+      let baseFeeCandidate =
         override.feePerYear ??
         classDefaults.feePerYear ??
         base.feePerYear ??
         base.feeDue ??
         base.requiredFee ??
         0;
+      
+      // If monthly plan, calculate total from schedule if fee is not set
+      if (isMonthlyPlan && (!baseFeeCandidate || baseFeeCandidate === 0) && resolvedPlan?.schedule) {
+        const totalFromSchedule = resolvedPlan.schedule.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+        if (totalFromSchedule > 0) {
+          baseFeeCandidate = totalFromSchedule;
+        }
+      }
+      
       const baseFee = Math.max(0, Math.round(Number(baseFeeCandidate) || 0));
       const carryAmount = Math.max(0, Number(carry.amount ?? carry.balance ?? 0));
       const effectiveFee = Math.max(0, baseFee + carryAmount);

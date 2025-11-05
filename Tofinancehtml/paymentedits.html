@@ -321,6 +321,12 @@
             <!-- checkboxes will be populated by JS -->
           </div>
         </div>
+        <div class="text-sm text-slate-700 col-span-2">
+          Exclude Months (mark months that should NOT be paid)
+          <div class="grid grid-cols-3 gap-1 mt-1 text-xs" id="mpExcluded">
+            <!-- checkboxes will be populated by JS -->
+          </div>
+        </div>
       </div>
       <div class="mb-3">
         <label class="text-sm inline-flex items-center gap-2 text-slate-700">
@@ -684,7 +690,23 @@
     function renderClassCard(className, cfg) {
       const planId = cfg?.defaultPlanId || cfg?.defaultPlan || DEFAULT_PLAN_ID;
       const plan = state.plans?.[planId];
-      const planName = plan?.name || planId || 'â€”';
+      let planName = plan?.name || planId || 'â€”';
+      let displayFee = cfg?.feePerYear || 0;
+      
+      // Check if this is a monthly plan (schedule has "Monthly:" labels)
+      const isMonthlyPlan = plan?.schedule && Array.isArray(plan.schedule) && 
+        plan.schedule.length > 0 && 
+        plan.schedule.some(row => String(row.label || '').includes('Monthly:'));
+      
+      if (isMonthlyPlan) {
+        planName = 'Malipo kwa mwezi';
+        // Calculate total from monthly schedule
+        const totalFromSchedule = plan.schedule.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+        if (totalFromSchedule > 0) {
+          displayFee = totalFromSchedule;
+        }
+      }
+      
       const badge = cfg?.active === false
         ? '<span class="tag bg-rose-500/20 border border-rose-400/30 text-rose-200">Inactive</span>'
         : '<span class="tag bg-emerald-500/15 border border-emerald-400/25 text-emerald-200">Active</span>';
@@ -725,7 +747,7 @@
             <div>
               <h3 class="text-lg font-semibold">${className}</h3>
               <p class="text-xs text-slate-400 mt-1">Default plan: <span class="font-medium text-slate-200">${planName}</span></p>
-              <p class="text-xs text-slate-400">Fee (year): <span class="font-medium text-indigo-200">TSh ${fmtMoney(cfg?.feePerYear || 0)}</span></p>
+              <p class="text-xs text-slate-400">Fee (year): <span class="font-medium text-indigo-200">TSh ${fmtMoney(displayFee)}</span></p>
             </div>
             <div class="flex flex-col items-end gap-2">
               ${badge}
@@ -1906,6 +1928,8 @@
     let modal, ctx, elPlanId, elPlanName, elAmt, elFrom, elLen, elDbl, elAssignClass, prevBtn, saveBtn, saveApplyBtn, prevBox;
     let MP_STATE = { attachTo: null, className: null, studentId: null, studentName: null };
 
+    let elExcluded;
+    
     function initMonthlyPlanModal() {
       modal = document.getElementById('monthlyPlanModal');
       ctx = document.getElementById('mpContext');
@@ -1915,6 +1939,7 @@
       elFrom = document.getElementById('mpFromDay');
       elLen = document.getElementById('mpWindowLen');
       elDbl = document.getElementById('mpDoubles');
+      elExcluded = document.getElementById('mpExcluded');
       elAssignClass = document.getElementById('mpAssignClass');
       prevBtn = document.getElementById('mpPreview');
       saveBtn = document.getElementById('mpSave');
@@ -1922,6 +1947,7 @@
       prevBox = document.getElementById('mpPreviewBox');
       
       fillDoubleMonthChecks();
+      fillExcludedMonthChecks();
       
       if (document.getElementById('mpClose')) {
         document.getElementById('mpClose').onclick = closeMonthlyPlanModal;
@@ -1958,6 +1984,16 @@
       `).join('');
     }
 
+    function fillExcludedMonthChecks() {
+      if (!elExcluded) return;
+      elExcluded.innerHTML = MONTHS.map((m, i) => `
+        <label class="inline-flex items-center gap-1 text-xs">
+          <input type="checkbox" value="${i + 1}" class="mpExcluded" title="Exclude ${m} from payment">
+          <span class="text-red-600">✕</span> ${m}
+        </label>
+      `).join('');
+    }
+
     function openMonthlyPlanModal({ attachTo, className = null, studentId = null, studentName = null }) {
       MP_STATE = { attachTo, className, studentId, studentName };
       const year = state.year || window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR;
@@ -1977,6 +2013,7 @@
       if (prevBox) prevBox.classList.add('hidden');
       
       fillDoubleMonthChecks();
+      fillExcludedMonthChecks();
       
       if (modal) {
         modal.style.display = 'flex';
@@ -1999,10 +2036,21 @@
         .map(x => Number(x.value)); // 1..12
     }
 
-    function buildMonthlySchedule(monthlyAmount, fromDay, winLen, doubleMonths) {
+    function getExcludedMonths() {
+      if (!elExcluded) return [];
+      return Array.from(elExcluded.querySelectorAll('.mpExcluded'))
+        .filter(x => x.checked)
+        .map(x => Number(x.value)); // 1..12
+    }
+
+    function buildMonthlySchedule(monthlyAmount, fromDay, winLen, doubleMonths, excludedMonths) {
       const pad = (n) => String(n).padStart(2, '0');
       const rows = [];
       for (let m = 1; m <= 12; m++) {
+        // Skip excluded months
+        if (excludedMonths && excludedMonths.includes(m)) {
+          continue;
+        }
         const amt = monthlyAmount * (doubleMonths.includes(m) ? 2 : 1);
         const from = `${pad(m)}-${pad(fromDay)}`;
         const toDay = Math.min(fromDay + winLen - 1, 28);
@@ -2024,7 +2072,8 @@
       const fromDay = Math.max(1, Math.min(28, Number(elFrom.value || 1)));
       const winLen = Math.max(3, Math.min(20, Number(elLen.value || 10)));
       const dbl = getSelectedDoubleMonths();
-      const rows = buildMonthlySchedule(monthlyAmount, fromDay, winLen, dbl);
+      const excluded = getExcludedMonths();
+      const rows = buildMonthlySchedule(monthlyAmount, fromDay, winLen, dbl, excluded);
       const total = rows.reduce((a, b) => a + Number(b.amount || 0), 0);
       
       prevBox.innerHTML = `
@@ -2061,7 +2110,21 @@
         await writer(`${pathPlans(year)}/${planId}`, payload);
         
         if (MP_STATE.attachTo === 'class' && elAssignClass?.checked && MP_STATE.className) {
-          await window.financePlansService.upsertClassFeeAndPlan(MP_STATE.className, null, planId, { year, by: currentUser() });
+          // Calculate total fee from monthly schedule
+          const totalFee = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+          // Update class with monthly plan and total fee
+          await window.financePlansService.upsertClassFeeAndPlan(MP_STATE.className, totalFee, planId, { year, by: currentUser() });
+          // Also update the old structure
+          const classPath = `${pathFees(year)}/${MP_STATE.className}`;
+          const classData = await reader(classPath) || {};
+          await writer(classPath, {
+            ...classData,
+            feePerYear: totalFee,
+            defaultPlanId: planId,
+            defaultPlan: planId,
+            updatedAt: Date.now(),
+            updatedBy: currentUser()
+          });
         }
         
         if (applyToStudent && MP_STATE.studentId) {

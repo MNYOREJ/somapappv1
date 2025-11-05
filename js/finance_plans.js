@@ -459,7 +459,7 @@ async function getStudentCarryForward(studentId) {
   }
 }
 
-// Export for use in HTML files (non-module scripts)
+// Export for use in HTML files (non-module scripts) - expose immediately
 if (typeof window !== 'undefined') {
   window.financePlansService = {
     getYear,
@@ -480,5 +480,6 @@ if (typeof window !== 'undefined') {
     getStudentLedger,
     getStudentCarryForward
   };
+  console.log('✅ Finance Plans Service initialized');
 }
 

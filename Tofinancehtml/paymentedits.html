@@ -407,7 +407,12 @@
       console.error('Firebase init error', err);
     }
     const db = (() => { try { return firebase.database(); } catch { return null; } })();
-    if (!db) console.error('Firebase database not initialized.');
+    if (!db) {
+      console.error('Firebase database not initialized.');
+    } else {
+      // Make db available globally for the service
+      window.db = db;
+    }
 
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -512,12 +517,13 @@
     }
 
     async function ensureYearScaffold(year) {
-      const [feesSnap, plansSnap] = await Promise.all([
-        db.ref(pathFees(year)).once('value'),
-        db.ref(pathPlans(year)).once('value')
-      ]);
-      let fees = canonicalizeFees(feesSnap.val() || {});
-      let plans = plansSnap.val() || {};
+      try {
+        const [feesSnap, plansSnap] = await Promise.all([
+          db.ref(pathFees(year)).once('value').catch(() => ({ val: () => null })),
+          db.ref(pathPlans(year)).once('value').catch(() => ({ val: () => null }))
+        ]);
+        let fees = canonicalizeFees(feesSnap?.val() || {});
+        let plans = plansSnap?.val() || {};
 
       let baseFees = fees;
       let basePlans = plans;
@@ -584,16 +590,21 @@
         }
       });
 
-      if (Object.keys(updates).length) {
-        await db.ref().update(updates);
-        const [feesRefreshed, plansRefreshed] = await Promise.all([
-          db.ref(pathFees(year)).once('value'),
-          db.ref(pathPlans(year)).once('value')
-        ]);
-        fees = canonicalizeFees(feesRefreshed.val() || {});
-        plans = plansRefreshed.val() || {};
+        if (Object.keys(updates).length) {
+          await db.ref().update(updates);
+          const [feesRefreshed, plansRefreshed] = await Promise.all([
+            db.ref(pathFees(year)).once('value').catch(() => ({ val: () => null })),
+            db.ref(pathPlans(year)).once('value').catch(() => ({ val: () => null }))
+          ]);
+          fees = canonicalizeFees(feesRefreshed?.val() || {});
+          plans = plansRefreshed?.val() || {};
+        }
+        return { fees, plans };
+      } catch (err) {
+        console.error('Error in ensureYearScaffold:', err);
+        // Return empty objects on error but don't crash
+        return { fees: {}, plans: {} };
       }
-      return { fees, plans };
     }
 
     const state = {
@@ -758,25 +769,40 @@
     }
 
     async function refreshAll() {
-      if (!db) return;
-      const hint = $('#somapYearHint');
-      const year = String(window.somapYearContext.getSelectedYear());
-      state.year = year;
-      if (hint) hint.textContent = year;
-      $('#plansWrap').innerHTML = '<div class="text-sm text-slate-300">Loadingâ€¦</div>';
-      $('#classesWrap').innerHTML = '<div class="text-sm text-slate-300">Loadingâ€¦</div>';
+      if (!db) {
+        console.error('Database not available');
+        const errorMsg = '<div class="text-sm text-red-300">Error: Database not initialized</div>';
+        $('#plansWrap').innerHTML = errorMsg;
+        $('#classesWrap').innerHTML = errorMsg;
+        return;
+      }
+      
+      try {
+        const hint = $('#somapYearHint');
+        const year = String(window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+        state.year = year;
+        if (hint) hint.textContent = year;
+        $('#plansWrap').innerHTML = '<div class="text-sm text-slate-300">Loading…</div>';
+        $('#classesWrap').innerHTML = '<div class="text-sm text-slate-300">Loading…</div>';
 
-      const { fees, plans } = await ensureYearScaffold(year);
-      state.fees = fees;
-      state.plans = plans;
-      populateClassPicker();
-      renderClasses();
-      renderPlans();
-      const q = $('#studentQuery')?.value || '';
-      if (q && q.length >= 2) {
-        renderOverrides(q);
-      } else {
-        $('#studentPanel').innerHTML = '<div class="text-sm text-slate-400">Search for a student to view overrides.</div>';
+        const { fees, plans } = await ensureYearScaffold(year);
+        state.fees = fees || {};
+        state.plans = plans || {};
+        populateClassPicker();
+        renderClasses();
+        renderPlans();
+        const q = $('#studentQuery')?.value || '';
+        if (q && q.length >= 2) {
+          await renderOverrides(q);
+        } else {
+          $('#studentPanel').innerHTML = '<div class="text-sm text-slate-400">Search for a student to view overrides.</div>';
+        }
+      } catch (err) {
+        console.error('Error in refreshAll:', err);
+        const errorMsg = 'Error loading data: ' + (err.message || 'Unknown error');
+        toast(errorMsg, 'error');
+        $('#plansWrap').innerHTML = '<div class="text-sm text-red-300">' + errorMsg + '</div>';
+        $('#classesWrap').innerHTML = '<div class="text-sm text-red-300">' + errorMsg + '</div>';
       }
     }
 
@@ -1747,11 +1773,52 @@
       if (action === 'override-custom') setOverrideCustom(studentId);
     });
 
+    // Ensure year context is initialized before using service
+    if (!window.somapYearContext) {
+      window.somapYearContext = (function () {
+        let selected = String(sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR);
+        const listeners = new Set();
+        return {
+          getSelectedYear() { return selected; },
+          setSelectedYear(y) {
+            const val = String(y);
+            if (val === selected) return;
+            selected = val;
+            try { sessionStorage.setItem('somap_selected_year', val); } catch (e) { console.warn(e); }
+            listeners.forEach((fn) => { try { fn(val); } catch (err) { console.error(err); } });
+          },
+          onYearChanged(fn) { if (typeof fn === 'function') listeners.add(fn); }
+        };
+      })();
+    }
+
     window.somapYearContext.onYearChanged(() => refreshAll());
 
-    document.addEventListener('DOMContentLoaded', () => {
-      populateClassPicker();
-      refreshAll();
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        // Ensure year selector is initialized
+        const select = document.querySelector('[data-somap-year-select]');
+        const hint = document.getElementById('somapYearHint');
+        if (select && !select.innerHTML) {
+          select.innerHTML = SOMAP_ALLOWED_YEARS.map((y) => `<option value="${y}">${y}</option>`).join('');
+          const current = window.somapYearContext.getSelectedYear();
+          select.value = current;
+          if (hint) hint.textContent = current;
+          select.addEventListener('change', (ev) => {
+            const chosen = String(ev.target.value);
+            window.somapYearContext.setSelectedYear(chosen);
+            if (hint) hint.textContent = chosen;
+          });
+        }
+        
+        populateClassPicker();
+        // Small delay to ensure everything is initialized
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await refreshAll();
+      } catch (err) {
+        console.error('Error on page load:', err);
+        toast('Error loading page data: ' + (err.message || 'Unknown'), 'error');
+      }
     });
   </script>
 </body>

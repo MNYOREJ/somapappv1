@@ -341,14 +341,37 @@ function sumValues(list, mapper = (v) => v) {
   }, 0);
 }
 
+function toNumeric(value) {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return NaN;
+    const cleaned = trimmed.replace(/[^0-9.\-]/g, '');
+    if (!cleaned) return NaN;
+    return Number(cleaned);
+  }
+  return Number(value);
+}
+
 function parseScheduleRow(raw = {}) {
   const label = raw.label ?? raw.title ?? '';
   const from = raw.from ?? raw.start ?? '';
   const to = raw.to ?? raw.end ?? '';
-  const weightRaw = raw.weight ?? raw.liveWeight ?? raw.weightValue ?? 0;
-  const weight = Number(weightRaw);
-  const hasAmount = raw.amount !== undefined && raw.amount !== null && raw.amount !== '';
-  const amountVal = hasAmount ? Number(raw.amount) : NaN;
+  const weightRaw = raw.weight ?? raw.liveWeight ?? raw.weightValue ?? raw.weightKg ?? 0;
+  const weight = toNumeric(weightRaw);
+  const amountSource =
+    raw.amount ??
+    raw.value ??
+    raw.amountDue ??
+    raw.expectedAmount ??
+    raw.expected ??
+    raw.installmentAmount ??
+    raw.total ??
+    raw.fee ??
+    raw.amountValue ??
+    null;
+  const amountVal = toNumeric(amountSource);
   const out = {
     label: String(label || ''),
     from: from || '',

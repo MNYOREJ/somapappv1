@@ -710,6 +710,7 @@
   let graduationGalleryYear = null;
   let scoresChart = null, attendanceChart = null;
   let __allPaymentsSum = 0;
+  let latestFinanceSnapshot = null;
   const getActiveYearString = () => String(activeYear || new Date().getFullYear());
   const getActiveYearNumber = () => Number(getActiveYearString());
   function updateYearBadge(){
@@ -734,6 +735,7 @@
     const yearStr = getActiveYearString();
     try{
       const fin = await window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey);
+      latestFinanceSnapshot = fin;
       statFeeDue.textContent = fmtTsh(fin.due);
       statPaid.textContent = fmtTsh(fin.paid);
       statBalance.textContent = fmtTsh(Math.max(0, fin.outstanding));
@@ -890,12 +892,20 @@
     // Recompute with best total
     const aggSum = merged.reduce((s,p)=> s + (Number(p.amount)||0), 0);
     __allPaymentsSum = aggSum;
-    const feeDue = Number(currentStudent?.feePerYear || currentStudent?.feeDue || 0);
+    const snapshotDue = Number(latestFinanceSnapshot?.due || 0);
+    const snapshotPaid = Number(latestFinanceSnapshot?.paid || 0);
+    const fallbackFeeDue = Number(currentStudent?.feePerYear || currentStudent?.feeDue || 0);
+    const feeDue = snapshotDue > 0 ? snapshotDue : fallbackFeeDue;
     const paidLocal = Number(currentStudent?.paidAmount || calculateTotalPayments(currentStudent) || 0);
-    const bestPaid = Math.max(aggSum, paidLocal);
+    const bestPaid = Math.max(aggSum, paidLocal, snapshotPaid);
     statPaid.textContent = fmtTsh(bestPaid);
-    statBalance.textContent = fmtTsh(Math.max(0, feeDue - bestPaid));
+    const computedOutstanding = Math.max(0, feeDue - bestPaid);
+    statBalance.textContent = fmtTsh(computedOutstanding);
     applyFeeBadge(feeDue, bestPaid);
+    if (latestFinanceSnapshot) {
+      latestFinanceSnapshot.paid = bestPaid;
+      latestFinanceSnapshot.outstanding = computedOutstanding;
+    }
 
     // ---- Update Receipts stat card
     const recCount = merged.length;

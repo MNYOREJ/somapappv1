@@ -385,6 +385,18 @@
   const defaultNoBooksText = noBooksMessageEl?.textContent || 'No books available yet.';
   const grid = document.getElementById('booksGrid');
   const searchInput = document.getElementById('searchInput');
+  let activeBooksRef = null;
+  let activeBooksListener = null;
+
+  function canonicalClassName(cls){ return (cls || '').trim(); }
+  function booksCacheKey(cls, year = selectedYear){ return `books_${year}_${canonicalClassName(cls)}`; }
+  function detachActiveBooksListener(){
+    if (activeBooksRef && activeBooksListener){
+      try{ activeBooksRef.off('value', activeBooksListener); }catch(_){}
+    }
+    activeBooksRef = null;
+    activeBooksListener = null;
+  }
 
   function isPdf(url){ return /\.pdf(\?|#|$)/i.test(url||''); }
   function thumbFrom(url){
@@ -395,15 +407,18 @@
   }
 
   async function fetchBooks(cls){
+    const targetClass = canonicalClassName(cls);
+    className = targetClass;
+    detachActiveBooksListener();
     grid.innerHTML = '';
     loadingEl.classList.remove('hidden');
     noBooksEl.classList.add('hidden');
-    if (!cls || cls.toUpperCase() === 'GRADUATED') {
+    if (!targetClass || targetClass.toUpperCase() === 'GRADUATED') {
       loadingEl.classList.add('hidden');
       if (noBooksEl) {
         noBooksEl.classList.remove('hidden');
         if (noBooksMessageEl) {
-          noBooksMessageEl.textContent = cls && cls.toUpperCase() === 'GRADUATED'
+          noBooksMessageEl.textContent = targetClass && targetClass.toUpperCase() === 'GRADUATED'
             ? `Graduated learners do not have assigned class books for ${selectedYear}.`
             : 'No class selected for this year.';
         }
@@ -413,23 +428,52 @@
       noBooksMessageEl.textContent = defaultNoBooksText;
     }
 
-    const path = `class_books/${encodeURIComponent(cls)}`;
-    const key = `books_${cls}`;
-    if (cache.has(key)) { renderBooks(cache.get(key)); }
+    const cacheKey = booksCacheKey(targetClass);
+    if (cache.has(cacheKey)) {
+      renderBooks(cache.get(cacheKey));
+    }
+
+    const encodedClass = encodeURIComponent(targetClass);
+    const yearPaths = [
+      `class_books/${selectedYear}/${encodedClass}`,
+      `class_books/${selectedYear}/${targetClass}`
+    ];
+    const legacyPaths = [
+      `class_books/${encodedClass}`,
+      `class_books/${targetClass}`
+    ];
+    const pathCandidates = [...yearPaths, ...legacyPaths];
+    let chosenPath = null;
+    let entries = [];
 
     try{
-      const snap = await db.ref(path).once('value');
-      const data = snap.val() || {};
-      const entries = Object.entries(data);
-      cache.set(key, entries);
-      renderBooks(entries);
-      db.ref(path).on('value', s=>{
-        const d = s.val()||{};
-        const e = Object.entries(d);
-        if (JSON.stringify(e)!==JSON.stringify(cache.get(key))){
-          cache.set(key,e); renderBooks(e);
+      for (const path of pathCandidates){
+        const snap = await db.ref(path).once('value');
+        const data = snap.val() || {};
+        const pairs = Object.entries(data);
+        if (!chosenPath) chosenPath = path;
+        if (pairs.length){
+          chosenPath = path;
+          entries = pairs;
+          break;
         }
-      });
+      }
+      cache.set(cacheKey, entries);
+      renderBooks(entries);
+      if (chosenPath){
+        const ref = db.ref(chosenPath);
+        const listener = s=>{
+          const d = s.val()||{};
+          const e = Object.entries(d);
+          if (JSON.stringify(e)!==JSON.stringify(cache.get(cacheKey))){
+            cache.set(cacheKey, e);
+            renderBooks(e);
+          }
+        };
+        ref.on('value', listener);
+        activeBooksRef = ref;
+        activeBooksListener = listener;
+      }
     }catch(e){
       loadingEl.classList.add('hidden');
       alert('Error loading books: ' + e.message);
@@ -439,7 +483,7 @@
   // attach once
   searchInput.addEventListener('input', ()=>{
     const q = (searchInput.value||'').toLowerCase().trim();
-    const all = cache.get(`books_${className}`)||[];
+    const all = cache.get(booksCacheKey(className))||[];
     const filtered = all.filter(([id,b])=>{
       const t=(b.title||'').toLowerCase(); const s=(b.subject||'').toLowerCase();
       return t.includes(q)||s.includes(q);

@@ -7,13 +7,31 @@
   'use strict';
 
   const SOMAP_DEFAULT_YEAR = Number(global.SOMAP_DEFAULT_YEAR) || 2025;
+  const DEFAULT_CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
   const CLASS_ORDER = Array.isArray(global.CLASS_ORDER) && global.CLASS_ORDER.length
     ? global.CLASS_ORDER
-    : ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    : DEFAULT_CLASS_ORDER;
   const L = (s) => String(s || '').trim().toLowerCase();
+  const CLASS_ALIASES = {
+    'middle': 'Middle Class',
+    'middle class': 'Middle Class',
+    'pre unit': 'Pre Unit Class',
+    'pre-unit': 'Pre Unit Class',
+    'preunit': 'Pre Unit Class',
+    'preunit class': 'Pre Unit Class',
+    'pre unit class': 'Pre Unit Class',
+    'pre-primary': 'Middle Class',
+    'pre primary': 'Middle Class'
+  };
+
+  const normalizeClassLabel = (label) => {
+    const key = L(label);
+    return CLASS_ALIASES[key] || label;
+  };
 
   const shiftClassFallback = (baseClass, deltaYears) => {
-    const i = CLASS_ORDER.findIndex((c) => L(c) === L(baseClass));
+    const normalizedBase = normalizeClassLabel(baseClass);
+    const i = CLASS_ORDER.findIndex((c) => L(c) === L(normalizedBase));
     if (i < 0) return baseClass || '';
     const j = i + Number(deltaYears || 0);
     if (j < 0) return 'PRE-ADMISSION';

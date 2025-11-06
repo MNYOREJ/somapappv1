@@ -161,6 +161,47 @@
       .sidebar{ position:sticky; top:0; width:100%; height:auto; flex-direction:row; justify-content:center; gap:10px; }
     }
   </style>
+
+  <script>
+  /** Year range + anchor **/
+  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+  const SOMAP_DEFAULT_YEAR = 2025;
+
+  /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const L = s => String(s||'').trim().toLowerCase();
+
+  /** Shift a base class by delta years relative to anchor (2025). */
+  function shiftClass(baseClass, deltaYears){
+    const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+    if (i<0) return baseClass||'';
+    const j = i + Number(deltaYears||0);
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASS_ORDER.length) return 'GRADUATED';
+    return CLASS_ORDER[j];
+  }
+  </script>
+
+  <script>
+  /** Reuse shared year context if present, else create a light fallback. */
+  window.somapYearContext = window.somapYearContext || (function(){
+    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    const listeners = new Set();
+    return {
+      getSelectedYear(){ return selected; },
+      setSelectedYear(y){
+        y = String(y);
+        if (selected===y) return;
+        selected = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
+        listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+      },
+      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+    };
+  })();
+  </script>
+
+  <script src="shared/finance_math.js"></script>
 </head>
 <body>
 
@@ -186,22 +227,23 @@
           <p class="uppercase tracking-[0.35em] text-xs muted">Parent Experience Hub</p>
           <h1 id="studentName" class="title text-3xl md:text-4xl font-extrabold">Parent Dashboard</h1>
           <p id="studentMeta" class="muted mt-1">Loading student detailsΓÇª</p>
+          <p id="studentGradBadge" class="badge badge-risk mt-2" style="display:none;">Graduated</p>
         </div>
-          <div class="flex flex-col items-end gap-3 md:flex-row md:items-center">
-            <div class="text-right md:text-right">
-              <p class="muted text-xs uppercase tracking-[0.35em]">Role</p>
-              <p class="title font-extrabold">Parent</p>
-            </div>
-            <div class="flex w-full flex-col items-end gap-1 rounded-xl border border-slate-600/40 bg-slate-900/40 px-3 py-2 md:w-auto md:items-start md:border-transparent md:bg-transparent md:px-0 md:py-0">
-              <span class="muted text-[0.65rem] uppercase tracking-[0.35em]">Academic Year</span>
-              <select
-                data-somap-year-select
-                class="w-full min-w-[130px] rounded-lg border border-slate-600/60 bg-slate-950/70 px-3 py-1 text-sm font-semibold text-slate-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40 md:min-w-[140px] md:bg-slate-900/60"
-              >
-              </select>
-            </div>
-            <button class="btn" id="openMarketTop"><i class="fas fa-bag-shopping mr-2"></i>Open Market</button>
+        <div class="flex flex-col items-end gap-3 md:flex-row md:items-center">
+          <div class="text-right md:text-right">
+            <p class="muted text-xs uppercase tracking-[0.35em]">Role</p>
+            <p class="title font-extrabold">Parent</p>
           </div>
+          <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;margin:6px 0;" class="flex w-full flex-col items-end gap-1 rounded-xl border border-slate-600/40 bg-slate-900/40 px-3 py-2 md:w-auto md:flex-row md:items-center md:border-transparent md:bg-transparent md:px-0 md:py-0">
+            <label class="muted text-[0.65rem] uppercase tracking-[0.35em] text-xs font-semibold">Academic Year</label>
+            <select
+              data-somap-year-select
+              class="w-full min-w-[130px] rounded-lg border border-slate-600/60 bg-slate-950/70 px-3 py-1 text-sm font-semibold text-slate-100 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-500/40 md:min-w-[140px] md:bg-slate-900/60"
+            ></select>
+            <span class="text-xs text-slate-300">Working year: <b id="somapYearHint">--</b></span>
+          </div>
+          <button class="btn" id="openMarketTop"><i class="fas fa-bag-shopping mr-2"></i>Open Market</button>
+        </div>
       </div>
     </section>
 
@@ -476,6 +518,7 @@
   // Refs
   const studentNameEl = q('#studentName');
   const studentMetaEl = q('#studentMeta');
+  const studentGradBadge = q('#studentGradBadge');
   const statFeeDue = q('#statFeeDue');
   const statPaid = q('#statPaid');
   const statBalance = q('#statBalance');
@@ -657,13 +700,52 @@
   let graduationGalleryYear = null;
   let scoresChart = null, attendanceChart = null;
   let __allPaymentsSum = 0;
-    const getActiveYearString = () => String(activeYear || new Date().getFullYear());
+  const getActiveYearString = () => String(activeYear || new Date().getFullYear());
   const getActiveYearNumber = () => Number(getActiveYearString());
-  function updateYearBadge(){ if(gradYearLabel) gradYearLabel.textContent = getActiveYearString(); }
+  function updateYearBadge(){
+    const yearStr = getActiveYearString();
+    if (gradYearLabel) gradYearLabel.textContent = yearStr;
+    const hint = document.getElementById('somapYearHint');
+    if (hint) hint.textContent = yearStr;
+  }
+
+  function toggleGradBadge(isGraduated, yearStr){
+    if (!studentGradBadge) return;
+    if (isGraduated){
+      studentGradBadge.style.display = 'inline-flex';
+      studentGradBadge.textContent = `Graduated (${yearStr})`;
+    } else {
+      studentGradBadge.style.display = 'none';
+    }
+  }
+
+  async function renderFinanceStats(){
+    if (!currentStudentKey || !window.SomapFinance) return;
+    const yearStr = getActiveYearString();
+    try{
+      const fin = await window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey);
+      statFeeDue.textContent = fmtTsh(fin.due);
+      statPaid.textContent = fmtTsh(fin.paid);
+      statBalance.textContent = fmtTsh(Math.max(0, fin.outstanding));
+      applyFeeBadge(fin.due, fin.paid);
+      const planName = fin.record?.paymentPlan || fin.paymentPlan || currentStudent?.paymentPlan || '-';
+      statPaymentPlan.textContent = safe(planName);
+      const displayClass = fin.classLevel || fin.record?.classLevel || currentStudent?.classLevel || '-';
+      const classLabel = displayClass === 'GRADUATED'
+        ? `Graduated (${yearStr})`
+        : safe(displayClass);
+      detailClass.textContent = classLabel;
+      toggleGradBadge(fin.isGraduated || displayClass === 'GRADUATED', yearStr);
+    }catch(err){
+      console.error('Failed to sync finance stats', err);
+    }
+  }
+
   async function refreshYearDependentData() {
     if (!currentStudent) return;
     const adm = currentStudent.admissionNumber || currentStudent.pupilId || currentStudentKey;
     const classLevel = currentStudent.classLevel || '';
+    await renderFinanceStats();
     await loadPaymentsAllSources(currentStudentKey, adm, classLevel, getActiveYearString());
     await loadGraduationSummary(adm, classLevel, getActiveYearString());
     updateYearBadge();
@@ -706,15 +788,6 @@
     studentNameEl.textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.middleName || '')} ${safe(currentStudent.lastName)}`.replace(/\s+/g,' ').trim();
     studentMetaEl.textContent = `School: ${safe(currentStudent.schoolName || '-')}`;
     updateYearBadge();
-
-    // Stats
-    const feeDue = Number(currentStudent.feePerYear || currentStudent.feeDue || 0);
-    const paidLocal = Number(currentStudent.paidAmount || calculateTotalPayments(currentStudent) || 0);
-    statFeeDue.textContent = fmtTsh(feeDue);
-    statPaid.textContent = fmtTsh(paidLocal);
-    statBalance.textContent = fmtTsh(Math.max(0, feeDue - paidLocal));
-    applyFeeBadge(feeDue, paidLocal);
-    statPaymentPlan.textContent = safe(currentStudent.paymentPlan || '-');
 
     detailClass.textContent = safe(currentStudent.classLevel || '-');
     detailStream.textContent = safe(currentStudent.stream || '-');
@@ -1168,7 +1241,13 @@
         w.addEventListener('load', ()=>{ w.document.documentElement.requestFullscreen?.().catch(()=>{}); }, {once:true});
         break;
       case 'fees': Swal.fire({ title:'Payments', html: paymentsList.innerHTML, width:800 }); break;
-      case 'books': window.open('Bookshtml/classbook.html','_blank'); break;
+      case 'books':
+        if (!currentStudentKey){
+          Swal.fire('Error','Student data not loaded. Please sign in again.','error');
+          return;
+        }
+        window.open(`Bookshtml/classbook.html?student=${encodeURIComponent(currentStudentKey)}&year=${encodeURIComponent(getActiveYearString())}`,'_blank');
+        break;
     }
   }
 
@@ -1181,14 +1260,6 @@
       return;
     }
     currentStudent = snap.val();
-    const feeDue = Number(currentStudent.feePerYear || currentStudent.feeDue || 0);
-    const paidLocal = Number(currentStudent.paidAmount || calculateTotalPayments(currentStudent) || 0);
-    const bestPaid = Math.max(paidLocal, __allPaymentsSum||0);
-    statFeeDue.textContent = fmtTsh(feeDue);
-    statPaid.textContent = fmtTsh(bestPaid);
-    statBalance.textContent = fmtTsh(Math.max(0, feeDue - bestPaid));
-    applyFeeBadge(feeDue, bestPaid);
-
     studentNameEl.textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`;
     detailClass.textContent = safe(currentStudent.classLevel || '-');
     detailStream.textContent = safe(currentStudent.stream || '-');

@@ -12,6 +12,7 @@
   <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="../shared/finance_math.js"></script>
   <!-- Unified Finance Plans Service -->
   <script type="module" src="../js/financeplans.js"></script>
 
@@ -675,7 +676,25 @@
       if (bi === -1) return -1;
       return ai - bi;
     }
+    function windowLabelFromInstallment(inst) {
+      const year = Number(state?.year || SOMAP_DEFAULT_YEAR);
+      const fromPair = inst?.window?.from || [];
+      const toPair = inst?.window?.to || [];
+      const resolveYear = (pair) => (pair[0] === 12 ? year - 1 : year);
+      const fmt = (pair, y) => {
+        const [m = 1, d = 1] = pair;
+        return `${m}/${d}/${y}`;
+      };
+      return `${fmt(fromPair, resolveYear(fromPair))} - ${fmt(toPair, resolveYear(toPair))}`;
+    }
     function sortInstallments(entries) {
+      const comparator = window.SomapFinance?.installmentCompare;
+      if (typeof comparator === 'function') {
+        return entries.sort(([, A], [, B]) => comparator(
+          { label: A?.label, window: windowLabelFromInstallment(A || {}) },
+          { label: B?.label, window: windowLabelFromInstallment(B || {}) }
+        ));
+      }
       return entries.sort(([, A], [, B]) => {
         const af = A?.window?.from || [];
         const bf = B?.window?.from || [];

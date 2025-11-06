@@ -8,6 +8,7 @@
   <!-- Firebase (v9 compat) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="../shared/finance_math.js"></script>
 
   <!-- Tailwind for quick styling -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -455,6 +456,27 @@
         };
       }
 
+      function windowLabelForSort(item){
+        const fmt = (ts) => {
+          const d = new Date(ts || 0);
+          return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+        };
+        return `${fmt(item.fromTS)} - ${fmt(item.toTS)}`;
+      }
+
+      function sortScheduleItems(items){
+        if (!Array.isArray(items)) return;
+        const comparator = window.SomapFinance?.installmentCompare;
+        if (typeof comparator === 'function') {
+          items.sort((a, b) => comparator(
+            { label: a.label, window: windowLabelForSort(a) },
+            { label: b.label, window: windowLabelForSort(b) }
+          ));
+        } else {
+          items.sort((a, b) => (a.fromTS || 0) - (b.fromTS || 0));
+        }
+      }
+
       function allocatePayments(schedule, student) {
         const payments = Object.values(student.payments || {})
           .map(p => ({
@@ -507,6 +529,7 @@
 
         const schedule = await buildSchedule(student, classDefaults, override);
         schedule.items = Array.isArray(schedule?.items) ? schedule.items : [];
+        sortScheduleItems(schedule.items);
         const planDisplay = schedule.planName || student.paymentPlan || '';
         const allocation = allocatePayments(schedule, student);
         const hasYearData = Boolean(student.hasYearData);

@@ -128,6 +128,45 @@
       .page-inner { width: 98%; }
     }
   </style>
+
+  <script>
+  /** Year range + anchor **/
+  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+  const SOMAP_DEFAULT_YEAR = 2025;
+
+  /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const L = s => String(s||'').trim().toLowerCase();
+
+  /** Shift a base class by delta years relative to anchor (2025). */
+  function shiftClass(baseClass, deltaYears){
+    const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+    if (i<0) return baseClass||'';
+    const j = i + Number(deltaYears||0);
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASS_ORDER.length) return 'GRADUATED';
+    return CLASS_ORDER[j];
+  }
+  </script>
+
+  <script>
+  /** Reuse shared year context if present, else create a light fallback. */
+  window.somapYearContext = window.somapYearContext || (function(){
+    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    const listeners = new Set();
+    return {
+      getSelectedYear(){ return selected; },
+      setSelectedYear(y){
+        y = String(y);
+        if (selected===y) return;
+        selected = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
+        listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+      },
+      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+    };
+  })();
+  </script>
 </head>
 <body>
   <!-- ======= Top ======= -->
@@ -153,6 +192,13 @@
 
   <!-- ======= Body ======= -->
   <main class="maxw px-4 py-6">
+    <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;margin:6px 0 16px 0;" class="flex flex-col items-start sm:flex-row sm:items-center sm:justify-between text-sm text-slate-600">
+      <div class="flex flex-col">
+        <label class="text-xs font-semibold uppercase tracking-wide">Academic Year</label>
+        <select data-somap-year-select class="mt-1 border rounded px-3 py-1 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"></select>
+      </div>
+      <span class="text-xs text-slate-500 mt-2 sm:mt-0">Working year: <b id="somapYearHint">--</b></span>
+    </div>
     <div class="mb-4 searchwrap">
       <input id="searchInput" class="searchbar" placeholder="Search books by title or subject…"/>
       <i class="fa fa-search"></i>
@@ -230,10 +276,36 @@
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.database();
+  const yearContext = window.somapYearContext || null;
+  const urlParams = new URLSearchParams(location.search);
+  const forcedStudentId = urlParams.get('student');
+  const forcedYear = urlParams.get('year');
+  let selectedYear = forcedYear || (yearContext?.getSelectedYear ? String(yearContext.getSelectedYear()) : String(SOMAP_DEFAULT_YEAR));
+  function updateYearHint(){
+    const hint = document.getElementById('somapYearHint');
+    if (hint) hint.textContent = selectedYear;
+  }
+  updateYearHint();
+  if (forcedYear && yearContext && typeof yearContext.setSelectedYear === 'function') {
+    yearContext.setSelectedYear(selectedYear);
+  }
 
   let userMode = 'child'; // 'child' | 'teacher'
   let className = '';
   let userKey = '';
+  let currentStudentData = null;
+
+  if (yearContext && typeof yearContext.onYearChanged === 'function') {
+    yearContext.onYearChanged((year) => {
+      selectedYear = String(year);
+      updateYearHint();
+      if (userMode === 'child' && userKey) {
+        loadChildView(userKey).catch(console.error);
+      } else if (userMode === 'teacher' && className) {
+        fetchBooks(className);
+      }
+    });
+  }
 
   auth.onAuthStateChanged(async (user) => {
     if (user) {
@@ -251,13 +323,10 @@
         }
       } catch(e){ alert(e.message); }
     } else {
-      const studentKey = localStorage.getItem('studentKey');
+      const studentKey = forcedStudentId || localStorage.getItem('studentKey');
       if (!studentKey){ alert('Please sign in'); location.href='../index.html'; return; }
       try {
-        const s = (await db.ref(`students/${studentKey}`).once('value')).val();
-        if (!s || !s.classLevel){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
-        userMode = 'child'; className = (s.classLevel||'').trim(); userKey = studentKey;
-        initChild(); fetchBooks(className);
+        await loadChildView(studentKey);
       } catch(e){ alert(e.message); }
     }
   });
@@ -265,11 +334,45 @@
   function initTeacher(){ document.getElementById('backBtn').href = '../staff.html'; }
   function initChild(){ document.getElementById('backBtn').href = '../parent.html'; }
 
+  async function loadChildView(studentKey){
+    const snap = await db.ref(`students/${studentKey}`).once('value');
+    if (!snap.exists()){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
+    currentStudentData = snap.val();
+    userMode = 'child';
+    userKey = studentKey;
+    try { localStorage.setItem('studentKey', studentKey); } catch(_e){}
+    className = (await resolveClassForSelectedYear(studentKey, (currentStudentData.classLevel || currentStudentData.class || '').trim())).trim();
+    initChild();
+    fetchBooks(className);
+  }
+
+  async function resolveClassForSelectedYear(studentId, fallbackClass){
+    try{
+      const [anchorSnap, yearSnap] = await Promise.all([
+        db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}/${studentId}`).once('value'),
+        db.ref(`enrollments/${selectedYear}/${studentId}`).once('value')
+      ]);
+      const anchor = anchorSnap.val() || {};
+      const yearSpecific = yearSnap.val() || {};
+      if (yearSpecific?.className || yearSpecific?.classLevel) {
+        return (yearSpecific.className || yearSpecific.classLevel || '').trim();
+      }
+      const baseClass = anchor.className || anchor.classLevel || fallbackClass || 'Baby Class';
+      const delta = Number(selectedYear) - SOMAP_DEFAULT_YEAR;
+      return shiftClass(baseClass, delta);
+    }catch(err){
+      console.warn('Unable to resolve class for selected year', err);
+      return fallbackClass || 'Baby Class';
+    }
+  }
+
   // ================== Data / Grid ==================
   const cache = new Map();
   const thumbCache = new Map(); // url -> dataURL
   const loadingEl = document.getElementById('loading');
   const noBooksEl = document.getElementById('noBooks');
+  const noBooksMessageEl = noBooksEl?.querySelector('div');
+  const defaultNoBooksText = noBooksMessageEl?.textContent || 'No books available yet.';
   const grid = document.getElementById('booksGrid');
   const searchInput = document.getElementById('searchInput');
 
@@ -285,6 +388,20 @@
     grid.innerHTML = '';
     loadingEl.classList.remove('hidden');
     noBooksEl.classList.add('hidden');
+    if (!cls || cls.toUpperCase() === 'GRADUATED') {
+      loadingEl.classList.add('hidden');
+      if (noBooksEl) {
+        noBooksEl.classList.remove('hidden');
+        if (noBooksMessageEl) {
+          noBooksMessageEl.textContent = cls && cls.toUpperCase() === 'GRADUATED'
+            ? `Graduated learners do not have assigned class books for ${selectedYear}.`
+            : 'No class selected for this year.';
+        }
+      }
+      return;
+    } else if (noBooksMessageEl) {
+      noBooksMessageEl.textContent = defaultNoBooksText;
+    }
 
     const path = `class_books/${encodeURIComponent(cls)}`;
     const key = `books_${cls}`;
@@ -762,6 +879,28 @@
   });
 
   // ========= End =========
+  </script>
+  <script>
+  (function initYearSelector(){
+    const sel = document.querySelector('[data-somap-year-select]');
+    const hint = document.getElementById('somapYearHint');
+    if (!sel) return;
+    sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+    sel.value = selectedYear;
+    if (hint) hint.textContent = selectedYear;
+    sel.addEventListener('change', (e) => {
+      const val = String(e.target.value);
+      selectedYear = val;
+      if (yearContext && typeof yearContext.setSelectedYear === 'function') {
+        yearContext.setSelectedYear(val);
+      } else {
+        updateYearHint();
+        if (userMode === 'child' && userKey) {
+          loadChildView(userKey).catch(console.error);
+        }
+      }
+    });
+  })();
   </script>
 </body>
 </html>

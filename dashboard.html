@@ -112,22 +112,26 @@
         }
         .card {
           border-radius: 0.75rem;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+          box-shadow: 0 25px 45px rgba(15, 23, 42, 0.35);
           transition: all 0.3s;
-          background: linear-gradient(135deg, #ffffff, #e5e7eb);
-          color: #000;
+          background: rgba(15, 23, 42, 0.55);
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          color: #f8fafc;
+          backdrop-filter: blur(18px);
         }
         .card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+          transform: translateY(-6px);
+          box-shadow: 0 35px 60px rgba(15, 23, 42, 0.45);
         }
         .stat-card {
           transition: all 0.3s;
-          background: linear-gradient(135deg, #20c997, #0dcaf0);
-          color: #fff;
+          background: linear-gradient(135deg, rgba(59,130,246,0.65), rgba(14,165,233,0.52));
+          color: #f8fafc;
+          border: 1px solid rgba(191,219,254,0.4);
+          backdrop-filter: blur(14px);
         }
         .stat-card:hover {
-          transform: translateY(-3px);
+          transform: translateY(-4px);
         }
         .btn {
           transition: all 0.2s;
@@ -395,7 +399,7 @@
           text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
         }
         .card h5, .card p, .events-list li {
-          color: #000;
+          color: #f8fafc;
           text-shadow: none;
         }
         p {
@@ -411,23 +415,66 @@
           padding: 20px;
         }
         /* New Finance Cards in Dashboard */
-.finance-card {
-  background: linear-gradient(135deg, #28a745, #198754); /* Green gradient like finance */
-  color: #fff;
-  border-radius: 15px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-}
-.finance-card h5 {
-  color: #fff;
-  text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-}
-.finance-card p {
-  font-size: 1.5rem;
-  font-weight: bold;
-}
+        .finance-card {
+          background: linear-gradient(135deg, rgba(99,102,241,0.85), rgba(16,185,129,0.7));
+          color: #f8fafc;
+          border-radius: 1rem;
+          padding: 20px;
+          margin-bottom: 20px;
+          border: 1px solid rgba(191, 219, 254, 0.35);
+          box-shadow: 0 30px 50px rgba(15, 23, 42, 0.4);
+          backdrop-filter: blur(18px);
+        }
+        .finance-card h5 {
+          color: #f8fafc;
+          text-shadow: 1px 1px 2px rgba(15,23,42,0.4);
+        }
+        .finance-card p {
+          font-size: 1.6rem;
+          font-weight: 700;
+        }
     </style>
+
+    <script>
+    /** Year range + anchor **/
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+    const SOMAP_DEFAULT_YEAR = 2025;
+
+    /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+    const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    const L = s => String(s||'').trim().toLowerCase();
+
+    /** Shift a base class by delta years relative to anchor (2025). */
+    function shiftClass(baseClass, deltaYears){
+      const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+      if (i<0) return baseClass||'';
+      const j = i + Number(deltaYears||0);
+      if (j < 0) return 'PRE-ADMISSION';
+      if (j >= CLASS_ORDER.length) return 'GRADUATED';
+      return CLASS_ORDER[j];
+    }
+    </script>
+
+    <script>
+    /** Reuse shared year context if present, else create a light fallback. */
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected===y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
+          listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+      };
+    })();
+    </script>
+
+    <script src="shared/finance_math.js"></script>
 </head>
 <body class="bg-gradient-to-br from-blue-500 to-purple-600 overflow-hidden">
     <div class="flex h-screen overflow-hidden">
@@ -552,12 +599,15 @@
                         <h1 id="page-title" class="text-xl font-semibold text-gray-800">SoMAp - SOCIETY MANAGEMENT APP</h1>
                     </div>
                       <div class="flex items-center space-x-4">
-                          <div class="hidden md:flex flex-col text-xs font-semibold text-gray-500">
-                              <span class="uppercase tracking-wide mb-1 text-[0.65rem] text-gray-500">Academic Year</span>
-                              <select
-                                  data-somap-year-select
-                                  class="min-w-[120px] rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-                              </select>
+                          <div id="somapYearWrap" class="flex flex-col md:flex-row md:items-center md:space-x-3 text-xs font-semibold text-gray-500">
+                              <div class="flex flex-col">
+                                  <span class="uppercase tracking-wide mb-1 text-[0.65rem] text-gray-500">Academic Year</span>
+                                  <select
+                                      data-somap-year-select
+                                      class="min-w-[140px] rounded-lg border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+                                  </select>
+                              </div>
+                              <span class="text-[0.7rem] text-gray-600 mt-1 md:mt-0">Working year: <b id="somapYearHint">--</b></span>
                           </div>
                           <div class="relative">
                               <input type="text" class="px-4 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64" placeholder="Search...">
@@ -579,6 +629,7 @@
                   data-somap-year-select
                   class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
               </select>
+              <p class="mt-2 text-xs text-gray-600">Working year: <b id="somapYearHintMobile">--</b></p>
           </div>
       </header>
             <!-- Main Dashboard -->
@@ -650,6 +701,26 @@
   <div class="finance-card">
     <h5>Net Balance</h5>
     <p id="net-balance">TSh 0</p>
+  </div>
+</div>
+<div class="col-md-3">
+  <div class="card stat-card stats-card glass-panel">
+    <div class="card-body">
+      <h5>Students Today</h5>
+      <p><span id="students-present-today">--</span> Present</p>
+      <p><span id="students-absent-today">--</span> Absent</p>
+      <p class="text-sm text-slate-300">Boys: <span id="students-boys-count">--</span> · Girls: <span id="students-girls-count">--</span></p>
+    </div>
+  </div>
+</div>
+<div class="col-md-3">
+  <div class="card stat-card stats-card glass-panel">
+    <div class="card-body">
+      <h5>Workers Snapshot</h5>
+      <p>Total: <span id="workers-total-count">--</span></p>
+      <p><span id="workers-present-count">--</span> Present · <span id="workers-absent-count">--</span> Absent</p>
+      <p class="text-sm text-slate-300">Male: <span id="workers-male-count">--</span> · Female: <span id="workers-female-count">--</span></p>
+    </div>
   </div>
 </div>
 <div class="col-md-3 role-specific admin-only" id="approvalsShortcut">
@@ -1059,85 +1130,186 @@
         if (email.includes('class72023')) return 'Class 7';
         return '';
     }
-    // Normalize Student Data (aligned with finance: sum payments for feePaid)
-    function normalizeStudent(admKey, s) {
-        const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() ||
-                     s.name || s.fullName || s.studentName || `Student ${admKey}`;
-        const studentClass = s.class || s.classLevel || s.currentClass || s.level || s.className || s.grade || 'Unknown';
-        const feeDue = Number(s.feePerYear || s.debt || s.totalFee || s.feeDue || s.required || 0);
-        const feePaid = s.payments ? Object.values(s.payments).reduce((sum, p) => sum + Number(p.amount || 0), 0) : Number(s.credit || s.paid || s.feePaid || s.paidAmount || 0);
-        const balance = Number(s.balance || Math.max(0, feeDue - feePaid) || 0);
+    const formatTsh = (value) => `TSh ${Math.round(Number(value) || 0).toLocaleString()}`;
+    const yearManager = window.somapYearContext || null;
+    const getSelectedYear = () => {
+        if (yearManager && typeof yearManager.getSelectedYear === 'function') {
+            return String(yearManager.getSelectedYear());
+        }
+        return String(SOMAP_DEFAULT_YEAR);
+    };
+    function updateYearHint() {
+        const year = getSelectedYear();
+        const desktopHint = document.getElementById('somapYearHint');
+        const mobileHint = document.getElementById('somapYearHintMobile');
+        if (desktopHint) desktopHint.textContent = year;
+        if (mobileHint) mobileHint.textContent = year;
+    }
+    let currentRole = 'admin';
+    let currentClassScope = '';
+    let yearListenerBound = false;
+
+    function scopeEntries(entriesMap, role, className) {
+        const records = Object.entries(entriesMap || {}).map(([id, entry]) => ({ id, ...entry }));
+        if (role === 'teacher' && className) {
+            const target = L(className);
+            return records.filter(rec => L(rec.student?.classLevel || rec.student?.className || '') === target);
+        }
+        return records;
+    }
+
+    function scopeStudents(studentsMap, role, className) {
+        const records = Object.entries(studentsMap || {}).map(([id, student]) => ({ id, ...student }));
+        if (role === 'teacher' && className) {
+            const target = L(className);
+            return records.filter(rec => L(rec.classLevel || rec.className || '') === target);
+        }
+        return records;
+    }
+
+    function bindYearChangeListener() {
+        if (yearListenerBound || !yearManager || typeof yearManager.onYearChanged !== 'function') return;
+        yearListenerBound = true;
+        yearManager.onYearChanged(() => refreshDashboard(currentRole, currentClassScope));
+    }
+
+    function buildDateKeys(year) {
+        const today = new Date();
+        today.setFullYear(Number(year) || SOMAP_DEFAULT_YEAR);
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, '0');
+        const d = String(today.getDate()).padStart(2, '0');
         return {
-            adm: admKey,
-            name,
-            class: studentClass,
-            feeDue,
-            feePaid,
-            balance,
-            meta: s // Keep raw data
+            studentMonthKey: `${y}-${m}`,
+            studentDayKey: `${y}-${m}-${d}`,
+            workerMonthKey: `${y}${m}`,
+            workerDayKey: `${y}${m}${d}`
         };
     }
-    // Load Dashboard Data (match finance: sum payments for collected, outstanding = due - collected)
-    async function loadDashboardData(role, className) {
-        const studentsRef = db.ref('students');
-        const expensesRef = db.ref('expenses');
+
+    async function refreshDashboard(role, className) {
+        if (!window.SomapFinance) return;
+        currentRole = role || currentRole || 'admin';
+        currentClassScope = className || currentClassScope || '';
+        const year = getSelectedYear();
+        updateYearHint();
         try {
-            const snapshot = await studentsRef.once('value');
-            let students = [];
-            if (snapshot.exists()) {
-                const data = snapshot.val();
-                Object.entries(data).forEach(([key, s]) => {
-                    if (s && (s.classLevel || s.name || s.admissionNumber)) {
-                        const student = normalizeStudent(key, s);
-                        if (role === 'teacher' && className) {
-                            if (student.class === className) students.push(student);
-                        } else {
-                            students.push(student);
-                        }
-                    }
-                });
-            }
-            // Total Students
-            document.getElementById('total-students').innerHTML = `${students.length} <small>5.2% Since last month</small>`;
-            // Total Due
-            let totalDue = students.reduce((sum, s) => sum + s.feeDue, 0);
-            document.getElementById('total-due').innerHTML = `TSh ${totalDue.toLocaleString()}`;
-            // Total Collected (from payments sum)
-            let totalCollected = students.reduce((sum, s) => sum + s.feePaid, 0);
-            document.getElementById('total-collected').innerHTML = `TSh ${totalCollected.toLocaleString()}`;
-            // Total Outstanding (due - collected)
-            let totalOutstanding = Math.max(0, totalDue - totalCollected);
-            document.getElementById('total-outstanding').innerHTML = `TSh ${totalOutstanding.toLocaleString()}`;
-            // Attendance Rate
-            let attendanceRate = students.length > 0 ? (students.reduce((sum, s) => sum + (parseFloat(s.meta.attendanceRate) || 94.2), 0) / students.length).toFixed(1) : 0;
-            document.getElementById('attendance-rate').innerHTML = `${attendanceRate}% <small>1.5% Since last month</small>`;
-            // Update Fee Chart
-            updateFeeChart(totalCollected, totalDue);
-            // Update Recent Activities
-            updateRecentActivities(students);
-            // Expenses
-            const expenseSnapshot = await expensesRef.once('value');
-            let expenses = expenseSnapshot.val() ? Object.values(expenseSnapshot.val()) : [];
-            let totalExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-            document.getElementById('total-expenses').innerHTML = `TSh ${totalExpenses.toLocaleString()}`;
-            // Net Balance (collected - expenses)
-            let netBalance = totalCollected - totalExpenses;
-            document.getElementById('net-balance').innerHTML = `TSh ${netBalance.toLocaleString()}`;
+            const [entriesMap, studentsMap, payments] = await Promise.all([
+                window.SomapFinance.getYearFinanceEntries(year),
+                window.SomapFinance.getYearStudents(year),
+                window.SomapFinance.listRecentPayments(year, 6)
+            ]);
+            const entries = scopeEntries(entriesMap, currentRole, currentClassScope);
+            const students = scopeStudents(studentsMap, currentRole, currentClassScope);
+            await renderFinanceStats(entries, year);
+            await renderStudentSnapshot(students);
+            await renderAttendanceSummary(students, year);
+            await loadWorkerSnapshot(year);
+            renderRecentActivitiesFromPayments(payments, new Set(entries.map(entry => entry.id)));
         } catch (error) {
             console.error('Error loading dashboard:', error);
             Swal.fire('Error', 'Failed to load dashboard data: ' + error.message, 'error');
         }
     }
-    function updateRecentActivities(students) {
-        const list = document.getElementById('activities-list');
-        if (list) {
-            let html = '';
-            students.slice(0, 4).forEach(s => {
-                const name = s.name || `${s.meta.firstName || ''} ${s.meta.middleName || ''} ${s.meta.lastName || ''}`.trim() || 'Student';
-                html += `<li>${name} paid TSh ${s.feePaid.toLocaleString()} - ${new Date().toLocaleString()}</li>`;
+
+    async function renderFinanceStats(entries, year) {
+        const totals = entries.reduce((acc, entry) => {
+            acc.due += Number(entry.due || 0);
+            acc.paid += Number(entry.paid || 0);
+            acc.outstanding += Number(entry.outstanding || 0);
+            return acc;
+        }, { due: 0, paid: 0, outstanding: 0 });
+        const expensesTotal = await window.SomapFinance.loadExpensesTotal(year);
+        document.getElementById('total-due').innerHTML = formatTsh(totals.due);
+        document.getElementById('total-collected').innerHTML = formatTsh(totals.paid);
+        document.getElementById('total-outstanding').innerHTML = formatTsh(totals.outstanding);
+        document.getElementById('total-expenses').innerHTML = formatTsh(expensesTotal);
+        document.getElementById('net-balance').innerHTML = formatTsh(totals.paid - expensesTotal);
+        updateFeeChart(totals.paid, totals.due);
+    }
+
+    function renderStudentSnapshot(students) {
+        const active = students.filter(st => (st.classLevel || st.className || '').toUpperCase() !== 'GRADUATED');
+        document.getElementById('total-students').innerHTML = `${active.length} <small class="text-xs text-slate-300">Live count</small>`;
+        let boys = 0, girls = 0;
+        active.forEach(st => {
+            const gender = String(st.gender || st.sex || st.meta?.gender || '').trim().toLowerCase();
+            if (gender.startsWith('m')) boys++;
+            else if (gender.startsWith('f')) girls++;
+        });
+        document.getElementById('students-boys-count').textContent = boys;
+        document.getElementById('students-girls-count').textContent = girls;
+    }
+
+    async function renderAttendanceSummary(students, year) {
+        const active = students.filter(st => (st.classLevel || '').toUpperCase() !== 'GRADUATED');
+        const { studentMonthKey, studentDayKey } = buildDateKeys(year);
+        const classNames = Array.from(new Set(active.map(st => st.classLevel).filter(Boolean)));
+        let present = 0;
+        let recordedAbsent = 0;
+        await Promise.all(classNames.map(async cls => {
+            const snap = await db.ref(`attendance/${cls}/${studentMonthKey}/${studentDayKey}`).once('value');
+            const records = snap.val() || {};
+            Object.values(records).forEach(rec => {
+                const status = String(rec?.daily || '').toUpperCase();
+                if (status === 'P') present++;
+                else if (status.includes('A')) recordedAbsent++;
             });
-            list.innerHTML = html || '<li>No recent activities.</li>';
+        }));
+        const totalStudents = active.length;
+        const computedAbsent = Math.max(0, totalStudents - present);
+        const absent = Math.max(recordedAbsent, computedAbsent);
+        document.getElementById('students-present-today').textContent = present;
+        document.getElementById('students-absent-today').textContent = absent;
+        const rate = totalStudents ? Math.round((present / totalStudents) * 1000) / 10 : 0;
+        document.getElementById('attendance-rate').innerHTML = `${rate}% <small class="text-xs text-slate-200">Live</small>`;
+    }
+
+    async function loadWorkerSnapshot(year) {
+        const { workerMonthKey, workerDayKey } = buildDateKeys(year);
+        const [workersSnap, attendanceSnap] = await Promise.all([
+            db.ref('workers').once('value'),
+            db.ref('attendance').once('value')
+        ]);
+        const workers = workersSnap.val() || {};
+        const totalWorkers = Object.values(workers).filter(w => w?.profile?.active !== false).length;
+        let male = 0, female = 0;
+        Object.values(workers).forEach(worker => {
+            const gender = String(worker?.profile?.gender || worker.gender || '').trim().toLowerCase();
+            if (gender.startsWith('m')) male++;
+            else if (gender.startsWith('f')) female++;
+        });
+        const attendance = attendanceSnap.val() || {};
+        let present = 0;
+        Object.values(attendance).forEach(record => {
+            const monthBucket = record?.[workerMonthKey];
+            const dayEntry = monthBucket?.[workerDayKey];
+            if (dayEntry?.checkInTs) present++;
+        });
+        const absent = Math.max(0, totalWorkers - present);
+        document.getElementById('workers-total-count').textContent = totalWorkers;
+        document.getElementById('workers-present-count').textContent = present;
+        document.getElementById('workers-absent-count').textContent = absent;
+        document.getElementById('workers-male-count').textContent = male;
+        document.getElementById('workers-female-count').textContent = female;
+    }
+
+    function renderRecentActivitiesFromPayments(payments, allowedIds) {
+        const list = document.getElementById('activities-list');
+        if (!list) return;
+        if (!allowedIds.size) {
+            list.innerHTML = '<li>No recent activities.</li>';
+            return;
         }
+        const items = payments.filter(p => allowedIds.has(p.studentId)).slice(0, 4);
+        if (!items.length) {
+            list.innerHTML = '<li>No recent activities.</li>';
+            return;
+        }
+        list.innerHTML = items.map(p => {
+            const ts = p.timestamp ? new Date(p.timestamp).toLocaleString() : new Date().toLocaleString();
+            return `<li>${p.fullName} paid ${formatTsh(p.amount)} via ${p.method || '-'} - ${ts}</li>`;
+        }).join('');
     }
     function updateFeeChart(collected, due) {
         const ctx = document.getElementById('fee-chart')?.getContext('2d');
@@ -1329,7 +1501,8 @@
                 
                 // Use a slight delay to ensure DOM is ready
                 setTimeout(() => {
-                    loadDashboardData('admin', null);
+                    refreshDashboard('admin', null);
+                    bindYearChangeListener();
                     
                     // Remove loader after data loads
                     setTimeout(() => {
@@ -1348,7 +1521,8 @@
                 if (gradShortcut) {
                     gradShortcut.style.display = GRAD_EMAILS.has(user.email.toLowerCase()) ? 'flex' : 'none';
                 }
-                loadDashboardData(role, getClassFromEmail(user.email));
+                refreshDashboard(role, getClassFromEmail(user.email));
+                bindYearChangeListener();
                 if (role === 'parent') {
                     const phone = localStorage.getItem('parentPhone');
                     if (phone) loadParentData(phone);
@@ -1457,6 +1631,9 @@
                     `;
                     workspace.insertBefore(banner, workspace.firstChild);
                 }
+
+                refreshDashboard('admin', null);
+                bindYearChangeListener();
                 
             } else {
                 // Not logged in and not from teacher dashboard - redirect to login
@@ -1478,7 +1655,8 @@
         document.querySelectorAll('.sidebar-expanded').forEach(el => el.classList.toggle('hidden'));
     });
     document.querySelector('[data-module="dashboard"]').addEventListener('click', () => {
-        loadDashboardData(localStorage.getItem('role'), getClassFromEmail(auth.currentUser?.email));
+        refreshDashboard(localStorage.getItem('role'), getClassFromEmail(auth.currentUser?.email));
+        bindYearChangeListener();
         document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth' });
     });
 </script>

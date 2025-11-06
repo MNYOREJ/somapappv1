@@ -277,6 +277,47 @@
           background: #c82333;
         }
     </style>
+
+    <script>
+    /** Year range + anchor **/
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+    const SOMAP_DEFAULT_YEAR = 2025;
+
+    /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+    const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    const L = s => String(s||'').trim().toLowerCase();
+
+    /** Shift a base class by delta years relative to anchor (2025). */
+    function shiftClass(baseClass, deltaYears){
+      const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+      if (i<0) return baseClass||'';
+      const j = i + Number(deltaYears||0);
+      if (j < 0) return 'PRE-ADMISSION';
+      if (j >= CLASS_ORDER.length) return 'GRADUATED';
+      return CLASS_ORDER[j];
+    }
+    </script>
+
+    <script>
+    /** Reuse shared year context if present, else create a light fallback. */
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected===y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
+          listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+      };
+    })();
+    </script>
+
+    <script src="shared/finance_math.js"></script>
 </head>
 <body>
     <div class="flex h-screen overflow-hidden">
@@ -339,8 +380,14 @@
         </div>
         <div class="main-content transition-all" style="margin-left: 64px; padding: 2rem;">
             <h1 class="text-3xl font-bold mb-6">Mhasibu Dashboard</h1>
+            <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;margin:6px 0;" class="mb-4 bg-white/70 border border-emerald-200 rounded-xl px-4 py-2 inline-flex items-center shadow">
+                <label class="text-xs font-semibold text-emerald-800">Academic Year</label>
+                <select data-somap-year-select class="border rounded px-2 py-1 text-sm text-emerald-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400"></select>
+                <span class="text-xs text-emerald-700">Working year: <b id="somapYearHint">--</b></span>
+            </div>
             <div class="alert">
-                <i class="fas fa-bell text-yellow-400 mr-2"></i> 3 overdue payments exceeding 30 days. View Debtors for details.
+                <i class="fas fa-bell text-yellow-400 mr-2"></i>
+                <span id="overdue-alert-text">Loading overdue summary...</span>
             </div>
             <!-- Finance Overview -->
             <section id="finance-overview" class="card finance-overview module-section fade-in">
@@ -529,6 +576,17 @@
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.database();
+    const yearManager = window.somapYearContext || null;
+    const getSelectedYear = () => {
+        if (yearManager && typeof yearManager.getSelectedYear === 'function') {
+            return String(yearManager.getSelectedYear());
+        }
+        return String(SOMAP_DEFAULT_YEAR);
+    };
+    let feeTrendChart = null;
+    let outstandingChart = null;
+    let expenseChart = null;
+    let hasBoundYearListener = false;
     auth.onAuthStateChanged(user => {
         if (!user) {
             window.location.href = 'index.html';
@@ -542,11 +600,12 @@
                 window.location.href = 'index.html';
                 return;
             }
-            loadFinanceData();
-            loadExpenses();
-            loadDebtors();
-            loadGraphs();
+            refreshFinanceScreens();
             loadAuditLog();
+            if (!hasBoundYearListener && yearManager && typeof yearManager.onYearChanged === 'function') {
+                hasBoundYearListener = true;
+                yearManager.onYearChanged(() => refreshFinanceScreens());
+            }
         });
     });
     // Sidebar Toggle
@@ -578,123 +637,150 @@
             Swal.fire('Error', 'Sign-out failed: ' + err.message, 'error');
         });
     }
-    // Load Finance Data
-    function loadFinanceData() {
-        db.ref('students').on('value', snapshot => {
-            const students = snapshot.val() ? Object.values(snapshot.val()) : [];
-            let totalDue = 0;
+    async function refreshFinanceScreens(){
+        await Promise.all([
+            loadFinanceData(),
+            loadExpensesList(),
+            loadDebtors(),
+            loadGraphs()
+        ]);
+    }
+
+    const formatTsh = (value) => `TSh ${Math.round(Number(value) || 0).toLocaleString()}`;
+
+    async function loadFinanceData() {
+        if (!window.SomapFinance) return;
+        const year = getSelectedYear();
+        const paymentsList = document.getElementById('payments-list');
+        paymentsList.innerHTML = '<li>Loading...</li>';
+        try {
+            const totals = await window.SomapFinance.loadSchoolTotals(year);
+            const expensesTotal = await window.SomapFinance.loadExpensesTotal(year);
+            const netBalance = totals.collected - expensesTotal;
+            document.getElementById('total-due').textContent = formatTsh(totals.due);
+            document.getElementById('total-collected').textContent = formatTsh(totals.collected);
+            document.getElementById('total-outstanding').textContent = formatTsh(totals.outstanding);
+            document.getElementById('total-expenses').textContent = formatTsh(expensesTotal);
+            document.getElementById('net-balance').textContent = formatTsh(netBalance);
+
+            const recentPayments = await window.SomapFinance.listRecentPayments(year, 10);
+            if (recentPayments.length === 0) {
+                paymentsList.innerHTML = '<li>No payments found.</li>';
+            } else {
+                paymentsList.innerHTML = recentPayments.map(p => {
+                    const ts = p.timestamp ? new Date(p.timestamp).toLocaleString() : 'No date';
+                    return `<li>${p.fullName} - ${formatTsh(p.amount)} via ${p.method || '-'} - ${ts}${p.note ? ` (Note: ${p.note})` : ''}</li>`;
+                }).join('');
+            }
+        } catch (err) {
+            console.error('Failed to load finance overview', err);
+            paymentsList.innerHTML = '<li>Error loading payments.</li>';
+        }
+    }
+
+    async function fetchExpensesByYear(year){
+        let snap = await db.ref(`expenses/${year}`).once('value');
+        let raw = snap.val();
+        if (!raw || (typeof raw === 'object' && !Object.keys(raw).length)) {
+            snap = await db.ref('expenses').once('value');
+            raw = snap.val();
+        }
+        return Object.values(raw || {});
+    }
+
+    async function loadExpensesList() {
+        const year = getSelectedYear();
+        const expensesList = document.getElementById('expenses-list');
+        expensesList.innerHTML = '<li>Loading...</li>';
+        try {
+            const expenses = await fetchExpensesByYear(year);
+            if (!expenses.length) {
+                expensesList.innerHTML = '<li>No expenses found.</li>';
+                return;
+            }
+            const sorted = expenses.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+            expensesList.innerHTML = sorted.map(e => {
+                const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : 'No date';
+                return `<li>${e.category || '-'} - ${formatTsh(e.amount)} - ${e.description || '-'} - ${ts}</li>`;
+            }).join('');
+        } catch (err) {
+            console.error('Failed to load expenses list', err);
+            expensesList.innerHTML = '<li>Error loading expenses.</li>';
+        }
+    }
+
+    async function loadDebtors() {
+        if (!window.SomapFinance) return;
+        const year = getSelectedYear();
+        const debtorsTable = document.getElementById('debtors-table');
+        debtorsTable.innerHTML = '<tr><td colspan="8">Loading...</td></tr>';
+        try {
+            const entries = await window.SomapFinance.getYearFinanceEntries(year);
+            const rows = [];
+            let overdueCount = 0;
+            Object.entries(entries || {}).forEach(([studentId, entry]) => {
+                const student = entry.student || {};
+                if (student.isGraduated) return;
+                const balance = Number(entry.outstanding || 0);
+                if (balance <= 0) return;
+                const fee = Number(entry.due || 0);
+                const paid = Number(entry.paid || 0);
+                const schedule = entry.finance?.scheduleItems || [];
+                const hasOverdue = schedule.some(item => {
+                    const remaining = Math.max(0, (item.amount || 0) - (item.paidAllocated || 0));
+                    return remaining > 0 && /overdue/i.test(item.status || '');
+                });
+                if (hasOverdue) overdueCount++;
+                rows.push(`
+                    <tr>
+                        <td>${student.admissionNumber || '-'}</td>
+                        <td>${(student.firstName || '')} ${(student.middleName || '')} ${(student.lastName || '')}</td>
+                        <td>${student.classLevel || '-'}</td>
+                        <td>${formatTsh(fee)}</td>
+                        <td>${formatTsh(paid)}</td>
+                        <td>${formatTsh(balance)}</td>
+                        <td>${entry.finance?.periodDebtLabel || '-'}</td>
+                        <td><button class="btn btn-small" onclick="openPopup('Tofinancehtml/payment.html?student=${encodeURIComponent(studentId)}&year=${year}')">View Pay</button></td>
+                    </tr>
+                `);
+            });
+            debtorsTable.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="8" class="text-center">No debtors.</td></tr>';
+            const alertEl = document.getElementById('overdue-alert-text');
+            if (alertEl) {
+                alertEl.textContent = overdueCount
+                    ? `${overdueCount} overdue payment${overdueCount > 1 ? 's' : ''} exceeding their window. View Debtors for details.`
+                    : 'No overdue payments recorded for the selected year.';
+            }
+        } catch (err) {
+            console.error('Failed to load debtors', err);
+            debtorsTable.innerHTML = '<tr><td colspan="8" class="text-center">Error loading debtors.</td></tr>';
+        }
+    }
+
+    async function loadGraphs() {
+        if (!window.SomapFinance) return;
+        const year = getSelectedYear();
+        try {
+            const entries = await window.SomapFinance.getYearFinanceEntries(year);
             let totalCollected = 0;
             let totalOutstanding = 0;
-            let recentPayments = [];
-            students.forEach(s => {
-                const fee = parseInt(s.feePerYear) || 0;
-                totalDue += fee;
-                let paid = 0;
-                if (s.payments) {
-                    const payments = Object.values(s.payments);
-                    paid = payments.reduce((sum, p) => sum + (parseInt(p.amount) || 0), 0);
-                    payments.forEach(p => {
-                        recentPayments.push({
-                            name: `${s.firstName} ${s.lastName}`,
-                            amount: p.amount,
-                            method: p.method,
-                            timestamp: p.timestamp,
-                            note: p.note
-                        });
-                    });
-                }
-                totalCollected += paid;
-                totalOutstanding += fee - paid;
+            const classOutstanding = {};
+            Object.values(entries || {}).forEach(entry => {
+                const student = entry.student || {};
+                if (student.isGraduated) return;
+                totalCollected += Number(entry.paid || 0);
+                totalOutstanding += Number(entry.outstanding || 0);
+                const cls = student.classLevel || 'Unknown';
+                classOutstanding[cls] = (classOutstanding[cls] || 0) + Number(entry.outstanding || 0);
             });
-            // Sort recent payments by timestamp descending and limit to 10
-            recentPayments.sort((a, b) => b.timestamp - a.timestamp);
-            recentPayments = recentPayments.slice(0, 10);
-            let paymentsHtml = '';
-            recentPayments.forEach(p => {
-                paymentsHtml += `<li>${p.name} - TSh ${p.amount.toLocaleString()} via ${p.method} - ${new Date(p.timestamp).toLocaleString()} (Note: ${p.note})</li>`;
-            });
-            document.getElementById('payments-list').innerHTML = paymentsHtml || '<li>No payments found.</li>';
-            db.ref('expenses').once('value').then(expSnapshot => {
-                const expenses = expSnapshot.val() ? Object.values(expSnapshot.val()) : [];
-                let totalExpenses = expenses.reduce((sum, e) => sum + (parseInt(e.amount) || 0), 0);
-                let netBalance = totalCollected - totalExpenses;
-                document.getElementById('total-due').textContent = `TSh ${totalDue.toLocaleString()}`;
-                document.getElementById('total-collected').textContent = `TSh ${totalCollected.toLocaleString()}`;
-                document.getElementById('total-outstanding').textContent = `TSh ${totalOutstanding.toLocaleString()}`;
-                document.getElementById('total-expenses').textContent = `TSh ${totalExpenses.toLocaleString()}`;
-                document.getElementById('net-balance').textContent = `TSh ${netBalance.toLocaleString()}`;
-            });
-        });
-    }
-    // Load Expenses
-    function loadExpenses() {
-        db.ref('expenses').on('value', snapshot => {
-            const expenses = snapshot.val() ? Object.values(snapshot.val()) : [];
-            const expensesList = document.getElementById('expenses-list');
-            let html = '';
-            expenses.forEach(e => {
-                html += `<li>${e.category} - TSh ${parseInt(e.amount).toLocaleString()} - ${e.description} - ${new Date(e.timestamp).toLocaleString()}</li>`;
-            });
-            expensesList.innerHTML = html || '<li>No expenses found.</li>';
-        });
-    }
-    // Load Debtors
-    function loadDebtors() {
-        db.ref('students').on('value', snapshot => {
-            const students = snapshot.val() ? Object.values(snapshot.val()) : [];
-            const debtorsTable = document.getElementById('debtors-table');
-            let html = '';
-            students.forEach(s => {
-                const fee = parseInt(s.feePerYear) || 0;
-                let paid = 0;
-                if (s.payments) {
-                    paid = Object.values(s.payments).reduce((sum, p) => sum + (parseInt(p.amount) || 0), 0);
-                }
-                const balance = fee - paid;
-                if (balance > 0) {
-                    html += `
-                        <tr>
-                            <td>${s.admissionNumber}</td>
-                            <td>${s.firstName} ${s.middleName || ''} ${s.lastName}</td>
-                            <td>${s.classLevel}</td>
-                            <td>TSh ${fee.toLocaleString()}</td>
-                            <td>TSh ${paid.toLocaleString()}</td>
-                            <td>TSh ${balance.toLocaleString()}</td>
-                            <td>Debt till ${new Date().toLocaleDateString()}</td>
-                            <td><button class="btn btn-small">View Pay</button></td>
-                        </tr>
-                    `;
-                }
-            });
-            debtorsTable.innerHTML = html || '<tr><td colspan="8" class="text-center">No debtors.</td></tr>';
-        });
-    }
-    // Load Graphs
-    function loadGraphs() {
-        db.ref('students').once('value').then(snapshot => {
-            const students = snapshot.val() ? Object.values(snapshot.val()) : [];
-            let totalCollected = 0;
-            let totalOutstanding = 0;
-            let classOutstanding = {};
-            students.forEach(s => {
-                const fee = parseInt(s.feePerYear) || 0;
-                let paid = 0;
-                if (s.payments) {
-                    paid = Object.values(s.payments).reduce((sum, p) => sum + (parseInt(p.amount) || 0), 0);
-                }
-                totalCollected += paid;
-                const balance = fee - paid;
-                totalOutstanding += balance;
-                classOutstanding[s.classLevel] = (classOutstanding[s.classLevel] || 0) + balance;
-            });
-            // Fee Trend Chart (Line)
             const feeCtx = document.getElementById('fee-trend-chart').getContext('2d');
-            new Chart(feeCtx, {
+            if (feeTrendChart) feeTrendChart.destroy();
+            feeTrendChart = new Chart(feeCtx, {
                 type: 'line',
                 data: {
                     labels: ['Collected', 'Outstanding'],
                     datasets: [{
-                        label: 'Fee Trend',
+                        label: `Fee Trend (${year})`,
                         data: [totalCollected, totalOutstanding],
                         backgroundColor: '#28a745',
                         borderColor: '#198754',
@@ -708,14 +794,15 @@
                     }
                 }
             });
-            // Outstanding Fees by Class (Bar)
+
             const outstandingCtx = document.getElementById('outstanding-bar-chart').getContext('2d');
-            new Chart(outstandingCtx, {
+            if (outstandingChart) outstandingChart.destroy();
+            outstandingChart = new Chart(outstandingCtx, {
                 type: 'bar',
                 data: {
                     labels: Object.keys(classOutstanding),
                     datasets: [{
-                        label: 'Outstanding Fees by Class',
+                        label: `Outstanding Fees by Class (${year})`,
                         data: Object.values(classOutstanding),
                         backgroundColor: '#dc3545'
                     }]
@@ -727,16 +814,16 @@
                     }
                 }
             });
-        });
-        db.ref('expenses').once('value').then(snapshot => {
-            const expenses = snapshot.val() ? Object.values(snapshot.val()) : [];
+
+            const expenses = await fetchExpensesByYear(year);
             const categories = {};
             expenses.forEach(e => {
-                categories[e.category] = (categories[e.category] || 0) + (parseInt(e.amount) || 0);
+                const key = e.category || 'Other';
+                categories[key] = (categories[key] || 0) + (Number(e.amount) || 0);
             });
-            // Expense Breakdown (Pie)
             const expenseCtx = document.getElementById('expense-pie-chart').getContext('2d');
-            new Chart(expenseCtx, {
+            if (expenseChart) expenseChart.destroy();
+            expenseChart = new Chart(expenseCtx, {
                 type: 'pie',
                 data: {
                     labels: Object.keys(categories),
@@ -745,17 +832,38 @@
                         backgroundColor: ['#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff']
                     }]
                 },
-                options: {
-                    responsive: true
-                }
+                options: { responsive: true }
             });
-        });
+        } catch (err) {
+            console.error('Failed to load graphs', err);
+        }
     }
     // Load Audit Log (placeholder, can be made dynamic from payments and expenses)
     function loadAuditLog() {
         // For now, placeholder
         document.getElementById('audit-log-list').innerHTML = '<li>Payment added for Mnyore Omondi - 09/07/2025</li><li>Expense added for Printing Exams - 08/30/2025</li><li>Invoice generated for Class 4 - 09/15/2025</li><li>Reminder sent to 5 parents - 09/14/2025</li><li>New admission for Jane Doe - 09/13/2025</li><li>Financial report downloaded - 09/12/2025</li><li>Expense updated for Food - 09/11/2025</li><li>Payment recorded for Rehema Mlekwa - 09/10/2025</li><li>Audit performed on transactions - 09/09/2025</li><li>Inventory view accessed - 09/08/2025</li>';
     }
+    </script>
+    <script>
+    (function initYearSelector(){
+        const sel = document.querySelector('[data-somap-year-select]');
+        const hint = document.getElementById('somapYearHint');
+        if (!sel) return;
+        sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+        const current = getSelectedYear();
+        sel.value = current;
+        if (hint) hint.textContent = current;
+        sel.addEventListener('change', (e) => {
+            const value = String(e.target.value);
+            if (yearManager && typeof yearManager.setSelectedYear === 'function') {
+                yearManager.setSelectedYear(value);
+            } else {
+                try { sessionStorage.setItem('somap_selected_year', value); } catch (_e) {}
+                refreshFinanceScreens();
+            }
+            if (hint) hint.textContent = value;
+        });
+    })();
     </script>
 </body>
 </html>

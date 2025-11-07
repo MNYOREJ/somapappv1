@@ -18,10 +18,12 @@
     if (!trimmed) return [''];
     const variants = [
       trimmed,
+      encodeURIComponent(trimmed), // Most important - matches upload.html storage
       trimmed.replace(/\s+/g, '_'),
       trimmed.replace(/\s+/g, '-'),
       trimmed.replace(/\s+/g, ''),
-      encodeURIComponent(trimmed)
+      trimmed.toLowerCase(),
+      encodeURIComponent(trimmed.toLowerCase())
     ];
     return Array.from(new Set(variants.filter(Boolean)));
   }
@@ -113,8 +115,12 @@
     const subject = record.subject || meta.subject || 'General';
     const pageFrom = record.pageFrom || meta.pageFrom || null;
     const pageTo = record.pageTo || meta.pageTo || null;
-    const url = record.url || record.secure_url || meta.secure_url || null;
-    const publicId = record.cloudinaryPublicId || meta.cloudinaryPublicId || record.public_id || null;
+    // Handle all URL formats from upload.html
+    const url = record.url || record.secure_url || meta.secure_url || meta.url || null;
+    // Handle both camelCase and snake_case public ID formats
+    const publicId = record.cloudinaryPublicId || record.cloudinary_public_id || 
+                     meta.cloudinaryPublicId || meta.cloudinary_public_id || 
+                     record.public_id || meta.public_id || null;
     const uploadedAt = Number(record.uploadedAt || record.createdAt || meta.uploadedAt || meta.timestamp || 0) || 0;
     const sourceTag = record._src || (record.path ? 'uploads/files' : 'indexed');
     return {
@@ -196,10 +202,12 @@
     const variants = classNameVariants(canonical);
     const buildPaths = (base) => variants.map(v => `${base}${v}`);
     const prioritizedPaths = [
+      // Primary path from upload.html - URL encoded class name with year
+      ...buildPaths(`class_books/${y}/`),
+      // Legacy paths
+      ...buildPaths(`class_books/`),
       ...buildPaths(`booksIndex/${y}/`),
       ...buildPaths(`uploads/books/${y}/`),
-      ...buildPaths(`class_books/${y}/`),
-      ...buildPaths(`class_books/`),
       ...buildPaths(`uploads/booksShared/`)
     ];
 

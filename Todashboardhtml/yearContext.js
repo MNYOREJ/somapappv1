@@ -39,11 +39,22 @@
 
   function getSelectedYear() {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return stored;
-    const current = String(new Date().getFullYear());
-    localStorage.setItem(STORAGE_KEY, current);
+    // Force 2025 as minimum (SoMAp anchor year)
+    const MIN_YEAR = 2025;
+    if (stored) {
+      const yearNum = Number(stored);
+      if (yearNum < MIN_YEAR) {
+        const defaultYear = String(MIN_YEAR);
+        localStorage.setItem(STORAGE_KEY, defaultYear);
+        setManualFlag(false);
+        return defaultYear;
+      }
+      return stored;
+    }
+    const defaultYear = String(MIN_YEAR);
+    localStorage.setItem(STORAGE_KEY, defaultYear);
     setManualFlag(false);
-    return current;
+    return defaultYear;
   }
 
   function dispatchYearChanged(year) {
@@ -52,7 +63,12 @@
 
   function setSelectedYear(year, options = {}) {
     if (!year) return getSelectedYear();
-    const normalized = String(year);
+    const MIN_YEAR = 2025;
+    let normalized = String(year);
+    // Ensure year is at least 2025
+    if (Number(normalized) < MIN_YEAR) {
+      normalized = String(MIN_YEAR);
+    }
     const previous = getSelectedYear();
     if (previous === normalized) {
       if (options.forceDispatch) dispatchYearChanged(normalized);

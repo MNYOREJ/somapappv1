@@ -165,12 +165,20 @@
   <script>
   /** Reuse shared year context if present, else create a light fallback. */
   window.somapYearContext = window.somapYearContext || (function(){
-    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    // Force 2025 as minimum, clear old values from 2023
+    let stored = sessionStorage.getItem('somap_selected_year');
+    if (!stored || Number(stored) < 2025) {
+      stored = String(SOMAP_DEFAULT_YEAR);
+      try{ sessionStorage.setItem('somap_selected_year', stored); }catch(_e){}
+    }
+    let selected = stored || String(SOMAP_DEFAULT_YEAR);
     const listeners = new Set();
     return {
       getSelectedYear(){ return selected; },
       setSelectedYear(y){
         y = String(y);
+        // Ensure year is valid
+        if (Number(y) < 2025) y = String(SOMAP_DEFAULT_YEAR);
         if (selected===y) return;
         selected = y;
         try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
@@ -300,15 +308,23 @@
   const forcedYear = urlParams.get('year');
   const forcedSubject = urlParams.get('subject');
   const subjectFilter = forcedSubject ? forcedSubject.trim() : null;
+  
+  // Ensure selectedYear is at least 2025
   let selectedYear = forcedYear || (yearContext?.getSelectedYear ? String(yearContext.getSelectedYear()) : String(SOMAP_DEFAULT_YEAR));
+  if (Number(selectedYear) < 2025) {
+    selectedYear = String(SOMAP_DEFAULT_YEAR);
+  }
+  
+  // Sync with yearContext if available
+  if (yearContext && typeof yearContext.setSelectedYear === 'function') {
+    yearContext.setSelectedYear(selectedYear);
+  }
+  
   function updateYearHint(){
     const hint = document.getElementById('somapYearHint');
     if (hint) hint.textContent = selectedYear;
   }
   updateYearHint();
-  if (forcedYear && yearContext && typeof yearContext.setSelectedYear === 'function') {
-    yearContext.setSelectedYear(selectedYear);
-  }
 
   let userMode = 'child'; // 'child' | 'teacher'
   let className = '';
@@ -355,15 +371,21 @@
   function initChild(){ document.getElementById('backBtn').href = '../parent.html'; }
 
   async function loadChildView(studentKey){
-    const snap = await db.ref(`students/${studentKey}`).once('value');
-    if (!snap.exists()){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
-    currentStudentData = snap.val();
-    userMode = 'child';
-    userKey = studentKey;
-    try { localStorage.setItem('studentKey', studentKey); } catch(_e){}
-    className = (await resolveClassForSelectedYear(studentKey, (currentStudentData.classLevel || currentStudentData.class || '').trim())).trim();
-    initChild();
-    fetchBooks(className);
+    try {
+      const snap = await db.ref(`students/${studentKey}`).once('value');
+      if (!snap.exists()){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
+      currentStudentData = snap.val();
+      userMode = 'child';
+      userKey = studentKey;
+      try { localStorage.setItem('studentKey', studentKey); } catch(_e){}
+      className = (await resolveClassForSelectedYear(studentKey, (currentStudentData.classLevel || currentStudentData.class || '').trim())).trim();
+      initChild();
+      await fetchBooks(className);
+    } catch(err) {
+      console.error('Error loading child view:', err);
+      loadingEl.classList.add('hidden');
+      showEmptyState(className || '', `Error loading student data: ${err.message || 'Please try again.'}`);
+    }
   }
 
   async function resolveClassForSelectedYear(studentId, fallbackClass){
@@ -440,7 +462,14 @@
     grid.innerHTML = '';
     loadingEl.classList.remove('hidden');
     noBooksEl.classList.add('hidden');
+    
+    // Always clear loading state when done
+    const clearLoading = () => {
+      loadingEl.classList.add('hidden');
+    };
+    
     if (!targetClass || targetClass.toUpperCase() === 'GRADUATED') {
+      clearLoading();
       showEmptyState(targetClass);
       return;
     } else if (noBooksMessageEl) {
@@ -449,25 +478,36 @@
 
     const cacheKey = booksCacheKey(targetClass);
     if (!options.force && cache.has(cacheKey) && cache.get(cacheKey)?.length){
+      clearLoading();
       renderBooks(cache.get(cacheKey));
+      return;
     }
 
     try{
       if (!window.SomapBooks?.fetchBooksForClass){
-        throw new Error('Books helper not loaded.');
+        clearLoading();
+        throw new Error('Books helper not loaded. Ensure shared/somap-books.js is loaded.');
       }
-      const books = await window.SomapBooks.fetchBooksForClass(
-        selectedYear,
-        targetClass,
-        subjectFilter,
-        options.force ? { force:true } : {}
-      );
+      
+      console.log(`Fetching books for ${targetClass} in year ${selectedYear}...`);
+      const books = await Promise.race([
+        window.SomapBooks.fetchBooksForClass(
+          selectedYear,
+          targetClass,
+          subjectFilter,
+          options.force ? { force:true } : {}
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout: Books loading took too long')), 30000))
+      ]);
+      
       cache.set(cacheKey, books);
-      loadingEl.classList.add('hidden');
-      if (!books.length){
+      clearLoading();
+      
+      if (!books || !books.length){
         showEmptyState(targetClass, `No indexed books found for <b>${targetClass}</b> in <b>${selectedYear}</b> yet.`);
         return;
       }
+      
       if (reloadBtn){
         reloadBtn.classList.add('hidden');
         reloadBtn.style.display = 'none';
@@ -475,7 +515,8 @@
       renderBooks(books);
     }catch(e){
       console.error('Error loading books:', e);
-      showEmptyState(targetClass, 'Unable to load books right now. Please try again.');
+      clearLoading();
+      showEmptyState(targetClass, `Unable to load books right now: ${e.message || 'Please try again.'}`);
     }
   }
 
@@ -949,18 +990,37 @@
     const hint = document.getElementById('somapYearHint');
     if (!sel) return;
     sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+    
+    // Ensure selectedYear is valid and at least 2025
+    if (!selectedYear || Number(selectedYear) < 2025) {
+      selectedYear = String(SOMAP_DEFAULT_YEAR);
+    }
+    
     sel.value = selectedYear;
     if (hint) hint.textContent = selectedYear;
+    
+    // Sync with context
+    if (yearContext && typeof yearContext.setSelectedYear === 'function') {
+      yearContext.setSelectedYear(selectedYear);
+    }
+    
     sel.addEventListener('change', (e) => {
-      const val = String(e.target.value);
+      let val = String(e.target.value);
+      // Ensure year is at least 2025
+      if (Number(val) < 2025) {
+        val = String(SOMAP_DEFAULT_YEAR);
+        sel.value = val;
+      }
       selectedYear = val;
+      updateYearHint();
       if (yearContext && typeof yearContext.setSelectedYear === 'function') {
         yearContext.setSelectedYear(val);
-      } else {
-        updateYearHint();
-        if (userMode === 'child' && userKey) {
-          loadChildView(userKey).catch(console.error);
-        }
+      }
+      // Reload books for the new year
+      if (userMode === 'child' && userKey) {
+        loadChildView(userKey).catch(console.error);
+      } else if (userMode === 'teacher' && className) {
+        fetchBooks(className).catch(console.error);
       }
     });
   })();

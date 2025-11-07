@@ -196,12 +196,20 @@
   <script>
   /** Reuse shared year context if present, else create a light fallback. */
   window.somapYearContext = window.somapYearContext || (function(){
-    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    // Force 2025 as minimum, clear old values from 2023
+    let stored = sessionStorage.getItem('somap_selected_year');
+    if (!stored || Number(stored) < 2025) {
+      stored = String(SOMAP_DEFAULT_YEAR);
+      try{ sessionStorage.setItem('somap_selected_year', stored); }catch(_e){}
+    }
+    let selected = stored || String(SOMAP_DEFAULT_YEAR);
     const listeners = new Set();
     return {
       getSelectedYear(){ return selected; },
       setSelectedYear(y){
         y = String(y);
+        // Ensure year is valid
+        if (Number(y) < 2025) y = String(SOMAP_DEFAULT_YEAR);
         if (selected===y) return;
         selected = y;
         try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
@@ -535,7 +543,14 @@
 
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const yearContext = window.somapYearContext || null;
-  let activeYear = yearContext ? yearContext.getSelectedYear() : String(new Date().getFullYear());
+  let activeYear = yearContext ? yearContext.getSelectedYear() : String(SOMAP_DEFAULT_YEAR);
+  // Ensure activeYear is at least 2025
+  if (Number(activeYear) < 2025) {
+    activeYear = String(SOMAP_DEFAULT_YEAR);
+    if (yearContext && typeof yearContext.setSelectedYear === 'function') {
+      yearContext.setSelectedYear(activeYear);
+    }
+  }
   const db = window.db = firebase.database();
 
   // Helpers
@@ -748,14 +763,71 @@
   let latestFinanceSnapshot = null;
   const parentBooksClassCache = new Map();
   let latestBooksSnapshot = { year: null, className: null, items: [] };
-  const getActiveYearString = () => String(activeYear || new Date().getFullYear());
+  const getActiveYearString = () => {
+    const year = activeYear || (yearContext?.getSelectedYear?.() || String(SOMAP_DEFAULT_YEAR));
+    // Ensure year is at least 2025
+    return Number(year) >= 2025 ? String(year) : String(SOMAP_DEFAULT_YEAR);
+  };
   const getActiveYearNumber = () => Number(getActiveYearString());
   function updateYearBadge(){
     const yearStr = getActiveYearString();
     if (gradYearLabel) gradYearLabel.textContent = yearStr;
     const hint = document.getElementById('somapYearHint');
     if (hint) hint.textContent = yearStr;
+    
+    // Also update year selector if it exists
+    const yearSelect = document.querySelector('[data-somap-year-select]');
+    if (yearSelect && yearSelect.value !== yearStr) {
+      yearSelect.value = yearStr;
+    }
   }
+  
+  // Initialize year selector on page load
+  (function initYearSelector(){
+    const sel = document.querySelector('[data-somap-year-select]');
+    const hint = document.getElementById('somapYearHint');
+    if (!sel) return;
+    
+    // Wait for yearContext.js to attach, then sync
+    setTimeout(() => {
+      const currentYear = activeYear || (yearContext?.getSelectedYear?.() || String(SOMAP_DEFAULT_YEAR));
+      const validYear = Number(currentYear) >= 2025 ? currentYear : String(SOMAP_DEFAULT_YEAR);
+      
+      if (sel.value !== validYear) {
+        sel.value = validYear;
+      }
+      if (hint) hint.textContent = validYear;
+      
+      // Listen for changes from yearContext.js
+      if (yearContext && typeof yearContext.onYearChanged === 'function') {
+        yearContext.onYearChanged((year) => {
+          const normalized = String(year);
+          if (Number(normalized) >= 2025) {
+            activeYear = normalized;
+            updateYearBadge();
+            refreshYearDependentData().catch(console.error);
+            refreshParentBooksPanel().catch(console.error);
+          }
+        });
+      }
+      
+      // Also listen to direct select changes
+      sel.addEventListener('change', (e) => {
+        let val = String(e.target.value);
+        if (Number(val) < 2025) {
+          val = String(SOMAP_DEFAULT_YEAR);
+          sel.value = val;
+        }
+        activeYear = val;
+        updateYearBadge();
+        if (yearContext && typeof yearContext.setSelectedYear === 'function') {
+          yearContext.setSelectedYear(val);
+        }
+        refreshYearDependentData().catch(console.error);
+        refreshParentBooksPanel().catch(console.error);
+      });
+    }, 100);
+  })();
 
   function toggleGradBadge(isGraduated, yearStr){
     if (!studentGradBadge) return;
@@ -938,6 +1010,8 @@
 
       await showParentDashboard();
       bindUI();
+      // Initialize year badge after dashboard loads
+      updateYearBadge();
     }catch(err){
       console.error(err);
       Swal.fire('Error','Failed to initialize dashboard. Please refresh the page.','error');

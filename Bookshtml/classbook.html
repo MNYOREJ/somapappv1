@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -135,16 +135,17 @@
   const SOMAP_DEFAULT_YEAR = 2025;
 
   /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
-  const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
   const L = s => String(s||'').trim().toLowerCase();
   const CLASS_ALIASES = {
-    'middle': 'Middle Class',
-    'middle class': 'Middle Class',
-    'pre unit': 'Pre Unit Class',
-    'preunit': 'Pre Unit Class',
-    'pre-unit': 'Pre Unit Class',
-    'pre unit class': 'Pre Unit Class',
-    'preunit class': 'Pre Unit Class'
+    'middle': 'Baby Class',
+    'middle class': 'Baby Class',
+    'nursery': 'Baby Class',
+    'pre unit': 'Baby Class',
+    'preunit': 'Baby Class',
+    'pre-unit': 'Baby Class',
+    'pre unit class': 'Baby Class',
+    'preunit class': 'Baby Class',
   };
 
   /** Shift a base class by delta years relative to anchor (2025). */
@@ -158,6 +159,8 @@
     return CLASS_ORDER[j];
   }
   </script>
+
+  <script src="../shared/somap-books.js"></script>
 
   <script>
   /** Reuse shared year context if present, else create a light fallback. */
@@ -223,7 +226,12 @@
 
     <div id="noBooks" class="hidden text-center text-gray-500 my-10">
       <i class="fa fa-book-open text-5xl mb-4"></i>
-      <div>No books available yet.</div>
+      <div id="noBooksMessage">No books available yet.</div>
+      <button id="reloadBooksBtn"
+              class="mt-4 inline-flex items-center justify-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              type="button">
+        <i class="fa fa-rotate mr-2"></i>Reload from uploads
+      </button>
     </div>
   </main>
 
@@ -285,11 +293,13 @@
   };
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
-  const db = firebase.database();
+  const db = window.db = firebase.database();
   const yearContext = window.somapYearContext || null;
   const urlParams = new URLSearchParams(location.search);
   const forcedStudentId = urlParams.get('student');
   const forcedYear = urlParams.get('year');
+  const forcedSubject = urlParams.get('subject');
+  const subjectFilter = forcedSubject ? forcedSubject.trim() : null;
   let selectedYear = forcedYear || (yearContext?.getSelectedYear ? String(yearContext.getSelectedYear()) : String(SOMAP_DEFAULT_YEAR));
   function updateYearHint(){
     const hint = document.getElementById('somapYearHint');
@@ -381,21 +391,39 @@
   const thumbCache = new Map(); // url -> dataURL
   const loadingEl = document.getElementById('loading');
   const noBooksEl = document.getElementById('noBooks');
-  const noBooksMessageEl = noBooksEl?.querySelector('div');
+  const noBooksMessageEl = document.getElementById('noBooksMessage');
+  const reloadBtn = document.getElementById('reloadBooksBtn');
   const defaultNoBooksText = noBooksMessageEl?.textContent || 'No books available yet.';
   const grid = document.getElementById('booksGrid');
   const searchInput = document.getElementById('searchInput');
-  let activeBooksRef = null;
-  let activeBooksListener = null;
 
   function canonicalClassName(cls){ return (cls || '').trim(); }
-  function booksCacheKey(cls, year = selectedYear){ return `books_${year}_${canonicalClassName(cls)}`; }
-  function detachActiveBooksListener(){
-    if (activeBooksRef && activeBooksListener){
-      try{ activeBooksRef.off('value', activeBooksListener); }catch(_){}
+  function booksCacheKey(cls, year = selectedYear){
+    const subjectKey = L(subjectFilter || 'any');
+    return `books_${year}_${canonicalClassName(cls)}_${subjectKey}`;
+  }
+
+  function showEmptyState(targetClass, message){
+    if (!noBooksEl) return;
+    loadingEl.classList.add('hidden');
+    noBooksEl.classList.remove('hidden');
+    if (noBooksMessageEl){
+      const targetGraduated = targetClass && targetClass.toUpperCase() === 'GRADUATED';
+      const subjectLabel = subjectFilter ? ` and subject <b>${escapeHtml(subjectFilter)}</b>` : '';
+      const classLabel = targetClass ? `<b>${escapeHtml(targetClass)}</b>` : 'this class';
+      const defaultMsg = targetGraduated
+        ? `This learner graduated in ${escapeHtml(String(selectedYear))}. No class books for this year.`
+        : (message || `No indexed books found for ${classLabel} in <b>${escapeHtml(String(selectedYear))}</b>${subjectLabel}.`);
+      noBooksMessageEl.innerHTML = defaultMsg;
     }
-    activeBooksRef = null;
-    activeBooksListener = null;
+    if (reloadBtn){
+      const hideReload = !targetClass || targetClass.toUpperCase() === 'GRADUATED';
+      reloadBtn.style.display = hideReload ? 'none' : 'inline-flex';
+      reloadBtn.classList.toggle('hidden', hideReload);
+      if (!hideReload){
+        reloadBtn.onclick = ()=> fetchBooks(targetClass, { force:true });
+      }
+    }
   }
 
   function isPdf(url){ return /\.pdf(\?|#|$)/i.test(url||''); }
@@ -406,153 +434,63 @@
       : url;
   }
 
-  async function fetchBooks(cls){
+  async function fetchBooks(cls, options = {}){
     const targetClass = canonicalClassName(cls);
     className = targetClass;
-    detachActiveBooksListener();
     grid.innerHTML = '';
     loadingEl.classList.remove('hidden');
     noBooksEl.classList.add('hidden');
     if (!targetClass || targetClass.toUpperCase() === 'GRADUATED') {
-      loadingEl.classList.add('hidden');
-      if (noBooksEl) {
-        noBooksEl.classList.remove('hidden');
-        if (noBooksMessageEl) {
-          noBooksMessageEl.textContent = targetClass && targetClass.toUpperCase() === 'GRADUATED'
-            ? `Graduated learners do not have assigned class books for ${selectedYear}.`
-            : 'No class selected for this year.';
-        }
-      }
+      showEmptyState(targetClass);
       return;
     } else if (noBooksMessageEl) {
       noBooksMessageEl.textContent = defaultNoBooksText;
     }
 
     const cacheKey = booksCacheKey(targetClass);
-    if (cache.has(cacheKey)) {
+    if (!options.force && cache.has(cacheKey) && cache.get(cacheKey)?.length){
       renderBooks(cache.get(cacheKey));
     }
 
-    const encodedClass = encodeURIComponent(targetClass);
-    const yearPaths = [
-      `class_books/${selectedYear}/${encodedClass}`,
-      `class_books/${selectedYear}/${targetClass}`
-    ];
-    const legacyPaths = [
-      `class_books/${encodedClass}`,
-      `class_books/${targetClass}`
-    ];
-    const pathCandidates = [...yearPaths, ...legacyPaths];
-    let entries = [];
-    let allBooksMap = new Map(); // Use Map to deduplicate by book ID
-
     try{
-      // Check all paths and merge results (prioritize year-based paths)
-      for (const path of pathCandidates){
-        try {
-          const snap = await db.ref(path).once('value');
-          const data = snap.val() || {};
-          const pairs = Object.entries(data);
-          // Merge books, preferring year-specific ones if duplicate IDs exist
-          pairs.forEach(([bookId, bookData]) => {
-            if (bookData && typeof bookData === 'object' && bookData.url) {
-              // If year-specific path, prioritize it; otherwise add if not already present
-              const isYearPath = yearPaths.includes(path);
-              if (!allBooksMap.has(bookId) || isYearPath) {
-                allBooksMap.set(bookId, bookData);
-              }
-            }
-          });
-        } catch (pathErr) {
-          console.warn(`Failed to fetch from ${path}`, pathErr);
-        }
+      if (!window.SomapBooks?.fetchBooksForClass){
+        throw new Error('Books helper not loaded.');
       }
-      
-      // Convert Map to array of [id, bookData] pairs
-      entries = Array.from(allBooksMap.entries());
-      
-      // Sort by uploadedAt (newest first)
-      entries.sort((a, b) => {
-        const timeA = (a[1].uploadedAt || 0);
-        const timeB = (b[1].uploadedAt || 0);
-        return timeB - timeA;
-      });
-
+      const books = await window.SomapBooks.fetchBooksForClass(
+        selectedYear,
+        targetClass,
+        subjectFilter,
+        options.force ? { force:true } : {}
+      );
+      cache.set(cacheKey, books);
       loadingEl.classList.add('hidden');
-      cache.set(cacheKey, entries);
-      renderBooks(entries);
-      
-      // For live updates, listen to the year-specific path primarily
-      // We'll re-fetch all paths when updates occur to ensure we have the latest
-      const listenPath = yearPaths[0]; // Always prefer year-based path for live updates
-      try {
-        const ref = db.ref(listenPath);
-        const listener = async s=>{
-          // On update, re-fetch from all paths to get the complete picture
-          const merged = new Map();
-          // First, get year-specific books
-          for (const path of yearPaths) {
-            try {
-              const snap = await db.ref(path).once('value');
-              const data = snap.val() || {};
-              Object.entries(data).forEach(([id, book]) => {
-                if (book && typeof book === 'object' && book.url) {
-                  merged.set(id, book);
-                }
-              });
-            } catch (err) {
-              // Ignore errors for individual paths
-            }
-          }
-          // Then add legacy books that aren't already in the map
-          for (const path of legacyPaths) {
-            try {
-              const snap = await db.ref(path).once('value');
-              const data = snap.val() || {};
-              Object.entries(data).forEach(([id, book]) => {
-                if (book && typeof book === 'object' && book.url && !merged.has(id)) {
-                  merged.set(id, book);
-                }
-              });
-            } catch (err) {
-              // Ignore errors for individual paths
-            }
-          }
-          const finalEntries = Array.from(merged.entries()).sort((a, b) => {
-            return (b[1].uploadedAt || 0) - (a[1].uploadedAt || 0);
-          });
-          if (JSON.stringify(finalEntries)!==JSON.stringify(cache.get(cacheKey))){
-            cache.set(cacheKey, finalEntries);
-            renderBooks(finalEntries);
-          }
-        };
-        ref.on('value', listener);
-        activeBooksRef = ref;
-        activeBooksListener = listener;
-      } catch (listenErr) {
-        console.warn('Failed to set up listener', listenErr);
+      if (!books.length){
+        showEmptyState(targetClass, `No indexed books found for <b>${targetClass}</b> in <b>${selectedYear}</b> yet.`);
+        return;
       }
+      if (reloadBtn){
+        reloadBtn.classList.add('hidden');
+        reloadBtn.style.display = 'none';
+      }
+      renderBooks(books);
     }catch(e){
       console.error('Error loading books:', e);
-      loadingEl.classList.add('hidden');
-      if (entries.length === 0) {
-        noBooksEl.classList.remove('hidden');
-        if (noBooksMessageEl) {
-          noBooksMessageEl.textContent = `No books found for ${targetClass} in ${selectedYear}. Books may need to be uploaded.`;
-        }
-      } else {
-        renderBooks(entries);
-      }
+      showEmptyState(targetClass, 'Unable to load books right now. Please try again.');
     }
   }
 
   // attach once
   searchInput.addEventListener('input', ()=>{
-    const q = (searchInput.value||'').toLowerCase().trim();
-    const all = cache.get(booksCacheKey(className))||[];
-    const filtered = all.filter(([id,b])=>{
-      const t=(b.title||'').toLowerCase(); const s=(b.subject||'').toLowerCase();
-      return t.includes(q)||s.includes(q);
+    const term = (searchInput.value||'').toLowerCase().trim();
+    const shelf = cache.get(booksCacheKey(className))||[];
+    if (!term){
+      renderBooks(shelf);
+      return;
+    }
+    const filtered = shelf.filter(b=>{
+      const title = (b.title||'').toLowerCase();
+      const subject = (b.subject||'').toLowerCase();
+      return title.includes(term) || subject.includes(term);
     });
     renderBooks(filtered);
   });
@@ -600,41 +538,45 @@
   async function renderBooks(entries){
     loadingEl.classList.add('hidden');
     grid.innerHTML = '';
-    if (!entries.length){ noBooksEl.classList.remove('hidden'); return; }
+    if (!entries.length){
+      showEmptyState(className);
+      return;
+    }
     noBooksEl.classList.add('hidden');
 
     const frag = document.createDocumentFragment();
-    for (const [id,b] of entries){
+    entries.forEach((b, idx)=>{
       const card = document.createElement('div');
       card.className = 'book-card';
-      const t = (b.title||'Untitled');
-      const s = (b.subject||'');
-      const subClass = subjectClass(s);
+      const title = (b.title||'Untitled');
+      const subject = (b.subject||'');
+      const subClass = subjectClass(subject);
+      const link = b.url || (typeof cloudinaryFileUrl === 'function' ? cloudinaryFileUrl(b.publicId) : '');
 
-      let cover = thumbFrom(b.url||'');
-      if (!cover && isPdf(b.url)){
-        // placeholder while generating
-        cover = 'https://dummyimage.com/640x360/0b1220/ffffff.png&text=Loading…';
-        // async improve once ready
-        generatePdfCoverThumb(b.url).then(dataURL=>{
+      let cover = thumbFrom(link||'');
+      if (!cover && isPdf(link)){
+        cover = 'https://dummyimage.com/640x360/0b1220/ffffff.png&text=Loading.';
+        generatePdfCoverThumb(link).then(dataURL=>{
           if (!dataURL) return;
-          const imgEl = card.querySelector('img[data-id="'+id+'"]');
+          const imgEl = card.querySelector('img[data-id="'+idx+'"]');
           if (imgEl) imgEl.src = dataURL;
         });
       }
 
       card.innerHTML = `
         <div class="book-thumb-wrap">
-          <img class="book-thumb" data-id="${id}" loading="lazy" src="${cover||''}" alt="${escapeHtml(t)} cover" onerror="this.style.display='none'">
+          <img class="book-thumb" data-id="${idx}" loading="lazy" src="${cover||''}" alt="${escapeHtml(title)} cover" onerror="this.style.display='none'">
           <div class="thumb-veil"></div>
         </div>
         <div class="book-body">
-          <div class="book-title">${escapeHtml(t)}</div>
-          <div class="book-sub"><span class="subject-chip ${subClass}">${escapeHtml(s||'General')}</span></div>
-          <button class="read-btn" data-url="${b.url||''}" data-title="${escapeHtml(t)}"><i class="fa fa-book-open mr-1"></i>Read</button>
+          <div class="book-title">${escapeHtml(title)}</div>
+          <div class="book-sub"><span class="subject-chip ${subClass}">${escapeHtml(subject||'General')}</span></div>
+          ${b.pageFrom && b.pageTo ? `<div class="text-xs text-slate-500 mb-2">Pages ${b.pageFrom} - ${b.pageTo}</div>` : ''}
+          <button class="read-btn" data-url="${link||''}" data-title="${escapeHtml(title)}"><i class="fa fa-book-open mr-1"></i>Read</button>
+          <div class="text-[10px] text-slate-400 mt-2 text-right">src: ${escapeHtml(b._src||'library')}</div>
         </div>`;
       frag.appendChild(card);
-    }
+    });
     grid.appendChild(frag);
 
     grid.querySelectorAll('.read-btn').forEach(btn=>{
@@ -642,6 +584,7 @@
         openViewer(btn.getAttribute('data-url'), btn.getAttribute('data-title'));
       });
     });
+  }
   }
 
   function escapeHtml(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
@@ -1024,3 +967,4 @@
   </script>
 </body>
 </html>
+

@@ -80,9 +80,15 @@
             </div>
           </div>
 
-          <div>
-            <label class="small">Edition / Year</label>
-            <input id="edition" type="text" placeholder="e.g., 2025 (optional)" class="w-full px-3 py-2 rounded-md border mt-1" />
+          <div class="flex gap-3">
+            <div style="flex:1">
+              <label class="small">Academic Year</label>
+              <select id="academicYear" class="w-full px-3 py-2 rounded-md border mt-1"></select>
+            </div>
+            <div style="flex:1">
+              <label class="small">Edition (optional)</label>
+              <input id="edition" type="text" placeholder="e.g., 1st edition" class="w-full px-3 py-2 rounded-md border mt-1" />
+            </div>
           </div>
 
           <div>
@@ -250,6 +256,20 @@
       });
       populateSubjects();
     }
+    function populateAcademicYears(){
+      const yearSelect = document.getElementById('academicYear');
+      if (!yearSelect) return;
+      const currentYear = new Date().getFullYear();
+      yearSelect.innerHTML = '';
+      // Generate years from 2023 to 10 years in the future
+      for (let y = 2023; y <= currentYear + 10; y++) {
+        const o = document.createElement('option');
+        o.value = String(y);
+        o.textContent = String(y);
+        if (y === currentYear) o.selected = true;
+        yearSelect.appendChild(o);
+      }
+    }
     function populateSubjects(){
       const cls = classSelect.value;
       const subs = SUBJECTS_BY_CLASS[cls] || ['Other'];
@@ -295,6 +315,7 @@
       if(err){ showError(err.message); disableAll(); return; }
       // UI setup
       populateClasses();
+      populateAcademicYears();
       // read saved cloud settings
       const cN = localStorage.getItem('cloudName') || DEFAULT_CLOUD_NAME;
       const up = localStorage.getItem('uploadPreset') || DEFAULT_UPLOAD_PRESET;
@@ -346,12 +367,15 @@
       const subject = subjectSelect.value;
       const edition = editionInput.value.trim();
       const description = descriptionInput.value.trim();
+      const academicYearSelect = document.getElementById('academicYear');
+      const academicYear = academicYearSelect ? academicYearSelect.value.trim() : String(new Date().getFullYear());
       const cloudName = (cloudNameInput.value.trim() || localStorage.getItem('cloudName') || DEFAULT_CLOUD_NAME).trim();
       const uploadPreset = (uploadPresetInput.value.trim() || localStorage.getItem('uploadPreset') || DEFAULT_UPLOAD_PRESET).trim();
 
       if(!title){ showError('Please enter book title.'); return; }
       if(!cls){ showError('Please select class.'); return; }
       if(!subject){ showError('Please select subject.'); return; }
+      if(!academicYear){ showError('Please select academic year.'); return; }
       if(!cloudName || !uploadPreset){ showError('Set Cloudinary cloud name and upload preset on the right.'); return; }
 
       // save settings locally
@@ -400,12 +424,16 @@
         setProgress(70);
         showMessage(el('<div class="small">Saving metadata to Firebase…</div>'));
 
+        // Use the selected academic year
+        const yearToUse = academicYear || String(new Date().getFullYear());
+
         // Build metadata
         const bookMeta = {
           title: title,
           class: cls,
           subject: subject,
           edition: edition || '',
+          year: yearToUse,
           description: description || '',
           url: secureUrl,
           cloudinary_public_id: publicId,
@@ -420,10 +448,15 @@
         const newBookRef = await firebase.database().ref('books').push(bookMeta);
         const bookId = newBookRef.key;
 
-        // Index by class for quick retrieval
+        // Index by class for quick retrieval (with year and without year for backward compatibility)
         try {
+          // Store with year for year-based access (primary storage)
+          await firebase.database().ref(`class_books/${yearToUse}/${encodeURIComponent(cls)}/${bookId}`).set({
+            title, subject, url: secureUrl, uploadedAt: Date.now(), year: yearToUse, edition: edition || ''
+          });
+          // Also store without year for legacy/fallback access
           await firebase.database().ref(`class_books/${encodeURIComponent(cls)}/${bookId}`).set({
-            title, subject, url: secureUrl, uploadedAt: Date.now()
+            title, subject, url: secureUrl, uploadedAt: Date.now(), year: yearToUse, edition: edition || ''
           });
         } catch(err){
           console.warn('Failed to index class_books', err);

@@ -443,40 +443,106 @@
       `class_books/${targetClass}`
     ];
     const pathCandidates = [...yearPaths, ...legacyPaths];
-    let chosenPath = null;
     let entries = [];
+    let allBooksMap = new Map(); // Use Map to deduplicate by book ID
 
     try{
+      // Check all paths and merge results (prioritize year-based paths)
       for (const path of pathCandidates){
-        const snap = await db.ref(path).once('value');
-        const data = snap.val() || {};
-        const pairs = Object.entries(data);
-        if (!chosenPath) chosenPath = path;
-        if (pairs.length){
-          chosenPath = path;
-          entries = pairs;
-          break;
+        try {
+          const snap = await db.ref(path).once('value');
+          const data = snap.val() || {};
+          const pairs = Object.entries(data);
+          // Merge books, preferring year-specific ones if duplicate IDs exist
+          pairs.forEach(([bookId, bookData]) => {
+            if (bookData && typeof bookData === 'object' && bookData.url) {
+              // If year-specific path, prioritize it; otherwise add if not already present
+              const isYearPath = yearPaths.includes(path);
+              if (!allBooksMap.has(bookId) || isYearPath) {
+                allBooksMap.set(bookId, bookData);
+              }
+            }
+          });
+        } catch (pathErr) {
+          console.warn(`Failed to fetch from ${path}`, pathErr);
         }
       }
+      
+      // Convert Map to array of [id, bookData] pairs
+      entries = Array.from(allBooksMap.entries());
+      
+      // Sort by uploadedAt (newest first)
+      entries.sort((a, b) => {
+        const timeA = (a[1].uploadedAt || 0);
+        const timeB = (b[1].uploadedAt || 0);
+        return timeB - timeA;
+      });
+
+      loadingEl.classList.add('hidden');
       cache.set(cacheKey, entries);
       renderBooks(entries);
-      if (chosenPath){
-        const ref = db.ref(chosenPath);
-        const listener = s=>{
-          const d = s.val()||{};
-          const e = Object.entries(d);
-          if (JSON.stringify(e)!==JSON.stringify(cache.get(cacheKey))){
-            cache.set(cacheKey, e);
-            renderBooks(e);
+      
+      // For live updates, listen to the year-specific path primarily
+      // We'll re-fetch all paths when updates occur to ensure we have the latest
+      const listenPath = yearPaths[0]; // Always prefer year-based path for live updates
+      try {
+        const ref = db.ref(listenPath);
+        const listener = async s=>{
+          // On update, re-fetch from all paths to get the complete picture
+          const merged = new Map();
+          // First, get year-specific books
+          for (const path of yearPaths) {
+            try {
+              const snap = await db.ref(path).once('value');
+              const data = snap.val() || {};
+              Object.entries(data).forEach(([id, book]) => {
+                if (book && typeof book === 'object' && book.url) {
+                  merged.set(id, book);
+                }
+              });
+            } catch (err) {
+              // Ignore errors for individual paths
+            }
+          }
+          // Then add legacy books that aren't already in the map
+          for (const path of legacyPaths) {
+            try {
+              const snap = await db.ref(path).once('value');
+              const data = snap.val() || {};
+              Object.entries(data).forEach(([id, book]) => {
+                if (book && typeof book === 'object' && book.url && !merged.has(id)) {
+                  merged.set(id, book);
+                }
+              });
+            } catch (err) {
+              // Ignore errors for individual paths
+            }
+          }
+          const finalEntries = Array.from(merged.entries()).sort((a, b) => {
+            return (b[1].uploadedAt || 0) - (a[1].uploadedAt || 0);
+          });
+          if (JSON.stringify(finalEntries)!==JSON.stringify(cache.get(cacheKey))){
+            cache.set(cacheKey, finalEntries);
+            renderBooks(finalEntries);
           }
         };
         ref.on('value', listener);
         activeBooksRef = ref;
         activeBooksListener = listener;
+      } catch (listenErr) {
+        console.warn('Failed to set up listener', listenErr);
       }
     }catch(e){
+      console.error('Error loading books:', e);
       loadingEl.classList.add('hidden');
-      alert('Error loading books: ' + e.message);
+      if (entries.length === 0) {
+        noBooksEl.classList.remove('hidden');
+        if (noBooksMessageEl) {
+          noBooksMessageEl.textContent = `No books found for ${targetClass} in ${selectedYear}. Books may need to be uploaded.`;
+        }
+      } else {
+        renderBooks(entries);
+      }
     }
   }
 

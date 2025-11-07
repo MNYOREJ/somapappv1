@@ -1,88 +1,180 @@
 (function SomapBooksModule(global){
   'use strict';
 
-  const fallbackYear = global.SOMAP_DEFAULT_YEAR || 2025;
-  const fallbackClasses = global.CLASS_ORDER || [
-    'Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'
-  ];
+  const defaultYears = Array.from({ length: 20 }, (_, i) => 2023 + i);
+  const fallbackClasses = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const allowedYears = global.SOMAP_ALLOWED_YEARS || defaultYears;
+  const fallbackYear = Number(global.SOMAP_DEFAULT_YEAR) || 2025;
+  const classOrder = global.CLASS_ORDER || fallbackClasses;
   const lower = global.L || (s => String(s || '').trim().toLowerCase());
 
-  function canonicalClassName(name){
-    if (!name) return '';
-    const normalized = lower(name);
-    return fallbackClasses.find(c => lower(c) === normalized) || name;
+  if (!global.SOMAP_ALLOWED_YEARS) global.SOMAP_ALLOWED_YEARS = allowedYears;
+  if (!global.SOMAP_DEFAULT_YEAR) global.SOMAP_DEFAULT_YEAR = fallbackYear;
+  if (!global.CLASS_ORDER) global.CLASS_ORDER = classOrder;
+  if (!global.L) global.L = lower;
+
+  function fallbackShift(baseClass, deltaYears){
+    const norm = lower(baseClass || '');
+    const idx = classOrder.findIndex(c => lower(c) === norm);
+    if (idx < 0) return baseClass || '';
+    const next = idx + Number(deltaYears || 0);
+    if (next < 0) return 'PRE-ADMISSION';
+    if (next >= classOrder.length) return 'GRADUATED';
+    return classOrder[next];
   }
 
-  function classNameVariants(name){
-    const trimmed = String(name || '').trim();
-    if (!trimmed) return [''];
-    const variants = [
-      trimmed,
-      encodeURIComponent(trimmed), // Most important - matches upload.html storage
-      trimmed.replace(/\s+/g, '_'),
-      trimmed.replace(/\s+/g, '-'),
-      trimmed.replace(/\s+/g, ''),
-      trimmed.toLowerCase(),
-      encodeURIComponent(trimmed.toLowerCase())
-    ];
-    return Array.from(new Set(variants.filter(Boolean)));
+  if (typeof global.shiftClass !== 'function'){
+    global.shiftClass = fallbackShift;
   }
+
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const withTimeout = (promise, ms = 30000) => Promise.race([
+    promise,
+    wait(ms).then(() => { throw new Error('timeout'); })
+  ]);
 
   function ensureDb(){
     if (global.db) return global.db;
     if (global.firebase?.apps?.length){
-      const instance = global.firebase.database();
-      global.db = instance;
-      return instance;
+      global.db = global.firebase.database();
+      return global.db;
     }
     throw new Error('Firebase database is not initialized. Load firebase.js first.');
   }
 
-  async function loadCommonYear(targetYear, studentId){
+  function canonicalClassName(name){
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return classOrder[0] || 'Baby Class';
+    const norm = lower(trimmed);
+    const match = classOrder.find(c => lower(c) === norm);
+    return match || trimmed;
+  }
+
+  function classKeyVariants(name){
+    const raw = String(name || '').trim();
+    if (!raw) return [''];
+    const variants = [
+      raw,
+      raw.toLowerCase(),
+      raw.replace(/\s+/g, ''),
+      raw.replace(/\s+/g, '_'),
+      raw.replace(/\s+/g, '-'),
+      encodeURIComponent(raw),
+      encodeURIComponent(raw.toLowerCase())
+    ].filter(Boolean);
+    return Array.from(new Set(variants));
+  }
+
+  async function tryFirstNonEmpty(paths){
     const db = ensureDb();
-    const ctx = global.somapYearContext;
-    const y = String(targetYear || (ctx?.getSelectedYear?.() ?? fallbackYear));
-    const studentPath = studentId ? `students/${studentId}` : 'students';
-    const [studentsSnap, anchorSnap, yearSnap] = await Promise.all([
-      db.ref(studentPath).once('value'),
-      db.ref(`enrollments/${fallbackYear}`).once('value'),
-      db.ref(`enrollments/${y}`).once('value').catch(()=>({ val: ()=>null }))
-    ]);
-    const safeVal = snap => (snap && snap.val ? snap.val() : null) || {};
-    const studentsRaw = safeVal(studentsSnap);
-    const students = studentId ? { [studentId]: studentsRaw } : studentsRaw;
+    for (const path of paths){
+      try{
+        const snap = await withTimeout(db.ref(path).once('value'));
+        const payload = snap && snap.val ? snap.val() : null;
+        if (payload && Object.keys(payload).length){
+          return { path, data: payload };
+        }
+      }catch(err){
+        console.warn('SomapBooks: unable to read path', path, err?.message || err);
+      }
+    }
+    return null;
+  }
+
+  function normalizeBook(record, year, className, source){
+    const meta = record.meta || {};
+    const title = record.title || record.name || record.fileName || meta.title || 'Untitled';
+    const subject = record.subject || meta.subject || 'General';
+    const pageFrom = record.pageFrom ?? meta.pageFrom ?? null;
+    const pageTo = record.pageTo ?? meta.pageTo ?? null;
+    const url = record.url || record.secure_url || meta.url || meta.secure_url || null;
+    const publicId = record.cloudinaryPublicId || record.cloudinary_public_id ||
+      meta.cloudinaryPublicId || meta.cloudinary_public_id ||
+      record.public_id || meta.public_id || null;
+    const uploadedAt = Number(
+      record.uploadedAt || record.createdAt || record.timestamp ||
+      meta.uploadedAt || meta.createdAt || meta.timestamp || 0
+    ) || 0;
+    const link = url || (publicId && typeof global.cloudinaryFileUrl === 'function'
+      ? global.cloudinaryFileUrl(publicId)
+      : null);
     return {
-      y,
-      students: students || {},
-      enrollAnchor: safeVal(anchorSnap),
-      enrollYear: safeVal(yearSnap)
+      title,
+      subject,
+      className,
+      year: String(year),
+      pageFrom,
+      pageTo,
+      url: link,
+      publicId,
+      uploadedAt,
+      _src: record._src || source || 'indexed',
+      raw: record
     };
   }
 
-  function resolveClassForYear(studentId, anchorMap = {}, yearMap = {}, targetYear = fallbackYear){
-    const sid = String(studentId || '');
-    if (!sid) return 'Baby Class';
-    const explicit = yearMap[sid] || {};
-    if (explicit.className || explicit.classLevel){
-      return explicit.className || explicit.classLevel;
+  function collectClassHints(record){
+    const meta = record.meta || {};
+    const strings = [
+      record.className, record.class, record.classLevel, record.level, record.grade,
+      meta.className, meta.class, meta.classLevel, meta.level, meta.grade, meta.standard
+    ].filter(Boolean);
+    const arrays = [];
+    if (Array.isArray(record.tags)) arrays.push(record.tags);
+    if (Array.isArray(meta.tags)) arrays.push(meta.tags);
+    return [
+      ...strings.map(lower),
+      ...arrays.flat().filter(Boolean).map(lower)
+    ];
+  }
+
+  function recordMatches(record, className, year, subjectOpt){
+    const target = lower(className);
+    const hints = collectClassHints(record);
+    const synonyms = new Set([target]);
+    const classNumber = (String(className).match(/\d+/) || [])[0];
+    if (target === 'baby class'){
+      ['baby','nursery','pre unit','pre-unit','preunit','class 0','class zero','pre class']
+        .forEach(s => synonyms.add(s));
     }
-    const anchor = anchorMap[sid] || {};
-    const baseClass = anchor.className || anchor.classLevel || 'Baby Class';
-    const delta = Number(targetYear) - fallbackYear;
-    if (typeof global.shiftClass === 'function'){
-      return global.shiftClass(baseClass, delta);
+    if (classNumber){
+      [`class-${classNumber}`, `class${classNumber}`, `class ${classNumber}`,
+        `grade ${classNumber}`, `grade-${classNumber}`, `std ${classNumber}`, `standard ${classNumber}`]
+        .forEach(s => synonyms.add(lower(s)));
     }
-    return baseClass;
+    const classOk = hints.some(h => synonyms.has(h));
+    if (!classOk) return false;
+    const meta = record.meta || {};
+    const yearField = record.year || meta.year || record.session || record.term;
+    const yearOk = !yearField || String(yearField) === String(year);
+    if (!yearOk) return false;
+    if (!subjectOpt) return true;
+    const recordSubject = record.subject || meta.subject || meta.Subject || '';
+    return lower(recordSubject) === lower(subjectOpt);
+  }
+
+  async function fetchFromUploadsFallback(year, className, subjectOpt){
+    try{
+      const db = ensureDb();
+      const snap = await withTimeout(db.ref('uploads/files').once('value'));
+      const payload = snap && snap.val ? snap.val() : {};
+      return Object.values(payload || {})
+        .filter(item => recordMatches(item, className, year, subjectOpt))
+        .map(item => normalizeBook(item, year, className, 'uploads/files'));
+    }catch(err){
+      console.warn('SomapBooks: uploads fallback failed', err?.message || err);
+      return [];
+    }
   }
 
   const shelfCache = new Map();
-  const storagePrefix = 'somap_books_';
+  const storagePrefix = 'somap_books_cache::';
 
   function shelfCacheKey(year, className, subject){
     return `${String(year)}::${lower(className)}::${lower(subject || '')}`;
   }
 
-  function fromStorage(key){
+  function readFromStorage(key){
     try{
       const raw = sessionStorage.getItem(storagePrefix + key);
       return raw ? JSON.parse(raw) : null;
@@ -91,17 +183,17 @@
     }
   }
 
-  function toStorage(key, data){
+  function writeToStorage(key, value){
     try{
-      sessionStorage.setItem(storagePrefix + key, JSON.stringify(data));
+      sessionStorage.setItem(storagePrefix + key, JSON.stringify(value));
     }catch(_err){
-      /* ignore quota errors */
+      /* ignore quota issues */
     }
   }
 
   function hydrateShelf(key){
     if (shelfCache.has(key)) return shelfCache.get(key);
-    const stored = fromStorage(key);
+    const stored = readFromStorage(key);
     if (stored){
       shelfCache.set(key, stored);
       return stored;
@@ -109,142 +201,43 @@
     return null;
   }
 
-  function normalizeBook(record, className, year){
-    const meta = record.meta || {};
-    const title = record.title || meta.title || record.name || record.fileName || 'Untitled';
-    const subject = record.subject || meta.subject || 'General';
-    const pageFrom = record.pageFrom || meta.pageFrom || null;
-    const pageTo = record.pageTo || meta.pageTo || null;
-    // Handle all URL formats from upload.html
-    const url = record.url || record.secure_url || meta.secure_url || meta.url || null;
-    // Handle both camelCase and snake_case public ID formats
-    const publicId = record.cloudinaryPublicId || record.cloudinary_public_id || 
-                     meta.cloudinaryPublicId || meta.cloudinary_public_id || 
-                     record.public_id || meta.public_id || null;
-    const uploadedAt = Number(record.uploadedAt || record.createdAt || meta.uploadedAt || meta.timestamp || 0) || 0;
-    const sourceTag = record._src || (record.path ? 'uploads/files' : 'indexed');
-    return {
-      title,
-      subject,
-      className,
-      year,
-      pageFrom,
-      pageTo,
-      url,
-      publicId,
-      uploadedAt,
-      _src: sourceTag
-    };
-  }
-
-  function collectClassHints(record){
-    const meta = record.meta || {};
-    const arrays = [];
-    if (Array.isArray(record.tags)) arrays.push(record.tags);
-    if (Array.isArray(meta.tags)) arrays.push(meta.tags);
-    const strings = [
-      record.className, record.class, record.classLevel, record.level, record.grade,
-      meta.className, meta.class, meta.classLevel, meta.level, meta.grade, meta.standard
-    ];
-    return [
-      ...strings.filter(Boolean).map(lower),
-      ...arrays.flat().filter(Boolean).map(lower)
-    ];
-  }
-
-  function metaMatches(record, targetClass, year, subjectOpt){
-    const normalizedClass = lower(targetClass);
-    const hints = collectClassHints(record);
-    const classNumber = (targetClass.match(/\d+/) || [])[0] || '';
-    const synonyms = new Set([normalizedClass]);
-    if (normalizedClass === 'baby class'){
-      ['baby','nursery','pre unit','pre-unit','preunit','middle','middle class','class 0','class zero'].forEach(s => synonyms.add(s));
-    }
-    if (classNumber){
-      [`class-${classNumber}`, `class${classNumber}`, `class ${classNumber}`, `grade ${classNumber}`, `grade-${classNumber}`, `std ${classNumber}`, `standard ${classNumber}`]
-        .forEach(s => synonyms.add(lower(s)));
-    }
-    const classOk = hints.some(h => synonyms.has(h));
-    if (!classOk) return false;
-    const metaYear = record.year || record.session || record.term || record.meta?.year;
-    const yearOk = !metaYear || String(metaYear) === String(year);
-    if (!yearOk) return false;
-    if (!subjectOpt) return true;
-    const recordSubject = record.subject || record.meta?.subject || record.meta?.Subject || '';
-    return lower(recordSubject) === lower(subjectOpt);
-  }
-
-  async function tryPaths(paths){
-    const db = ensureDb();
-    for (const path of paths){
-      try{
-        const snap = await db.ref(path).once('value');
-        const payload = snap.val();
-        if (payload && Object.keys(payload).length){
-          return payload;
-        }
-      }catch(err){
-        console.warn('SomapBooks: unable to read', path, err);
-      }
-    }
-    return null;
+  function rememberShelf(key, payload){
+    shelfCache.set(key, payload);
+    writeToStorage(key, payload);
   }
 
   async function fetchBooksForClass(year, className, subjectOpt, options = {}){
-    const y = String(year || fallbackYear);
+    const yStr = String(year || fallbackYear);
     const canonical = canonicalClassName(className || 'Baby Class');
-    const cacheKey = shelfCacheKey(y, canonical, subjectOpt);
+    const cacheKey = shelfCacheKey(yStr, canonical, subjectOpt);
     if (!options.force){
       const cached = hydrateShelf(cacheKey);
       if (cached) return cached;
     }
 
-    const variants = classNameVariants(canonical);
-    const buildPaths = (base) => variants.map(v => `${base}${v}`);
-    const prioritizedPaths = [
-      // Primary path from upload.html - URL encoded class name with year
-      ...buildPaths(`class_books/${y}/`),
-      // Legacy paths
-      ...buildPaths(`class_books/`),
-      ...buildPaths(`booksIndex/${y}/`),
-      ...buildPaths(`uploads/books/${y}/`),
-      ...buildPaths(`uploads/booksShared/`)
-    ];
+    const variants = classKeyVariants(canonical);
+    const candidatePaths = [];
+    variants.forEach(v => candidatePaths.push(`class_books/${yStr}/${v}`));
+    variants.forEach(v => candidatePaths.push(`class_books/${v}`));
+    variants.forEach(v => candidatePaths.push(`booksIndex/${yStr}/${v}`));
+    variants.forEach(v => candidatePaths.push(`uploads/books/${yStr}/${v}`));
+    variants.forEach(v => candidatePaths.push(`uploads/booksShared/${v}`));
 
-    let rawItems = await tryPaths(prioritizedPaths);
-    let list = [];
-    if (rawItems){
-      list = Object.values(rawItems).filter(Boolean).map(item => ({ ...item, _src: item._src || 'indexed' }));
+    const hit = await tryFirstNonEmpty(candidatePaths);
+    let books = [];
+    if (hit){
+      books = Object.values(hit.data || {})
+        .filter(Boolean)
+        .map(entry => normalizeBook(entry, yStr, canonical, hit.path));
     }else{
-      try{
-        const db = ensureDb();
-        const snap = await db.ref('uploads/files').once('value');
-        const files = snap.val() || {};
-        list = Object.values(files).filter(item => {
-          const hasLink = !!(item.url || item.secure_url || item.cloudinaryPublicId || item.meta?.cloudinaryPublicId);
-          if (!hasLink) return false;
-          return metaMatches(item, canonical, y, subjectOpt);
-        }).map(item => ({ ...item, _src: 'uploads/files' }));
-      }catch(err){
-        console.warn('SomapBooks: fallback lookup failed', err);
-        list = [];
-      }
+      books = await fetchFromUploadsFallback(yStr, canonical, subjectOpt);
     }
 
-    const normalized = list
-      .map(item => {
-        const n = normalizeBook(item, canonical, y);
-        if (!n.url && n.publicId && typeof global.cloudinaryFileUrl === 'function'){
-          n.url = global.cloudinaryFileUrl(n.publicId);
-        }
-        return n;
-      })
-      .filter(book => !!(book.url || book.publicId));
-    normalized.sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
-
-    shelfCache.set(cacheKey, normalized);
-    toStorage(cacheKey, normalized);
-    return normalized;
+    const ready = books
+      .filter(b => !!(b.url || b.publicId))
+      .sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
+    rememberShelf(cacheKey, ready);
+    return ready;
   }
 
   function invalidateShelf(year, className, subjectOpt){
@@ -253,10 +246,46 @@
     try{ sessionStorage.removeItem(storagePrefix + key); }catch(_err){ /* ignore */ }
   }
 
+  async function loadCommonYear(targetYear){
+    const db = ensureDb();
+    const ctx = global.somapYearContext;
+    let desired = targetYear || (ctx?.getSelectedYear?.() ?? fallbackYear);
+    desired = String(desired);
+    if (!allowedYears.map(String).includes(desired)){
+      desired = String(fallbackYear);
+    }
+    const [studentsSnap, anchorSnap, yearSnap] = await Promise.all([
+      db.ref('students').once('value'),
+      db.ref(`enrollments/${fallbackYear}`).once('value'),
+      db.ref(`enrollments/${desired}`).once('value').catch(()=>({ val: ()=>null }))
+    ]);
+    return {
+      y: desired,
+      students: (studentsSnap && studentsSnap.val ? studentsSnap.val() : {}) || {},
+      enrollAnchor: (anchorSnap && anchorSnap.val ? anchorSnap.val() : {}) || {},
+      enrollYear: (yearSnap && yearSnap.val ? yearSnap.val() : {}) || {}
+    };
+  }
+
+  function resolveClassForYear(studentId, anchorMap = {}, yearMap = {}, targetYear = fallbackYear){
+    const sid = String(studentId || '').trim();
+    if (!sid) return 'Baby Class';
+    const explicit = yearMap[sid];
+    if (explicit?.className || explicit?.classLevel){
+      return explicit.className || explicit.classLevel;
+    }
+    const anchor = anchorMap[sid] || {};
+    const base = anchor.className || anchor.classLevel || 'Baby Class';
+    const delta = Number(targetYear) - Number(fallbackYear);
+    return (typeof global.shiftClass === 'function' ? global.shiftClass : fallbackShift)(base, delta);
+  }
+
   global.SomapBooks = Object.assign(global.SomapBooks || {}, {
+    fetchBooksForClass,
     loadCommonYear,
     resolveClassForYear,
-    fetchBooksForClass,
-    invalidateShelf
+    invalidateShelf,
+    classKeyVariants,
+    withTimeout
   });
 })(window);

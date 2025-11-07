@@ -163,13 +163,12 @@
   </style>
 
   <script>
-  /** Year range + anchor **/
-  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+  /** Years: 2023..2042; default anchor year = 2025 */
+  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i);
   const SOMAP_DEFAULT_YEAR = 2025;
 
-  /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+  /** Tanzania ladder (no Class 8). Labels must match RTDB exactly. */
   const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
-  const L = s => String(s||'').trim().toLowerCase();
   const CLASS_ALIASES = {
     'middle': 'Baby Class',
     'middle class': 'Baby Class',
@@ -180,40 +179,34 @@
     'pre unit class': 'Baby Class',
     'preunit class': 'Baby Class',
   };
+  const L = s => String(s||'').trim().toLowerCase();
 
-  /** Shift a base class by delta years relative to anchor (2025). */
+  /** Shift base class by delta years from the 2025 anchor. */
   function shiftClass(baseClass, deltaYears){
-    const alias = CLASS_ALIASES[L(baseClass)] || baseClass;
+    const alias = CLASS_ALIASES[L(baseClass)] || baseClass || '';
     const i = CLASS_ORDER.findIndex(c => L(c)===L(alias));
-    if (i<0) return baseClass||'';
+    if (i < 0) return baseClass || '';
     const j = i + Number(deltaYears||0);
     if (j < 0) return 'PRE-ADMISSION';
     if (j >= CLASS_ORDER.length) return 'GRADUATED';
     return CLASS_ORDER[j];
   }
-  </script>
 
-  <script>
-  /** Reuse shared year context if present, else create a light fallback. */
+  /** Global year context shared across SoMAp pages. */
   window.somapYearContext = window.somapYearContext || (function(){
-    // Force 2025 as minimum, clear old values from 2023
-    let stored = sessionStorage.getItem('somap_selected_year');
-    if (!stored || Number(stored) < 2025) {
-      stored = String(SOMAP_DEFAULT_YEAR);
-      try{ sessionStorage.setItem('somap_selected_year', stored); }catch(_e){}
-    }
-    let selected = stored || String(SOMAP_DEFAULT_YEAR);
+    const allowed = SOMAP_ALLOWED_YEARS.map(String);
+    let saved = String(sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR);
+    if (!allowed.includes(saved)) saved = String(SOMAP_DEFAULT_YEAR);
     const listeners = new Set();
     return {
-      getSelectedYear(){ return selected; },
+      getSelectedYear(){ return saved; },
       setSelectedYear(y){
         y = String(y);
-        // Ensure year is valid
-        if (Number(y) < 2025) y = String(SOMAP_DEFAULT_YEAR);
-        if (selected===y) return;
-        selected = y;
-        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
-        listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+        if (!allowed.includes(y)) return;
+        if (saved === y) return;
+        saved = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_err){}
+        listeners.forEach(fn => { try{ fn(y); }catch(_e){} });
       },
       onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
     };
@@ -538,18 +531,19 @@
     storageBucket: "somaptestt.appspot.com",
     messagingSenderId: "105526245138",
     appId: "1:105526245138:web:b8e7c0cb82a46e861965cb",
-    measurementId: "G-4HKX7KN6Q3"
+  measurementId: "G-4HKX7KN6Q3"
   };
 
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  const allowedYearStrings = SOMAP_ALLOWED_YEARS.map(String);
+  const normalizeYear = (value) => {
+    const str = String(value || SOMAP_DEFAULT_YEAR);
+    return allowedYearStrings.includes(str) ? str : String(SOMAP_DEFAULT_YEAR);
+  };
   const yearContext = window.somapYearContext || null;
-  let activeYear = yearContext ? yearContext.getSelectedYear() : String(SOMAP_DEFAULT_YEAR);
-  // Ensure activeYear is at least 2025
-  if (Number(activeYear) < 2025) {
-    activeYear = String(SOMAP_DEFAULT_YEAR);
-    if (yearContext && typeof yearContext.setSelectedYear === 'function') {
-      yearContext.setSelectedYear(activeYear);
-    }
+  let activeYear = normalizeYear(yearContext?.getSelectedYear?.() ?? SOMAP_DEFAULT_YEAR);
+  if (yearContext?.setSelectedYear) {
+    yearContext.setSelectedYear(activeYear);
   }
   const db = window.db = firebase.database();
 
@@ -762,12 +756,10 @@
   let __allPaymentsSum = 0;
   let latestFinanceSnapshot = null;
   const parentBooksClassCache = new Map();
+  let parentYearDataCache = null;
+  let parentYearDataKey = null;
   let latestBooksSnapshot = { year: null, className: null, items: [] };
-  const getActiveYearString = () => {
-    const year = activeYear || (yearContext?.getSelectedYear?.() || String(SOMAP_DEFAULT_YEAR));
-    // Ensure year is at least 2025
-    return Number(year) >= 2025 ? String(year) : String(SOMAP_DEFAULT_YEAR);
-  };
+  const getActiveYearString = () => activeYear;
   const getActiveYearNumber = () => Number(getActiveYearString());
   function updateYearBadge(){
     const yearStr = getActiveYearString();
@@ -781,52 +773,42 @@
       yearSelect.value = yearStr;
     }
   }
+
+  function handleYearChange(nextYear){
+    const normalized = normalizeYear(nextYear);
+    if (normalized === activeYear) return;
+    activeYear = normalized;
+    parentBooksClassCache.clear();
+    parentYearDataCache = null;
+    parentYearDataKey = null;
+    updateYearBadge();
+    refreshYearDependentData().catch(console.error);
+    refreshParentBooksPanel(true).catch(console.error);
+  }
+
+  if (yearContext && typeof yearContext.onYearChanged === 'function') {
+    yearContext.onYearChanged(handleYearChange);
+  }
   
   // Initialize year selector on page load
   (function initYearSelector(){
     const sel = document.querySelector('[data-somap-year-select]');
     const hint = document.getElementById('somapYearHint');
     if (!sel) return;
-    
-    // Wait for yearContext.js to attach, then sync
-    setTimeout(() => {
-      const currentYear = activeYear || (yearContext?.getSelectedYear?.() || String(SOMAP_DEFAULT_YEAR));
-      const validYear = Number(currentYear) >= 2025 ? currentYear : String(SOMAP_DEFAULT_YEAR);
-      
-      if (sel.value !== validYear) {
-        sel.value = validYear;
+    sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+    const current = getActiveYearString();
+    sel.value = current;
+    if (hint) hint.textContent = current;
+    sel.addEventListener('change', (e) => {
+      const normalized = normalizeYear(e.target.value);
+      if (sel.value !== normalized) sel.value = normalized;
+      if (hint) hint.textContent = normalized;
+      if (yearContext?.setSelectedYear) {
+        yearContext.setSelectedYear(normalized);
+      } else {
+        handleYearChange(normalized);
       }
-      if (hint) hint.textContent = validYear;
-      
-      // Listen for changes from yearContext.js
-      if (yearContext && typeof yearContext.onYearChanged === 'function') {
-        yearContext.onYearChanged((year) => {
-          const normalized = String(year);
-          if (Number(normalized) >= 2025) {
-            activeYear = normalized;
-            updateYearBadge();
-            refreshYearDependentData().catch(console.error);
-            refreshParentBooksPanel().catch(console.error);
-          }
-        });
-      }
-      
-      // Also listen to direct select changes
-      sel.addEventListener('change', (e) => {
-        let val = String(e.target.value);
-        if (Number(val) < 2025) {
-          val = String(SOMAP_DEFAULT_YEAR);
-          sel.value = val;
-        }
-        activeYear = val;
-        updateYearBadge();
-        if (yearContext && typeof yearContext.setSelectedYear === 'function') {
-          yearContext.setSelectedYear(val);
-        }
-        refreshYearDependentData().catch(console.error);
-        refreshParentBooksPanel().catch(console.error);
-      });
-    }, 100);
+    });
   })();
 
   function toggleGradBadge(isGraduated, yearStr){
@@ -896,31 +878,54 @@
     }
   }
 
-  async function resolveParentDisplayClass(yearStr){
+  async function ensureParentYearData(yearStr){
+    if (!window.SomapBooks?.loadCommonYear) return null;
+    const target = yearStr || getActiveYearString();
+    if (parentYearDataCache && parentYearDataKey === target){
+      return parentYearDataCache;
+    }
+    try{
+      const data = await window.SomapBooks.loadCommonYear(target);
+      parentYearDataCache = data;
+      parentYearDataKey = data?.y || target;
+      return data;
+    }catch(err){
+      console.warn('Unable to load enrollment context for parent view', err);
+      parentYearDataCache = null;
+      parentYearDataKey = null;
+      return null;
+    }
+  }
+
+  async function resolveParentDisplayClass(yearStr, force = false){
     if (!currentStudentKey) return currentStudent?.classLevel || 'Baby Class';
     const cacheKey = `${currentStudentKey}:${yearStr}`;
-    if (parentBooksClassCache.has(cacheKey)) return parentBooksClassCache.get(cacheKey);
+    if (force){
+      parentBooksClassCache.delete(cacheKey);
+      parentYearDataCache = null;
+      parentYearDataKey = null;
+    }
+    if (!force && parentBooksClassCache.has(cacheKey)) return parentBooksClassCache.get(cacheKey);
     try{
-      const [anchorSnap, yearSnap] = await Promise.all([
-        db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}/${currentStudentKey}`).once('value'),
-        db.ref(`enrollments/${yearStr}/${currentStudentKey}`).once('value').catch(()=>({ val:()=>null }))
-      ]);
-      const anchorVal = anchorSnap.val() || {};
-      const yearVal = (yearSnap && yearSnap.val ? yearSnap.val() : {}) || {};
-      const resolved = window.SomapBooks?.resolveClassForYear
-        ? window.SomapBooks.resolveClassForYear(
-            currentStudentKey,
-            { [currentStudentKey]: anchorVal },
-            { [currentStudentKey]: yearVal },
-            yearStr
-          )
-        : (yearVal.className || yearVal.classLevel || anchorVal.className || anchorVal.classLevel || currentStudent?.classLevel || 'Baby Class');
-      parentBooksClassCache.set(cacheKey, resolved);
-      return resolved;
+      const yearData = await ensureParentYearData(yearStr);
+      if (yearData && window.SomapBooks?.resolveClassForYear){
+        const resolved = window.SomapBooks.resolveClassForYear(
+          currentStudentKey,
+          yearData.enrollAnchor || {},
+          yearData.enrollYear || {},
+          yearStr
+        ) || currentStudent?.classLevel || 'Baby Class';
+        parentBooksClassCache.set(cacheKey, resolved);
+        return resolved;
+      }
     }catch(err){
       console.warn('Failed to resolve parent books class', err);
-      return currentStudent?.classLevel || 'Baby Class';
     }
+    const fallback = currentStudent?.classLevel || 'Baby Class';
+    const delta = Number(yearStr) - SOMAP_DEFAULT_YEAR;
+    const derived = shiftClass(fallback, delta);
+    parentBooksClassCache.set(cacheKey, derived);
+    return derived;
   }
 
   async function refreshParentBooksPanel(force = false){
@@ -941,7 +946,7 @@
     if (parentBooksYear) parentBooksYear.textContent = yearStr;
     setParentBooksSkeleton();
     try{
-      const displayClass = await resolveParentDisplayClass(yearStr);
+      const displayClass = await resolveParentDisplayClass(yearStr, force);
       if (parentBooksClass) parentBooksClass.textContent = displayClass;
       if (displayClass === 'GRADUATED'){
         showParentBooksEmpty(`Graduated (${yearStr}). No class books for this year.`, false);
@@ -1002,6 +1007,9 @@
       const snap = await db.ref('students/'+currentStudentKey).once('value');
       if (!snap.exists()){ localStorage.removeItem('studentKey'); window.location.href='index.html'; return; }
       currentStudent = snap.val();
+      parentBooksClassCache.clear();
+      parentYearDataCache = null;
+      parentYearDataKey = null;
 
       // Preform icon
       if (localStorage.getItem('preformParentIcon') === 'true') {

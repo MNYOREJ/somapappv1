@@ -130,13 +130,12 @@
   </style>
 
   <script>
-  /** Year range + anchor **/
-  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+  /** Years: 2023..2042; default anchor year = 2025 */
+  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i);
   const SOMAP_DEFAULT_YEAR = 2025;
 
-  /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+  /** Tanzania ladder (no Class 8). Labels must match RTDB exactly. */
   const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
-  const L = s => String(s||'').trim().toLowerCase();
   const CLASS_ALIASES = {
     'middle': 'Baby Class',
     'middle class': 'Baby Class',
@@ -147,47 +146,41 @@
     'pre unit class': 'Baby Class',
     'preunit class': 'Baby Class',
   };
+  const L = s => String(s||'').trim().toLowerCase();
 
-  /** Shift a base class by delta years relative to anchor (2025). */
+  /** Shift base class by delta years from the 2025 anchor. */
   function shiftClass(baseClass, deltaYears){
-    const alias = CLASS_ALIASES[L(baseClass)] || baseClass;
+    const alias = CLASS_ALIASES[L(baseClass)] || baseClass || '';
     const i = CLASS_ORDER.findIndex(c => L(c)===L(alias));
-    if (i<0) return baseClass||'';
+    if (i < 0) return baseClass || '';
     const j = i + Number(deltaYears||0);
     if (j < 0) return 'PRE-ADMISSION';
     if (j >= CLASS_ORDER.length) return 'GRADUATED';
     return CLASS_ORDER[j];
   }
-  </script>
 
-  <script src="../shared/somap-books.js"></script>
-
-  <script>
-  /** Reuse shared year context if present, else create a light fallback. */
+  /** Global year context shared across SoMAp pages. */
   window.somapYearContext = window.somapYearContext || (function(){
-    // Force 2025 as minimum, clear old values from 2023
-    let stored = sessionStorage.getItem('somap_selected_year');
-    if (!stored || Number(stored) < 2025) {
-      stored = String(SOMAP_DEFAULT_YEAR);
-      try{ sessionStorage.setItem('somap_selected_year', stored); }catch(_e){}
-    }
-    let selected = stored || String(SOMAP_DEFAULT_YEAR);
+    const allowed = SOMAP_ALLOWED_YEARS.map(String);
+    let saved = String(sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR);
+    if (!allowed.includes(saved)) saved = String(SOMAP_DEFAULT_YEAR);
     const listeners = new Set();
     return {
-      getSelectedYear(){ return selected; },
+      getSelectedYear(){ return saved; },
       setSelectedYear(y){
         y = String(y);
-        // Ensure year is valid
-        if (Number(y) < 2025) y = String(SOMAP_DEFAULT_YEAR);
-        if (selected===y) return;
-        selected = y;
-        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_e){}
-        listeners.forEach(fn=>{ try{ fn(y); }catch(err){ console.error(err); } });
+        if (!allowed.includes(y)) return;
+        if (saved === y) return;
+        saved = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_err){}
+        listeners.forEach(fn => { try{ fn(y); }catch(_e){} });
       },
       onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
     };
   })();
   </script>
+
+  <script src="../shared/somap-books.js"></script>
 </head>
 <body>
   <!-- ======= Top ======= -->
@@ -303,26 +296,29 @@
   const auth = firebase.auth();
   const db = window.db = firebase.database();
   const yearContext = window.somapYearContext || null;
+  const allowedYearStrings = SOMAP_ALLOWED_YEARS.map(String);
+  const normalizeYear = (value) => {
+    const str = String(value || SOMAP_DEFAULT_YEAR);
+    return allowedYearStrings.includes(str) ? str : String(SOMAP_DEFAULT_YEAR);
+  };
   const urlParams = new URLSearchParams(location.search);
   const forcedStudentId = urlParams.get('student');
   const forcedYear = urlParams.get('year');
   const forcedSubject = urlParams.get('subject');
   const subjectFilter = forcedSubject ? forcedSubject.trim() : null;
   
-  // Ensure selectedYear is at least 2025
-  let selectedYear = forcedYear || (yearContext?.getSelectedYear ? String(yearContext.getSelectedYear()) : String(SOMAP_DEFAULT_YEAR));
-  if (Number(selectedYear) < 2025) {
-    selectedYear = String(SOMAP_DEFAULT_YEAR);
-  }
-  
-  // Sync with yearContext if available
-  if (yearContext && typeof yearContext.setSelectedYear === 'function') {
+  let selectedYear = normalizeYear(forcedYear || (yearContext?.getSelectedYear?.() ?? SOMAP_DEFAULT_YEAR));
+  if (yearContext?.setSelectedYear) {
     yearContext.setSelectedYear(selectedYear);
   }
   
   function updateYearHint(){
     const hint = document.getElementById('somapYearHint');
     if (hint) hint.textContent = selectedYear;
+    const selector = document.querySelector('[data-somap-year-select]');
+    if (selector && selector.value !== selectedYear){
+      selector.value = selectedYear;
+    }
   }
   updateYearHint();
 
@@ -330,16 +326,18 @@
   let className = '';
   let userKey = '';
   let currentStudentData = null;
+  let yearDataCache = null;
+  let yearDataKey = null;
 
   if (yearContext && typeof yearContext.onYearChanged === 'function') {
     yearContext.onYearChanged((year) => {
-      selectedYear = String(year);
+      const normalized = normalizeYear(year);
+      if (normalized === selectedYear) return;
+      selectedYear = normalized;
+      yearDataCache = null;
+      yearDataKey = null;
       updateYearHint();
-      if (userMode === 'child' && userKey) {
-        loadChildView(userKey).catch(console.error);
-      } else if (userMode === 'teacher' && className) {
-        fetchBooks(className);
-      }
+      refreshBooksForCurrentUser({ force:true }).catch(console.error);
     });
   }
 
@@ -388,23 +386,49 @@
     }
   }
 
+  async function refreshBooksForCurrentUser(options = {}){
+    if (userMode === 'child' && userKey){
+      const fallbackClass = (currentStudentData?.classLevel || currentStudentData?.class || '').trim() || 'Baby Class';
+      className = (await resolveClassForSelectedYear(userKey, fallbackClass)).trim();
+      await fetchBooks(className, options);
+    }else if (userMode === 'teacher' && className){
+      await fetchBooks(className, options);
+    }
+  }
+
   async function resolveClassForSelectedYear(studentId, fallbackClass){
     try{
-      const [anchorSnap, yearSnap] = await Promise.all([
-        db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}/${studentId}`).once('value'),
-        db.ref(`enrollments/${selectedYear}/${studentId}`).once('value')
-      ]);
-      const anchor = anchorSnap.val() || {};
-      const yearSpecific = yearSnap.val() || {};
-      if (yearSpecific?.className || yearSpecific?.classLevel) {
-        return (yearSpecific.className || yearSpecific.classLevel || '').trim();
+      const yearData = await ensureYearData();
+      if (yearData && window.SomapBooks?.resolveClassForYear){
+        const resolved = window.SomapBooks.resolveClassForYear(
+          studentId,
+          yearData.enrollAnchor || {},
+          yearData.enrollYear || {},
+          selectedYear
+        );
+        if (resolved) return (resolved || '').trim();
       }
-      const baseClass = anchor.className || anchor.classLevel || fallbackClass || 'Baby Class';
-      const delta = Number(selectedYear) - SOMAP_DEFAULT_YEAR;
-      return shiftClass(baseClass, delta);
     }catch(err){
       console.warn('Unable to resolve class for selected year', err);
-      return fallbackClass || 'Baby Class';
+    }
+    const fallback = (fallbackClass || 'Baby Class').trim();
+    const delta = Number(selectedYear) - SOMAP_DEFAULT_YEAR;
+    return shiftClass(fallback, delta);
+  }
+
+  async function ensureYearData(){
+    if (!window.SomapBooks?.loadCommonYear) return null;
+    if (yearDataCache && yearDataKey === selectedYear) return yearDataCache;
+    try{
+      const payload = await window.SomapBooks.loadCommonYear(selectedYear);
+      yearDataCache = payload;
+      yearDataKey = payload?.y || selectedYear;
+      return payload;
+    }catch(err){
+      console.warn('Unable to load enrollment context', err);
+      yearDataCache = null;
+      yearDataKey = null;
+      return null;
     }
   }
 
@@ -990,37 +1014,21 @@
     const hint = document.getElementById('somapYearHint');
     if (!sel) return;
     sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
-    
-    // Ensure selectedYear is valid and at least 2025
-    if (!selectedYear || Number(selectedYear) < 2025) {
-      selectedYear = String(SOMAP_DEFAULT_YEAR);
-    }
-    
+    selectedYear = normalizeYear(selectedYear);
     sel.value = selectedYear;
     if (hint) hint.textContent = selectedYear;
-    
-    // Sync with context
-    if (yearContext && typeof yearContext.setSelectedYear === 'function') {
-      yearContext.setSelectedYear(selectedYear);
-    }
-    
     sel.addEventListener('change', (e) => {
-      let val = String(e.target.value);
-      // Ensure year is at least 2025
-      if (Number(val) < 2025) {
-        val = String(SOMAP_DEFAULT_YEAR);
-        sel.value = val;
-      }
-      selectedYear = val;
-      updateYearHint();
-      if (yearContext && typeof yearContext.setSelectedYear === 'function') {
-        yearContext.setSelectedYear(val);
-      }
-      // Reload books for the new year
-      if (userMode === 'child' && userKey) {
-        loadChildView(userKey).catch(console.error);
-      } else if (userMode === 'teacher' && className) {
-        fetchBooks(className).catch(console.error);
+      const normalized = normalizeYear(e.target.value);
+      if (sel.value !== normalized) sel.value = normalized;
+      if (yearContext?.setSelectedYear){
+        yearContext.setSelectedYear(normalized);
+      }else{
+        if (normalized === selectedYear) return;
+        selectedYear = normalized;
+        yearDataCache = null;
+        yearDataKey = null;
+        updateYearHint();
+        refreshBooksForCurrentUser({ force:true }).catch(console.error);
       }
     });
   })();

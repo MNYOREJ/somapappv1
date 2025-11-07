@@ -230,6 +230,12 @@
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
   const db = firebase.database();
+  const urlParams = new URLSearchParams(location.search);
+  const forcedStudentId = urlParams.get('student');
+  const forcedClassParam = (urlParams.get('class') || '').trim();
+  if (forcedStudentId){
+    try{ localStorage.setItem('studentKey', forcedStudentId); }catch(_e){}
+  }
 
   let userMode = 'child'; // 'child' | 'teacher'
   let className = '';
@@ -251,12 +257,25 @@
         }
       } catch(e){ alert(e.message); }
     } else {
-      const studentKey = localStorage.getItem('studentKey');
+      const studentKey = forcedStudentId || localStorage.getItem('studentKey');
       if (!studentKey){ alert('Please sign in'); location.href='../index.html'; return; }
       try {
-        const s = (await db.ref(`students/${studentKey}`).once('value')).val();
-        if (!s || !s.classLevel){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
-        userMode = 'child'; className = (s.classLevel||'').trim(); userKey = studentKey;
+        const snap = await db.ref(`students/${studentKey}`).once('value');
+        const s = snap.val();
+        if (!s && !forcedClassParam){
+          localStorage.removeItem('studentKey');
+          location.href='../index.html';
+          return;
+        }
+        const resolvedClass = (forcedClassParam || s?.classLevel || s?.class || '').trim();
+        if (!resolvedClass){
+          alert('Class information missing for this learner.');
+          return;
+        }
+        userMode = 'child';
+        className = resolvedClass;
+        userKey = studentKey;
+        try{ localStorage.setItem('studentKey', studentKey); }catch(_e){}
         initChild(); fetchBooks(className);
       } catch(e){ alert(e.message); }
     }

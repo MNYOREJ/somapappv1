@@ -869,10 +869,78 @@
     try{
       const fin = await window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey);
       latestFinanceSnapshot = fin;
-      statFeeDue.textContent = fmtTsh(fin.due);
+      
+      // Calculate previous year's debt (carry-forward)
+      let previousYearDebt = 0;
+      let previousYear = null;
+      const currentYearNum = Number(yearStr);
+      if (currentYearNum >= 2023) {
+        previousYear = String(currentYearNum - 1);
+        try {
+          const prevFin = await window.SomapFinance.loadStudentFinance(previousYear, currentStudentKey);
+          if (prevFin) {
+            const prevDue = Number(prevFin.due || 0);
+            const prevPaid = Number(prevFin.paid || 0);
+            previousYearDebt = Math.max(0, prevDue - prevPaid);
+          }
+        } catch(err) {
+          console.warn('Could not calculate previous year debt', err);
+        }
+      }
+      
+      // Determine what to display for Total Fee
+      const currentFee = Number(fin.due || 0);
+      const carryAmount = Number(fin.record?.carryAmount || 0);
+      
+      // If current fee is 0 but there's previous debt or carryAmount, show the debt
+      let displayFee = currentFee;
+      let debtNote = '';
+      if (currentFee === 0 && (previousYearDebt > 0 || carryAmount > 0)) {
+        displayFee = previousYearDebt || carryAmount;
+        if (previousYearDebt > 0) {
+          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px;">debt from ${previousYear}</span>`;
+        } else if (carryAmount > 0) {
+          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px;">debt from previous year</span>`;
+        }
+      } else if (currentFee > 0 && previousYearDebt > 0) {
+        // Current fee exists and there's also previous debt - show both
+        debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px;">includes ${fmtTsh(previousYearDebt)} debt from ${previousYear}</span>`;
+      }
+      
+      // Update display with debt note if applicable
+      if (debtNote) {
+        statFeeDue.innerHTML = fmtTsh(displayFee) + debtNote;
+      } else {
+        statFeeDue.textContent = fmtTsh(displayFee);
+      }
+      
       statPaid.textContent = fmtTsh(fin.paid);
-      statBalance.textContent = fmtTsh(Math.max(0, fin.outstanding));
-      applyFeeBadge(fin.due, fin.paid);
+      
+      // Calculate total outstanding
+      // If current fee is 0 and there's previous debt, payments should be applied to previous debt
+      const currentPaid = Number(fin.paid || 0);
+      let totalOutstanding = 0;
+      
+      if (currentFee === 0 && previousYearDebt > 0) {
+        // Current year fee is 0, so payments go toward previous debt
+        totalOutstanding = Math.max(0, previousYearDebt - currentPaid);
+      } else if (currentFee > 0 && previousYearDebt > 0) {
+        // Both current fee and previous debt exist
+        // Payments are typically applied to previous debt first, then current year
+        const remainingAfterPrevDebt = Math.max(0, currentPaid - previousYearDebt);
+        const currentOutstanding = Math.max(0, currentFee - remainingAfterPrevDebt);
+        const prevDebtRemaining = Math.max(0, previousYearDebt - currentPaid);
+        totalOutstanding = currentOutstanding + prevDebtRemaining;
+      } else {
+        // Normal case: only current year fee
+        totalOutstanding = Math.max(0, currentFee - currentPaid);
+      }
+      
+      statBalance.textContent = fmtTsh(totalOutstanding);
+      
+      // Use displayFee (which includes debt if current fee is 0) for badge calculation
+      applyFeeBadge(displayFee, fin.paid);
+      
       const planName = fin.record?.paymentPlan || fin.paymentPlan || currentStudent?.paymentPlan || '-';
       statPaymentPlan.textContent = safe(planName);
       const displayClass = fin.classLevel || fin.record?.classLevel || currentStudent?.classLevel || '-';

@@ -13,6 +13,19 @@
     return fallbackClasses.find(c => lower(c) === normalized) || name;
   }
 
+  function classNameVariants(name){
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return [''];
+    const variants = [
+      trimmed,
+      trimmed.replace(/\s+/g, '_'),
+      trimmed.replace(/\s+/g, '-'),
+      trimmed.replace(/\s+/g, ''),
+      encodeURIComponent(trimmed)
+    ];
+    return Array.from(new Set(variants.filter(Boolean)));
+  }
+
   function ensureDb(){
     if (global.db) return global.db;
     if (global.firebase?.apps?.length){
@@ -180,13 +193,17 @@
       if (cached) return cached;
     }
 
-    const tryList = [
-      `booksIndex/${y}/${canonical}`,
-      `uploads/books/${y}/${canonical}`,
-      `uploads/booksShared/${canonical}`
+    const variants = classNameVariants(canonical);
+    const buildPaths = (base) => variants.map(v => `${base}${v}`);
+    const prioritizedPaths = [
+      ...buildPaths(`booksIndex/${y}/`),
+      ...buildPaths(`uploads/books/${y}/`),
+      ...buildPaths(`class_books/${y}/`),
+      ...buildPaths(`class_books/`),
+      ...buildPaths(`uploads/booksShared/`)
     ];
 
-    let rawItems = await tryPaths(tryList);
+    let rawItems = await tryPaths(prioritizedPaths);
     let list = [];
     if (rawItems){
       list = Object.values(rawItems).filter(Boolean).map(item => ({ ...item, _src: item._src || 'indexed' }));

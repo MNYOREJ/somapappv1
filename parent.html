@@ -1,4 +1,4 @@
-﻿<!doctype html>
+﻿﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -865,166 +865,102 @@
     }
   }
 
-  // ===== FINANCE AGGREGATOR (year-scoped, carry-forward aware) =====
-  const fmtTZS = n => `TSh ${Number(n||0).toLocaleString('en-KE')}`;
-  const toInt  = v => Math.round(Number(v||0));
-
-  /** 1) Fee for the year (from studentFees/{y}/{id}/feePerYear). Fallbacks to 0. */
-  async function getFeePerYear(y, studentId){
-    try {
-      const snap = await db.ref(`studentFees/${y}/${studentId}/feePerYear`).once('value');
-      return toInt(snap.val());
-    } catch { return 0; }
-  }
-
-  /** 2) Sum of approved finance payments for the year.
-   * Read approvalsHistory/{y} and filter items where:
-   *   - sourceModule === 'finance'
-   *   - studentKey === studentId  (or studentAdm/admission matches)
-   */
-  async function sumFinancePaymentsForYear(y, studentId, admissionNoOpt){
-    let sum = 0;
-    try {
-      const yearSnap = await db.ref(`approvalsHistory/${y}`).once('value');
-      const months = yearSnap.val() || {};
-      const lowerStudent = String(studentId||'').trim();
-      const lowerAdm     = String(admissionNoOpt||'').trim();
-      Object.values(months).forEach(m => {
-        Object.values(m||{}).forEach(rec=>{
-          const okModule = (rec?.sourceModule === 'finance');
-          const keyMatch = (rec?.modulePayload?.studentKey === lowerStudent) ||
-                           (rec?.studentAdm === lowerAdm);
-          if (okModule && keyMatch) sum += toInt(rec?.amountPaidNow);
-        });
-      });
-    } catch(e) {}
-    return sum;
-  }
-
-  /** 3) Compute carry-forward for year y as max(0, due(y-1) - paid(y-1)),
-   * with optional read override from financeCarryForward/{y}/{id}/amount if present.
-   */
-  async function getCarryForward(y, studentId, admissionNoOpt){
-    try {
-      const snap = await db.ref(`financeCarryForward/${y}/${studentId}/amount`).once('value');
-      const stored = toInt(snap.val());
-      if (stored > 0) return stored;
-    } catch {}
-    const prev = String(Number(y)-1);
-    if (Number.isNaN(Number(prev)) || Number(prev) < 2023) return 0;
-    // Compute from prev year
-    const [feePrev, paidPrev] = await Promise.all([
-      getFeePerYear(prev, studentId),
-      sumFinancePaymentsForYear(prev, studentId, admissionNoOpt)
-    ]);
-    const carry = Math.max(0, feePrev - paidPrev);
-    return toInt(carry);
-  }
-
-  /** 4) Aggregate for a single student & year. */
-  async function getFinanceAggregate(y, studentId, admissionNoOpt){
-    const [fee, paid, carry] = await Promise.all([
-      getFeePerYear(y, studentId),
-      sumFinancePaymentsForYear(y, studentId, admissionNoOpt),
-      getCarryForward(y, studentId, admissionNoOpt)
-    ]);
-    const totalDueDisplay = toInt(fee + carry);
-    const outstanding = Math.max(0, totalDueDisplay - paid);
-    return {
-      year: String(y),
-      fee,          // this year's fee only
-      paid,         // finance payments for this year only
-      carry,        // debt from previous year
-      totalDueDisplay, // fee + carry, for stat-cards
-      outstanding
-    };
-  }
-
-  /** Optional: admin helper to persist a computed carry into financeCarryForward/{y}/{id}/amount */
-  async function persistCarryForward(y, studentId, amount){
-    const val = toInt(amount);
-    await db.ref(`financeCarryForward/${y}/${studentId}/amount`).set(val);
-    return val;
-  }
-
-  // Legacy fallback function for compatibility
   async function resolveCarryForwardDebt(studentKey, uptoYearStr){
-    try {
-      const adm = currentStudent?.admissionNumber || currentStudent?.pupilId || '';
-      const carry = await getCarryForward(uptoYearStr, studentKey, adm);
-      const prevYearNum = Number(uptoYearStr) - 1;
-      return { 
-        amount: carry, 
-        sourceYear: carry > 0 ? String(prevYearNum) : null 
-      };
-    } catch(err) {
-      console.warn('Carry-forward debt lookup failed', { studentKey, year: uptoYearStr, err });
-      return { amount: 0, sourceYear: null };
+    const fallback = { amount: 0, sourceYear: null };
+    if (!studentKey || !window.SomapFinance?.loadStudentFinance) return fallback;
+    const targetYearNum = Number(uptoYearStr);
+    const earliestYear = Math.max(MIN_DATA_YEAR, EARLIEST_CARRY_FORWARD_YEAR);
+    if (!Number.isFinite(targetYearNum) || targetYearNum <= earliestYear) return fallback;
+    for (let year = targetYearNum - 1; year >= earliestYear; year--){
+      const yearStr = String(year);
+      try{
+        const fin = await window.SomapFinance.loadStudentFinance(yearStr, studentKey);
+        if (!fin) continue;
+        const due = Number(fin.due ?? fin.feePerYear ?? 0);
+        const paid = Number(fin.paid ?? fin.paidAmount ?? 0);
+        const outstanding = Math.max(
+          0,
+          Number.isFinite(due - paid) ? (due - paid) : 0,
+          Number(fin.outstanding ?? 0),
+          Number(fin.balance ?? 0),
+          Number(fin.record?.balance ?? 0)
+        );
+        if (outstanding > 0){
+          return { amount: outstanding, sourceYear: yearStr };
+        }
+      }catch(err){
+        console.warn('Carry-forward debt lookup failed', { studentKey, year: yearStr, err });
+      }
     }
+    return fallback;
   }
 
   async function renderFinanceStats(){
-    if (!currentStudentKey) return;
+    if (!currentStudentKey || !window.SomapFinance) return;
     const yearStr = getActiveYearString();
     try{
-      // Use new aggregator for accurate, year-scoped finance data
-      const adm = currentStudent?.admissionNumber || currentStudent?.pupilId || '';
-      const agg = await getFinanceAggregate(yearStr, currentStudentKey, adm);
-      
-      // Store for compatibility with existing code
-      latestFinanceSnapshot = {
-        due: agg.totalDueDisplay,
-        paid: agg.paid,
-        outstanding: agg.outstanding,
-        fee: agg.fee,
-        carry: agg.carry
-      };
+      const [fin, carryMeta] = await Promise.all([
+        window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey),
+        resolveCarryForwardDebt(currentStudentKey, yearStr)
+      ]);
+      latestFinanceSnapshot = fin;
 
-      const prevYearNum = Number(yearStr) - 1;
-      const carryYearLabel = Number.isFinite(prevYearNum) ? prevYearNum : `${yearStr}-1`;
+      const currentFee = Number(fin.due || 0);
+      const carryAmountFromRecord = Number(fin.record?.carryAmount || 0);
+      const carryAmountComputed = Number(carryMeta.amount || 0);
+      let carryForwardDebt = carryAmountComputed;
+      if (carryForwardDebt <= 0 && carryAmountFromRecord > 0) {
+        carryForwardDebt = carryAmountFromRecord;
+      }
+      const totalFeeDue = currentFee + carryForwardDebt;
+      const fallbackPrevYear = (() => {
+        const prev = Number(yearStr) - 1;
+        if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
+        return String(EARLIEST_CARRY_FORWARD_YEAR);
+      })();
+      const carryYearLabel = carryForwardDebt > 0
+        ? (carryMeta.sourceYear || fallbackPrevYear)
+        : null;
       
       // Build debt note in small letters for parent understanding
       let debtNote = '';
-      if (agg.carry > 0) {
-        if (agg.fee === 0) {
+      if (carryForwardDebt > 0) {
+        if (currentFee === 0) {
           // Only debt, no current year fee
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${carryYearLabel}</span>`;
+          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${carryYearLabel || 'previous year'}</span>`;
         } else {
           // Both current fee and debt
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">includes ${fmtTsh(agg.carry)} debt carried from ${carryYearLabel}</span>`;
+          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">includes ${fmtTsh(carryForwardDebt)} debt carried from ${carryYearLabel || 'previous year'}</span>`;
         }
       }
       
       // Update display with debt note if applicable
       if (debtNote) {
-        statFeeDue.innerHTML = fmtTsh(agg.totalDueDisplay) + debtNote;
+        statFeeDue.innerHTML = fmtTsh(totalFeeDue) + debtNote;
       } else {
-        statFeeDue.textContent = fmtTsh(agg.totalDueDisplay);
+        statFeeDue.textContent = fmtTsh(totalFeeDue);
       }
       
-      statPaid.textContent = fmtTsh(agg.paid);
-      statBalance.textContent = fmtTsh(agg.outstanding);
+      statPaid.textContent = fmtTsh(fin.paid);
       
-      // Use totalDueDisplay (which includes carry-forward debt) for badge calculation
-      applyFeeBadge(agg.totalDueDisplay, agg.paid);
+      // Calculate total outstanding
+      // Total outstanding = (current fee + previous debt) - payments made this year
+      const currentPaid = Number(fin.paid || 0);
+      let totalOutstanding = Math.max(0, totalFeeDue - currentPaid);
       
-      // Try to get payment plan from SomapFinance if available, otherwise use currentStudent
-      let planName = currentStudent?.paymentPlan || '-';
-      if (window.SomapFinance?.loadStudentFinance) {
-        try {
-          const fin = await window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey);
-          planName = fin?.record?.paymentPlan || fin?.paymentPlan || planName;
-        } catch {}
-      }
+      statBalance.textContent = fmtTsh(totalOutstanding);
+      
+      // Use totalFeeDue (which includes carry-forward debt) for badge calculation
+      applyFeeBadge(totalFeeDue, fin.paid);
+      
+      const planName = fin.record?.paymentPlan || fin.paymentPlan || currentStudent?.paymentPlan || '-';
       statPaymentPlan.textContent = safe(planName);
-      
-      // Update class display
-      const displayClass = currentStudent?.classLevel || '-';
+      const displayClass = fin.classLevel || fin.record?.classLevel || currentStudent?.classLevel || '-';
       const classLabel = displayClass === 'GRADUATED'
         ? `Graduated (${yearStr})`
         : safe(displayClass);
       detailClass.textContent = classLabel;
-      toggleGradBadge(displayClass === 'GRADUATED', yearStr);
+      toggleGradBadge(fin.isGraduated || displayClass === 'GRADUATED', yearStr);
     }catch(err){
       console.error('Failed to sync finance stats', err);
     }
@@ -1357,11 +1293,13 @@
     const yearPaymentsSum = merged.reduce((s,p)=> s + (Number(p.amount)||0), 0);
     __allPaymentsSum = yearPaymentsSum;
     
-    // Always use the finance aggregator for consistency between parent.html and finance.html
-    // This ensures that parent dashboard shows exactly the same numbers as finance.html
+    // The finance snapshot from renderFinanceStats() already handles:
+    // - Year-filtered payments (via normalizePayments in finance_math.js)
+    // - Carry-forward debt (via financeCarryForward in buildFinanceStudents)
+    // - Correct due/paid/outstanding calculations
+    // So we should NOT override those stats here - only update if finance snapshot is not available
     if (latestFinanceSnapshot && latestFinanceSnapshot.due !== undefined) {
-      // Finance snapshot from renderFinanceStats() is already accurate and includes carry-forward
-      // Stats are already set by renderFinanceStats, so nothing more to do here
+      // Finance snapshot is available and correct - use it (stats already set by renderFinanceStats)
       // Just verify the paid amount matches what we see in payments list for consistency
       if (Math.abs(yearPaymentsSum - (latestFinanceSnapshot.paid || 0)) > 1) {
         // Slight discrepancy - finance snapshot is the source of truth, but log for debugging
@@ -1372,31 +1310,38 @@
         });
       }
     } else {
-      // Fallback: finance snapshot not available, use aggregator directly
-      const adm = currentStudent?.admissionNumber || currentStudent?.pupilId || '';
-      const agg = await getFinanceAggregate(year, studentKey, adm);
-      
-      const prevYearNum = Number(year) - 1;
-      const carryYearLabel = Number.isFinite(prevYearNum) ? prevYearNum : `${year}-1`;
+      // Fallback: finance snapshot not available, calculate manually
+      const carryMeta = await resolveCarryForwardDebt(studentKey, year);
+      const previousDebt = carryMeta.amount;
+      const fallbackFeeDue = Number(currentStudent?.feePerYear || currentStudent?.feeDue || 0);
+      const feeDue = fallbackFeeDue + previousDebt;
+      const paidForYear = yearPaymentsSum;
+      const computedOutstanding = Math.max(0, feeDue - paidForYear);
       
       // Build debt note in small letters if there's previous debt
       let debtNote = '';
-      if (agg.carry > 0) {
-        if (agg.fee === 0) {
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${carryYearLabel}</span>`;
+      if (previousDebt > 0) {
+        const fallbackPrevYear = (() => {
+          const prev = Number(year) - 1;
+          if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
+          return String(EARLIEST_CARRY_FORWARD_YEAR);
+        })();
+        const noteYear = carryMeta.sourceYear || fallbackPrevYear;
+        if (fallbackFeeDue === 0) {
+          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${noteYear}</span>`;
         } else {
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">includes ${fmtTsh(agg.carry)} debt carried from ${carryYearLabel}</span>`;
+          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">includes ${fmtTsh(previousDebt)} debt carried from ${noteYear}</span>`;
         }
       }
       
       if (debtNote) {
-        statFeeDue.innerHTML = fmtTsh(agg.totalDueDisplay) + debtNote;
+        statFeeDue.innerHTML = fmtTsh(feeDue) + debtNote;
       } else {
-        statFeeDue.textContent = fmtTsh(agg.totalDueDisplay);
+        statFeeDue.textContent = fmtTsh(feeDue);
       }
-      statPaid.textContent = fmtTsh(agg.paid);
-      statBalance.textContent = fmtTsh(agg.outstanding);
-      applyFeeBadge(agg.totalDueDisplay, agg.paid);
+      statPaid.textContent = fmtTsh(paidForYear);
+      statBalance.textContent = fmtTsh(computedOutstanding);
+      applyFeeBadge(feeDue, paidForYear);
     }
 
     // ---- Update Receipts stat card

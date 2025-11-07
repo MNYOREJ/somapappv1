@@ -128,99 +128,6 @@
       .page-inner { width: 98%; }
     }
   </style>
-
-  <script>
-  /** Years: 2023..2042; default anchor year = 2025 */
-  const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i);
-  const SOMAP_DEFAULT_YEAR = 2025;
-
-  /** Tanzania ladder (no Class 8). Labels must match RTDB exactly. */
-  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
-  const CLASS_ALIASES = {
-    'middle': 'Baby Class',
-    'middle class': 'Baby Class',
-    'nursery': 'Baby Class',
-    'pre unit': 'Baby Class',
-    'preunit': 'Baby Class',
-    'pre-unit': 'Baby Class',
-    'pre unit class': 'Baby Class',
-    'preunit class': 'Baby Class',
-  };
-  const L = s => String(s||'').trim().toLowerCase();
-
-  /** Shift base class by delta years from the 2025 anchor. */
-  function shiftClass(baseClass, deltaYears){
-    const alias = CLASS_ALIASES[L(baseClass)] || baseClass || '';
-    const i = CLASS_ORDER.findIndex(c => L(c)===L(alias));
-    if (i < 0) return baseClass || '';
-    const j = i + Number(deltaYears||0);
-    if (j < 0) return 'PRE-ADMISSION';
-    if (j >= CLASS_ORDER.length) return 'GRADUATED';
-    return CLASS_ORDER[j];
-  }
-
-  /** Global year context shared across SoMAp pages. */
-  window.somapYearContext = window.somapYearContext || (function(){
-    const allowed = SOMAP_ALLOWED_YEARS.map(String);
-    const STORAGE_KEY = 'somap_selected_year_v2';
-    const LEGACY_KEYS = ['somap_selected_year'];
-    const VERSION_KEY = 'somap_year_ctx_version';
-    const CURRENT_VERSION = '2';
-    const defaultYear = String(SOMAP_DEFAULT_YEAR);
-
-    const sanitize = (value) => {
-      const str = String(value || defaultYear);
-      return allowed.includes(str) ? str : defaultYear;
-    };
-
-    const bootYear = () => {
-      let stored = sessionStorage.getItem(STORAGE_KEY);
-      const version = sessionStorage.getItem(VERSION_KEY);
-      if (!stored){
-        for (const legacyKey of LEGACY_KEYS){
-          const legacyVal = sessionStorage.getItem(legacyKey);
-          if (legacyVal && allowed.includes(legacyVal)){
-            stored = legacyVal;
-            break;
-          }
-        }
-      }
-      stored = sanitize(stored);
-      if (version !== CURRENT_VERSION){
-        if (Number(stored) < Number(SOMAP_DEFAULT_YEAR)){
-          stored = defaultYear;
-        }
-        try{
-          sessionStorage.setItem(STORAGE_KEY, stored);
-          sessionStorage.setItem(VERSION_KEY, CURRENT_VERSION);
-          LEGACY_KEYS.forEach(key => sessionStorage.setItem(key, stored));
-        }catch(_err){}
-      }
-      return stored;
-    };
-
-    let saved = bootYear();
-    const listeners = new Set();
-
-    return {
-      getSelectedYear(){ return saved; },
-      setSelectedYear(y){
-        const next = sanitize(y);
-        if (saved === next) return;
-        saved = next;
-        try{
-          sessionStorage.setItem(STORAGE_KEY, next);
-          sessionStorage.setItem(VERSION_KEY, CURRENT_VERSION);
-          LEGACY_KEYS.forEach(key => sessionStorage.setItem(key, next));
-        }catch(_err){}
-        listeners.forEach(fn => { try{ fn(next); }catch(_e){} });
-      },
-      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
-    };
-  })();
-  </script>
-
-  <script src="../shared/somap-books.js"></script>
 </head>
 <body>
   <!-- ======= Top ======= -->
@@ -246,13 +153,6 @@
 
   <!-- ======= Body ======= -->
   <main class="maxw px-4 py-6">
-    <div id="somapYearWrap" style="display:flex;gap:.5rem;align-items:center;margin:6px 0 16px 0;" class="flex flex-col items-start sm:flex-row sm:items-center sm:justify-between text-sm text-slate-600">
-      <div class="flex flex-col">
-        <label class="text-xs font-semibold uppercase tracking-wide">Academic Year</label>
-        <select data-somap-year-select class="mt-1 border rounded px-3 py-1 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"></select>
-      </div>
-      <span class="text-xs text-slate-500 mt-2 sm:mt-0">Working year: <b id="somapYearHint">--</b></span>
-    </div>
     <div class="mb-4 searchwrap">
       <input id="searchInput" class="searchbar" placeholder="Search books by title or subject…"/>
       <i class="fa fa-search"></i>
@@ -267,12 +167,7 @@
 
     <div id="noBooks" class="hidden text-center text-gray-500 my-10">
       <i class="fa fa-book-open text-5xl mb-4"></i>
-      <div id="noBooksMessage">No books available yet.</div>
-      <button id="reloadBooksBtn"
-              class="mt-4 inline-flex items-center justify-center rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-              type="button">
-        <i class="fa fa-rotate mr-2"></i>Reload from uploads
-      </button>
+      <div>No books available yet.</div>
     </div>
   </main>
 
@@ -334,52 +229,11 @@
   };
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const auth = firebase.auth();
-  const db = window.db = firebase.database();
-  const yearContext = window.somapYearContext || null;
-  const allowedYearStrings = SOMAP_ALLOWED_YEARS.map(String);
-  const normalizeYear = (value) => {
-    const str = String(value || SOMAP_DEFAULT_YEAR);
-    return allowedYearStrings.includes(str) ? str : String(SOMAP_DEFAULT_YEAR);
-  };
-  const urlParams = new URLSearchParams(location.search);
-  const forcedStudentId = urlParams.get('student');
-  const forcedYear = urlParams.get('year');
-  const forcedSubject = urlParams.get('subject');
-  const subjectFilter = forcedSubject ? forcedSubject.trim() : null;
-  
-  let selectedYear = normalizeYear(forcedYear || (yearContext?.getSelectedYear?.() ?? SOMAP_DEFAULT_YEAR));
-  if (yearContext?.setSelectedYear) {
-    yearContext.setSelectedYear(selectedYear);
-  }
-  
-  function updateYearHint(){
-    const hint = document.getElementById('somapYearHint');
-    if (hint) hint.textContent = selectedYear;
-    const selector = document.querySelector('[data-somap-year-select]');
-    if (selector && selector.value !== selectedYear){
-      selector.value = selectedYear;
-    }
-  }
-  updateYearHint();
+  const db = firebase.database();
 
   let userMode = 'child'; // 'child' | 'teacher'
   let className = '';
   let userKey = '';
-  let currentStudentData = null;
-  let yearDataCache = null;
-  let yearDataKey = null;
-
-  if (yearContext && typeof yearContext.onYearChanged === 'function') {
-    yearContext.onYearChanged((year) => {
-      const normalized = normalizeYear(year);
-      if (normalized === selectedYear) return;
-      selectedYear = normalized;
-      yearDataCache = null;
-      yearDataKey = null;
-      updateYearHint();
-      refreshBooksForCurrentUser({ force:true }).catch(console.error);
-    });
-  }
 
   auth.onAuthStateChanged(async (user) => {
     if (user) {
@@ -397,10 +251,13 @@
         }
       } catch(e){ alert(e.message); }
     } else {
-      const studentKey = forcedStudentId || localStorage.getItem('studentKey');
+      const studentKey = localStorage.getItem('studentKey');
       if (!studentKey){ alert('Please sign in'); location.href='../index.html'; return; }
       try {
-        await loadChildView(studentKey);
+        const s = (await db.ref(`students/${studentKey}`).once('value')).val();
+        if (!s || !s.classLevel){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
+        userMode = 'child'; className = (s.classLevel||'').trim(); userKey = studentKey;
+        initChild(); fetchBooks(className);
       } catch(e){ alert(e.message); }
     }
   });
@@ -408,109 +265,13 @@
   function initTeacher(){ document.getElementById('backBtn').href = '../staff.html'; }
   function initChild(){ document.getElementById('backBtn').href = '../parent.html'; }
 
-  async function loadChildView(studentKey){
-    try {
-      const snap = await db.ref(`students/${studentKey}`).once('value');
-      if (!snap.exists()){ localStorage.removeItem('studentKey'); location.href='../index.html'; return; }
-      currentStudentData = snap.val();
-      userMode = 'child';
-      userKey = studentKey;
-      try { localStorage.setItem('studentKey', studentKey); } catch(_e){}
-      className = (await resolveClassForSelectedYear(studentKey, (currentStudentData.classLevel || currentStudentData.class || '').trim())).trim();
-      initChild();
-      await fetchBooks(className);
-    } catch(err) {
-      console.error('Error loading child view:', err);
-      loadingEl.classList.add('hidden');
-      showEmptyState(className || '', `Error loading student data: ${err.message || 'Please try again.'}`);
-    }
-  }
-
-  async function refreshBooksForCurrentUser(options = {}){
-    if (userMode === 'child' && userKey){
-      const fallbackClass = (currentStudentData?.classLevel || currentStudentData?.class || '').trim() || 'Baby Class';
-      className = (await resolveClassForSelectedYear(userKey, fallbackClass)).trim();
-      await fetchBooks(className, options);
-    }else if (userMode === 'teacher' && className){
-      await fetchBooks(className, options);
-    }
-  }
-
-  async function resolveClassForSelectedYear(studentId, fallbackClass){
-    try{
-      const yearData = await ensureYearData();
-      if (yearData && window.SomapBooks?.resolveClassForYear){
-        const resolved = window.SomapBooks.resolveClassForYear(
-          studentId,
-          yearData.enrollAnchor || {},
-          yearData.enrollYear || {},
-          selectedYear
-        );
-        if (resolved) return (resolved || '').trim();
-      }
-    }catch(err){
-      console.warn('Unable to resolve class for selected year', err);
-    }
-    const fallback = (fallbackClass || 'Baby Class').trim();
-    const delta = Number(selectedYear) - SOMAP_DEFAULT_YEAR;
-    return shiftClass(fallback, delta);
-  }
-
-  async function ensureYearData(){
-    if (!window.SomapBooks?.loadCommonYear) return null;
-    if (yearDataCache && yearDataKey === selectedYear) return yearDataCache;
-    try{
-      const payload = await window.SomapBooks.loadCommonYear(selectedYear);
-      yearDataCache = payload;
-      yearDataKey = payload?.y || selectedYear;
-      return payload;
-    }catch(err){
-      console.warn('Unable to load enrollment context', err);
-      yearDataCache = null;
-      yearDataKey = null;
-      return null;
-    }
-  }
-
   // ================== Data / Grid ==================
   const cache = new Map();
   const thumbCache = new Map(); // url -> dataURL
   const loadingEl = document.getElementById('loading');
   const noBooksEl = document.getElementById('noBooks');
-  const noBooksMessageEl = document.getElementById('noBooksMessage');
-  const reloadBtn = document.getElementById('reloadBooksBtn');
-  const defaultNoBooksText = noBooksMessageEl?.textContent || 'No books available yet.';
   const grid = document.getElementById('booksGrid');
   const searchInput = document.getElementById('searchInput');
-
-  function canonicalClassName(cls){ return (cls || '').trim(); }
-  function booksCacheKey(cls, year = selectedYear){
-    const subjectKey = L(subjectFilter || 'any');
-    return `books_${year}_${canonicalClassName(cls)}_${subjectKey}`;
-  }
-
-  function showEmptyState(targetClass, message){
-    if (!noBooksEl) return;
-    loadingEl.classList.add('hidden');
-    noBooksEl.classList.remove('hidden');
-    if (noBooksMessageEl){
-      const targetGraduated = targetClass && targetClass.toUpperCase() === 'GRADUATED';
-      const subjectLabel = subjectFilter ? ` and subject <b>${escapeHtml(subjectFilter)}</b>` : '';
-      const classLabel = targetClass ? `<b>${escapeHtml(targetClass)}</b>` : 'this class';
-      const defaultMsg = targetGraduated
-        ? `This learner graduated in ${escapeHtml(String(selectedYear))}. No class books for this year.`
-        : (message || `No indexed books found for ${classLabel} in <b>${escapeHtml(String(selectedYear))}</b>${subjectLabel}.`);
-      noBooksMessageEl.innerHTML = defaultMsg;
-    }
-    if (reloadBtn){
-      const hideReload = !targetClass || targetClass.toUpperCase() === 'GRADUATED';
-      reloadBtn.style.display = hideReload ? 'none' : 'inline-flex';
-      reloadBtn.classList.toggle('hidden', hideReload);
-      if (!hideReload){
-        reloadBtn.onclick = ()=> fetchBooks(targetClass, { force:true });
-      }
-    }
-  }
 
   function isPdf(url){ return /\.pdf(\?|#|$)/i.test(url||''); }
   function thumbFrom(url){
@@ -520,82 +281,41 @@
       : url;
   }
 
-  async function fetchBooks(cls, options = {}){
-    const targetClass = canonicalClassName(cls);
-    className = targetClass;
+  async function fetchBooks(cls){
     grid.innerHTML = '';
     loadingEl.classList.remove('hidden');
     noBooksEl.classList.add('hidden');
-    
-    // Always clear loading state when done
-    const clearLoading = () => {
-      loadingEl.classList.add('hidden');
-    };
-    
-    if (!targetClass || targetClass.toUpperCase() === 'GRADUATED') {
-      clearLoading();
-      showEmptyState(targetClass);
-      return;
-    } else if (noBooksMessageEl) {
-      noBooksMessageEl.textContent = defaultNoBooksText;
-    }
 
-    const cacheKey = booksCacheKey(targetClass);
-    if (!options.force && cache.has(cacheKey) && cache.get(cacheKey)?.length){
-      clearLoading();
-      renderBooks(cache.get(cacheKey));
-      return;
-    }
+    const path = `class_books/${encodeURIComponent(cls)}`;
+    const key = `books_${cls}`;
+    if (cache.has(key)) { renderBooks(cache.get(key)); }
 
     try{
-      if (!window.SomapBooks?.fetchBooksForClass){
-        clearLoading();
-        throw new Error('Books helper not loaded. Ensure shared/somap-books.js is loaded.');
-      }
-      
-      console.log(`Fetching books for ${targetClass} in year ${selectedYear}...`);
-      const books = await Promise.race([
-        window.SomapBooks.fetchBooksForClass(
-          selectedYear,
-          targetClass,
-          subjectFilter,
-          options.force ? { force:true } : {}
-        ),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout: Books loading took too long')), 30000))
-      ]);
-      
-      cache.set(cacheKey, books);
-      clearLoading();
-      
-      if (!books || !books.length){
-        showEmptyState(targetClass, `No indexed books found for <b>${targetClass}</b> in <b>${selectedYear}</b> yet.`);
-        return;
-      }
-      
-      if (reloadBtn){
-        reloadBtn.classList.add('hidden');
-        reloadBtn.style.display = 'none';
-      }
-      renderBooks(books);
+      const snap = await db.ref(path).once('value');
+      const data = snap.val() || {};
+      const entries = Object.entries(data);
+      cache.set(key, entries);
+      renderBooks(entries);
+      db.ref(path).on('value', s=>{
+        const d = s.val()||{};
+        const e = Object.entries(d);
+        if (JSON.stringify(e)!==JSON.stringify(cache.get(key))){
+          cache.set(key,e); renderBooks(e);
+        }
+      });
     }catch(e){
-      console.error('Error loading books:', e);
-      clearLoading();
-      showEmptyState(targetClass, `Unable to load books right now: ${e.message || 'Please try again.'}`);
+      loadingEl.classList.add('hidden');
+      alert('Error loading books: ' + e.message);
     }
   }
 
   // attach once
   searchInput.addEventListener('input', ()=>{
-    const term = (searchInput.value||'').toLowerCase().trim();
-    const shelf = cache.get(booksCacheKey(className))||[];
-    if (!term){
-      renderBooks(shelf);
-      return;
-    }
-    const filtered = shelf.filter(b=>{
-      const title = (b.title||'').toLowerCase();
-      const subject = (b.subject||'').toLowerCase();
-      return title.includes(term) || subject.includes(term);
+    const q = (searchInput.value||'').toLowerCase().trim();
+    const all = cache.get(`books_${className}`)||[];
+    const filtered = all.filter(([id,b])=>{
+      const t=(b.title||'').toLowerCase(); const s=(b.subject||'').toLowerCase();
+      return t.includes(q)||s.includes(q);
     });
     renderBooks(filtered);
   });
@@ -643,45 +363,41 @@
   async function renderBooks(entries){
     loadingEl.classList.add('hidden');
     grid.innerHTML = '';
-    if (!entries.length){
-      showEmptyState(className);
-      return;
-    }
+    if (!entries.length){ noBooksEl.classList.remove('hidden'); return; }
     noBooksEl.classList.add('hidden');
 
     const frag = document.createDocumentFragment();
-    entries.forEach((b, idx)=>{
+    for (const [id,b] of entries){
       const card = document.createElement('div');
       card.className = 'book-card';
-      const title = (b.title||'Untitled');
-      const subject = (b.subject||'');
-      const subClass = subjectClass(subject);
-      const link = b.url || (typeof cloudinaryFileUrl === 'function' ? cloudinaryFileUrl(b.publicId) : '');
+      const t = (b.title||'Untitled');
+      const s = (b.subject||'');
+      const subClass = subjectClass(s);
 
-      let cover = thumbFrom(link||'');
-      if (!cover && isPdf(link)){
-        cover = 'https://dummyimage.com/640x360/0b1220/ffffff.png&text=Loading.';
-        generatePdfCoverThumb(link).then(dataURL=>{
+      let cover = thumbFrom(b.url||'');
+      if (!cover && isPdf(b.url)){
+        // placeholder while generating
+        cover = 'https://dummyimage.com/640x360/0b1220/ffffff.png&text=Loading…';
+        // async improve once ready
+        generatePdfCoverThumb(b.url).then(dataURL=>{
           if (!dataURL) return;
-          const imgEl = card.querySelector('img[data-id="'+idx+'"]');
+          const imgEl = card.querySelector('img[data-id="'+id+'"]');
           if (imgEl) imgEl.src = dataURL;
         });
       }
 
       card.innerHTML = `
         <div class="book-thumb-wrap">
-          <img class="book-thumb" data-id="${idx}" loading="lazy" src="${cover||''}" alt="${escapeHtml(title)} cover" onerror="this.style.display='none'">
+          <img class="book-thumb" data-id="${id}" loading="lazy" src="${cover||''}" alt="${escapeHtml(t)} cover" onerror="this.style.display='none'">
           <div class="thumb-veil"></div>
         </div>
         <div class="book-body">
-          <div class="book-title">${escapeHtml(title)}</div>
-          <div class="book-sub"><span class="subject-chip ${subClass}">${escapeHtml(subject||'General')}</span></div>
-          ${b.pageFrom && b.pageTo ? `<div class="text-xs text-slate-500 mb-2">Pages ${b.pageFrom} - ${b.pageTo}</div>` : ''}
-          <button class="read-btn" data-url="${link||''}" data-title="${escapeHtml(title)}"><i class="fa fa-book-open mr-1"></i>Read</button>
-          <div class="text-[10px] text-slate-400 mt-2 text-right">src: ${escapeHtml(b._src||'library')}</div>
+          <div class="book-title">${escapeHtml(t)}</div>
+          <div class="book-sub"><span class="subject-chip ${subClass}">${escapeHtml(s||'General')}</span></div>
+          <button class="read-btn" data-url="${b.url||''}" data-title="${escapeHtml(t)}"><i class="fa fa-book-open mr-1"></i>Read</button>
         </div>`;
       frag.appendChild(card);
-    });
+    }
     grid.appendChild(frag);
 
     grid.querySelectorAll('.read-btn').forEach(btn=>{
@@ -689,7 +405,6 @@
         openViewer(btn.getAttribute('data-url'), btn.getAttribute('data-title'));
       });
     });
-  }
   }
 
   function escapeHtml(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
@@ -1048,31 +763,5 @@
 
   // ========= End =========
   </script>
-  <script>
-  (function initYearSelector(){
-    const sel = document.querySelector('[data-somap-year-select]');
-    const hint = document.getElementById('somapYearHint');
-    if (!sel) return;
-    sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
-    selectedYear = normalizeYear(selectedYear);
-    sel.value = selectedYear;
-    if (hint) hint.textContent = selectedYear;
-    sel.addEventListener('change', (e) => {
-      const normalized = normalizeYear(e.target.value);
-      if (sel.value !== normalized) sel.value = normalized;
-      if (yearContext?.setSelectedYear){
-        yearContext.setSelectedYear(normalized);
-      }else{
-        if (normalized === selectedYear) return;
-        selectedYear = normalized;
-        yearDataCache = null;
-        yearDataKey = null;
-        updateYearHint();
-        refreshBooksForCurrentUser({ force:true }).catch(console.error);
-      }
-    });
-  })();
-  </script>
 </body>
 </html>
-

@@ -168,16 +168,18 @@
   const SOMAP_DEFAULT_YEAR = 2025;
 
   /** Tanzania ladder (no Class 8). Labels must match RTDB exactly. */
-  const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+  const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
   const CLASS_ALIASES = {
-    'middle': 'Baby Class',
-    'middle class': 'Baby Class',
+    'middle': 'Middle Class',
+    'middle class': 'Middle Class',
     'nursery': 'Baby Class',
-    'pre unit': 'Baby Class',
-    'pre-unit': 'Baby Class',
-    'preunit': 'Baby Class',
-    'pre unit class': 'Baby Class',
-    'preunit class': 'Baby Class',
+    'pre unit': 'Pre Unit Class',
+    'pre-unit': 'Pre Unit Class',
+    'preunit': 'Pre Unit Class',
+    'pre unit class': 'Pre Unit Class',
+    'preunit class': 'Pre Unit Class',
+    'pre-primary': 'Middle Class',
+    'pre primary': 'Middle Class',
   };
   const L = s => String(s||'').trim().toLowerCase();
 
@@ -1118,24 +1120,81 @@
   }
 
   // Payments aggregator (pull from common finance paths)
-  function normalizePayment(p, sourceKey){
+  function normalizePayment(p, sourceKey, targetYear){
     const amt = Number(p?.amount || 0);
+    if (!amt || amt <= 0) return null;
+    
     let ts = Number(p?.timestamp || 0);
     if (!ts && p?.date){ const t = Date.parse(p.date); if(!Number.isNaN(t)) ts=t; }
     if (!ts) ts = Date.now();
-    return { amount:amt, timestamp:ts, method:p?.method || p?.mode || '-', note:p?.note || p?.remarks || '', _src:sourceKey||'unknown' };
+    
+    // Determine payment year from payment record or timestamp
+    let paymentYear = Number(
+      p?.academicYear ??
+      p?.financeYear ??
+      p?.feeYear ??
+      p?.year ??
+      p?._year ??
+      p?.academic_session
+    );
+    if (!Number.isFinite(paymentYear)) {
+      const tsDate = new Date(ts);
+      if (!Number.isNaN(tsDate.getTime())) paymentYear = tsDate.getFullYear();
+    }
+    
+    // Filter by target year - only include payments for the selected year
+    if (Number.isFinite(targetYear) && Number.isFinite(paymentYear) && paymentYear !== Number(targetYear)) {
+      return null; // Payment doesn't belong to the target year
+    }
+    
+    return { 
+      amount: amt, 
+      timestamp: ts, 
+      academicYear: paymentYear,
+      method: p?.method || p?.mode || '-', 
+      note: p?.note || p?.remarks || '', 
+      _src: sourceKey || 'unknown' 
+    };
   }
   async function tryPathOnce(path){ try{ const s=await db.ref(path).once('value'); return s.val()||null; }catch{return null;} }
   function dedupePayments(arr){
     const seen = new Set();
-    return arr.filter(p=>{ const k = `${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}`; if(seen.has(k)) return false; seen.add(k); return true; });
+    return arr.filter(p=>{ 
+      if (!p) return false;
+      const k = `${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}`; 
+      if(seen.has(k)) return false; 
+      seen.add(k); 
+      return true; 
+    });
   }
+  
+  // Calculate previous year's debt (unpaid balance from previous year)
+  async function calculatePreviousYearDebt(studentKey, admNo, classLevel, currentYear){
+    const prevYear = Number(currentYear) - 1;
+    if (prevYear < 2023) return 0; // No data before 2023
+    
+    try {
+      // Try to get previous year's finance data
+      const prevYearFin = await window.SomapFinance?.loadStudentFinance?.(prevYear, studentKey);
+      if (prevYearFin) {
+        const prevDue = Number(prevYearFin.due || 0);
+        const prevPaid = Number(prevYearFin.paid || 0);
+        const prevDebt = Math.max(0, prevDue - prevPaid);
+        return prevDebt;
+      }
+    } catch(err) {
+      console.warn('Could not calculate previous year debt', err);
+    }
+    return 0;
+  }
+  
   async function loadPaymentsAllSources(studentKey, admNo, classLevel, year){
     paymentsList.innerHTML = `
       <li><div class="skeleton h-4 w-40"></div></li>
       <li><div class="skeleton h-4 w-56"></div></li>
       <li><div class="skeleton h-4 w-48"></div></li>`;
 
+    const targetYear = Number(year);
     const paths = [
       `students/${studentKey}/payments`,
       `finance/${year}/${classLevel}/${admNo}/payments`,
@@ -1148,12 +1207,18 @@
     let merged = [];
     results.forEach((obj, idx) => {
       if (!obj) return;
-      Object.values(obj).forEach(v => merged.push(normalizePayment(v, paths[idx])));
+      Object.values(obj).forEach(v => {
+        const normalized = normalizePayment(v, paths[idx], targetYear);
+        if (normalized) merged.push(normalized);
+      });
     });
     merged = dedupePayments(merged).sort((a,b)=> b.timestamp - a.timestamp);
 
+    // Calculate previous year debt for carry-forward
+    const previousDebt = await calculatePreviousYearDebt(studentKey, admNo, classLevel, year);
+    
     if (!merged.length){
-      paymentsList.innerHTML = '<li class="muted">No payments recorded.</li>';
+      paymentsList.innerHTML = '<li class="muted">No payments recorded for this year.</li>';
     }else{
       const max = Math.min(merged.length, 50);
       paymentsList.innerHTML = merged.slice(0,max).map(p => `
@@ -1167,22 +1232,37 @@
       `).join('');
     }
 
-    // Recompute with best total
-    const aggSum = merged.reduce((s,p)=> s + (Number(p.amount)||0), 0);
-    __allPaymentsSum = aggSum;
-    const snapshotDue = Number(latestFinanceSnapshot?.due || 0);
-    const snapshotPaid = Number(latestFinanceSnapshot?.paid || 0);
-    const fallbackFeeDue = Number(currentStudent?.feePerYear || currentStudent?.feeDue || 0);
-    const feeDue = snapshotDue > 0 ? snapshotDue : fallbackFeeDue;
-    const paidLocal = Number(currentStudent?.paidAmount || calculateTotalPayments(currentStudent) || 0);
-    const bestPaid = Math.max(aggSum, paidLocal, snapshotPaid);
-    statPaid.textContent = fmtTsh(bestPaid);
-    const computedOutstanding = Math.max(0, feeDue - bestPaid);
-    statBalance.textContent = fmtTsh(computedOutstanding);
-    applyFeeBadge(feeDue, bestPaid);
-    if (latestFinanceSnapshot) {
-      latestFinanceSnapshot.paid = bestPaid;
-      latestFinanceSnapshot.outstanding = computedOutstanding;
+    // Only count payments for the selected year
+    const yearPaymentsSum = merged.reduce((s,p)=> s + (Number(p.amount)||0), 0);
+    __allPaymentsSum = yearPaymentsSum;
+    
+    // The finance snapshot from renderFinanceStats() already handles:
+    // - Year-filtered payments (via normalizePayments in finance_math.js)
+    // - Carry-forward debt (via financeCarryForward in buildFinanceStudents)
+    // - Correct due/paid/outstanding calculations
+    // So we should NOT override those stats here - only update if finance snapshot is not available
+    if (latestFinanceSnapshot && latestFinanceSnapshot.due !== undefined) {
+      // Finance snapshot is available and correct - use it (stats already set by renderFinanceStats)
+      // Just verify the paid amount matches what we see in payments list for consistency
+      if (Math.abs(yearPaymentsSum - (latestFinanceSnapshot.paid || 0)) > 1) {
+        // Slight discrepancy - finance snapshot is the source of truth, but log for debugging
+        console.debug('Payment sum discrepancy:', {
+          yearPaymentsSum,
+          snapshotPaid: latestFinanceSnapshot.paid,
+          year
+        });
+      }
+    } else {
+      // Fallback: finance snapshot not available, calculate manually
+      const fallbackFeeDue = Number(currentStudent?.feePerYear || currentStudent?.feeDue || 0);
+      const feeDue = fallbackFeeDue + previousDebt;
+      const paidForYear = yearPaymentsSum;
+      const computedOutstanding = Math.max(0, feeDue - paidForYear);
+      
+      statFeeDue.textContent = fmtTsh(feeDue);
+      statPaid.textContent = fmtTsh(paidForYear);
+      statBalance.textContent = fmtTsh(computedOutstanding);
+      applyFeeBadge(feeDue, paidForYear);
     }
 
     // ---- Update Receipts stat card

@@ -195,18 +195,58 @@
   /** Global year context shared across SoMAp pages. */
   window.somapYearContext = window.somapYearContext || (function(){
     const allowed = SOMAP_ALLOWED_YEARS.map(String);
-    let saved = String(sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR);
-    if (!allowed.includes(saved)) saved = String(SOMAP_DEFAULT_YEAR);
+    const STORAGE_KEY = 'somap_selected_year_v2';
+    const LEGACY_KEYS = ['somap_selected_year'];
+    const VERSION_KEY = 'somap_year_ctx_version';
+    const CURRENT_VERSION = '2';
+    const defaultYear = String(SOMAP_DEFAULT_YEAR);
+
+    const sanitize = (value) => {
+      const str = String(value || defaultYear);
+      return allowed.includes(str) ? str : defaultYear;
+    };
+
+    const bootYear = () => {
+      let stored = sessionStorage.getItem(STORAGE_KEY);
+      const version = sessionStorage.getItem(VERSION_KEY);
+      if (!stored){
+        for (const legacyKey of LEGACY_KEYS){
+          const legacyVal = sessionStorage.getItem(legacyKey);
+          if (legacyVal && allowed.includes(legacyVal)){
+            stored = legacyVal;
+            break;
+          }
+        }
+      }
+      stored = sanitize(stored);
+      if (version !== CURRENT_VERSION){
+        if (Number(stored) < Number(SOMAP_DEFAULT_YEAR)){
+          stored = defaultYear;
+        }
+        try{
+          sessionStorage.setItem(STORAGE_KEY, stored);
+          sessionStorage.setItem(VERSION_KEY, CURRENT_VERSION);
+          LEGACY_KEYS.forEach(key => sessionStorage.setItem(key, stored));
+        }catch(_err){}
+      }
+      return stored;
+    };
+
+    let saved = bootYear();
     const listeners = new Set();
+
     return {
       getSelectedYear(){ return saved; },
       setSelectedYear(y){
-        y = String(y);
-        if (!allowed.includes(y)) return;
-        if (saved === y) return;
-        saved = y;
-        try{ sessionStorage.setItem('somap_selected_year', y); }catch(_err){}
-        listeners.forEach(fn => { try{ fn(y); }catch(_e){} });
+        const next = sanitize(y);
+        if (saved === next) return;
+        saved = next;
+        try{
+          sessionStorage.setItem(STORAGE_KEY, next);
+          sessionStorage.setItem(VERSION_KEY, CURRENT_VERSION);
+          LEGACY_KEYS.forEach(key => sessionStorage.setItem(key, next));
+        }catch(_err){}
+        listeners.forEach(fn => { try{ fn(next); }catch(_e){} });
       },
       onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
     };

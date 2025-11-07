@@ -1,4 +1,4 @@
-﻿?<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -239,100 +239,6 @@
   </div>
 
 <script>
-function getSomapFinanceDb() {
-  if (window.db) return window.db;
-  try {
-    if (firebase?.apps?.length) return firebase.database();
-  } catch (_) {}
-  return null;
-}
-
-const fmtTZS = (n) => `TSh ${Number(n || 0).toLocaleString('en-KE')}`;
-const toInt = (v) => Math.round(Number(v || 0));
-
-async function getFeePerYear(year, studentId) {
-  const dbRef = getSomapFinanceDb();
-  if (!dbRef) return 0;
-  try {
-    const snap = await dbRef.ref(`studentFees/${year}/${studentId}/feePerYear`).once('value');
-    return toInt(snap.val());
-  } catch (_) {
-    return 0;
-  }
-}
-
-async function sumFinancePaymentsForYear(year, studentId, admissionNoOpt) {
-  const dbRef = getSomapFinanceDb();
-  if (!dbRef) return 0;
-  let sum = 0;
-  try {
-    const yearSnap = await dbRef.ref(`approvalsHistory/${year}`).once('value');
-    const months = yearSnap.val() || {};
-    const lowerStudent = String(studentId || '').trim();
-    const lowerAdm = String(admissionNoOpt || '').trim();
-
-    Object.values(months).forEach((monthNode) => {
-      Object.values(monthNode || {}).forEach((rec) => {
-        const okModule = rec?.sourceModule === 'finance';
-        const keyMatch =
-          rec?.modulePayload?.studentKey === lowerStudent ||
-          rec?.studentAdm === lowerAdm;
-        if (okModule && keyMatch) sum += toInt(rec?.amountPaidNow);
-      });
-    });
-  } catch (err) {
-    console.warn('sumFinancePaymentsForYear error', err);
-  }
-  return sum;
-}
-
-async function getCarryForward(year, studentId, admissionNoOpt) {
-  const dbRef = getSomapFinanceDb();
-  if (!dbRef) return 0;
-  try {
-    const snap = await dbRef.ref(`financeCarryForward/${year}/${studentId}/amount`).once('value');
-    const stored = toInt(snap.val());
-    if (stored > 0) return stored;
-  } catch (_) {}
-
-  const prevYear = String(Number(year) - 1);
-  if (Number.isNaN(Number(prevYear)) || Number(prevYear) < 2023) return 0;
-  const [feePrev, paidPrev] = await Promise.all([
-    getFeePerYear(prevYear, studentId),
-    sumFinancePaymentsForYear(prevYear, studentId, admissionNoOpt),
-  ]);
-  const carry = Math.max(0, feePrev - paidPrev);
-  return toInt(carry);
-}
-
-async function getFinanceAggregate(year, studentId, admissionNoOpt) {
-  const [fee, paid, carry] = await Promise.all([
-    getFeePerYear(year, studentId),
-    sumFinancePaymentsForYear(year, studentId, admissionNoOpt),
-    getCarryForward(year, studentId, admissionNoOpt),
-  ]);
-  const totalDueDisplay = toInt(fee + carry);
-  const outstanding = Math.max(0, totalDueDisplay - paid);
-  return {
-    year: String(year),
-    fee: toInt(fee),
-    paid: toInt(paid),
-    carry: toInt(carry),
-    totalDueDisplay,
-    outstanding,
-  };
-}
-
-async function persistCarryForward(year, studentId, amount) {
-  const dbRef = getSomapFinanceDb();
-  if (!dbRef) return 0;
-  const val = toInt(amount);
-  await dbRef.ref(`financeCarryForward/${year}/${studentId}/amount`).set(val);
-  return val;
-}
-</script>
-
-<script>
 (function () {
   /* ===== Parent mode detection (non-destructive) ===== */
   const parentCtx = { enabled:false, studentId:null, adm:null, year:null, className:null };
@@ -446,66 +352,6 @@ async function persistCarryForward(year, studentId, amount) {
 
   let cachedStudents = {};
   let showingDebtorsOnly = false;
-  const financeAggregateCache = {};
-  const aggregateFallback = (year) => ({
-    year: String(year || financeYear),
-    fee: 0,
-    paid: 0,
-    carry: 0,
-    totalDueDisplay: 0,
-    outstanding: 0,
-  });
-
-  function clearFinanceAggregateCache(year) {
-    if (!year) {
-      Object.keys(financeAggregateCache).forEach((key) => delete financeAggregateCache[key]);
-      return;
-    }
-    delete financeAggregateCache[String(year)];
-  }
-
-  async function resolveFinanceAggregate(year, studentId, studentRecord) {
-    const yKey = String(year || financeYear);
-    if (!financeAggregateCache[yKey]) financeAggregateCache[yKey] = {};
-    if (!financeAggregateCache[yKey][studentId]) {
-      const admission = studentRecord?.admissionNumber || studentRecord?.admission || '';
-      financeAggregateCache[yKey][studentId] = (async () => {
-        try {
-          return await getFinanceAggregate(yKey, studentId, admission);
-        } catch (err) {
-          console.warn('Failed to compute finance aggregate', { studentId, yKey, err });
-          return aggregateFallback(yKey);
-        }
-      })();
-    }
-    try {
-      return await financeAggregateCache[yKey][studentId];
-    } catch (err) {
-      console.warn('Aggregate cache rejected', err);
-      return aggregateFallback(yKey);
-    }
-  }
-
-  async function buildFinanceViewModels() {
-    const entries = Object.entries(cachedStudents || {});
-    if (!entries.length) return [];
-    const filterClass = classFilter ? classFilter.value : '';
-    const filtered = entries.filter(([_, student]) => {
-      if (filterClass && student.classLevel !== filterClass) return false;
-      if (!parentCtx.enabled && student.isGraduated) return false;
-      return true;
-    });
-    if (!filtered.length) return [];
-    const aggregates = await Promise.all(filtered.map(([id, student]) => resolveFinanceAggregate(financeYear, id, student)));
-    const views = [];
-    filtered.forEach(([id, student], idx) => {
-      const agg = aggregates[idx] || aggregateFallback(financeYear);
-      const fin = computeStudentFinancials(student);
-      if (showingDebtorsOnly && agg.outstanding <= 0 && fin.periodDebtValue <= 0) return;
-      views.push({ id, student, agg, fin });
-    });
-    return views;
-  }
 
   populateClassFilterDropdown();
 
@@ -1011,59 +857,33 @@ function buildFinanceStudents(
     return `
       <tr id="br-${id}" class="hidden bg-slate-50">
         <td class="p-2 border-t" colspan="10">
-          <div class="space-y-3">
-            <div data-carry-forward class="text-xs"></div>
-            <div class="breakdown-slot" data-id="${id}">
-              <div class="p-3 text-xs text-slate-500 skel rounded">Loading area.</div>
-            </div>
+          <div class="breakdown-slot" data-id="${id}">
+            <div class="p-3 text-xs text-slate-500 skel rounded">Loading area…</div>
           </div>
         </td>
       </tr>
     `;
   }
 
-  // ===== Render table with carry-forward awareness =====
-  async function renderTable() {
-    if (!tbody) return;
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="10" class="p-4 text-center text-sm text-slate-500">Loading finance data...</td>
-      </tr>
-    `;
-
-    let viewModels = [];
-    try {
-      viewModels = await buildFinanceViewModels();
-    } catch (err) {
-      console.error('Failed to build finance rows', err);
-    }
-
+  // ===== Render table (unchanged except: uses placeholder breakdown row) =====
+  function renderTable() {
     tbody.innerHTML = '';
-    if (!viewModels.length) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="10" class="p-4 text-center text-sm text-slate-500">No students match the current filters for ${financeYear}.</td>
-        </tr>
-      `;
-      updateFinanceKpis(0, 0, 0);
-      return;
-    }
+    let totalDue = 0, totalCollected = 0;
+    const filterClass = classFilter.value;
+    const isParentScope = parentCtx.enabled;
 
-    let totalDue = 0;
-    let totalCollected = 0;
-    let totalOutstanding = 0;
-    const fragment = document.createDocumentFragment();
+    Object.entries(cachedStudents).forEach(([id, student]) => {
+      if (filterClass && student.classLevel !== filterClass) return;
+      if (!isParentScope && student.isGraduated) return;
 
-    viewModels.forEach(({ id, student, agg, fin }) => {
-      if (!student) return;
-      let finSnapshot = fin;
+      let fin = computeStudentFinancials(student);
       if (!student.hasYearData || student.isGraduated) {
         const effectiveFee = student.isGraduated ? 0 : Number(student.feePerYear) || 0;
-        finSnapshot = {
-          feePerYear: parentCtx.enabled ? 0 : effectiveFee,
+        fin = {
+          feePerYear: isParentScope ? 0 : effectiveFee,
           previousDebt: 0,
           paidAmount: 0,
-          balance: parentCtx.enabled ? 0 : effectiveFee,
+          balance: isParentScope ? 0 : effectiveFee,
           periodDebtLabel: '-',
           periodDebtValue: 0,
           credit: 0,
@@ -1071,16 +891,17 @@ function buildFinanceStudents(
         };
       }
 
-      totalDue += agg.totalDueDisplay;
-      totalCollected += agg.paid;
-      totalOutstanding += agg.outstanding;
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+
+      totalDue += fin.feePerYear;
+      totalCollected += fin.paidAmount;
 
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-      const debtLabel = finSnapshot.periodDebtValue > 0 ? `Debt till ${finSnapshot.periodDebtLabel}` : '-';
+      const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '-';
       const prevYearNum = Number(financeYear) - 1;
       const carryYearLabel = Number.isFinite(prevYearNum) ? prevYearNum : `${financeYear}-1`;
-      const carryNote = agg.carry > 0
-        ? `<div class="text-xs font-semibold text-rose-600 text-right mt-1">Debt carried from ${carryYearLabel}: ${fmt(agg.carry)}</div>`
+      const carryNote = student.carryAmount > 0
+        ? `<div class="text-xs text-slate-500 text-right mt-1">Includes carry-forward from ${carryYearLabel}: ${fmt(student.carryAmount)}</div>`
         : '';
       const statusNote = student.isGraduated
         ? `<div class="mt-1 text-xs font-semibold text-emerald-600 uppercase">Graduated</div>`
@@ -1104,14 +925,14 @@ function buildFinanceStudents(
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
         <td class="p-2 border align-top">${student.classLevel || ''}${statusNote}</td>
-        <td class="p-2 border align-top text-right">${fmt(agg.fee)}${carryNote}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}${carryNote}</td>
         <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
-        <td class="p-2 border align-top text-right">${fmt(agg.paid)}</td>
-        <td class="p-2 border align-top text-right">${fmt(agg.outstanding)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
         <td class="p-2 border align-top">
           <div class="flex items-center justify-between gap-2">
             <span>${debtLabel}</span>
-            <span class="font-semibold ${finSnapshot.periodDebtValue > 0 ? 'text-red-700' : ''}">${fmt(finSnapshot.periodDebtValue)}</span>
+            <span class="font-semibold ${fin.periodDebtValue > 0 ? 'text-red-700' : ''}">${fmt(fin.periodDebtValue)}</span>
           </div>
         </td>
         <td class="p-2 border align-top">
@@ -1119,37 +940,14 @@ function buildFinanceStudents(
           ${payBtnHtml}
         </td>
       `;
-      fragment.appendChild(tr);
+      tbody.appendChild(tr);
 
       const brWrap = document.createElement('tbody');
       brWrap.innerHTML = breakdownRowHTML(id);
-      const brRow = brWrap.firstElementChild;
-      const carryHost = brRow && brRow.querySelector('[data-carry-forward]');
-      if (carryHost) {
-        carryHost.innerHTML = agg.carry > 0
-          ? `<div class="rounded border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2 text-xs font-semibold">
-              Debt carried from ${carryYearLabel}: ${fmt(agg.carry)}
-            </div>`
-          : '';
-      }
-      fragment.appendChild(brRow);
+      tbody.appendChild(brWrap.firstElementChild);
     });
 
-    tbody.appendChild(fragment);
-    updateFinanceKpis(totalDue, totalCollected, totalOutstanding);
-
-    tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', (e) => {
-      if (btn.disabled) return;
-      openPaymentModalFor(e.currentTarget.dataset.id);
-    }));
-    tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      openDetailsModal(e.currentTarget.dataset.id);
-    }));
-    // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
-  }
-
-  function updateFinanceKpis(totalDue, totalCollected, totalOutstanding) {
+    const totalOutstanding = totalDue - totalCollected;
     const totalDueEl = document.getElementById('totalDue');
     if (totalDueEl) {
       totalDueEl.textContent = fmt(totalDue);
@@ -1165,6 +963,13 @@ function buildFinanceStudents(
       totalOutstandingEl.textContent = fmt(totalOutstanding);
       totalOutstandingEl.dataset.amount = String(totalOutstanding);
     }
+
+    tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', (e) => {
+      if (btn.disabled) return;
+      openPaymentModalFor(e.currentTarget.dataset.id);
+    }));
+    tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
+    // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
   }
 
   // ====== SPEED FIX: lazy-load a single iframe when clicked, and close others ======
@@ -1280,37 +1085,24 @@ function buildFinanceStudents(
   }
 
   // ===== CSV/PDF downloaders (parent-scoped) =====
-  async function downloadCSV_Main() {
-    const rows = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till .', 'Debt Amount']];
+  function downloadCSV_Main() {
+    const rows = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
     let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
-    const views = await buildFinanceViewModels();
-    if (!views.length) {
-      alert('No finance records to export for this filter.');
-      return;
-    }
-    views.forEach(({ student, agg, fin }) => {
-      const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-      rows.push([
-        student.admissionNumber || '',
-        fullName,
-        student.classLevel || '',
-        agg.fee,
-        student.paymentPlan || '',
-        agg.paid,
-        agg.outstanding,
-        fin.periodDebtLabel,
-        fin.periodDebtValue
-      ]);
-      totalFee += agg.fee;
-      totalPaid += agg.paid;
-      totalBal += agg.outstanding;
-      totalDebt += fin.periodDebtValue;
+    const filterClass = classFilter.value;
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && s.classLevel !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      rows.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
+      totalFee += fin.feePerYear; totalPaid += fin.paidAmount; totalBal += fin.balance; totalDebt += fin.periodDebtValue;
     });
     rows.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Finance');
     
+    // Parent mode: use child-specific filename
     let filename = `finance_export_${Date.now()}.xlsx`;
     if (parentCtx.enabled) {
       const onlyId = Object.keys(cachedStudents||{})[0];
@@ -1321,39 +1113,26 @@ function buildFinanceStudents(
     XLSX.writeFile(wb, filename);
   }
 
-  async function downloadPDF_Main() {
-    const views = await buildFinanceViewModels();
-    if (!views.length) {
-      alert('No finance records to export for this filter.');
-      return;
-    }
+  function downloadPDF_Main() {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape' });
-    const headers = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till .', 'Debt Amount']];
+    const headers = [['Admission No', 'Full Name', 'Class', 'Fee (Year)', 'Plan', 'Paid', 'Balance (Year)', 'Debt till …', 'Debt Amount']];
     const body = [];
     let totalFee = 0, totalPaid = 0, totalBal = 0, totalDebt = 0;
-    views.forEach(({ student, agg, fin }) => {
-      const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
-      body.push([
-        student.admissionNumber || '',
-        fullName,
-        student.classLevel || '',
-        fmt(agg.fee),
-        student.paymentPlan || '',
-        fmt(agg.paid),
-        fmt(agg.outstanding),
-        fin.periodDebtLabel,
-        fmt(fin.periodDebtValue)
-      ]);
-      totalFee += agg.fee;
-      totalPaid += agg.paid;
-      totalBal += agg.outstanding;
-      totalDebt += fin.periodDebtValue;
+    const filterClass = classFilter.value;
+    Object.entries(cachedStudents).forEach(([id, s]) => {
+      if (filterClass && s.classLevel !== filterClass) return;
+      const fin = computeStudentFinancials(s);
+      if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
+      const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+      body.push([s.admissionNumber || '', fullName, s.classLevel || '', fin.feePerYear, s.paymentPlan || '', fin.paidAmount, fin.balance, fin.periodDebtLabel, fin.periodDebtValue]);
+      totalFee += fin.feePerYear; totalPaid += fin.paidAmount; totalBal += fin.balance; totalDebt += fin.periodDebtValue;
     });
-    body.push(['TOTAL', '', '', fmt(totalFee), '', fmt(totalPaid), fmt(totalBal), '', fmt(totalDebt)]);
+    body.push(['TOTAL', '', '', totalFee, '', totalPaid, totalBal, '', totalDebt]);
     doc.setFontSize(14); doc.text('SoMAp Finance Report', 14, 14);
     doc.autoTable({ head: headers, body, startY: 20, styles: { fontSize: 8 } });
     
+    // Parent mode: use child-specific filename
     let filename = `finance_report_${Date.now()}.pdf`;
     if (parentCtx.enabled) {
       const onlyId = Object.keys(cachedStudents||{})[0];
@@ -1504,7 +1283,7 @@ function buildFinanceStudents(
     try {
       await db.ref(`studentFees/${financeYear}/${studentId}`).update({ feePerYear: rounded });
       await loadStudents(financeYear);
-      await openDetailsModal(studentId);
+      openDetailsModal(studentId);
       alert(`Base fee updated for ${financeYear}.`);
     } catch (err) {
       console.error('Failed to update fee', err);
@@ -1512,9 +1291,8 @@ function buildFinanceStudents(
     }
   }
 
-  async function openDetailsModal(id) {
+  function openDetailsModal(id) {
     const s = cachedStudents[id]; if (!s) return alert('Student not found');
-    const agg = await resolveFinanceAggregate(financeYear, id, s);
     let fin = computeStudentFinancials(s);
     if (!s.hasYearData || s.isGraduated) {
       fin = {
@@ -1529,21 +1307,15 @@ function buildFinanceStudents(
       };
     }
     const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
-    const prevYearNum = Number(financeYear) - 1;
-    const carryYearLabel = agg.carry > 0
-      ? (Number.isFinite(prevYearNum) ? prevYearNum : `${financeYear}-1`)
-      : null;
     let html = `
       <p><strong>Name:</strong> ${fullName}</p>
       <p><strong>Admission No:</strong> ${s.admissionNumber || ''}</p>
       <p><strong>Class:</strong> ${s.classLevel || ''}</p>
-      <p><strong>Fee (year):</strong> ${fmt(agg.fee)}</p>
-      ${agg.carry > 0 ? `<p><strong>Debt carried from ${carryYearLabel}:</strong> ${fmt(agg.carry)}</p>` : ''}
-      <p><strong>Total to pay (fee + carry):</strong> ${fmt(agg.totalDueDisplay)}</p>
+      <p><strong>Fee/year:</strong> ${fmt(fin.feePerYear || 0)}${s.carryAmount > 0 ? ` <span class="text-xs text-slate-500">(Base ${fmt(s.baseFee || 0)} + Carry ${fmt(s.carryAmount)})</span>` : ''}</p>
       <p><strong>Payment Plan:</strong> ${s.paymentPlan || ''}</p>
-      <p><strong>Paid (this year):</strong> ${fmt(agg.paid)}</p>
-      <p><strong>Outstanding:</strong> ${fmt(agg.outstanding)}</p>
       <p><strong>Debt till:</strong> ${fin.periodDebtLabel} - <strong>${fmt(fin.periodDebtValue)}</strong></p>
+      <p><strong>Paid:</strong> ${fmt(fin.paidAmount)}</p>
+      <p><strong>Balance (Year):</strong> ${fmt(fin.balance)}</p>
     `;
     if (hasFinanceAdminAccess()) {
       html += `
@@ -1745,7 +1517,6 @@ function buildFinanceStudents(
     const targetYear = String(year || activeYear);
     activeYear = targetYear;
     financeYear = targetYear;
-    clearFinanceAggregateCache(targetYear);
     try { sessionStorage.setItem('somap_selected_year', targetYear); } catch (_) {}
     updateYearHint();
     if (yearSelectEl && yearSelectEl.value !== targetYear) {
@@ -1817,7 +1588,7 @@ function buildFinanceStudents(
       }
 
       populateStudentSelect();
-      await renderTable();
+      renderTable();
       if (parentCtx.enabled) {
         applyParentModeUI();
       }
@@ -1855,13 +1626,13 @@ function buildFinanceStudents(
   closePaymentModal.addEventListener('click', closePaymentModalFn);
   cancelPayment.addEventListener('click', closePaymentModalFn);
   closeDetailsModal.addEventListener('click', closeDetailsModalFn);
-  showOnlyDebtorsBtn.addEventListener('click', async () => {
+  showOnlyDebtorsBtn.addEventListener('click', () => {
     showingDebtorsOnly = !showingDebtorsOnly;
     showOnlyDebtorsBtn.textContent = showingDebtorsOnly ? 'Showing Debtors' : 'Show Debtors';
-    await renderTable();
+    renderTable();
   });
-  downloadCsvBtn.addEventListener('click', () => { downloadCSV_Main().catch(console.error); });
-  downloadPdfBtn.addEventListener('click', () => { downloadPDF_Main().catch(console.error); });
+  downloadCsvBtn.addEventListener('click', downloadCSV_Main);
+  downloadPdfBtn.addEventListener('click', downloadPDF_Main);
   downloadDebtNowCsvBtn.addEventListener('click', downloadCSV_DebtNow);
   downloadDebtNowPdfBtn.addEventListener('click', downloadPDF_DebtNow);
   downloadBreakdownCsvBtn.addEventListener('click', downloadCSV_Breakdown);
@@ -1885,7 +1656,7 @@ function buildFinanceStudents(
     if (ev.target === paymentModal) closePaymentModalFn();
     if (ev.target === detailsModal) closeDetailsModalFn();
   });
-  classFilter.addEventListener('change', () => { renderTable().catch(console.error); });
+  classFilter.addEventListener('change', renderTable);
   document.addEventListener('DOMContentLoaded', () => {
     updateYearHint();
     refreshFinanceData(activeYear);
@@ -1894,10 +1665,6 @@ function buildFinanceStudents(
 </script>
 </body>
 </html>
-
-
-
-
 
 
 

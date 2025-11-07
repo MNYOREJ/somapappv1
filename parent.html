@@ -579,6 +579,7 @@
   if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
   const allowedYearStrings = SOMAP_ALLOWED_YEARS.map(String);
   const MIN_DATA_YEAR = SOMAP_ALLOWED_YEARS.length ? Math.min(...SOMAP_ALLOWED_YEARS) : 2023;
+  const EARLIEST_CARRY_FORWARD_YEAR = 2025;
   const normalizeYear = (value) => {
     const str = String(value || SOMAP_DEFAULT_YEAR);
     return allowedYearStrings.includes(str) ? str : String(SOMAP_DEFAULT_YEAR);
@@ -868,8 +869,8 @@
     const fallback = { amount: 0, sourceYear: null };
     if (!studentKey || !window.SomapFinance?.loadStudentFinance) return fallback;
     const targetYearNum = Number(uptoYearStr);
-    if (!Number.isFinite(targetYearNum)) return fallback;
-    const earliestYear = Math.max(MIN_DATA_YEAR, 2023);
+    const earliestYear = Math.max(MIN_DATA_YEAR, EARLIEST_CARRY_FORWARD_YEAR);
+    if (!Number.isFinite(targetYearNum) || targetYearNum <= earliestYear) return fallback;
     for (let year = targetYearNum - 1; year >= earliestYear; year--){
       const yearStr = String(year);
       try{
@@ -905,10 +906,18 @@
       latestFinanceSnapshot = fin;
 
       const currentFee = Number(fin.due || 0);
-      const carryAmount = Number(fin.record?.carryAmount || 0);
-      const carryForwardDebt = carryAmount > 0 ? carryAmount : carryMeta.amount;
+      const carryAmountFromRecord = Number(fin.record?.carryAmount || 0);
+      const carryAmountComputed = Number(carryMeta.amount || 0);
+      let carryForwardDebt = carryAmountComputed;
+      if (carryForwardDebt <= 0 && carryAmountFromRecord > 0) {
+        carryForwardDebt = carryAmountFromRecord;
+      }
       const totalFeeDue = currentFee + carryForwardDebt;
-      const fallbackPrevYear = String(Math.max(Number(yearStr) - 1, MIN_DATA_YEAR));
+      const fallbackPrevYear = (() => {
+        const prev = Number(yearStr) - 1;
+        if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
+        return String(EARLIEST_CARRY_FORWARD_YEAR);
+      })();
       const carryYearLabel = carryForwardDebt > 0
         ? (carryMeta.sourceYear || fallbackPrevYear)
         : null;
@@ -1312,7 +1321,11 @@
       // Build debt note in small letters if there's previous debt
       let debtNote = '';
       if (previousDebt > 0) {
-        const fallbackPrevYear = String(Math.max(Number(year) - 1, MIN_DATA_YEAR));
+        const fallbackPrevYear = (() => {
+          const prev = Number(year) - 1;
+          if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
+          return String(EARLIEST_CARRY_FORWARD_YEAR);
+        })();
         const noteYear = carryMeta.sourceYear || fallbackPrevYear;
         if (fallbackFeeDue === 0) {
           debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${noteYear}</span>`;

@@ -363,36 +363,73 @@
     };
   }
 
-  function buildFinanceStudents(
-    baseStudents = {},
-    anchorEnrollments = {},
-    enrollments = {},
-    classFees = {},
-    overrides = {},
-    plans = {},
-    ledgers = {},
-    carryForward = {},
-    year = SOMAP_DEFAULT_YEAR
-  ){
+function coerceFeeValue(value){
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[^\d.-]/g, '');
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === 'object') {
+    const maybe =
+      value.feePerYear ??
+      value.baseFee ??
+      value.amount ??
+      value.total ??
+      value.value;
+    return coerceFeeValue(maybe);
+  }
+  return null;
+}
+
+function buildFinanceStudents(
+  baseStudents = {},
+  anchorEnrollments = {},
+  enrollments = {},
+  classFees = {},
+  overrides = {},
+  plans = {},
+  ledgers = {},
+  carryForward = {},
+  studentFees = {},
+  year = SOMAP_DEFAULT_YEAR
+){
     const targetYear = String(year || SOMAP_DEFAULT_YEAR);
     const deltaYears = Number(targetYear) - SOMAP_DEFAULT_YEAR;
     const map = {};
-    const ids = new Set([
-      ...Object.keys(baseStudents || {}),
-      ...Object.keys(anchorEnrollments || {}),
-      ...Object.keys(enrollments || {}),
-      ...Object.keys(overrides || {}),
-      ...Object.keys(ledgers || {}),
-      ...Object.keys(carryForward || {}),
-    ]);
+  const ids = new Set([
+    ...Object.keys(baseStudents || {}),
+    ...Object.keys(anchorEnrollments || {}),
+    ...Object.keys(enrollments || {}),
+    ...Object.keys(overrides || {}),
+    ...Object.keys(ledgers || {}),
+    ...Object.keys(carryForward || {}),
+    ...Object.keys(studentFees || {})
+  ]);
 
     ids.forEach((id) => {
       const base = baseStudents[id] || {};
       const anchor = anchorEnrollments[id] || {};
       const enrollment = enrollments[id] || {};
-      const override = overrides[id] || {};
-      const ledgerEntry = ledgers[id] || {};
-      const carry = carryForward[id] || {};
+    const override = overrides[id] || {};
+    const ledgerEntry = ledgers[id] || {};
+    const carry = carryForward[id] || {};
+    let studentFeeOverride = studentFees[id];
+    if (!studentFeeOverride) {
+      const admKey =
+        base.admissionNumber ||
+        base.admissionNo ||
+        anchor.admissionNumber ||
+        anchor.admissionNo ||
+        enrollment.admissionNumber ||
+        enrollment.admissionNo ||
+        '';
+      if (admKey && studentFees[admKey]) {
+        studentFeeOverride = studentFees[admKey];
+      }
+    }
 
       const baseClass =
         anchor.className ||
@@ -424,13 +461,16 @@
 
       if (isMonthlyPlan) paymentPlan = 'Malipo kwa mwezi';
 
-      let baseFeeCandidate =
-        override.feePerYear ??
-        classDefaults.feePerYear ??
-        base.feePerYear ??
-        base.feeDue ??
-        base.requiredFee ??
-        0;
+    const explicitStudentFee = coerceFeeValue(studentFeeOverride);
+
+    let baseFeeCandidate =
+      (explicitStudentFee != null ? explicitStudentFee : undefined) ??
+      override.feePerYear ??
+      classDefaults.feePerYear ??
+      base.feePerYear ??
+      base.feeDue ??
+      base.requiredFee ??
+      0;
 
       if (isMonthlyPlan && (!baseFeeCandidate || baseFeeCandidate === 0) && resolvedPlan?.schedule) {
         const totalFromSchedule = resolvedPlan.schedule.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
@@ -532,6 +572,7 @@
           enrollmentSnap,
           classFeesSnap,
           overridesSnap,
+          studentFeesSnap,
           plansSnap,
           ledgerSnap,
           carrySnap
@@ -541,6 +582,7 @@
           database.ref(pref(`enrollments/${y}`)).once('value'),
           database.ref(pref(`feesStructure/${y}`)).once('value'),
           database.ref(pref(`studentOverrides/${y}`)).once('value'),
+          database.ref(pref(`studentFees/${y}`)).once('value'),
           database.ref(pref(`installmentPlans/${y}`)).once('value'),
           database.ref(pref(`financeLedgers/${y}`)).once('value'),
           database.ref(pref(`financeCarryForward/${y}`)).once('value'),
@@ -554,6 +596,15 @@
             console.warn('SomapFinance: legacy financeLedgers read failed', legacyErr?.message || legacyErr);
           }
         }
+        let studentFeesData = studentFeesSnap.val() || {};
+        if (!Object.keys(studentFeesData || {}).length) {
+          try {
+            const legacyStudentFeesSnap = await database.ref(pref(`finance/${y}/studentFees`)).once('value');
+            studentFeesData = legacyStudentFeesSnap.val() || {};
+          } catch (studentFeesErr) {
+            console.warn('SomapFinance: student fee override read failed', studentFeesErr?.message || studentFeesErr);
+          }
+        }
         const dataset = {
           year: y,
           baseStudents: baseSnap.val() || {},
@@ -564,6 +615,7 @@
           plans: plansSnap.val() || {},
           ledgers: ledgerData,
           carryForward: carrySnap.val() || {},
+          studentFees: studentFeesData,
         };
         dataset.students = buildFinanceStudents(
           dataset.baseStudents,
@@ -574,6 +626,7 @@
           dataset.plans,
           dataset.ledgers,
           dataset.carryForward,
+          dataset.studentFees,
           y
         );
         return dataset;

@@ -166,6 +166,7 @@
   /** Years: 2023..2042; default anchor year = 2025 */
   const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i);
   const SOMAP_DEFAULT_YEAR = 2025;
+  window.SOMAP_DEFAULT_YEAR = window.SOMAP_DEFAULT_YEAR || SOMAP_DEFAULT_YEAR;
 
   /** Tanzania ladder (no Class 8). Labels must match RTDB exactly. */
   const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
@@ -594,16 +595,136 @@
   // Helpers
   const q = s => document.querySelector(s);
   const qa = s => Array.from(document.querySelectorAll(s));
-  const safe = s => (s==null ? '' : String(s));
-  const escapeHtml = (value) => safe(value).replace(/[&<>"']/g, ch => ({
+  const safeText = s => (s==null ? '' : String(s));
+  const escapeHtml = (value) => safeText(value).replace(/[&<>"']/g, ch => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[ch] || ch));
   const fmtTsh = n => 'TSh ' + (Number(n)||0).toLocaleString();
-  const sanitizeKey = s => safe(s).replace(/[.#$/\[\]]/g, '_');
+  const sanitizeKey = s => safeText(s).replace(/[.#$/\[\]]/g, '_');
   const isGraduationClass = cls => {
-    const c = safe(cls).toLowerCase();
+    const c = safeText(cls).toLowerCase();
     return c.includes('preunit') || c.includes('pre-unit') || c.includes('class 7') || c.includes('std 7') || c.includes('grade 7');
   };
+  const cur = (n) => `TSh ${Number(n || 0).toLocaleString('en-US')}`;
+  const safe = (value) => {
+    if (value === null || value === undefined) return 0;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : 0;
+  };
+  const financeFeeCache = new Map();
+  const financePaymentCache = new Map();
+  const financeCarryCache = new Map();
+
+  async function sumYearPayments(year, studentId){
+    const yearKey = String(year || SOMAP_DEFAULT_YEAR);
+    if (!studentId) return 0;
+    const cacheKey = `${yearKey}:${studentId}`;
+    if (financePaymentCache.has(cacheKey)) return financePaymentCache.get(cacheKey);
+    try{
+      const snap = await db.ref(`financeLedgers/${yearKey}/${studentId}/payments`).once('value');
+      const rows = snap.val() || {};
+      let total = 0;
+      Object.values(rows).forEach(p => {
+        const amount = p?.amount ?? p?.paid ?? p?.value ?? p?.payment;
+        total += safe(amount);
+      });
+      financePaymentCache.set(cacheKey, total);
+      return total;
+    } catch (err){
+      console.warn('sumYearPayments (parent) failed', { year: yearKey, studentId, err });
+      financePaymentCache.set(cacheKey, 0);
+      return 0;
+    }
+  }
+
+  async function getYearFee(year, studentId){
+    const yearKey = String(year || SOMAP_DEFAULT_YEAR);
+    if (!studentId) return 0;
+    const cacheKey = `${yearKey}:${studentId}`;
+    if (financeFeeCache.has(cacheKey)) return financeFeeCache.get(cacheKey);
+    try{
+      const ref = db.ref(`studentFees/${yearKey}/${studentId}`);
+      const snap = await ref.child('feePerYear').once('value');
+      let value = snap.val();
+      if (value === null || value === undefined){
+        const fallback = await ref.child('planTotal').once('value');
+        value = fallback.val();
+      }
+      const fee = safe(value);
+      financeFeeCache.set(cacheKey, fee);
+      return fee;
+    } catch (err){
+      console.warn('getYearFee (parent) failed', { year: yearKey, studentId, err });
+      financeFeeCache.set(cacheKey, 0);
+      return 0;
+    }
+  }
+
+  async function computeCarryForward(year, studentId){
+    const y = Number(year);
+    if (!studentId || !Number.isFinite(y) || y <= EARLIEST_CARRY_FORWARD_YEAR) return 0;
+    const key = `${y}:${studentId}`;
+    const prevYear = String(y - 1);
+    const [prevFee, prevPaid] = await Promise.all([
+      getYearFee(prevYear, studentId),
+      sumYearPayments(prevYear, studentId)
+    ]);
+    const balance = Math.max(safe(prevFee) - safe(prevPaid), 0);
+    try{
+      const ref = db.ref(`financeCarryForward/${y}/${studentId}/amount`);
+      const snap = await ref.once('value');
+      const existing = safe(snap.val());
+      if (existing !== balance){
+        await ref.set(balance);
+      }
+      financeCarryCache.set(key, balance);
+    } catch (err){
+      console.warn('computeCarryForward (parent) failed', { year: y, studentId, err });
+    }
+    return balance;
+  }
+
+  async function getCarryForward(year, studentId){
+    const y = Number(year);
+    if (!studentId || !Number.isFinite(y) || y <= EARLIEST_CARRY_FORWARD_YEAR) return 0;
+    const key = `${y}:${studentId}`;
+    if (financeCarryCache.has(key)) return financeCarryCache.get(key);
+    try{
+      const snap = await db.ref(`financeCarryForward/${y}/${studentId}/amount`).once('value');
+      const amount = safe(snap.val());
+      financeCarryCache.set(key, amount);
+      return amount;
+    } catch (err){
+      console.warn('getCarryForward (parent) failed', { year: y, studentId, err });
+      financeCarryCache.set(key, 0);
+      return 0;
+    }
+  }
+
+  async function fetchFinanceTotals(year, studentId){
+    if (!studentId) {
+      return { feeYear: 0, paidYear: 0, carryForward: 0, combinedFee: 0, outstanding: 0 };
+    }
+    const yearKey = String(year || SOMAP_DEFAULT_YEAR);
+    const [feeYear, paidYear, carryForward] = await Promise.all([
+      getYearFee(yearKey, studentId),
+      sumYearPayments(yearKey, studentId),
+      (async () => {
+        const computed = await computeCarryForward(yearKey, studentId);
+        const stored = await getCarryForward(yearKey, studentId);
+        return (stored ?? computed ?? 0);
+      })()
+    ]);
+    const combinedFee = safe(feeYear) + safe(carryForward);
+    const paid = safe(paidYear);
+    return {
+      feeYear: safe(feeYear),
+      paidYear: paid,
+      carryForward: safe(carryForward),
+      combinedFee,
+      outstanding: Math.max(combinedFee - paid, 0),
+    };
+  }
 
   // Refs
   const studentNameEl = q('#studentName');
@@ -867,100 +988,73 @@
 
   async function resolveCarryForwardDebt(studentKey, uptoYearStr){
     const fallback = { amount: 0, sourceYear: null };
-    if (!studentKey || !window.SomapFinance?.loadStudentFinance) return fallback;
+    if (!studentKey) return fallback;
     const targetYearNum = Number(uptoYearStr);
-    const earliestYear = Math.max(MIN_DATA_YEAR, EARLIEST_CARRY_FORWARD_YEAR);
-    if (!Number.isFinite(targetYearNum) || targetYearNum <= earliestYear) return fallback;
-    for (let year = targetYearNum - 1; year >= earliestYear; year--){
-      const yearStr = String(year);
-      try{
-        const fin = await window.SomapFinance.loadStudentFinance(yearStr, studentKey);
-        if (!fin) continue;
-        const due = Number(fin.due ?? fin.feePerYear ?? 0);
-        const paid = Number(fin.paid ?? fin.paidAmount ?? 0);
-        const outstanding = Math.max(
-          0,
-          Number.isFinite(due - paid) ? (due - paid) : 0,
-          Number(fin.outstanding ?? 0),
-          Number(fin.balance ?? 0),
-          Number(fin.record?.balance ?? 0)
-        );
-        if (outstanding > 0){
-          return { amount: outstanding, sourceYear: yearStr };
-        }
-      }catch(err){
-        console.warn('Carry-forward debt lookup failed', { studentKey, year: yearStr, err });
+    if (!Number.isFinite(targetYearNum) || targetYearNum <= EARLIEST_CARRY_FORWARD_YEAR) return fallback;
+    const prevYear = String(targetYearNum - 1);
+    try{
+      const [prevFee, prevPaid] = await Promise.all([
+        getYearFee(prevYear, studentKey),
+        sumYearPayments(prevYear, studentKey)
+      ]);
+      const outstanding = Math.max(safe(prevFee) - safe(prevPaid), 0);
+      if (outstanding > 0){
+        return { amount: outstanding, sourceYear: prevYear };
       }
+    }catch(err){
+      console.warn('Carry-forward debt lookup failed', { studentKey, year: prevYear, err });
     }
     return fallback;
   }
 
   async function renderFinanceStats(){
-    if (!currentStudentKey || !window.SomapFinance) return;
+    if (!currentStudentKey) return;
     const yearStr = getActiveYearString();
     try{
-      const [fin, carryMeta] = await Promise.all([
-        window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey),
-        resolveCarryForwardDebt(currentStudentKey, yearStr)
+      const finPromise = window.SomapFinance?.loadStudentFinance
+        ? window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey).catch(err => {
+            console.warn('SomapFinance snapshot unavailable', err);
+            return null;
+          })
+        : Promise.resolve(null);
+      const [finRecord, totals] = await Promise.all([
+        finPromise,
+        fetchFinanceTotals(yearStr, currentStudentKey)
       ]);
-      latestFinanceSnapshot = fin;
 
-      const currentFee = Number(fin.due || 0);
-      const carryAmountFromRecord = Number(fin.record?.carryAmount || 0);
-      const carryAmountComputed = Number(carryMeta.amount || 0);
-      let carryForwardDebt = carryAmountComputed;
-      if (carryForwardDebt <= 0 && carryAmountFromRecord > 0) {
-        carryForwardDebt = carryAmountFromRecord;
-      }
-      const totalFeeDue = currentFee + carryForwardDebt;
-      const fallbackPrevYear = (() => {
-        const prev = Number(yearStr) - 1;
-        if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
-        return String(EARLIEST_CARRY_FORWARD_YEAR);
-      })();
-      const carryYearLabel = carryForwardDebt > 0
-        ? (carryMeta.sourceYear || fallbackPrevYear)
+      if (!totals) return;
+      latestFinanceSnapshot = {
+        ...(finRecord || {}),
+        due: totals.combinedFee,
+        paid: totals.paidYear,
+        balance: totals.outstanding,
+        carryAmount: totals.carryForward,
+      };
+
+      const carryYearLabel = totals.carryForward > 0
+        ? String(Math.max(Number(yearStr) - 1, EARLIEST_CARRY_FORWARD_YEAR))
         : null;
-      
-      // Build debt note in small letters for parent understanding
-      let debtNote = '';
-      if (carryForwardDebt > 0) {
-        if (currentFee === 0) {
-          // Only debt, no current year fee
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${carryYearLabel || 'previous year'}</span>`;
-        } else {
-          // Both current fee and debt
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">includes ${fmtTsh(carryForwardDebt)} debt carried from ${carryYearLabel || 'previous year'}</span>`;
-        }
-      }
-      
-      // Update display with debt note if applicable
+      const debtNote = totals.carryForward > 0
+        ? `<span class="text-xs mt-1 block text-red-500">Debt carried from ${carryYearLabel}: ${cur(totals.carryForward)}</span>`
+        : '';
+
       if (debtNote) {
-        statFeeDue.innerHTML = fmtTsh(totalFeeDue) + debtNote;
+        statFeeDue.innerHTML = `${cur(totals.combinedFee)}${debtNote}`;
       } else {
-        statFeeDue.textContent = fmtTsh(totalFeeDue);
+        statFeeDue.textContent = cur(totals.combinedFee);
       }
-      
-      statPaid.textContent = fmtTsh(fin.paid);
-      
-      // Calculate total outstanding
-      // Total outstanding = (current fee + previous debt) - payments made this year
-      const currentPaid = Number(fin.paid || 0);
-      let totalOutstanding = Math.max(0, totalFeeDue - currentPaid);
-      
-      statBalance.textContent = fmtTsh(totalOutstanding);
-      
-      // Use totalFeeDue (which includes carry-forward debt) for badge calculation
-      applyFeeBadge(totalFeeDue, fin.paid);
-      
-      const planName = fin.record?.paymentPlan || fin.paymentPlan || currentStudent?.paymentPlan || '-';
-      statPaymentPlan.textContent = safe(planName);
-      const displayClass = fin.classLevel || fin.record?.classLevel || currentStudent?.classLevel || '-';
+      statPaid.textContent = cur(totals.paidYear);
+      statBalance.textContent = cur(totals.outstanding);
+      applyFeeBadge(totals.combinedFee, totals.paidYear);
+
+      const planName = finRecord?.record?.paymentPlan || finRecord?.paymentPlan || currentStudent?.paymentPlan || '-';
+      statPaymentPlan.textContent = safeText(planName);
+      const displayClass = finRecord?.classLevel || finRecord?.record?.classLevel || currentStudent?.classLevel || '-';
       const classLabel = displayClass === 'GRADUATED'
         ? `Graduated (${yearStr})`
-        : safe(displayClass);
+        : safeText(displayClass);
       detailClass.textContent = classLabel;
-      toggleGradBadge(fin.isGraduated || displayClass === 'GRADUATED', yearStr);
+      toggleGradBadge(finRecord?.isGraduated || displayClass === 'GRADUATED', yearStr);
     }catch(err){
       console.error('Failed to sync finance stats', err);
     }
@@ -1156,14 +1250,14 @@
     }
 
     // Header
-    studentNameEl.textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.middleName || '')} ${safe(currentStudent.lastName)}`.replace(/\s+/g,' ').trim();
-    studentMetaEl.textContent = `School: ${safe(currentStudent.schoolName || '-')}`;
+    studentNameEl.textContent = `${safeText(currentStudent.firstName)} ${safeText(currentStudent.middleName || '')} ${safeText(currentStudent.lastName)}`.replace(/\s+/g,' ').trim();
+    studentMetaEl.textContent = `School: ${safeText(currentStudent.schoolName || '-')}`;
     updateYearBadge();
 
-    detailClass.textContent = safe(currentStudent.classLevel || '-');
-    detailStream.textContent = safe(currentStudent.stream || '-');
-    detailAdm.textContent = safe(currentStudent.admissionNumber || currentStudent.pupilId || '-');
-    detailParentPhone.textContent = safe(currentStudent.primaryParentContact || '-');
+    detailClass.textContent = safeText(currentStudent.classLevel || '-');
+    detailStream.textContent = safeText(currentStudent.stream || '-');
+    detailAdm.textContent = safeText(currentStudent.admissionNumber || currentStudent.pupilId || '-');
+    detailParentPhone.textContent = safeText(currentStudent.primaryParentContact || '-');
 
     const adm = currentStudent.admissionNumber || currentStudent.pupilId || currentStudentKey;
     const classLevel = currentStudent.classLevel || '';
@@ -1282,7 +1376,7 @@
         <li>
           <div>
             <div class="title font-extrabold">${fmtTsh(p.amount)}</div>
-            <div class="muted text-sm">${(p.method||'-')} ΓÇó ${safe(p.note)}</div>
+            <div class="muted text-sm">${(p.method||'-')} ΓÇó ${safeText(p.note)}</div>
           </div>
           <div class="muted text-right text-sm">${new Date(p.timestamp).toLocaleString()}</div>
         </li>
@@ -1318,29 +1412,23 @@
       const paidForYear = yearPaymentsSum;
       const computedOutstanding = Math.max(0, feeDue - paidForYear);
       
-      // Build debt note in small letters if there's previous debt
-      let debtNote = '';
-      if (previousDebt > 0) {
-        const fallbackPrevYear = (() => {
-          const prev = Number(year) - 1;
-          if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
-          return String(EARLIEST_CARRY_FORWARD_YEAR);
-        })();
-        const noteYear = carryMeta.sourceYear || fallbackPrevYear;
-        if (fallbackFeeDue === 0) {
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">debt carried from ${noteYear}</span>`;
-        } else {
-          debtNote = `<span style="font-size: 0.65rem; color: var(--muted); display: block; margin-top: 2px; text-transform: lowercase;">includes ${fmtTsh(previousDebt)} debt carried from ${noteYear}</span>`;
-        }
-      }
+      const fallbackPrevYear = (() => {
+        const prev = Number(year) - 1;
+        if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);
+        return String(EARLIEST_CARRY_FORWARD_YEAR);
+      })();
+      const noteYear = carryMeta.sourceYear || fallbackPrevYear;
+      const debtNote = previousDebt > 0
+        ? `<span class="text-xs mt-1 block text-red-500">Debt carried from ${noteYear}: ${cur(previousDebt)}</span>`
+        : '';
       
       if (debtNote) {
-        statFeeDue.innerHTML = fmtTsh(feeDue) + debtNote;
+        statFeeDue.innerHTML = `${cur(feeDue)}${debtNote}`;
       } else {
-        statFeeDue.textContent = fmtTsh(feeDue);
+        statFeeDue.textContent = cur(feeDue);
       }
-      statPaid.textContent = fmtTsh(paidForYear);
-      statBalance.textContent = fmtTsh(computedOutstanding);
+      statPaid.textContent = cur(paidForYear);
+      statBalance.textContent = cur(computedOutstanding);
       applyFeeBadge(feeDue, paidForYear);
     }
 
@@ -1475,7 +1563,7 @@
         gradGalleryList.innerHTML = '<div class="muted text-sm col-span-full">No graduation photos uploaded yet.</div>';
       } else {
         gradGalleryList.innerHTML = photos.slice(0, 6).map(photo => {
-          const caption = safe(photo.caption || 'Graduation moment');
+          const caption = safeText(photo.caption || 'Graduation moment');
           const when = photo.uploadedAt ? new Date(Number(photo.uploadedAt)).toLocaleDateString() : '';
           return `
             <figure>
@@ -1651,7 +1739,7 @@
     });
     if (!rows.length){ Swal.fire('No scores','No scores to export','info'); return; }
     const { jsPDF } = window.jspdf; const doc = new jsPDF();
-    doc.setFontSize(14); doc.text(`${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)} ΓÇö Scores`,14,20);
+    doc.setFontSize(14); doc.text(`${safeText(currentStudent.firstName)} ${safeText(currentStudent.lastName)} ΓÇö Scores`,14,20);
     doc.autoTable({startY:30, head:[['Subject','Score','Max','%']], body:rows, styles:{fontSize:10}});
     doc.save(`${currentStudent.admissionNumber||'student'}_scores.pdf`);
   });
@@ -1720,11 +1808,11 @@
       return;
     }
     currentStudent = snap.val();
-    studentNameEl.textContent = `${safe(currentStudent.firstName)} ${safe(currentStudent.lastName)}`;
-    detailClass.textContent = safe(currentStudent.classLevel || '-');
-    detailStream.textContent = safe(currentStudent.stream || '-');
-    detailAdm.textContent = safe(currentStudent.admissionNumber || '-');
-    detailParentPhone.textContent = safe(currentStudent.primaryParentContact || '-');
+    studentNameEl.textContent = `${safeText(currentStudent.firstName)} ${safeText(currentStudent.lastName)}`;
+    detailClass.textContent = safeText(currentStudent.classLevel || '-');
+    detailStream.textContent = safeText(currentStudent.stream || '-');
+    detailAdm.textContent = safeText(currentStudent.admissionNumber || '-');
+    detailParentPhone.textContent = safeText(currentStudent.primaryParentContact || '-');
 
     refreshYearDependentData().catch(console.error);
     refreshParentBooksPanel().catch(console.error);

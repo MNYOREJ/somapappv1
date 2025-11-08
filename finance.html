@@ -267,29 +267,7 @@
     }
   })();
 
-  window.SOMAP_DEFAULT_YEAR = window.SOMAP_DEFAULT_YEAR || 2025;
-  window.somapYearContext = window.somapYearContext || (function(){
-    let selected = (() => {
-      try { return sessionStorage.getItem('somap_selected_year'); }
-      catch (_) { return null; }
-    })() || String(window.SOMAP_DEFAULT_YEAR);
-    const listeners = new Set();
-    return {
-      getSelectedYear(){ return String(selected); },
-      setSelectedYear(y){
-        y = String(y);
-        if (selected === y) return;
-        selected = y;
-        try { sessionStorage.setItem('somap_selected_year', y); } catch (_) {}
-        listeners.forEach(fn => { try { fn(y); } catch (_) {} });
-      },
-      onYearChanged(fn){
-        if (typeof fn === 'function') listeners.add(fn);
-      }
-    };
-  })();
-
-  const SOMAP_DEFAULT_YEAR = Number(window.SOMAP_DEFAULT_YEAR) || 2025;
+  const SOMAP_DEFAULT_YEAR = 2025;
   const FINANCE_ADMIN_EMAIL = 'socratesschool2020@gmail.com';
   const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
   const norm = (s) => String(s || '').trim().toLowerCase();
@@ -302,102 +280,8 @@
     return CLASS_ORDER[j];
   }
 
-  const cur = (n) => `TSh ${Number(n || 0).toLocaleString('en-US')}`;
-  const safe = (value) => {
-    if (value === null || value === undefined) return 0;
-    const num = Number(value);
-    return Number.isFinite(num) ? num : 0;
-  };
-  const db = window.db || (firebase?.database ? firebase.database() : null);
+  const db = window.db || null;
   const yearContext = window.somapYearContext || null;
-  const feeCache = new Map();
-  const paymentCache = new Map();
-  const carryCache = new Map();
-
-  async function sumYearPayments(year, studentId){
-    if (!db || !studentId) return 0;
-    const key = `${year}:${studentId}`;
-    if (paymentCache.has(key)) return paymentCache.get(key);
-    try{
-      const snap = await db.ref(`financeLedgers/${year}/${studentId}/payments`).once('value');
-      const rows = snap.val() || {};
-      let total = 0;
-      Object.values(rows).forEach(p => {
-        const amount = p?.amount ?? p?.paid ?? p?.value ?? p?.payment;
-        total += safe(amount);
-      });
-      paymentCache.set(key, total);
-      return total;
-    } catch (err){
-      console.warn('sumYearPayments failed', { year, studentId, err });
-      paymentCache.set(key, 0);
-      return 0;
-    }
-  }
-
-  async function getYearFee(year, studentId){
-    if (!db || !studentId) return 0;
-    const key = `${year}:${studentId}`;
-    if (feeCache.has(key)) return feeCache.get(key);
-    try{
-      const ref = db.ref(`studentFees/${year}/${studentId}`);
-      const snap = await ref.child('feePerYear').once('value');
-      let value = snap.val();
-      if (value === null || value === undefined){
-        const fallbackSnap = await ref.child('planTotal').once('value');
-        value = fallbackSnap.val();
-      }
-      const fee = safe(value);
-      feeCache.set(key, fee);
-      return fee;
-    } catch (err){
-      console.warn('getYearFee failed', { year, studentId, err });
-      feeCache.set(key, 0);
-      return 0;
-    }
-  }
-
-  async function computeCarryForward(year, studentId){
-    const y = Number(year);
-    if (!db || !studentId || !Number.isFinite(y) || y <= 2025) return 0;
-    const key = `${y}:${studentId}`;
-    const prevYear = String(y - 1);
-    const [prevFee, prevPaid] = await Promise.all([
-      getYearFee(prevYear, studentId),
-      sumYearPayments(prevYear, studentId)
-    ]);
-    const prevBalance = Math.max(safe(prevFee) - safe(prevPaid), 0);
-    try{
-      const cfRef = db.ref(`financeCarryForward/${y}/${studentId}/amount`);
-      const snap = await cfRef.once('value');
-      const existing = safe(snap.val());
-      if (existing !== prevBalance){
-        await cfRef.set(prevBalance);
-      }
-      carryCache.set(key, prevBalance);
-    } catch (err){
-      console.warn('Carry-forward sync failed', { year: y, studentId, err });
-    }
-    return prevBalance;
-  }
-
-  async function getCarryForward(year, studentId){
-    const y = Number(year);
-    if (!db || !studentId || !Number.isFinite(y) || y <= 2025) return 0;
-    const key = `${y}:${studentId}`;
-    if (carryCache.has(key)) return carryCache.get(key);
-    try{
-      const snap = await db.ref(`financeCarryForward/${y}/${studentId}/amount`).once('value');
-      const amount = safe(snap.val());
-      carryCache.set(key, amount);
-      return amount;
-    } catch (err){
-      console.warn('Carry-forward read failed', { year: y, studentId, err });
-      carryCache.set(key, 0);
-      return 0;
-    }
-  }
-
   const yearSelectEl = document.querySelector('[data-somap-year-select]');
   const financeQuery = new URLSearchParams(location.search);
   let financeYear = financeQuery.get('year')
@@ -968,53 +852,6 @@ function buildFinanceStudents(
     return map;
   }
 
-  async function hydrateCarryForwardForYear(year){
-    if (!cachedStudents || !Object.keys(cachedStudents).length) return;
-    const targetYear = String(year || activeYear || SOMAP_DEFAULT_YEAR);
-    const yNum = Number(targetYear);
-    const ids = Object.keys(cachedStudents);
-    if (!Number.isFinite(yNum)){
-      ids.forEach((id) => {
-        const s = cachedStudents[id];
-        if (!s) return;
-        const base = Math.max(0, Number(s.baseFee ?? s.feePerYear ?? 0));
-        s.baseFee = base;
-        s.carryAmount = Math.max(0, Number(s.carryAmount || 0));
-        s.feePerYear = Math.max(0, base + s.carryAmount);
-      });
-      return;
-    }
-    if (yNum <= 2025){
-      ids.forEach((id) => {
-        const s = cachedStudents[id];
-        if (!s) return;
-        const base = Math.max(0, Number(s.baseFee ?? s.feePerYear ?? 0));
-        s.baseFee = base;
-        s.carryAmount = 0;
-        s.feePerYear = base;
-      });
-      return;
-    }
-    await Promise.all(ids.map(async (id) => {
-      const s = cachedStudents[id];
-      if (!s) return;
-      const [feeForYear, carryAmount] = await Promise.all([
-        getYearFee(targetYear, id),
-        (async () => {
-          const computed = await computeCarryForward(yNum, id);
-          const stored = await getCarryForward(yNum, id);
-          return (stored ?? computed ?? 0);
-        })()
-      ]);
-      const base = feeForYear > 0
-        ? feeForYear
-        : Math.max(0, Number(s.baseFee ?? (Number(s.feePerYear || 0) - Number(s.carryAmount || 0))) || 0);
-      s.baseFee = base;
-      s.carryAmount = Math.max(0, carryAmount);
-      s.feePerYear = Math.max(0, base + s.carryAmount);
-    }));
-  }
-
   // ====== SPEED FIX: placeholder breakdown row (no iframe yet) ======
   function breakdownRowHTML(id) {
     return `
@@ -1063,8 +900,8 @@ function buildFinanceStudents(
       const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '-';
       const prevYearNum = Number(financeYear) - 1;
       const carryYearLabel = Number.isFinite(prevYearNum) ? prevYearNum : `${financeYear}-1`;
-      const carryBadge = student.carryAmount > 0
-        ? `<div class="text-xs mt-1 px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200 inline-block">Debt carried from ${carryYearLabel}: ${cur(student.carryAmount)}</div>`
+      const carryNote = student.carryAmount > 0
+        ? `<div class="text-xs text-slate-500 text-right mt-1">Includes carry-forward from ${carryYearLabel}: ${fmt(student.carryAmount)}</div>`
         : '';
       const statusNote = student.isGraduated
         ? `<div class="mt-1 text-xs font-semibold text-emerald-600 uppercase">Graduated</div>`
@@ -1088,16 +925,15 @@ function buildFinanceStudents(
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
         <td class="p-2 border align-top">${student.classLevel || ''}${statusNote}</td>
-        <td class="p-2 border align-top text-right">${cur(fin.feePerYear)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}${carryNote}</td>
         <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
-        <td class="p-2 border align-top text-right">${cur(fin.paidAmount)}</td>
-        <td class="p-2 border align-top text-right">${cur(fin.balance)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
         <td class="p-2 border align-top">
           <div class="flex items-center justify-between gap-2">
             <span>${debtLabel}</span>
-            <span class="font-semibold ${fin.periodDebtValue > 0 ? 'text-red-700' : ''}">${cur(fin.periodDebtValue)}</span>
+            <span class="font-semibold ${fin.periodDebtValue > 0 ? 'text-red-700' : ''}">${fmt(fin.periodDebtValue)}</span>
           </div>
-          ${carryBadge}
         </td>
         <td class="p-2 border align-top">
           <button class="viewBtn px-2 py-1 text-xs border rounded" data-id="${id}">View</button>
@@ -1111,20 +947,20 @@ function buildFinanceStudents(
       tbody.appendChild(brWrap.firstElementChild);
     });
 
-    const totalOutstanding = Math.max(totalDue - totalCollected, 0);
+    const totalOutstanding = totalDue - totalCollected;
     const totalDueEl = document.getElementById('totalDue');
     if (totalDueEl) {
-      totalDueEl.textContent = cur(totalDue);
+      totalDueEl.textContent = fmt(totalDue);
       totalDueEl.dataset.amount = String(totalDue);
     }
     const totalCollectedEl = document.getElementById('totalCollected');
     if (totalCollectedEl) {
-      totalCollectedEl.textContent = cur(totalCollected);
+      totalCollectedEl.textContent = fmt(totalCollected);
       totalCollectedEl.dataset.amount = String(totalCollected);
     }
     const totalOutstandingEl = document.getElementById('totalOutstanding');
     if (totalOutstandingEl) {
-      totalOutstandingEl.textContent = cur(totalOutstanding);
+      totalOutstandingEl.textContent = fmt(totalOutstanding);
       totalOutstandingEl.dataset.amount = String(totalOutstanding);
     }
 
@@ -1226,7 +1062,7 @@ function buildFinanceStudents(
       });
       const totalExpensesEl = document.getElementById('totalExpenses');
       if (totalExpensesEl) {
-        totalExpensesEl.textContent = cur(total);
+        totalExpensesEl.textContent = fmt(total);
         totalExpensesEl.dataset.amount = String(total);
       }
       const collectedEl = document.getElementById('totalCollected');
@@ -1234,7 +1070,7 @@ function buildFinanceStudents(
       const net = collected - total;
       const netEl = document.getElementById('netBalance');
       if (netEl) {
-        netEl.textContent = cur(net);
+        netEl.textContent = fmt(net);
         netEl.dataset.amount = String(net);
       }
     } catch (err) {
@@ -1751,7 +1587,6 @@ function buildFinanceStudents(
         cachedStudents = { [targetId]: cachedStudents[targetId] };
       }
 
-      await hydrateCarryForwardForYear(targetYear);
       populateStudentSelect();
       renderTable();
       if (parentCtx.enabled) {
@@ -1830,3 +1665,6 @@ function buildFinanceStudents(
 </script>
 </body>
 </html>
+
+
+

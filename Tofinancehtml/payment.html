@@ -692,14 +692,30 @@
 
           <div class="mb-3 flex flex-col gap-2 text-xs md:flex-row md:items-center md:justify-between">
             <div class="flex flex-wrap items-center gap-3">
-              <span data-cf-fee-year>Fee (incl. carry): <strong>${fmt(totalDueWithCarry)}</strong></span>
+              <span data-cf-fee-year>
+                Fee (incl. carry):
+                <strong
+                  data-base-fee="${inferredBaseFee}"
+                  data-base-value="${inferredBaseFee}"
+                  data-initial-carry="${effectiveCarry}"
+                >${fmt(totalDueWithCarry)}</strong>
+              </span>
               <span data-cf-base-fee>Base: <strong>${fmt(inferredBaseFee)}</strong></span>
               <span data-cf-carry-slot>${carryTag || ''}</span>
             </div>
             <div class="flex flex-wrap items-center gap-3">
               <span data-cf-paid-total>Paid (total): <strong>${fmt(totalPaidAll)}</strong></span>
               <span data-cf-allocated>Allocated: <strong>${fmt(totalsPaid)}</strong></span>
-              <span data-cf-remaining>Remaining: <strong>${fmt(remainingWithCarry)}</strong></span>
+              <span data-cf-remaining>
+                Remaining:
+                <strong
+                  data-base-fee="${inferredBaseFee}"
+                  data-base-value="${remainingWithCarry}"
+                  data-initial-carry="${effectiveCarry}"
+                  data-total-paid="${totalPaidAll}"
+                  data-rem-base="${rem}"
+                >${fmt(remainingWithCarry)}</strong>
+              </span>
               <span data-cf-debt>Debt till now: <strong>${fmt(debtWithCarry)}</strong></span>
               <span data-cf-credit>Credit: <strong>${fmt(creditValue)}</strong></span>
             </div>
@@ -991,28 +1007,30 @@
 
       const feeStrong = document.querySelector('[data-cf-fee-year] strong');
       if (feeStrong) {
-        if (!feeStrong.dataset.baseValue) {
-          feeStrong.dataset.baseValue = String(parseNumberLike(feeStrong.textContent));
-        }
-        const baseFee = Number(feeStrong.dataset.baseValue || 0);
-        const appliedFeeCarry = Number(feeStrong.dataset.cfCarryApplied || 0);
-        if (carry !== appliedFeeCarry) {
+        const baseFee =
+          Number(feeStrong.dataset.baseFee || feeStrong.dataset.baseValue || 0) ||
+          parseNumberLike(feeStrong.textContent);
+        const shownCarry = Number(feeStrong.dataset.initialCarry || feeStrong.dataset.cfCarryApplied || 0);
+        if (carry > shownCarry) {
           const totalFee = baseFee + carry;
           feeStrong.textContent = formatTSh(totalFee);
+          feeStrong.dataset.initialCarry = String(carry);
           feeStrong.dataset.cfCarryApplied = String(carry);
         }
       }
 
       const remainingStrong = document.querySelector('[data-cf-remaining] strong');
       if (remainingStrong) {
-        if (!remainingStrong.dataset.baseValue) {
-          remainingStrong.dataset.baseValue = String(parseNumberLike(remainingStrong.textContent));
-        }
-        const baseRemSummary = Number(remainingStrong.dataset.baseValue || 0);
-        const appliedRemCarry = Number(remainingStrong.dataset.cfCarryApplied || 0);
-        if (carry !== appliedRemCarry) {
-          const newRemSummary = baseRemSummary + carry;
-          remainingStrong.textContent = formatTSh(newRemSummary);
+        const baseFee =
+          Number(remainingStrong.dataset.baseFee || feeStrong?.dataset.baseFee || 0) ||
+          parseNumberLike(remainingStrong.textContent);
+        const paidTotal = Number(remainingStrong.dataset.totalPaid || 0);
+        const remBase = Number(remainingStrong.dataset.remBase || 0);
+        const shownCarry = Number(remainingStrong.dataset.initialCarry || remainingStrong.dataset.cfCarryApplied || 0);
+        if (carry > shownCarry) {
+          const recomputed = Math.max(remBase, Math.max(0, (baseFee + carry) - paidTotal));
+          remainingStrong.textContent = formatTSh(recomputed);
+          remainingStrong.dataset.initialCarry = String(carry);
           remainingStrong.dataset.cfCarryApplied = String(carry);
         }
       }

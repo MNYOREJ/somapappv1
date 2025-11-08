@@ -865,26 +865,40 @@
     }
   }
 
-  async function resolveCarryForwardDebt(studentKey, uptoYearStr){
+  async function resolveCarryForwardDebt(studentKey, uptoYearStr, admissionOverride){
     const fallback = { amount: 0, sourceYear: null };
-    if (!studentKey || !window.SomapFinance?.loadStudentFinance) return fallback;
+    if (!studentKey || !window.SomapFinance) return fallback;
+    const financeApi = window.SomapFinance;
     const targetYearNum = Number(uptoYearStr);
     const earliestYear = Math.max(MIN_DATA_YEAR, EARLIEST_CARRY_FORWARD_YEAR);
     if (!Number.isFinite(targetYearNum) || targetYearNum <= earliestYear) return fallback;
+    const admKey = String(admissionOverride || currentStudent?.admissionNumber || '').trim();
     for (let year = targetYearNum - 1; year >= earliestYear; year--){
       const yearStr = String(year);
       try{
-        const fin = await window.SomapFinance.loadStudentFinance(yearStr, studentKey);
-        if (!fin) continue;
-        const due = Number(fin.due ?? fin.feePerYear ?? 0);
-        const paid = Number(fin.paid ?? fin.paidAmount ?? 0);
-        const outstanding = Math.max(
-          0,
-          Number.isFinite(due - paid) ? (due - paid) : 0,
-          Number(fin.outstanding ?? 0),
-          Number(fin.balance ?? 0),
-          Number(fin.record?.balance ?? 0)
-        );
+        let outstanding = 0;
+        if (typeof financeApi.getBalanceForYearAdmission === 'function'){
+          if (admKey) {
+            outstanding = await financeApi.getBalanceForYearAdmission(yearStr, admKey);
+          }
+          if (!outstanding) {
+            outstanding = await financeApi.getBalanceForYearAdmission(yearStr, studentKey);
+          }
+        } else if (typeof financeApi.loadStudentFinance === 'function') {
+          const fin = await financeApi.loadStudentFinance(yearStr, studentKey);
+          if (!fin) continue;
+          const due = Number(fin.due ?? fin.feePerYear ?? 0);
+          const paid = Number(fin.paid ?? fin.paidAmount ?? 0);
+          outstanding = Math.max(
+            0,
+            Number.isFinite(due - paid) ? (due - paid) : 0,
+            Number(fin.outstanding ?? 0),
+            Number(fin.balance ?? 0),
+            Number(fin.record?.balance ?? 0)
+          );
+        } else {
+          continue;
+        }
         if (outstanding > 0){
           return { amount: outstanding, sourceYear: yearStr };
         }
@@ -898,10 +912,11 @@
   async function renderFinanceStats(){
     if (!currentStudentKey || !window.SomapFinance) return;
     const yearStr = getActiveYearString();
+    const admissionRef = currentStudent?.admissionNumber || currentStudent?.pupilId || '';
     try{
       const [fin, carryMeta] = await Promise.all([
         window.SomapFinance.loadStudentFinance(yearStr, currentStudentKey),
-        resolveCarryForwardDebt(currentStudentKey, yearStr)
+        resolveCarryForwardDebt(currentStudentKey, yearStr, admissionRef)
       ]);
       latestFinanceSnapshot = fin;
 
@@ -1312,7 +1327,7 @@
       }
     } else {
       // Fallback: finance snapshot not available, calculate manually
-      const carryMeta = await resolveCarryForwardDebt(studentKey, year);
+      const carryMeta = await resolveCarryForwardDebt(studentKey, year, admNo);
       const previousDebt = carryMeta.amount;
       const fallbackFeeDue = Number(currentStudent?.feePerYear || currentStudent?.feeDue || 0);
       const feeDue = fallbackFeeDue + previousDebt;

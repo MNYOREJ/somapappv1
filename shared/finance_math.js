@@ -779,6 +779,32 @@ function buildFinanceStudents(
     return entries;
   }
 
+  function findStudentRecord(dataset, identifier){
+    const key = String(identifier || '').trim();
+    if (!key) return null;
+    const students = dataset?.students || {};
+    if (students[key]) return students[key];
+    const matchKey = Object.keys(students).find((id) => {
+      if (id === key) return true;
+      const entry = students[id] || {};
+      const adm = String(entry.admissionNumber || entry.admissionNo || '').trim();
+      if (adm && adm === key) return true;
+      const alt = String(entry.studentId || '').trim();
+      if (alt && alt === key) return true;
+      return false;
+    });
+    return matchKey ? students[matchKey] : null;
+  }
+
+  async function getBalanceForYearAdmission(year, identifier){
+    const y = normalizeYear(year);
+    const dataset = await ensureYearDataset(y);
+    const student = findStudentRecord(dataset, identifier);
+    if (!student) return 0;
+    const fin = computeStudentFinancials(student, y);
+    return Math.max(0, Number(fin.balance) || 0);
+  }
+
   const parseWindow = (win) => {
     const [a, b] = String(win || '').split('-').map((s) => s.trim());
     const sa = Date.parse(a);
@@ -822,6 +848,7 @@ function buildFinanceStudents(
     installmentCompare,
     getYearStudents,
     getYearFinanceEntries,
+    getBalanceForYearAdmission,
     _clearFinanceCaches: clearCaches
   };
 

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<!doctype html>
+﻿﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -905,14 +905,19 @@
       ]);
       latestFinanceSnapshot = fin;
 
-      const currentFee = Number(fin.due || 0);
-      const carryAmountFromRecord = Number(fin.record?.carryAmount || 0);
-      const carryAmountComputed = Number(carryMeta.amount || 0);
-      let carryForwardDebt = carryAmountComputed;
-      if (carryForwardDebt <= 0 && carryAmountFromRecord > 0) {
-        carryForwardDebt = carryAmountFromRecord;
+      const currentFee = Number(fin.due || fin.record?.feePerYear || 0);
+      const carryAmountFromRecord = Math.max(0, Number(fin.record?.carryAmount || fin.record?.carry || 0));
+      const carryAmountComputed = Math.max(0, Number(carryMeta.amount || 0));
+      let carryForwardDebt = carryAmountComputed > 0 ? carryAmountComputed : carryAmountFromRecord;
+      let totalFeeDue = currentFee;
+      if (carryForwardDebt > 0) {
+        if (carryAmountFromRecord > 0) {
+          const extra = Math.max(0, carryForwardDebt - carryAmountFromRecord);
+          totalFeeDue = currentFee + extra;
+        } else {
+          totalFeeDue = currentFee + carryForwardDebt;
+        }
       }
-      const totalFeeDue = currentFee + carryForwardDebt;
       const fallbackPrevYear = (() => {
         const prev = Number(yearStr) - 1;
         if (prev >= EARLIEST_CARRY_FORWARD_YEAR) return String(prev);

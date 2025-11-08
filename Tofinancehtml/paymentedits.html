@@ -1556,9 +1556,40 @@
         // Compute class for selected year and render rows
         const year = state.year || window.somapYearContext?.getSelectedYear() || SOMAP_DEFAULT_YEAR;
         const rows = await Promise.all(list.map(async ([id, S]) => {
-          const cls = await window.financePlansService.resolveClassForYearSimple(id, year);
+          let resolvedClass = '';
+          let financeSnapshot = null;
+          if (window.SomapFinance?.loadStudentFinance) {
+            try {
+              financeSnapshot = await window.SomapFinance.loadStudentFinance(year, id);
+              resolvedClass = financeSnapshot?.classLevel || '';
+            } catch (err) {
+              console.warn('PaymentEdits: failed to load finance snapshot', id, err);
+            }
+          }
+          if (!resolvedClass) {
+            try {
+              resolvedClass = await window.financePlansService.resolveClassForYearSimple(id, year);
+            } catch (err) {
+              console.warn('PaymentEdits: class resolve fallback failed', id, err);
+            }
+          }
+          if (!resolvedClass) {
+            resolvedClass =
+              S?.enrollments?.[year]?.classLevel ||
+              S?.enrollments?.[year]?.className ||
+              S?.classLevel ||
+              S?.className ||
+              '';
+          }
           const full = `${S.firstName || ''} ${S.middleName || ''} ${S.lastName || ''}`.replace(/\s+/g, ' ').trim();
-          return { id, full, cls, adm: (S.admissionNumber || id), data: S };
+          return {
+            id,
+            full,
+            cls: resolvedClass,
+            adm: (S.admissionNumber || id),
+            data: S,
+            financeSnapshot
+          };
         }));
         
         if (token !== lastSearchToken) return; // Stale response
@@ -1568,12 +1599,12 @@
         const overrides = await reader(`${pathOverrides(year)}`) || {};
         
         panel.innerHTML = (await Promise.all(rows.map(async (r) => {
-          const { id, full, cls, adm, data } = r;
+          const { id, full, cls, adm, financeSnapshot } = r;
           const ov = overrides[id] || {};
           
           // Get defaults from unified service using resolved class
-          const classFee = await window.financePlansService.getClassFeePerYear(cls);
-          const classPlanId = await window.financePlansService.getClassDefaultPlanId(cls);
+          const classFee = cls ? await window.financePlansService.getClassFeePerYear(cls) : 0;
+          const classPlanId = cls ? await window.financePlansService.getClassDefaultPlanId(cls) : null;
           const classPlan = classPlanId ? (await window.financePlansService.getPlan(classPlanId)) : null;
           
           // Get overrides
@@ -1584,7 +1615,11 @@
           const effectiveFee = feeOverride !== null ? feeOverride : classFee;
           const effectivePlanId = planOverrideId || classPlanId;
           const effectivePlan = effectivePlanId ? (state.plans[effectivePlanId] || await window.financePlansService.getPlan(effectivePlanId)) : null;
-          const planName = effectivePlan?.name || effectivePlanId || 'No plan set';
+          const planName =
+            effectivePlan?.name ||
+            financeSnapshot?.paymentPlan ||
+            effectivePlanId ||
+            'No plan set';
           
           const hasCustomSchedule = customSchedule && Array.isArray(customSchedule.rows) && customSchedule.rows.length > 0;
           
@@ -1624,14 +1659,17 @@
       }
     }
 
-    async function setStudentOverride(studentId, payload) {
+    async function setStudentOverride(studentId, payload, options = {}) {
       const year = state.year;
       const path = `${pathOverrides(year)}/${studentId}`;
       const before = await reader(path) || {};
       const merged = { ...before, ...payload, updatedAt: now(), updatedBy: currentUser() };
       await writer(path, merged);
       await writeHistory(year, 'overrides', studentId, 'update', before, merged);
-      toast('Override saved');
+      if (!options.silent) {
+        const message = options.toastMessage || 'Override saved';
+        toast(message);
+      }
       const q = $('#studentQuery').value;
       renderOverrides(q);
     }
@@ -1672,8 +1710,7 @@
         // Use unified service
         await window.financePlansService.setStudentFee(studentId, fee, { by: currentUser() });
         // Also update old structure
-        await setStudentOverride(studentId, { feePerYear: fee });
-        toast('Fee override saved');
+        await setStudentOverride(studentId, { feePerYear: fee }, { toastMessage: 'Fee override saved' });
       }
       const q = $('#studentQuery').value;
       renderOverrides(q);
@@ -1705,6 +1742,8 @@
         const before = await reader(path) || {};
         const updated = { ...before };
         delete updated.planId;
+        delete updated.planName;
+        delete updated.paymentPlan;
         await writer(path, updated);
         await writeHistory(year, 'overrides', studentId, 'update', before, updated);
         toast('Plan override cleared');
@@ -1714,8 +1753,13 @@
         // Use unified service
         await window.financePlansService.assignStudentPlan(studentId, id, { by: currentUser() });
         // Also update old structure
-        await setStudentOverride(studentId, { planId: id });
-        toast('Plan override saved');
+        const plan = state.plans[id] || await window.financePlansService.getPlan(id);
+        const planName = plan?.name || id;
+        await setStudentOverride(
+          studentId,
+          { planId: id, planName, paymentPlan: planName },
+          { toastMessage: 'Plan override saved' }
+        );
       }
       const q = $('#studentQuery').value;
       renderOverrides(q);
@@ -1858,12 +1902,15 @@
           delete updated.customSchedule;
           await writer(path, updated);
           await writeHistory(year, 'overrides', studentId, 'update', before, updated);
-          toast('Custom schedule cleared');
+          toast('Custom schedule cleared successfully');
         } else {
           // Save custom schedule
           await window.financePlansService.setCustomSchedule(studentId, rows, 'Custom schedule', { by: currentUser() });
-          await setStudentOverride(studentId, { customSchedule: rows });
-          toast('Custom schedule saved');
+          await setStudentOverride(
+            studentId,
+            { customSchedule: rows },
+            { toastMessage: 'Custom schedule saved successfully' }
+          );
         }
         closeModal();
         const q = $('#studentQuery').value;

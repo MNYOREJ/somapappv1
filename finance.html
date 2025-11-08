@@ -268,6 +268,7 @@
   })();
 
   const SOMAP_DEFAULT_YEAR = 2025;
+  const CARRY_FORWARD_START_YEAR = 2025;
   const FINANCE_ADMIN_EMAIL = 'socratesschool2020@gmail.com';
   const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
   const norm = (s) => String(s || '').trim().toLowerCase();
@@ -351,6 +352,20 @@
   const reloadBtn = document.getElementById('reloadBtn');
 
   let cachedStudents = {};
+  function lookupStudentByAdmission(adm) {
+    const normalized = String(adm || '').trim();
+    if (!normalized) return null;
+    if (cachedStudents[normalized]) {
+      return { id: normalized, student: cachedStudents[normalized] };
+    }
+    const matchKey = Object.keys(cachedStudents || {}).find((key) => {
+      const entry = cachedStudents[key] || {};
+      return String(entry.admissionNumber || entry.admissionNo || key).trim() === normalized;
+    });
+    if (!matchKey) return null;
+    return { id: matchKey, student: cachedStudents[matchKey] };
+  }
+  window.__finance_lookupStudent = lookupStudentByAdmission;
   let showingDebtorsOnly = false;
 
   populateClassFilterDropdown();
@@ -1033,6 +1048,7 @@ function buildFinanceStudents(
 
       const tr = document.createElement('tr');
       tr.className = 'table-row';
+      tr.dataset.studentId = id;
       tr.innerHTML = `
         <td class="p-2 border text-center align-top">
           <button class="expander text-indigo-600 hover:text-indigo-800" data-id="${id}" title="Expand/Collapse">
@@ -1413,7 +1429,7 @@ function buildFinanceStudents(
     }
   }
 
-  function openDetailsModal(id) {
+  async function openDetailsModal(id) {
     const s = cachedStudents[id]; if (!s) return alert('Student not found');
     let fin = computeStudentFinancials(s);
     if (!s.hasYearData || s.isGraduated) {
@@ -1429,15 +1445,53 @@ function buildFinanceStudents(
       };
     }
     const fullName = `${s.firstName || ''} ${s.middleName || ''} ${s.lastName || ''}`.trim();
+    const targetYearNum = Number(financeYear);
+    const admission = s.admissionNumber || id;
+    let carryForwardPrev = 0;
+    if (Number.isFinite(targetYearNum)) {
+      const prevYear = targetYearNum - 1;
+      if (prevYear >= CARRY_FORWARD_START_YEAR) {
+        const safeId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(id)) : String(id).replace(/"/g, '\\"');
+        const rowEl = document.querySelector(`#financeTable tbody tr[data-student-id="${safeId}"]`);
+        const rowCarry = Number(rowEl?.dataset?.carryForward || 0);
+        if (rowCarry > 0) {
+          carryForwardPrev = rowCarry;
+        } else {
+          const key = `${targetYearNum}::${admission}`;
+          const sharedCarry = window.__financeCarryForwardVisual?.[key]?.carry;
+          if (sharedCarry) carryForwardPrev = Number(sharedCarry) || 0;
+        }
+        if (carryForwardPrev <= 0 && typeof window.__finance_getBalanceForYearAdmission === 'function') {
+          try {
+            const bal = await window.__finance_getBalanceForYearAdmission(prevYear, admission);
+            carryForwardPrev = Math.max(0, Number(bal) || 0);
+          } catch (err) {
+            console.warn('Carry-forward (details modal) lookup failed', admission, prevYear, err);
+          }
+        }
+      }
+    }
+    carryForwardPrev = Math.max(0, Number(carryForwardPrev) || 0);
+    const dbCarry = Math.max(0, Number(s.carryAmount || 0));
+    const baseFeeRaw = s.baseFee != null ? Number(s.baseFee) : Number(s.feePerYear || 0) - dbCarry;
+    const baseFee = Math.max(0, Number.isFinite(baseFeeRaw) ? baseFeeRaw : 0);
+    const combinedCarry = dbCarry + carryForwardPrev;
+    const totalDue = baseFee + combinedCarry;
+    const paidTotal = Math.max(0, Number(fin.paidAmount || 0));
+    const balanceDisplay = Math.max(0, totalDue - paidTotal);
+    const debtWithCarry = Math.max(0, Number(fin.periodDebtValue || 0) + carryForwardPrev);
+    const prevYearLabel = Number.isFinite(targetYearNum) ? targetYearNum - 1 : 'Prev';
     let html = `
       <p><strong>Name:</strong> ${fullName}</p>
       <p><strong>Admission No:</strong> ${s.admissionNumber || ''}</p>
       <p><strong>Class:</strong> ${s.classLevel || ''}</p>
-      <p><strong>Fee/year:</strong> ${fmt(fin.feePerYear || 0)}${s.carryAmount > 0 ? ` <span class="text-xs text-slate-500">(Base ${fmt(s.baseFee || 0)} + Carry ${fmt(s.carryAmount)})</span>` : ''}</p>
+      <p><strong>Fee (base):</strong> ${fmt(baseFee)}</p>
+      ${combinedCarry > 0 ? `<p><strong>Carry Forward (${prevYearLabel}):</strong> ${fmt(carryForwardPrev)}${dbCarry > 0 ? ` <span class="text-xs text-slate-500">(Existing carry-in: ${fmt(dbCarry)})</span>` : ''}</p>` : ''}
+      <p><strong>Total Due (incl. carry):</strong> ${fmt(totalDue)}</p>
       <p><strong>Payment Plan:</strong> ${s.paymentPlan || ''}</p>
-      <p><strong>Debt till:</strong> ${fin.periodDebtLabel} - <strong>${fmt(fin.periodDebtValue)}</strong></p>
-      <p><strong>Paid:</strong> ${fmt(fin.paidAmount)}</p>
-      <p><strong>Balance (Year):</strong> ${fmt(fin.balance)}</p>
+      <p><strong>Debt till:</strong> ${fin.periodDebtLabel} - <strong>${fmt(debtWithCarry)}</strong></p>
+      <p><strong>Paid:</strong> ${fmt(paidTotal)}</p>
+      <p><strong>Balance (incl. carry):</strong> ${fmt(balanceDisplay)}</p>
     `;
     if (hasFinanceAdminAccess()) {
       html += `
@@ -1855,6 +1909,23 @@ function buildFinanceStudents(
     }
   }
 
+  function formatNumber(n) {
+    return (Number(n) || 0).toLocaleString('en-US');
+  }
+
+  function adjustKpis(delta) {
+    if (!delta) return;
+    const targets = ['totalDue', 'totalOutstanding'];
+    targets.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const current = parseNumberLike(el.dataset.amount || el.textContent);
+      const next = current + delta;
+      el.dataset.amount = String(next);
+      el.textContent = formatNumber(next);
+    });
+  }
+
   function findFinanceTableRows() {
     const table = document.getElementById('financeTable');
     if (!table) return [];
@@ -1898,8 +1969,43 @@ function buildFinanceStudents(
       row.tr.dataset.carryForward = hasCF ? String(carry) : '0';
       row.tr.dataset.carryForwardYear = String(prevYear);
       const storeKey = `${targetYear}::${row.adm}`;
+      const lookup = typeof window.__finance_lookupStudent === 'function'
+        ? window.__finance_lookupStudent(row.adm)
+        : null;
+      const student = lookup?.student || null;
+
+      let originalDisplayedDue = row.feeYear;
+      let newTotalDue = originalDisplayedDue;
+      let appliedCarry = 0;
+
+      if (student) {
+        const existingCarry = Math.max(0, Number(student.carryAmount || 0));
+        const currentFeePerYear = Math.max(0, Number(student.feePerYear || 0));
+        const inferredBase = Math.max(0, Number(
+          student.baseFee ??
+          (currentFeePerYear > existingCarry ? currentFeePerYear - existingCarry : 0)
+        ));
+
+        student.__carryOverlayAmount = carry;
+        student.__carryOverlayPrevYear = prevYear;
+        student.__carryOverlayYear = targetYear;
+
+        appliedCarry = Math.max(0, carry - existingCarry);
+        if (appliedCarry > 0) {
+          student.baseFee = inferredBase;
+          student.carryAmount = existingCarry + appliedCarry;
+          student.feePerYear = Math.max(0, currentFeePerYear || inferredBase + existingCarry) + appliedCarry;
+          student.__carryOverlayMerged = true;
+        }
+
+        newTotalDue = Math.max(0, Number(student.feePerYear || inferredBase + existingCarry + appliedCarry));
+      } else if (hasCF) {
+        appliedCarry = carry;
+        newTotalDue = row.feeYear + appliedCarry;
+      }
+
       if (hasCF) {
-        sharedCache[storeKey] = { carry, prevYear, total: row.feeYear + carry };
+        sharedCache[storeKey] = { carry, prevYear, total: newTotalDue };
         try {
           sessionStorage.setItem(`somap_cf_${targetYear}_${row.adm}`, String(carry));
         } catch (_) {}
@@ -1910,21 +2016,44 @@ function buildFinanceStudents(
         } catch (_) {}
       }
 
-      if (!row.feeYearCell) return;
-      row.feeYearCell.querySelectorAll('[data-cf-badge]').forEach(el => el.remove());
-      if (!hasCF) return;
+      row.tr.dataset.carryForwardTotal = String(newTotalDue);
 
-      const newTotal = row.feeYear + carry;
-      const badge = document.createElement('div');
-      badge.dataset.cfBadge = 'badge';
-      badge.className = 'text-xs mt-1';
-      badge.innerHTML = `<span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">Carry Forward (${prevYear}): ${formatTSh(carry)}</span>`;
-      const totalLine = document.createElement('div');
-      totalLine.dataset.cfBadge = 'total';
-      totalLine.className = 'text-sm font-semibold mt-1';
-      totalLine.textContent = `Total Due (incl. CF): ${formatTSh(newTotal)}`;
-      row.feeYearCell.appendChild(badge);
-      row.feeYearCell.appendChild(totalLine);
+      const delta = Math.max(0, newTotalDue - originalDisplayedDue);
+      if (delta > 0) {
+        adjustKpis(delta);
+      }
+
+      if (row.feeYearCell) {
+        if (row.feeYearCell.firstChild && row.feeYearCell.firstChild.nodeType === Node.TEXT_NODE) {
+          row.feeYearCell.firstChild.textContent = formatNumber(newTotalDue);
+        } else {
+          row.feeYearCell.textContent = formatNumber(newTotalDue);
+        }
+        row.feeYearCell.querySelectorAll('[data-cf-badge]').forEach(el => el.remove());
+      }
+
+      if (hasCF && row.feeYearCell) {
+        const badge = document.createElement('div');
+        badge.dataset.cfBadge = 'badge';
+        badge.className = 'text-xs mt-1';
+        badge.innerHTML = `<span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">Carry Forward (${prevYear}): ${formatTSh(carry)}</span>`;
+        const totalLine = document.createElement('div');
+        totalLine.dataset.cfBadge = 'total';
+        totalLine.className = 'text-sm font-semibold mt-1';
+        totalLine.textContent = `Total Due (incl. CF): ${formatTSh(newTotalDue)}`;
+        row.feeYearCell.appendChild(badge);
+        row.feeYearCell.appendChild(totalLine);
+      }
+
+      const paidCell = row.tds[6];
+      const balanceCell = row.tds[7];
+      const paidAmount = parseNumberLike(paidCell?.innerText || '0');
+      const newBalance = Math.max(0, newTotalDue - paidAmount);
+      if (balanceCell) {
+        balanceCell.textContent = formatNumber(newBalance);
+      }
+
+      row.feeYear = newTotalDue;
     });
     running = false;
     if (scheduled) {

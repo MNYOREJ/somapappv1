@@ -53,6 +53,75 @@
       const targetYearNum = Number(q.get('year') || SOMAP_DEFAULT_YEAR);
       const targetYear = Number.isFinite(targetYearNum) ? targetYearNum : SOMAP_DEFAULT_YEAR;
       const targetYearStr = String(targetYear);
+      const CARRY_FORWARD_START_YEAR = 2025;
+
+      const carryForwardCache = new Map();
+      async function fetchPrevYearCarry(admRaw) {
+        const normalized = String(admRaw || '').trim();
+        if (!normalized) return 0;
+        const cacheKey = `${targetYearStr}::${normalized}`;
+        if (carryForwardCache.has(cacheKey)) return carryForwardCache.get(cacheKey);
+        const prevYear = targetYear - 1;
+        if (!Number.isFinite(prevYear) || prevYear < CARRY_FORWARD_START_YEAR) {
+          carryForwardCache.set(cacheKey, 0);
+          return 0;
+        }
+        let amount = 0;
+        try {
+          const shared = window.parent && window.parent.__financeCarryForwardVisual
+            ? window.parent.__financeCarryForwardVisual[cacheKey]
+            : null;
+          if (shared && shared.carry) amount = Number(shared.carry) || 0;
+        } catch (_) {}
+        if (!amount) {
+          try {
+            const stored = sessionStorage.getItem(`somap_cf_${targetYearStr}_${normalized}`);
+            if (stored) amount = Number(stored) || 0;
+          } catch (_) {}
+        }
+        if (!amount && window.parent && typeof window.parent.__finance_getBalanceForYearAdmission === 'function') {
+          try {
+            const val = await window.parent.__finance_getBalanceForYearAdmission(prevYear, normalized);
+            amount = Number(val) || 0;
+          } catch (_) {}
+        }
+        if (!amount && typeof window.__finance_getBalanceForYearAdmission === 'function') {
+          try {
+            const val = await window.__finance_getBalanceForYearAdmission(prevYear, normalized);
+            amount = Number(val) || 0;
+          } catch (_) {}
+        }
+        if (!amount && window.firebase?.database) {
+          try {
+            const snap = await window.firebase.database().ref(`finance/${prevYear}/students/${normalized}`).get();
+            if (snap.exists()) {
+              const data = snap.val() || {};
+              if (data.balance !== undefined) amount = Number(data.balance) || 0;
+              else {
+                const feeYear = Number(String(data.feeYear || data.fee || 0).replace(/[^\d]/g, '')) || 0;
+                const paid = Number(String(data.paid || 0).replace(/[^\d]/g, '')) || 0;
+                amount = Math.max(0, feeYear - paid);
+              }
+            }
+          } catch (err) {
+            console.warn('Carry-forward fetch fallback failed', normalized, prevYear, err);
+          }
+        }
+        amount = Math.max(0, Number(amount) || 0);
+        carryForwardCache.set(cacheKey, amount);
+        return amount;
+      }
+
+      window.__somap_fetchCarryForward = async function(year, adm) {
+        const y = Number(year);
+        if (Number.isFinite(y) && y === targetYear) {
+          return fetchPrevYearCarry(adm);
+        }
+        if (window.parent && typeof window.parent.__somap_fetchCarryForward === 'function') {
+          return window.parent.__somap_fetchCarryForward(year, adm);
+        }
+        return 0;
+      };
 
       // ---- Firebase init (inline, so the iframe never depends on ../firebase.js) ----
       const firebaseConfig = {
@@ -533,6 +602,14 @@
         const planDisplay = schedule.planName || student.paymentPlan || '';
         const allocation = allocatePayments(schedule, student);
         const hasYearData = Boolean(student.hasYearData);
+        const admissionForLookup = student.admissionNumber || studentId;
+        const prevCarry = hasYearData ? await fetchPrevYearCarry(admissionForLookup) : 0;
+        const dbCarry = Math.max(0, Number(student.carryAmount || 0));
+        const combinedCarry = dbCarry + prevCarry;
+        const inferredBaseFee = student.baseFee != null
+          ? Math.max(0, Number(student.baseFee) || 0)
+          : Math.max(0, Number(student.feePerYear || 0) - dbCarry);
+        const totalDueWithCarry = hasYearData ? inferredBaseFee + combinedCarry : 0;
 
         const totalsExpRaw = schedule.items.reduce((s, it) => s + it.amount, 0);
         const totalsPaidRaw = schedule.items.reduce((s, it) => s + it.paidAllocated, 0);
@@ -541,12 +618,17 @@
         const totalsPaid = hasYearData ? totalsPaidRaw : 0;
         const totalPaidAll = hasYearData ? allocation.totalPaid : 0;
         const rem = hasYearData ? Math.max(0, totalsExp - totalsPaid) : 0;
+        const remainingWithCarry = hasYearData ? Math.max(0, totalDueWithCarry - totalPaidAll) : 0;
         const debtValue = hasYearData ? allocation.debtTillNow : 0;
+        const debtWithCarry = hasYearData ? Math.max(0, debtValue + prevCarry) : 0;
         const creditValue = hasYearData ? allocation.credit : 0;
 
         const prevYearLabel = targetYear - 1;
-        const carryTag = student.carryAmount > 0
-          ? `<span class="mr-3">Carry-forward ${prevYearLabel}: <strong>${fmt(student.carryAmount)}</strong></span>`
+        const carryParts = [];
+        if (prevCarry > 0) carryParts.push(`Prev ${prevYearLabel}: <strong>${fmt(prevCarry)}</strong>`);
+        if (dbCarry > 0) carryParts.push(`Ledger: <strong>${fmt(dbCarry)}</strong>`);
+        const carryTag = carryParts.length
+          ? `<span class="mr-3">Carry Forward (${prevYearLabel}+): ${carryParts.join(' + ')}</span>`
           : '';
 
         const rows = hasYearData && schedule.items.length
@@ -608,16 +690,16 @@
 
           <div class="mb-3 flex flex-col gap-2 text-xs md:flex-row md:items-center md:justify-between">
             <div class="flex flex-wrap items-center gap-3">
-              <span>Fee (year): <strong>${fmt(hasYearData ? student.feePerYear : 0)}</strong></span>
-              <span>Base: <strong>${fmt(student.baseFee || 0)}</strong></span>
-              ${carryTag}
+              <span data-cf-fee-year>Fee (incl. carry): <strong>${fmt(totalDueWithCarry)}</strong></span>
+              <span data-cf-base-fee>Base: <strong>${fmt(inferredBaseFee)}</strong></span>
+              <span data-cf-carry-slot>${carryTag || ''}</span>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <span>Paid (total): <strong>${fmt(totalPaidAll)}</strong></span>
-              <span>Allocated: <strong>${fmt(totalsPaid)}</strong></span>
-              <span>Remaining: <strong>${fmt(rem)}</strong></span>
-              <span>Debt till now: <strong>${fmt(debtValue)}</strong></span>
-              <span>Credit: <strong>${fmt(creditValue)}</strong></span>
+              <span data-cf-paid-total>Paid (total): <strong>${fmt(totalPaidAll)}</strong></span>
+              <span data-cf-allocated>Allocated: <strong>${fmt(totalsPaid)}</strong></span>
+              <span data-cf-remaining>Remaining: <strong>${fmt(remainingWithCarry)}</strong></span>
+              <span data-cf-debt>Debt till now: <strong>${fmt(debtWithCarry)}</strong></span>
+              <span data-cf-credit>Credit: <strong>${fmt(creditValue)}</strong></span>
             </div>
           </div>
 
@@ -806,7 +888,14 @@
 
     async function getCarryForward(adm) {
       if (!adm) return 0;
-      const storeKey = `${targetYear}::${adm}`;
+    if (typeof window.__somap_fetchCarryForward === 'function') {
+      try {
+        const val = await window.__somap_fetchCarryForward(targetYear, adm);
+        if (val) return Math.max(0, Number(val) || 0);
+      } catch (_) {}
+    }
+
+    const storeKey = `${targetYear}::${adm}`;
       try {
         if (window.parent && window.parent.__financeCarryForwardVisual) {
           const record = window.parent.__financeCarryForwardVisual[storeKey];
@@ -865,14 +954,20 @@
       const cells = Array.from(firstRow.children);
       const expectedCell = cells[1];
       const remainingCell = cells[3];
-      if (!expectedCell || expectedCell.dataset.cfCarryApplied === '1') return;
+      if (!expectedCell) return;
 
-      const baseExpected = parseNumberLike(expectedCell.innerText);
-      const baseRemaining = remainingCell ? parseNumberLike(remainingCell.innerText) : 0;
+      if (!expectedCell.dataset.baseValue) {
+        expectedCell.dataset.baseValue = String(parseNumberLike(expectedCell.innerText));
+      }
+      const baseExpected = Number(expectedCell.dataset.baseValue || 0);
+      const alreadyApplied = Number(expectedCell.dataset.cfCarryApplied || 0);
+      const deltaCarry = Math.max(0, carry - alreadyApplied);
+      if (deltaCarry === 0 && alreadyApplied > 0) {
+        // Already applied same amount; ensure summary still reflects it.
+      }
       const newExpected = baseExpected + carry;
-      const newRemaining = baseRemaining + carry;
 
-      expectedCell.dataset.cfCarryApplied = '1';
+      expectedCell.dataset.cfCarryApplied = String(carry);
       expectedCell.innerHTML = `${formatTSh(newExpected)}
         <div class="text-[10px] mt-1">
           <span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">
@@ -880,10 +975,49 @@
           </span>
         </div>`;
       if (remainingCell) {
+        if (!remainingCell.dataset.baseValue) {
+          remainingCell.dataset.baseValue = String(parseNumberLike(remainingCell.innerText));
+        }
+        const baseRemaining = Number(remainingCell.dataset.baseValue || 0);
+        const newRemaining = baseRemaining + carry;
+        remainingCell.dataset.cfCarryApplied = String(carry);
         remainingCell.innerHTML = `${formatTSh(newRemaining)}
           <div class="text-[10px] mt-1 text-slate-500">
             Includes carry-forward balance
           </div>`;
+      }
+
+      const feeStrong = document.querySelector('[data-cf-fee-year] strong');
+      if (feeStrong) {
+        if (!feeStrong.dataset.baseValue) {
+          feeStrong.dataset.baseValue = String(parseNumberLike(feeStrong.textContent));
+        }
+        const baseFee = Number(feeStrong.dataset.baseValue || 0);
+        const appliedFeeCarry = Number(feeStrong.dataset.cfCarryApplied || 0);
+        if (carry !== appliedFeeCarry) {
+          const totalFee = baseFee + carry;
+          feeStrong.textContent = formatTSh(totalFee);
+          feeStrong.dataset.cfCarryApplied = String(carry);
+        }
+      }
+
+      const remainingStrong = document.querySelector('[data-cf-remaining] strong');
+      if (remainingStrong) {
+        if (!remainingStrong.dataset.baseValue) {
+          remainingStrong.dataset.baseValue = String(parseNumberLike(remainingStrong.textContent));
+        }
+        const baseRemSummary = Number(remainingStrong.dataset.baseValue || 0);
+        const appliedRemCarry = Number(remainingStrong.dataset.cfCarryApplied || 0);
+        if (carry !== appliedRemCarry) {
+          const newRemSummary = baseRemSummary + carry;
+          remainingStrong.textContent = formatTSh(newRemSummary);
+          remainingStrong.dataset.cfCarryApplied = String(carry);
+        }
+      }
+
+      const carrySlot = document.querySelector('[data-cf-carry-slot]');
+      if (carrySlot) {
+        carrySlot.innerHTML = `<span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">Carry Forward (${prevYear}): ${formatTSh(carry)}</span>`;
       }
     }
 

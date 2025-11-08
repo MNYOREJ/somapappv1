@@ -852,6 +852,123 @@ function buildFinanceStudents(
     return map;
   }
 
+  const financeYearDataCache = new Map();
+  const financeBalanceCache = new Map();
+
+  async function loadFinanceStudentsForYearCached(year) {
+    const key = String(year || activeYear || SOMAP_DEFAULT_YEAR);
+    if (!db) return {};
+    if (key === String(activeYear) || key === String(financeYear)) {
+      return cachedStudents || {};
+    }
+    if (financeYearDataCache.has(key)) {
+      return financeYearDataCache.get(key);
+    }
+
+    const promise = (async () => {
+      try {
+        const [
+          baseSnap,
+          anchorEnrollSnap,
+          enrollmentSnap,
+          classFeesSnap,
+          stOverridesSnap,
+          plansSnap,
+          ledgerSnap,
+          carrySnap,
+        ] = await Promise.all([
+          db.ref('students').once('value'),
+          db.ref(`enrollments/${SOMAP_DEFAULT_YEAR}`).once('value'),
+          db.ref(`enrollments/${key}`).once('value'),
+          db.ref(`feesStructure/${key}`).once('value'),
+          db.ref(`studentOverrides/${key}`).once('value'),
+          db.ref(`installmentPlans/${key}`).once('value'),
+          db.ref(`financeLedgers/${key}`).once('value'),
+          db.ref(`financeCarryForward/${key}`).once('value'),
+        ]);
+
+        const baseStudents = baseSnap.val() || {};
+        let ledgerData = ledgerSnap.val() || {};
+        if (!Object.keys(ledgerData || {}).length) {
+          try {
+            const legacyLedgerSnap = await db.ref('financeLedgers').once('value');
+            ledgerData = legacyLedgerSnap.val() || {};
+          } catch (legacyErr) {
+            console.warn('Legacy financeLedgers read failed (helper)', legacyErr?.message || legacyErr);
+          }
+        }
+
+        const built = buildFinanceStudents(
+          baseStudents,
+          anchorEnrollSnap.val() || {},
+          enrollmentSnap.val() || {},
+          classFeesSnap.val() || {},
+          stOverridesSnap.val() || {},
+          plansSnap.val() || {},
+          ledgerData,
+          carrySnap.val() || {},
+          key
+        );
+        if (!Object.keys(built || {}).length) {
+          return baseStudents;
+        }
+        return built;
+      } catch (err) {
+        console.warn('Carry-forward helper failed to load year dataset', key, err);
+        return {};
+      }
+    })();
+
+    financeYearDataCache.set(key, promise);
+    return promise;
+  }
+
+  window.__finance_getBalanceForYearAdmission = async function (year, admissionNo) {
+    const normalizedYear = String(year || '');
+    const normalizedAdm = String(admissionNo || '').trim();
+    if (!normalizedAdm) return 0;
+    const cacheKey = `${normalizedYear}::${normalizedAdm}`;
+    if (financeBalanceCache.has(cacheKey)) {
+      return financeBalanceCache.get(cacheKey);
+    }
+    try {
+      const dataset = await loadFinanceStudentsForYearCached(normalizedYear);
+      if (!dataset || !Object.keys(dataset).length) {
+        financeBalanceCache.set(cacheKey, 0);
+        return 0;
+      }
+      let student = dataset[normalizedAdm];
+      if (!student) {
+        const matchKey = Object.keys(dataset).find((key) => {
+          const entry = dataset[key] || {};
+          return String(entry.admissionNumber || entry.admissionNo || key).trim() === normalizedAdm;
+        });
+        if (matchKey) student = dataset[matchKey];
+      }
+      if (!student) {
+        financeBalanceCache.set(cacheKey, 0);
+        return 0;
+      }
+      const previousFinanceYear = financeYear;
+      const previousActiveYear = activeYear;
+      try {
+        financeYear = normalizedYear;
+        activeYear = normalizedYear;
+        const fin = computeStudentFinancials(student);
+        const balanceValue = Math.max(0, Number(fin?.balance) || 0);
+        financeBalanceCache.set(cacheKey, balanceValue);
+        return balanceValue;
+      } finally {
+        financeYear = previousFinanceYear;
+        activeYear = previousActiveYear;
+      }
+    } catch (err) {
+      console.warn('Carry-forward helper balance lookup failed', year, admissionNo, err);
+      financeBalanceCache.set(cacheKey, 0);
+      return 0;
+    }
+  };
+
   // ====== SPEED FIX: placeholder breakdown row (no iframe yet) ======
   function breakdownRowHTML(id) {
     return `
@@ -969,6 +1086,11 @@ function buildFinanceStudents(
       openPaymentModalFor(e.currentTarget.dataset.id);
     }));
     tbody.querySelectorAll('.viewBtn').forEach(btn => btn.addEventListener('click', e => openDetailsModal(e.target.dataset.id)));
+    try {
+      document.dispatchEvent(new CustomEvent('finance:tableRendered', { detail: { year: financeYear } }));
+    } catch (eventErr) {
+      console.warn('finance:tableRendered dispatch failed', eventErr);
+    }
     // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
   }
 
@@ -1663,6 +1785,167 @@ function buildFinanceStudents(
   });
 })();
 </script>
+
+<script>
+/** SoMAp v2.1 — Carry-Forward Debts (2025→)
+ *  Non-invasive decorator for finance.html
+ *  - Adds previous-year (>=2025) unpaid balance to current year's Fee (year)
+ *  - Exposes data-carry-forward for payment.html (iframe) to pick for January
+ */
+(function carryForwardPatch() {
+  const START_YEAR = 2025;
+  const sharedCache = window.__financeCarryForwardVisual || (window.__financeCarryForwardVisual = {});
+  let scheduled = false;
+  let running = false;
+
+  function detectTargetYear() {
+    if (window.currentAcademicYear && Number(window.currentAcademicYear)) return Number(window.currentAcademicYear);
+    if (window.somapYearContext?.getSelectedYear) {
+      const ctxYear = Number(window.somapYearContext.getSelectedYear());
+      if (!Number.isNaN(ctxYear)) return ctxYear;
+    }
+    const sel = document.querySelector('#yearSelect, select[name="year"], [data-somap-year-select]');
+    if (sel) {
+      const v = Number(sel.value || sel.textContent);
+      if (!Number.isNaN(v)) return v;
+    }
+    const maybe = (document.title || '').match(/\b(20\d{2})\b/);
+    if (maybe) return Number(maybe[1]);
+    return new Date().getFullYear();
+  }
+
+  async function getPrevYearBalance(adm, prevYear) {
+    if (!adm) return 0;
+    if (typeof window.__finance_getBalanceForYearAdmission === 'function') {
+      return Number(await window.__finance_getBalanceForYearAdmission(prevYear, adm)) || 0;
+    }
+    if (window.firebase?.database) {
+      try {
+        const ref = window.firebase.database().ref(`finance/${prevYear}/students/${adm}`);
+        const snap = await ref.get();
+        if (snap.exists()) {
+          const d = snap.val();
+          if (d.balance !== undefined) return Number(d.balance) || 0;
+          const feeYear = Number(String(d.feeYear || d.fee || 0).replace(/[^\d]/g, '')) || 0;
+          const paid = Number(String(d.paid || 0).replace(/[^\d]/g, '')) || 0;
+          return Math.max(feeYear - paid, 0);
+        }
+      } catch (err) {
+        console.warn('CarryForward fallback fetch failed', adm, prevYear, err);
+      }
+    }
+    return 0;
+  }
+
+  function parseNumberLike(x) {
+    if (typeof x === 'number') return x;
+    return Number(String(x || '0').replace(/[^\d]/g, '')) || 0;
+  }
+
+  function formatTSh(n) {
+    const value = Number(n) || 0;
+    try {
+      return new Intl.NumberFormat('en-KE', {
+        style: 'currency',
+        currency: 'TZS',
+        maximumFractionDigits: 0,
+      }).format(value);
+    } catch (err) {
+      return 'TSh ' + value.toLocaleString('en-US');
+    }
+  }
+
+  function findFinanceTableRows() {
+    const table = document.getElementById('financeTable');
+    if (!table) return [];
+    const rows = Array.from(table.querySelectorAll('tbody tr')).filter(tr => tr.children.length >= 10);
+    return rows.map(tr => {
+      const tds = Array.from(tr.children);
+      const adm = (tds[1]?.innerText || '').trim();
+      const feeYearCell = tds[4] || null;
+      const feeYear = parseNumberLike(tds[4]?.innerText);
+      return { tr, tds, adm, feeYearCell, feeYear };
+    }).filter(entry => entry.adm);
+  }
+
+  async function decorateWithCarryForward() {
+    if (running) {
+      scheduled = true;
+      return;
+    }
+    running = true;
+    const targetYear = detectTargetYear();
+    const prevYear = targetYear - 1;
+    if (!Number.isFinite(prevYear) || prevYear < START_YEAR) {
+      running = false;
+      return;
+    }
+    const rows = findFinanceTableRows();
+    if (!rows.length) {
+      running = false;
+      return;
+    }
+    const uniqueAdms = [...new Set(rows.map(r => r.adm))];
+    const cfMap = new Map();
+    await Promise.all(uniqueAdms.map(async (adm) => {
+      const carry = await getPrevYearBalance(adm, prevYear);
+      cfMap.set(adm, Math.max(0, Number(carry) || 0));
+    }));
+
+    rows.forEach(row => {
+      const carry = cfMap.get(row.adm) || 0;
+      const hasCF = carry > 0;
+      row.tr.dataset.carryForward = hasCF ? String(carry) : '0';
+      row.tr.dataset.carryForwardYear = String(prevYear);
+      const storeKey = `${targetYear}::${row.adm}`;
+      if (hasCF) {
+        sharedCache[storeKey] = { carry, prevYear, total: row.feeYear + carry };
+        try {
+          sessionStorage.setItem(`somap_cf_${targetYear}_${row.adm}`, String(carry));
+        } catch (_) {}
+      } else {
+        delete sharedCache[storeKey];
+        try {
+          sessionStorage.removeItem(`somap_cf_${targetYear}_${row.adm}`);
+        } catch (_) {}
+      }
+
+      if (!row.feeYearCell) return;
+      row.feeYearCell.querySelectorAll('[data-cf-badge]').forEach(el => el.remove());
+      if (!hasCF) return;
+
+      const newTotal = row.feeYear + carry;
+      const badge = document.createElement('div');
+      badge.dataset.cfBadge = 'badge';
+      badge.className = 'text-xs mt-1';
+      badge.innerHTML = `<span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">Carry Forward (${prevYear}): ${formatTSh(carry)}</span>`;
+      const totalLine = document.createElement('div');
+      totalLine.dataset.cfBadge = 'total';
+      totalLine.className = 'text-sm font-semibold mt-1';
+      totalLine.textContent = `Total Due (incl. CF): ${formatTSh(newTotal)}`;
+      row.feeYearCell.appendChild(badge);
+      row.feeYearCell.appendChild(totalLine);
+    });
+    running = false;
+    if (scheduled) {
+      scheduled = false;
+      decorateWithCarryForward();
+    }
+  }
+
+  function queueRun() {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(decorateWithCarryForward, 0);
+    } else {
+      document.addEventListener('DOMContentLoaded', () => setTimeout(decorateWithCarryForward, 0), { once: true });
+    }
+  }
+
+  document.addEventListener('finance:tableRendered', () => setTimeout(decorateWithCarryForward, 0));
+  queueRun();
+})();
+</script>
+
 </body>
 </html>
 

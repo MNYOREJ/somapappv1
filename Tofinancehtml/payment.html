@@ -765,5 +765,152 @@
       });
     })();
   </script>
+
+  <script>
+  /** SoMAp v2.1 — Carry-forward overlay for January installment (prevYear >= 2025) */
+  (function carryForwardIntoJanuary() {
+    const START_YEAR = 2025;
+
+    function detectTargetYear() {
+      const urlYear = Number(new URL(location.href).searchParams.get('year'));
+      if (!Number.isNaN(urlYear)) return urlYear;
+      if (window.currentAcademicYear && Number(window.currentAcademicYear)) return Number(window.currentAcademicYear);
+      try {
+        const parentYear = Number(window.parent?.somapYearContext?.getSelectedYear?.());
+        if (!Number.isNaN(parentYear)) return parentYear;
+      } catch (_) {}
+      return new Date().getFullYear();
+    }
+
+    const targetYear = detectTargetYear();
+    const prevYear = targetYear - 1;
+    if (!Number.isFinite(prevYear) || prevYear < START_YEAR) return;
+
+    function parseNumberLike(value) {
+      if (typeof value === 'number') return value;
+      return Number(String(value || '0').replace(/[^\d\-]/g, '')) || 0;
+    }
+
+    function formatTSh(amount) {
+      const value = Number(amount) || 0;
+      try {
+        return new Intl.NumberFormat('en-KE', {
+          style: 'currency',
+          currency: 'TZS',
+          maximumFractionDigits: 0,
+        }).format(value);
+      } catch (_) {
+        return 'TSh ' + value.toLocaleString('en-US');
+      }
+    }
+
+    async function getCarryForward(adm) {
+      if (!adm) return 0;
+      const storeKey = `${targetYear}::${adm}`;
+      try {
+        if (window.parent && window.parent.__financeCarryForwardVisual) {
+          const record = window.parent.__financeCarryForwardVisual[storeKey];
+          if (record && record.carry) return Math.max(0, Number(record.carry) || 0);
+        }
+      } catch (_) {}
+
+      try {
+        const fromSession = sessionStorage.getItem(`somap_cf_${targetYear}_${adm}`);
+        if (fromSession) return Math.max(0, Number(fromSession) || 0);
+      } catch (_) {}
+
+      try {
+        if (window.parent && typeof window.parent.__finance_getBalanceForYearAdmission === 'function') {
+          const bal = await window.parent.__finance_getBalanceForYearAdmission(prevYear, adm);
+          return Math.max(0, Number(bal) || 0);
+        }
+      } catch (_) {}
+
+      if (typeof window.__finance_getBalanceForYearAdmission === 'function') {
+        try {
+          const bal = await window.__finance_getBalanceForYearAdmission(prevYear, adm);
+          return Math.max(0, Number(bal) || 0);
+        } catch (_) {}
+      }
+
+      if (window.firebase?.database) {
+        try {
+          const ref = window.firebase.database().ref(`finance/${prevYear}/students/${adm}`);
+          const snap = await ref.get();
+          if (snap.exists()) {
+            const data = snap.val() || {};
+            if (data.balance !== undefined) return Math.max(0, Number(data.balance) || 0);
+            const feeYear = Number(String(data.feeYear || data.fee || 0).replace(/[^\d]/g, '')) || 0;
+            const paid = Number(String(data.paid || 0).replace(/[^\d]/g, '')) || 0;
+            return Math.max(0, feeYear - paid);
+          }
+        } catch (err) {
+          console.warn('CarryForward January fallback fetch failed', adm, prevYear, err);
+        }
+      }
+      return 0;
+    }
+
+    async function applyCarryForward() {
+      const adm = window.__STUDENT_ID__ || new URL(location.href).searchParams.get('student') || '';
+      if (!adm) return;
+      const carry = await getCarryForward(adm);
+      if (!carry) return;
+
+      const tableBody = document.querySelector('#breakdownContent table tbody');
+      if (!tableBody) return;
+      const firstRow = tableBody.querySelector('tr');
+      if (!firstRow) return;
+
+      const cells = Array.from(firstRow.children);
+      const expectedCell = cells[1];
+      const remainingCell = cells[3];
+      if (!expectedCell || expectedCell.dataset.cfCarryApplied === '1') return;
+
+      const baseExpected = parseNumberLike(expectedCell.innerText);
+      const baseRemaining = remainingCell ? parseNumberLike(remainingCell.innerText) : 0;
+      const newExpected = baseExpected + carry;
+      const newRemaining = baseRemaining + carry;
+
+      expectedCell.dataset.cfCarryApplied = '1';
+      expectedCell.innerHTML = `${formatTSh(newExpected)}
+        <div class="text-[10px] mt-1">
+          <span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-700">
+            + Carry Forward (${prevYear}): ${formatTSh(carry)}
+          </span>
+        </div>`;
+      if (remainingCell) {
+        remainingCell.innerHTML = `${formatTSh(newRemaining)}
+          <div class="text-[10px] mt-1 text-slate-500">
+            Includes carry-forward balance
+          </div>`;
+      }
+    }
+
+    function startObserver() {
+      const container = document.getElementById('breakdownContent');
+      if (!container) return;
+      const attempt = () => { applyCarryForward(); };
+      if (container.querySelector('table tbody tr')) {
+        attempt();
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (container.querySelector('table tbody tr')) {
+          observer.disconnect();
+          attempt();
+        }
+      });
+      observer.observe(container, { childList: true, subtree: true });
+      setTimeout(() => observer.disconnect(), 12000);
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      startObserver();
+    } else {
+      document.addEventListener('DOMContentLoaded', startObserver);
+    }
+  })();
+  </script>
 </body>
 </html>

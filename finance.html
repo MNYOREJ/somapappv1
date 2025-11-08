@@ -1475,18 +1475,37 @@ function buildFinanceStudents(
     const dbCarry = Math.max(0, Number(s.carryAmount || 0));
     const baseFeeRaw = s.baseFee != null ? Number(s.baseFee) : Number(s.feePerYear || 0) - dbCarry;
     const baseFee = Math.max(0, Number.isFinite(baseFeeRaw) ? baseFeeRaw : 0);
-    const combinedCarry = dbCarry + carryForwardPrev;
-    const totalDue = baseFee + combinedCarry;
+    const prevYearLabel = Number.isFinite(targetYearNum) ? targetYearNum - 1 : 'Prev';
+    const effectiveCarry = Math.max(dbCarry, carryForwardPrev);
+    const totalDue = baseFee + effectiveCarry;
     const paidTotal = Math.max(0, Number(fin.paidAmount || 0));
     const balanceDisplay = Math.max(0, totalDue - paidTotal);
     const debtWithCarry = Math.max(0, Number(fin.periodDebtValue || 0) + carryForwardPrev);
-    const prevYearLabel = Number.isFinite(targetYearNum) ? targetYearNum - 1 : 'Prev';
+
+    let carryLine = '';
+    if (carryForwardPrev > 0 || dbCarry > 0) {
+      const parts = [];
+      if (carryForwardPrev > 0) {
+        parts.push(`${fmt(carryForwardPrev)}${dbCarry > 0 && dbCarry !== carryForwardPrev ? '' : ''}`);
+      }
+      if (dbCarry > 0 && dbCarry !== carryForwardPrev) {
+        parts.push(`Existing carry-in: ${fmt(dbCarry)}`);
+      }
+      const combined = parts.length ? parts.join(' + ') : fmt(effectiveCarry);
+      carryLine = `<p><strong>Carry Forward (${prevYearLabel}):</strong> ${combined}</p>`;
+    }
+
+    const carrySummaryNote = (carryForwardPrev > 0 && dbCarry > 0 && dbCarry === carryForwardPrev)
+      ? `<span class="text-xs text-slate-500">(Already captured in ${financeYear} record)</span>`
+      : '';
+
     let html = `
       <p><strong>Name:</strong> ${fullName}</p>
       <p><strong>Admission No:</strong> ${s.admissionNumber || ''}</p>
       <p><strong>Class:</strong> ${s.classLevel || ''}</p>
       <p><strong>Fee (base):</strong> ${fmt(baseFee)}</p>
-      ${combinedCarry > 0 ? `<p><strong>Carry Forward (${prevYearLabel}):</strong> ${fmt(carryForwardPrev)}${dbCarry > 0 ? ` <span class="text-xs text-slate-500">(Existing carry-in: ${fmt(dbCarry)})</span>` : ''}</p>` : ''}
+      ${carryLine || ''}
+      ${carrySummaryNote ? `<p class="mt-0">${carrySummaryNote}</p>` : ''}
       <p><strong>Total Due (incl. carry):</strong> ${fmt(totalDue)}</p>
       <p><strong>Payment Plan:</strong> ${s.paymentPlan || ''}</p>
       <p><strong>Debt till:</strong> ${fin.periodDebtLabel} - <strong>${fmt(debtWithCarry)}</strong></p>

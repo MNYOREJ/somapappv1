@@ -605,11 +605,11 @@
         const admissionForLookup = student.admissionNumber || studentId;
         const prevCarry = hasYearData ? await fetchPrevYearCarry(admissionForLookup) : 0;
         const dbCarry = Math.max(0, Number(student.carryAmount || 0));
-        const combinedCarry = dbCarry + prevCarry;
+        const effectiveCarry = Math.max(dbCarry, prevCarry);
         const inferredBaseFee = student.baseFee != null
           ? Math.max(0, Number(student.baseFee) || 0)
           : Math.max(0, Number(student.feePerYear || 0) - dbCarry);
-        const totalDueWithCarry = hasYearData ? inferredBaseFee + combinedCarry : 0;
+        const totalDueWithCarry = hasYearData ? inferredBaseFee + effectiveCarry : 0;
 
         const totalsExpRaw = schedule.items.reduce((s, it) => s + it.amount, 0);
         const totalsPaidRaw = schedule.items.reduce((s, it) => s + it.paidAllocated, 0);
@@ -618,7 +618,9 @@
         const totalsPaid = hasYearData ? totalsPaidRaw : 0;
         const totalPaidAll = hasYearData ? allocation.totalPaid : 0;
         const rem = hasYearData ? Math.max(0, totalsExp - totalsPaid) : 0;
-        const remainingWithCarry = hasYearData ? Math.max(0, totalDueWithCarry - totalPaidAll) : 0;
+        const remainingWithCarry = hasYearData
+          ? Math.max(rem, totalDueWithCarry - totalPaidAll)
+          : 0;
         const debtValue = hasYearData ? allocation.debtTillNow : 0;
         const debtWithCarry = hasYearData ? Math.max(0, debtValue + prevCarry) : 0;
         const creditValue = hasYearData ? allocation.credit : 0;
@@ -626,7 +628,7 @@
         const prevYearLabel = targetYear - 1;
         const carryParts = [];
         if (prevCarry > 0) carryParts.push(`Prev ${prevYearLabel}: <strong>${fmt(prevCarry)}</strong>`);
-        if (dbCarry > 0) carryParts.push(`Ledger: <strong>${fmt(dbCarry)}</strong>`);
+        if (dbCarry > 0 && dbCarry !== prevCarry) carryParts.push(`Ledger: <strong>${fmt(dbCarry)}</strong>`);
         const carryTag = carryParts.length
           ? `<span class="mr-3">Carry Forward (${prevYearLabel}+): ${carryParts.join(' + ')}</span>`
           : '';

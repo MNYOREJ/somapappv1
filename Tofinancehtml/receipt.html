@@ -24,6 +24,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="../js/finance_plans.js"></script>
 
   <style>
     :root{
@@ -156,6 +157,9 @@
     }
     .summary-scroll{
       overflow-x:auto;
+      border-radius:18px;
+      border:1px solid rgba(148,163,184,.5);
+      background:#fff;
     }
     @media (min-width:768px){
       .summary-scroll{
@@ -167,26 +171,28 @@
       border-collapse:collapse;
       table-layout:fixed;
       font-size:0.8rem;
+      min-width:900px;
+      background:#fff;
     }
     .summary-table th,
     .summary-table td{
-      padding:0.35rem 0.5rem;
+      padding:0.4rem 0.65rem;
       white-space:nowrap;
-      border-bottom:1px solid rgba(15,23,42,.08);
+      border:1px solid #e2e8f0;
     }
     .summary-table th{
-      font-size:0.6rem;
-      letter-spacing:0.18em;
+      font-size:0.65rem;
+      letter-spacing:0.25em;
       text-transform:uppercase;
       color:#475569;
-      background:#f8fafc;
+      background:#f1f5f9;
     }
     .summary-table td{
       font-size:0.78rem;
       color:#0f172a;
     }
     .summary-table td:first-child{
-      min-width:140px;
+      min-width:170px;
       white-space:normal;
     }
     .summary-table td .status-pill{
@@ -196,7 +202,7 @@
       .summary-table th,
       .summary-table td{
         padding:0.25rem 0.35rem;
-        font-size:0.6rem;
+        font-size:0.62rem;
       }
       .summary-table td:first-child{
         min-width:120px;
@@ -968,6 +974,40 @@
       hydrateState();
     }
 
+    function buildStudentIdentifierCandidates(studentId, admission, studentRecord){
+      const bucket = new Set();
+      const add = value => {
+        if (!value) return;
+        const trimmed = String(value || '').trim();
+        if (!trimmed) return;
+        bucket.add(trimmed);
+      };
+      add(studentId);
+      add(admission);
+      add(studentRecord?.admissionNumber);
+      add(studentRecord?.admissionNo);
+      add(studentRecord?.admNo);
+      add(studentRecord?.registrationNumber);
+      add(studentRecord?.autoId);
+      add(studentRecord?.pupilId);
+      add(studentRecord?.studentKey);
+      add(studentRecord?.autoRef);
+      return Array.from(bucket);
+    }
+
+    async function fetchFirstMatch(keys, pathBuilder){
+      if (!Array.isArray(keys)) return null;
+      for (const rawKey of keys){
+        const sanitized = sanitizeKey(String(rawKey || ''));
+        if (!sanitized) continue;
+        try{
+          const snap = await fetchScoped(pathBuilder(sanitized));
+          if (snap && snap.exists()) return snap;
+        }catch(_){}
+      }
+      return null;
+    }
+
     async function loadTargetAmounts(year, studentId, admission, studentRecord){
       const targets = createEmptyTargets();
       const recordFee = Number(studentRecord?.feePerYear || studentRecord?.feeDue || studentRecord?.totalFee || 0);
@@ -981,30 +1021,16 @@
         }
         return targets;
       }
-      const admissionKey = sanitizeKey(admission || studentId);
-      const feeByIdPromise = fetchScoped(`studentFees/${year}/${studentId}`);
-      const feeByAdmPromise = admissionKey && admissionKey !== studentId
-        ? fetchScoped(`studentFees/${year}/${admissionKey}`)
-        : Promise.resolve(null);
-      const statusPromise = fetchScoped(`financeStatuses/${year}/${studentId}`);
-      const transportPromise = fetchScoped(`transportExpected/${year}/${studentId}`);
-      const fridayPromise = fetchScoped(`fridayPlans/${year}/${studentId}`);
-      const gradPromise = fetchScoped(`graduation/${year}/students/${admissionKey}`);
-      const carryByIdPromise = fetchScoped(`financeCarryForward/${year}/${studentId}`);
-      const carryByAdmPromise = admissionKey && admissionKey !== studentId
-        ? fetchScoped(`financeCarryForward/${year}/${admissionKey}`)
-        : Promise.resolve(null);
-      const [feeSnap,feeAdmSnap,statusSnap,transportSnap,fridaySnap,gradSnap,carrySnap,carryAdmSnap] = await Promise.all([
-        feeByIdPromise,
-        feeByAdmPromise,
-        statusPromise,
-        transportPromise,
-        fridayPromise,
-        gradPromise,
-        carryByIdPromise,
-        carryByAdmPromise
+      const identifierCandidates = buildStudentIdentifierCandidates(studentId, admission, studentRecord);
+      const [feeSnap,statusSnap,transportSnap,fridaySnap,gradSnap,carrySnap] = await Promise.all([
+        fetchFirstMatch(identifierCandidates, key => `studentFees/${year}/${key}`),
+        fetchScoped(`financeStatuses/${year}/${studentId}`),
+        fetchScoped(`transportExpected/${year}/${studentId}`),
+        fetchScoped(`fridayPlans/${year}/${studentId}`),
+        fetchFirstMatch(identifierCandidates, key => `graduation/${year}/students/${key}`),
+        fetchFirstMatch(identifierCandidates, key => `financeCarryForward/${year}/${key}`)
       ]);
-      const fee = feeSnap?.val() || feeAdmSnap?.val() || {};
+      const fee = feeSnap?.val() || {};
       if (fee && Object.keys(fee).length){
         targets.schoolFees.required = Number(fee.feePerYear || fee.annualFee || fee.required || 0);
         targets.schoolFees.planLabel = fee.planLabel || fee.paymentPlan || fee.plan || targets.schoolFees.planLabel;
@@ -1039,7 +1065,7 @@
       if (baseFee <= 0 && recordFee > 0){
         baseFee = recordFee;
       }
-      const carryRaw = carrySnap?.val() || carryAdmSnap?.val() || null;
+      const carryRaw = carrySnap?.val() || null;
       const carryAmount = Number(
         typeof carryRaw === 'number'
           ? carryRaw
@@ -1486,19 +1512,13 @@
       const pageHeight = pdf.internal.pageSize.getHeight();
       const usableWidth = pageWidth - margin * 2;
       const usableHeight = pageHeight - margin * 2;
-      const imgHeight = canvas.height * (usableWidth / canvas.width);
-      let heightLeft = imgHeight;
-      let position = margin;
-
-      pdf.addImage(imgData,'PNG', margin, position, usableWidth, imgHeight);
-      heightLeft -= usableHeight;
-
-      while (heightLeft > 0){
-        const offset = margin - (imgHeight - heightLeft);
-        pdf.addPage();
-        pdf.addImage(imgData,'PNG', margin, offset, usableWidth, imgHeight);
-        heightLeft -= usableHeight;
-      }
+      const widthScale = usableWidth / canvas.width;
+      const heightScale = usableHeight / canvas.height;
+      const scale = Math.min(widthScale, heightScale, 1);
+      const imgWidth = canvas.width * scale;
+      const imgHeight = canvas.height * scale;
+      const offsetX = margin + Math.max(0, (usableWidth - imgWidth) / 2);
+      pdf.addImage(imgData,'PNG', offsetX, margin, imgWidth, imgHeight);
       const receiptNo = formatReceiptNumber(state.activeApproval) || state.activeApproval.id || `receipt_${Date.now()}`;
       const safeReceipt = receiptNo.replace(/[^A-Za-z0-9_-]/g,'');
       const filename = `${safeReceipt}_${state.year}.pdf`;

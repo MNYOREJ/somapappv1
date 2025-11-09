@@ -1,220 +1,174 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SoMAp — Receipts Manager</title>
+  <title>SoMAp - Receipt Center</title>
 
-  <!-- Tailwind + Icons -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter','system-ui','-apple-system','BlinkMacSystemFont','Segoe UI','sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-5A8nDU6AE2aVdM3mV0NHQW1+6RyXUGFaJq6Digw1k3D6Z0fjQX+0Gooy2cuglRez2oJ6TP2PzYDs2kP2T0b3A==" crossorigin="anonymous" referrerpolicy="no-referrer"/>
 
-  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
 
-  <!-- PDF libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
   <style>
+    :root{
+      color-scheme: dark;
+    }
     body{
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height:100vh;
       background:
         radial-gradient(1200px 800px at -10% -10%, rgba(14,165,233,.35), transparent 40%),
-        radial-gradient(900px 700px at 110% -10%, rgba(139,92,246,.30), transparent 35%),
-        linear-gradient(180deg, #020617 0%, #0b1220 100%);
-      min-height:100vh; color:#e2e8f0; font-family:Inter,system-ui,sans-serif;
+        radial-gradient(900px 700px at 110% -10%, rgba(139,92,246,.25), transparent 35%),
+        radial-gradient(1200px 900px at 20% 120%, rgba(59,130,246,.25), transparent 45%),
+        #020617;
+      color:#e2e8f0;
     }
-    .sidebar{
-      width:86px; position:fixed; inset:0 auto 0 0; z-index:30;
-      background:linear-gradient(180deg, rgba(2,6,23,.88), rgba(2,6,23,.6));
-      border-right:1px solid rgba(148,163,184,.22); backdrop-filter: blur(12px);
-      padding:12px 10px; display:flex; flex-direction:column; align-items:center; gap:12px;
+    .glass-card{
+      background:rgba(15,23,42,.75);
+      border:1px solid rgba(148,163,184,.25);
+      border-radius:24px;
+      backdrop-filter:blur(20px);
+      box-shadow:0 25px 60px -40px rgba(2,6,23,.9);
     }
-    .icon{ width:58px; height:58px; border-radius:14px; display:flex; align-items:center; justify-content:center; cursor:pointer;
-      background:rgba(148,163,184,.10); border:1px solid rgba(148,163,184,.25); color:#fff; transition:transform .15s ease, filter .2s ease; }
-    .icon:hover{ transform: translateY(-3px); }
-    .icon.receipts{ background:linear-gradient(120deg, rgba(250,204,21,.35), rgba(14,165,233,.40)); border-color:rgba(250,204,21,.55); box-shadow:0 18px 45px -25px rgba(250,204,21,.45); }
-    .main{ margin-left:106px; padding:18px; }
-    .card{ background:rgba(15,23,42,.82); border:1px solid rgba(148,163,184,.22); border-radius:18px; backdrop-filter: blur(14px); box-shadow:0 25px 60px -40px rgba(0,0,0,.6); }
-    .muted{ color:rgba(226,232,240,.8); }
-    .table thead th{ text-align:left; padding:10px 8px; font-size:.75rem; letter-spacing:.16em; text-transform:uppercase; color:rgba(226,232,240,.85);}
-    .table tbody td{ padding:10px 8px; border-top:1px solid rgba(148,163,184,.18); }
-    .drawer{ position:fixed; right:0; top:0; bottom:0; width:510px; transform:translateX(100%); transition: transform .28s ease; z-index:40; }
-    .drawer.open{ transform:translateX(0%); }
-    .tag{ font-size:.7rem; padding:.15rem .45rem; border:1px solid rgba(148,163,184,.3); border-radius:.5rem; background:rgba(148,163,184,.12); }
-
-    /* PDF look */
-    .receipt-paper{
-      background:#fff; color:#111827; width:900px; min-height:640px; margin:0 auto; padding:40px;
-      border-radius:16px; border:3px double #1e3a8a; font-family: Cambria, Georgia, "Times New Roman", serif;
+    .receipt-sheet{
+      background:rgba(255,255,255,.98);
+      color:#0f172a;
+      border-radius:30px;
+      border:1px solid rgba(148,163,184,.3);
+      box-shadow:0 40px 120px -80px rgba(15,23,42,.9);
+      position:relative;
+      overflow:hidden;
     }
-    .receipt-header{ border-bottom:2px solid #1e3a8a; padding-bottom:16px; margin-bottom:20px; }
-    .receipt-watermark{ position:absolute; inset:0; opacity:.06; background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="Cambria" fill="%231e3a8a">SOCRATES SCHOOL</text></svg>') center/contain no-repeat; pointer-events:none; }
-    .summary-table { width:100%; border-collapse:collapse; margin-top:14px; font-size:14px;}
-    .summary-table th, .summary-table td { border:1px solid #1e3a8a55; padding:6px 8px; }
-    .summary-badge { font-size:12px; padding:2px 6px; border:1px solid #1e3a8a66; border-radius:6px; color:#1e3a8a; }
-    @media (max-width:1024px){ .main{ margin-left:0; padding:12px; } .sidebar{ position:sticky; top:0; width:100%; height:auto; flex-direction:row; justify-content:center; } }
+    .receipt-sheet::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      background:radial-gradient(circle at top right, rgba(14,165,233,.2), transparent 45%);
+      opacity:.7;
+    }
+    .receipt-sheet > .inner{
+      position:relative;
+      padding:2.5rem;
+    }
+    .identity-card{
+      border-radius:24px;
+      background:linear-gradient(135deg, rgba(244,249,255,1), rgba(222,242,255,.8));
+      border:1px solid rgba(14,165,233,.15);
+      box-shadow:0 15px 40px -30px rgba(14,165,233,.7);
+      padding:1.5rem;
+    }
+    .avatar-frame{
+      width:110px;
+      height:110px;
+      border-radius:28px;
+      background:linear-gradient(145deg, rgba(14,165,233,.2), rgba(59,130,246,.35));
+      border:1px solid rgba(14,165,233,.35);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      position:relative;
+    }
+    .avatar-frame img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+    .avatar-initials{
+      font-size:1.7rem;
+      font-weight:700;
+      color:#0f172a;
+    }
+    .form-line{
+      display:flex;
+      gap:0.9rem;
+      align-items:flex-start;
+      font-size:0.95rem;
+      color:#0f172a;
+    }
+    .form-line label{
+      font-size:0.68rem;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:0.22em;
+      color:#94a3b8;
+      min-width:150px;
+    }
+    .form-line .value{
+      flex:1;
+      position:relative;
+      padding-bottom:0.35rem;
+    }
+    .form-line .value::after{
+      content:"";
+      position:absolute;
+      left:0;
+      right:0;
+      bottom:0;
+      border-bottom:1px dotted rgba(15,23,42,.25);
+    }
+    .form-line .value span{
+      position:relative;
+      display:inline-flex;
+      padding:0.15rem 0.4rem;
+      border-radius:6px;
+      background:rgba(255,255,255,.9);
+      min-height:1.5rem;
+      align-items:center;
+      font-weight:600;
+    }
+    .status-pill{
+      display:inline-flex;
+      align-items:center;
+      font-size:0.75rem;
+      padding:0.2rem 0.65rem;
+      border-radius:999px;
+      font-weight:600;
+      border:1px solid rgba(15,23,42,.15);
+    }
+    .list-card{
+      border-radius:18px;
+      border:1px solid rgba(148,163,184,.2);
+      padding:1rem;
+      background:rgba(15,23,42,.5);
+      transition:all .2s ease;
+      cursor:pointer;
+    }
+    .list-card:hover{
+      border-color:rgba(59,130,246,.65);
+    }
+    .print\:hidden{@media print{display:none!important;}}
+    @media print{
+      body{
+        background:#fff;
+        color:#0f172a;
+      }
+      header, #receiptsPanel, .print-hidden, .page-chrome{ display:none !important; }
+      .receipt-sheet{
+        box-shadow:none;
+        border:1px solid #cbd5f5;
+      }
+    }
   </style>
-</head>
-<body>
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <img src="../images/somap-logo.png.jpg" alt="SoMAp" class="w-12 h-12 rounded-xl object-cover"/>
-    <div class="icon receipts" title="Receipts"><i class="fas fa-file-invoice-dollar text-yellow-300"></i></div>
-    <div class="icon" title="Finance"><i class="fas fa-wallet"></i></div>
-    <div class="icon" title="Dashboard"><i class="fas fa-grid-2"></i></div>
-    <div class="icon" title="Back" onclick="history.back()"><i class="fas fa-arrow-left"></i></div>
-  </aside>
-
-  <main class="main">
-    <section class="card p-5 lg:p-7 mb-4">
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <p class="uppercase tracking-[0.35em] text-xs muted">Socrates School</p>
-          <h1 class="text-3xl md:text-4xl font-extrabold">Receipts Manager</h1>
-          <p class="muted text-sm">Search a student, view all payments (Fees, Friday Money, others), and generate official PDF receipts.</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <input id="searchBox" placeholder="Search name / ADM / phone" class="px-3 py-2 rounded-lg bg-white/10 border border-white/15 focus:outline-none w-[260px]"/>
-          <button id="refreshBtn" class="px-4 py-2 rounded-lg bg-sky-500/80 hover:bg-sky-500 text-white"><i class="fas fa-rotate mr-2"></i>Refresh</button>
-          <button id="fullBtn" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20"><i class="fas fa-expand"></i> <span class="ml-1 hidden sm:inline">Fullscreen</span></button>
-        </div>
-      </div>
-    </section>
-
-    <section class="card p-4">
-      <div class="overflow-auto">
-        <table class="table min-w-full" id="studentsTable">
-          <thead class="bg-white/5">
-            <tr>
-              <th>Student</th>
-              <th>ADM</th>
-              <th>Class</th>
-              <th>Parent Contact(s)</th>
-              <th>Last Payment</th>
-              <th>Receipts</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="studentsTbody">
-            <tr><td colspan="7" class="py-6 text-center muted">Loading students…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </main>
-
-  <!-- Drawer: per-student payments -->
-  <aside id="drawer" class="drawer card p-0">
-    <div class="p-4 border-b border-white/10 flex items-center justify-between">
-      <div>
-        <p class="text-xs uppercase tracking-[0.35em] muted">Receipts</p>
-        <h3 id="drawerTitle" class="text-xl font-bold">Student</h3>
-      </div>
-      <button class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20" onclick="closeDrawer()"><i class="fas fa-xmark"></i></button>
-    </div>
-    <div id="drawerContent" class="p-4 space-y-3 overflow-y-auto" style="max-height: calc(100vh - 60px);">
-      <!-- dynamic -->
-    </div>
-  </aside>
-
-  <!-- Hidden PDF template -->
-  <div id="pdfStage" class="hidden">
-    <div class="receipt-paper relative" id="pdfPaper">
-      <div class="receipt-watermark"></div>
-      <div class="receipt-header flex justify-between items-start">
-        <div>
-          <h2 class="text-2xl font-bold text-blue-900 uppercase tracking-[0.35em]">Socrates Investment Limited</h2>
-          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm">Socrates School</p>
-          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">P.O BOX 14256 ARUSHA</p>
-          <p class="uppercase tracking-[0.35em] text-blue-900 text-sm mt-1">Mob: 0686 828 732</p>
-        </div>
-        <div class="text-right">
-          <h3 class="text-3xl font-bold text-blue-900 uppercase">Receipt</h3>
-          <p class="text-sm text-blue-900 mt-2" id="pdfReceiptNo">Receipt No: ----</p>
-          <p class="text-sm text-blue-900" id="pdfReceiptDate">Date: --</p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-        <div class="lg:col-span-2">
-          <p class="text-base mb-3">Received From: <span id="pdfReceivedFrom" class="border-b border-black inline-block min-w-[240px]"></span></p>
-          <p class="text-base mb-3">The Sum of Shillings (In words): <span id="pdfAmountWords" class="border-b border-black inline-block min-w-[300px]"></span></p>
-          <p class="text-base mb-3">Amount in figures: <span id="pdfAmountFigures" class="border-b border-black inline-block min-w-[200px]"></span></p>
-          <p class="text-base mb-3">Being payment of: <span id="pdfPurpose" class="border-b border-black inline-block min-w-[300px]"></span> <span id="pdfKindBadge" class="summary-badge"></span></p>
-          <p class="text-base mb-3">Payment Method: <span id="pdfMethod" class="border-b border-black inline-block min-w-[200px]"></span></p>
-
-          <!-- Fees summary -->
-          <table class="summary-table">
-            <thead><tr><th colspan="4" style="text-align:left;background:#eff6ff;">Fees Summary</th></tr></thead>
-            <tbody>
-              <tr><td>Plan</td><td id="sumPlan">--</td><td>Annual Fee</td><td id="sumAnnual">--</td></tr>
-              <tr><td>Paid this Year</td><td id="sumPaidYear">--</td><td>Debt till <span id="sumTillLabel">--</span></td><td id="sumDebtTill">--</td></tr>
-              <tr><td>Annual Balance</td><td id="sumBalance">--</td><td>Total Fridays Paid</td><td id="sumFridayPaid">--</td></tr>
-              <tr><td>Graduation Paid</td><td id="sumGradPaid">--</td><td>Graduation Balance</td><td id="sumGradBalance">--</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="flex flex-col items-center">
-          <div class="w-32 h-32 rounded-3xl overflow-hidden border-2 border-blue-900 bg-gray-100">
-            <img id="pdfPhoto" src="" crossorigin="anonymous" class="w-full h-full object-cover" alt="Child passport"/>
-          </div>
-          <p id="pdfChildName" class="mt-3 text-base font-semibold text-blue-900 text-center"></p>
-          <p id="pdfChildAdm" class="text-sm text-gray-600 text-center"></p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-        <div>
-          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">Cash / Cheque</p>
-          <p id="pdfInstrument" class="border-b border-black h-8"></p>
-        </div>
-        <div>
-          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-4">TSh</p>
-          <p id="pdfCurrency" class="border-b border-black h-8"></p>
-        </div>
-      </div>
-
-      <div class="flex justify-between mt-10">
-        <div>
-          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Sign for Socrates</p>
-          <p class="border-t border-black w-48 h-0"></p>
-        </div>
-        <div>
-          <p class="uppercase tracking-[0.35em] text-sm text-blue-900 mb-6">Stamp</p>
-          <div class="w-40 h-24 border border-dashed border-blue-900"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <script>
-    /* ========= CONFIG (tweak here) ========= */
-    const SOMAP_DEFAULT_YEAR = 2025;
-    const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
-    const norm = s => String(s||'').trim().toLowerCase();
-    function shiftClass(baseName, deltaYears){
-      const i = CLASS_ORDER.findIndex(c => norm(c) === norm(baseName));
-      if (i < 0) return baseName || '';
-      const j = i + Number(deltaYears||0);
-      if (j < 0) return 'PRE-ADMISSION';
-      if (j >= CLASS_ORDER.length) return 'GRADUATED';
-      return CLASS_ORDER[j];
-    }
-
-    const FRIDAY_COST = 1000;                  // amount for Friday money
-    const FRIDAY_LOOKBACK = 120;               // how many most-recent Fridays to scan
-    const ACADEMIC_START_MONTH = 0;            // 0=January, 6=July (change if your school year starts in July)
-
-    const queryParams = new URL(location.href).searchParams;
-    const receiptsYearParam = Number(queryParams.get('year'));
-    let receiptsYear = Number.isFinite(receiptsYearParam) ? receiptsYearParam : SOMAP_DEFAULT_YEAR;
-    receiptsYear = Math.max(1970, Math.floor(receiptsYear));
-
-    /* ===== Firebase ===== */
     const firebaseConfig = {
       apiKey: "AIzaSyBhONntRE_aRsU0y1YcPZzWud3CBfwH_a8",
       authDomain: "somaptestt.firebaseapp.com",
@@ -226,499 +180,897 @@
       measurementId: "G-4HKX7KN6Q3"
     };
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-    const auth = firebase.auth();
+    window.firebaseApp = firebase.app();
+    window.db = firebase.database();
+  </script>
 
-    /* ===== Helpers ===== */
-    const q = s => document.querySelector(s);
-    const safe = s => (s==null ? '' : String(s));
-    const sanitizeKey = s => safe(s).replace(/[.#$/\[\]]/g, '_');
-    const formatCurrency = v => 'TSh ' + (Number(v)||0).toLocaleString('en-US',{maximumFractionDigits:0});
-    const formatDate = v => { const d=new Date(v); return isNaN(d)?'--':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
-    const monthName = m => new Date(2000, m, 1).toLocaleString('en-GB',{month:'long'});
+  <script>
+    /** Year range + anchor **/
+    const SOMAP_ALLOWED_YEARS = Array.from({length: 20}, (_,i)=>2023+i); // 2023..2042
+    const SOMAP_DEFAULT_YEAR = 2025;
 
-    function numberToEnglish(n){
-      const s=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-      const t=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-      if(n<20) return s[n];
-      if(n<100) return t[Math.floor(n/10)]+(n%10?` ${s[n%10]}`:'');
-      if(n<1000) return `${s[Math.floor(n/100)]} Hundred${n%100?` ${numberToEnglish(n%100)}`:''}`;
-      if(n<1e6) return `${numberToEnglish(Math.floor(n/1000))} Thousand${n%1000?` ${numberToEnglish(n%1000)}`:''}`;
-      if(n<1e9) return `${numberToEnglish(Math.floor(n/1e6))} Million${n%1e6?` ${numberToEnglish(n%1e6)}`:''}`;
-      return `${numberToEnglish(Math.floor(n/1e9))} Billion${n%1e9?` ${numberToEnglish(n%1e9)}`:''}`;
+    /** Tanzania class ladder (no Class 8). Keep labels EXACTLY. */
+    const CLASS_ORDER = ['Baby Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
+    const L = s => String(s||'').trim().toLowerCase();
+
+    /** Shift a base class by delta years relative to anchor (2025). */
+    function shiftClass(baseClass, deltaYears){
+      const i = CLASS_ORDER.findIndex(c => L(c)===L(baseClass));
+      if (i<0) return baseClass||'';
+      const j = i + Number(deltaYears||0);
+      if (j < 0) return 'PRE-ADMISSION';
+      if (j >= CLASS_ORDER.length) return 'GRADUATED';
+      return CLASS_ORDER[j];
     }
-    const amountToWords = a => `${numberToEnglish(Number(a)||0)} Tanzanian Shillings only`;
+  </script>
 
-    function normalizePayment(p, src, kind){
-      const amt = Number(p?.amount ?? p?.amt ?? p?.value ?? 0);
-      let ts = Number(p?.timestamp || p?.time || 0);
-      if(!ts && p?.date){ const t=Date.parse(p.date); if(!isNaN(t)) ts = t; }
-      if(!ts) ts = Date.now();
-      const method = p?.method || p?.mode || p?.paymode || 'Cash';
-      const note   = p?.note || p?.purpose || p?.desc || p?.remarks || 'Payment';
-      // infer kind if not passed
-      let k = kind;
-      if (!k) {
-        if (p?.type) {
-          k = String(p.type).toLowerCase();
-        } else if (/friday/i.test(src)) {
-          k = 'friday';
-        } else if (/graduation/i.test(src) || /graduation/i.test(note)) {
-          k = 'graduation';
-        } else if (/fee|finance/i.test(src) || /fee/i.test(note)) {
-          k = 'tuition';
-        } else {
-          k = 'other';
-        }
-      }
-      const academicYear = Number(p?.academicYear ?? p?.year ?? p?._year);
-      const payload = { amount: amt, timestamp: ts, method, note, _src: src || '', _kind: k };
-      if (Number.isFinite(academicYear)) payload.academicYear = academicYear;
-      return payload;
-    }
-    function dedupe(arr){
-      const seen=new Set();
-      return arr.filter(p=>{
-        const k=`${p.amount}|${new Date(p.timestamp).toDateString()}|${p.method}|${p.note}|${p._kind}`;
-        if(seen.has(k)) return false; seen.add(k); return true;
-      });
-    }
+  <script>
+    /** Reuse shared year context if present, else create a light fallback. */
+    window.somapYearContext = window.somapYearContext || (function(){
+      let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+      const listeners = new Set();
+      return {
+        getSelectedYear(){ return selected; },
+        setSelectedYear(y){
+          y = String(y);
+          if (selected===y) return;
+          selected = y;
+          try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
+          listeners.forEach(fn=>{ try{ fn(y); }catch{} });
+        },
+        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+      };
+    })();
+  </script>
 
-    /* ===== Contacts ===== */
-    function collectContactsFromStudent(s){
-      const candidates = [
-        s.primaryParentContact, s.prefoneParentContact, s.parentContact, s.parentPhone,
-        s.guardianPhone, s.guardianContact, s.fatherPhone, s.motherPhone,
-        s.phone1, s.phone2, s.phone, s.whatsapp, s.contact,
-        s.parent1Phone, s.parent2Phone, s.parent1, s.parent2, s.contacts
-      ];
-      const bag = [];
-      for (const v of candidates){
-        if (!v) continue;
-        if (typeof v === 'string' || typeof v === 'number'){ bag.push(String(v)); }
-        else if (Array.isArray(v)){ v.forEach(x=> x && bag.push(String(x))); }
-        else if (typeof v === 'object'){ Object.values(v).forEach(x=> x && bag.push(String(x))); }
-      }
-      return [...new Set(bag.map(x=>x.trim()).filter(Boolean))];
+  <script>
+    const db = window.db || (firebase?.database ? firebase.database() : null);
+    if (!db) console.error('DB not initialized; ensure firebase.js loaded earlier.');
+
+    async function loadYearData(targetYear){
+      const y = String(targetYear || window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      const anchorY = String(SOMAP_DEFAULT_YEAR);
+
+      const [studentsSnap, anchorEnrollSnap, yearEnrollSnap] = await Promise.all([
+        db.ref(scopedPath('students')).once('value'),
+        db.ref(scopedPath(`enrollments/${anchorY}`)).once('value'),
+        db.ref(scopedPath(`enrollments/${y}`)).once('value').catch(()=>({val:()=>null}))
+      ]);
+
+      const students = studentsSnap.val() || {};
+      const enrollAnchor = anchorEnrollSnap.val() || {};
+      const enrollYear   = (yearEnrollSnap && yearEnrollSnap.val && yearEnrollSnap.val()) || {};
+
+      return { y, students, enrollAnchor, enrollYear };
     }
 
-    async function fetchContactsFallback(st){
-      const adm = st.admissionNumber || st.pupilId || '';
-      const paths = [`parents/${st.key}`, `parents/${adm}`, `parentsByStudent/${st.key}`, `studentParents/${adm}`];
-      for (const p of paths){
-        try{
-          const snap = await db.ref(p).once('value'); const obj = snap.val();
-          if (!obj) continue;
-          const vals = (typeof obj === 'object') ? Object.values(obj) : [obj];
-          const bag=[];
-          vals.forEach(rec=>{
-            if (!rec) return;
-            [rec.phone,rec.mobile,rec.contact,rec.whatsapp,rec.parentPhone,rec.fatherPhone,rec.motherPhone]
-              .forEach(x=> x && bag.push(String(x)));
-          });
-          const clean=[...new Set(bag.map(x=>x.trim()).filter(Boolean))];
-          if (clean.length) return clean;
-        }catch{}
-      }
-      return [];
+    function resolveClassForYear(studentId, anchorMap, yearMap, targetYear){
+      const anchor = (anchorMap||{})[studentId] || {};
+      const baseClass = anchor.className || anchor.classLevel || 'Baby Class';
+      const yRec = (yearMap||{})[studentId];
+      if (yRec?.className || yRec?.classLevel) return (yRec.className || yRec.classLevel);
+      const delta = Number(targetYear) - SOMAP_DEFAULT_YEAR;
+      return shiftClass(baseClass, delta);
     }
 
-    /* ===== Global state ===== */
-    let allStudents = [];
+    const VIEW_KIND = 'detail';
+  </script>
+</head>
+<body class="antialiased">
+  <div class="min-h-screen pb-16">
+    <header class="page-chrome sticky top-0 z-30 border-b border-white/10 bg-slate-900/80 backdrop-blur-xl">
+      <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4">
+        <div class="flex items-center gap-3">
+          <img src="../images/somap-logo.png.jpg" alt="SoMAp logo" class="h-12 w-12 rounded-2xl border border-white/20 object-contain shadow-lg"/>
+          <div>
+            <p class="text-lg font-semibold text-white">SoMAp Receipt Center</p>
+            <p class="text-sm text-slate-300">Finance - Parents - Approvals</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <div id="somapYearWrap" class="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white">
+            <label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-300">Academic Year</label>
+            <select data-somap-year-select class="rounded-lg border border-white/30 bg-slate-900/80 px-2 py-1 text-sm text-white focus:outline-none"></select>
+            <span class="text-xs text-slate-400">Working year: <b id="somapYearHint">--</b></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="printReceiptBtn" class="print:hidden inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:border-sky-400 hover:text-sky-100"><i class="fa-solid fa-print"></i><span>Print</span></button>
+            <button id="downloadReceiptBtn" class="print:hidden inline-flex items-center gap-2 rounded-full border border-sky-500 bg-sky-500/20 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/30"><i class="fa-solid fa-file-arrow-down"></i><span>PDF</span></button>
+          </div>
+        </div>
+      </div>
+    </header>
 
-    /* ===== UI actions ===== */
-    q('#fullBtn').addEventListener('click', ()=>{
-      const el = document.documentElement;
-      if (!document.fullscreenElement) { el.requestFullscreen?.(); }
-      else { document.exitFullscreen?.(); }
-    });
-
-    q('#refreshBtn').addEventListener('click', async ()=>{
-      await loadStudents(true);
-      renderStudents(filter(q('#searchBox').value));
-    });
-    q('#searchBox').addEventListener('input', (e)=> renderStudents(filter(e.target.value)));
-
-    /* ===== Auth gate ===== */
-    auth.onAuthStateChanged(async user=>{
-      const tb = q('#studentsTbody');
-      if (!user){
-        tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-300">Not signed in. Please sign in (Mhasibu) and reopen Receipts.</td></tr>`;
-        return;
-      }
-      await loadStudents(true);
-      renderStudents(allStudents);
-    });
-
-    /* ===== Load students (fast; no receipts yet) ===== */
-    async function loadStudents(force){
-      if (allStudents.length && !force) return;
-      let snap;
-      try{ snap = await db.ref('students').once('value'); }
-      catch(e){
-        const tb = q('#studentsTbody');
-        tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-300">Permission denied or network error loading "students".</td></tr>`;
-        throw e;
-      }
-      const obj = snap.val() || {};
-      allStudents = Object.entries(obj).map(([key,val])=>({ key, ...(val||{}) }));
-      allStudents.sort((a,b)=> (safe(a.firstName)+safe(a.lastName)).localeCompare(safe(b.firstName)+safe(b.lastName)));
-
-      for (const st of allStudents){
-        let contacts = collectContactsFromStudent(st);
-        if (!contacts.length) contacts = await fetchContactsFallback(st);
-        st.__contacts = contacts;
-        st.__lastPayment = null;
-        st.__receiptCount = null;
-        st.__payments = null;
-        st.__finance = null; // cache of computed finance summary
-      }
-    }
-
-    function filter(term){
-      const t = String(term||'').toLowerCase().trim();
-      if(!t) return allStudents;
-      return allStudents.filter(s=>{
-        const name = `${safe(s.firstName)} ${safe(s.middleName||'')} ${safe(s.lastName)}`.toLowerCase();
-        const adm  = String(s.admissionNumber||s.pupilId||'').toLowerCase();
-        const contacts = (s.__contacts||[]).join(' ').toLowerCase();
-        return name.includes(t) || adm.includes(t) || contacts.includes(t);
-      });
-    }
-
-    function renderStudents(rows){
-      const tb = q('#studentsTbody');
-      if (!rows.length){
-        tb.innerHTML = `<tr><td colspan="7" class="py-8 text-center muted">No students found.</td></tr>`;
-        return;
-      }
-      tb.innerHTML = rows.map(st=>{
-        const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
-        const adm  = safe(st.admissionNumber || st.pupilId || '--');
-        const cls  = safe(st.classLevel || '--');
-        const contacts = (st.__contacts && st.__contacts.length) ? st.__contacts.join(', ') : '—';
-        const last = st.__lastPayment ? `${formatDate(st.__lastPayment.timestamp)} — ${formatCurrency(st.__lastPayment.amount)}` : '<span class="text-slate-400">—</span>';
-        const rcount = (st.__receiptCount!=null) ? st.__receiptCount : '<span class="text-slate-400">—</span>';
-        const meta = { key: st.key, adm, cls };
-        return `
-          <tr>
-            <td class="whitespace-nowrap">
-              <div class="flex items-center gap-2">
-                <img src="${st.photoUrl||'../images/somap-logo.png.jpg'}" class="w-8 h-8 rounded-lg object-cover" crossorigin="anonymous"/>
-                <div class="flex items-center gap-2">
-                  <span>${name}</span>
-                  ${st.gender ? `<span class="tag">${safe(st.gender)}</span>` : ``}
+    <main class="px-4 py-8">
+      <div class="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr),320px]">
+        <section id="receiptCanvas" class="receipt-sheet">
+          <div class="inner space-y-8">
+            <div class="flex flex-wrap items-start gap-6 border-b border-slate-200 pb-6">
+              <div class="flex items-center gap-4">
+                <img src="../images/somap-logo.png.jpg" alt="School logo" class="h-16 w-16 rounded-2xl border border-slate-200 bg-white object-contain shadow"/>
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">Socrates Modern Academy Programme</p>
+                  <h1 class="text-3xl font-bold text-slate-900">Receipt</h1>
+                  <p class="text-sm text-slate-500">SoMAp Integrated Finance Suite</p>
                 </div>
               </div>
-            </td>
-            <td>${adm}</td>
-            <td>${cls}</td>
-            <td class="whitespace-nowrap">${contacts}</td>
-            <td class="js-last" data-key="${st.key}">${last}</td>
-            <td class="js-count" data-key="${st.key}">${rcount}</td>
-            <td>
-              <button class="px-3 py-1.5 rounded-md bg-white/10 hover:bg-white/20" title="View receipts"
-                onclick='openDrawer(${JSON.stringify(meta).replace(/"/g,"&quot;")})'>
-                <i class="fas fa-eye"></i>
-              </button>
-            </td>
+              <div class="ml-auto text-right">
+                <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Receipt No.</p>
+                <p id="receiptNumber" class="text-2xl font-bold text-slate-900">--</p>
+                <p id="receiptDate" class="text-sm text-slate-500">--</p>
+              </div>
+            </div>
+
+            <div class="identity-card grid gap-6 md:grid-cols-[auto,1fr]">
+              <div class="avatar-frame">
+                <img id="avatarImage" class="hidden" alt="Student portrait"/>
+                <span id="avatarInitials" class="avatar-initials">--</span>
+              </div>
+              <div class="space-y-1">
+                <div class="flex flex-wrap items-center gap-3">
+                  <h2 id="studentName" class="text-2xl font-semibold text-slate-900">Student Name</h2>
+                  <span id="studentClass" class="rounded-full bg-sky-100 px-3 py-1 text-sm font-semibold text-sky-700">Class</span>
+                  <span id="graduatedBadge" class="hidden rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-rose-600">Graduated</span>
+                </div>
+                <p id="studentAdmission" class="text-sm font-medium text-slate-600">Admission: --</p>
+                <p class="text-sm text-slate-500 flex flex-wrap items-center gap-2"><i class="fa-solid fa-phone text-slate-400"></i><span id="motherContact">+255 ...</span></p>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="space-y-3">
+                <div class="form-line"><label>Received From</label><span class="value"><span id="fieldReceivedFrom">--</span></span></div>
+                <div class="form-line"><label>Being Payment Of</label><span class="value"><span id="fieldPaymentOf">--</span></span></div>
+                <div class="form-line"><label>Paid By (Name)</label><span class="value"><span id="fieldPaidBy">--</span></span></div>
+                <div class="form-line"><label>Contact of Payer</label><span class="value"><span id="fieldPayerContact">--</span></span></div>
+              </div>
+              <div class="space-y-3">
+                <div class="form-line"><label>Amount in Figures (TSh)</label><span class="value"><span id="fieldAmountFigures">--</span></span></div>
+                <div class="form-line"><label>Money in Words</label><span class="value"><span id="fieldAmountWords">--</span></span></div>
+                <div class="form-line"><label>Reference Number</label><span class="value"><span id="fieldReference">--</span></span></div>
+                <div class="form-line"><label>Payment Date</label><span class="value"><span id="fieldPaymentDate">--</span></span></div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white/70 px-6 py-4">
+              <div class="flex-1">
+                <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Being Payment Of</p>
+                <p id="paymentLabel" class="text-xl font-semibold text-slate-900">--</p>
+                <p id="paymentPathLabel" class="text-xs text-slate-500">Source --</p>
+              </div>
+              <div class="text-right">
+                <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Status</p>
+                <span id="statusBadge" class="status-pill bg-amber-50 text-amber-600 border border-amber-200">Awaiting</span>
+              </div>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Year Summary</p>
+                  <h3 class="text-xl font-semibold text-slate-900">Fee Summary Table</h3>
+                </div>
+                <button id="tablePeekBtn" class="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><i class="fa-regular fa-eye"></i><span>View</span></button>
+              </div>
+              <div class="overflow-auto rounded-2xl border border-slate-200">
+                <table id="yearSummaryTable" class="min-w-full text-sm">
+                  <thead class="bg-slate-50 text-xs uppercase tracking-[0.2em] text-slate-500">
+                    <tr>
+                      <th class="px-3 py-2 text-left">Being Payment Of</th>
+                      <th class="px-3 py-2 text-right">Paid Now</th>
+                      <th class="px-3 py-2 text-left">Reference</th>
+                      <th class="px-3 py-2 text-left">Receipt Updated</th>
+                      <th class="px-3 py-2 text-left">Payment Date</th>
+                      <th class="px-3 py-2 text-right">Total Paid (YTD)</th>
+                      <th class="px-3 py-2 text-right">Year Required</th>
+                      <th class="px-3 py-2 text-right">Balance</th>
+                      <th class="px-3 py-2 text-left">Plan</th>
+                      <th class="px-3 py-2 text-left">Debt Stage</th>
+                      <th class="px-3 py-2 text-left">Due Date</th>
+                    </tr>
+                  </thead>
+                  <tbody id="summaryBody" class="bg-white"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="grid gap-6 md:grid-cols-2">
+              <div class="space-y-3">
+                <div class="form-line"><label>Cash / Cheque / Bank / Mpesa / Airtel Money</label><span class="value"><span id="fieldMethod">--</span></span></div>
+                <div class="form-line"><label>Tanzanian Shillings</label><span class="value"><span id="fieldFiguresFooter">--</span></span></div>
+                <div class="form-line"><label>Money in Words</label><span class="value"><span id="fieldWordsFooter">--</span></span></div>
+              </div>
+              <div class="space-y-3">
+                <div class="form-line"><label>Approved On</label><span class="value"><span id="approvedOn">--</span></span></div>
+                <div class="form-line"><label>Approved By</label><span class="value"><span id="approvedBy">--</span></span></div>
+                <div class="form-line"><label>Signature</label><span class="value"><span class="text-slate-400">_____________________________</span></span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside id="receiptsPanel" class="glass-card h-fit space-y-4 p-5">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Receipts</p>
+              <h3 class="text-xl font-semibold text-white">Year History</h3>
+            </div>
+            <span class="text-slate-300"><i class="fa-regular fa-eye"></i></span>
+          </div>
+          <div id="receiptsList" class="max-h-[70vh] space-y-3 overflow-auto pr-1"></div>
+          <p id="listEmpty" class="text-sm text-slate-400 hidden">No approved receipts for this learner in the selected year.</p>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <div id="loadingState" class="fixed inset-0 hidden items-center justify-center bg-slate-900/70 text-lg font-semibold text-white backdrop-blur-xl">Loading receipt...</div>
+  <div id="errorBanner" class="fixed bottom-4 left-1/2 hidden w-[90%] max-w-xl -translate-x-1/2 rounded-2xl border border-rose-400 bg-rose-500/20 px-4 py-3 text-center text-sm text-rose-100"></div>
+  <script>
+    (function initYearSelector(){
+      const sel = document.querySelector('[data-somap-year-select]');
+      const hint = document.getElementById('somapYearHint');
+      if (!sel) return;
+      sel.innerHTML = SOMAP_ALLOWED_YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+      const current = window.somapYearContext.getSelectedYear();
+      sel.value = current;
+      if (hint) hint.textContent = current;
+      sel.addEventListener('change', e=>{
+        const y = String(e.target.value);
+        window.somapYearContext.setSelectedYear(y);
+        if (hint) hint.textContent = y;
+      });
+    })();
+  </script>
+  <script>
+    const urlParams = new URLSearchParams(location.search);
+    const initialYearParam = urlParams.get('year');
+    if (initialYearParam && SOMAP_ALLOWED_YEARS.includes(Number(initialYearParam))) {
+      window.somapYearContext.setSelectedYear(initialYearParam);
+    } else if (!initialYearParam) {
+      urlParams.set('year', window.somapYearContext.getSelectedYear());
+      history.replaceState({}, '', `${location.pathname}?${urlParams.toString()}`);
+    }
+
+    const scopedPath = path => {
+      if (!path) return '';
+      const schoolId = window.currentSchoolId;
+      return schoolId ? `schools/${schoolId}/${path}` : path;
+    };
+
+    const PAYMENT_ROWS = [
+      { key:'schoolFees', label:'School Fees', modules:['finance','schoolfees','school-fees','tuition','fees'], path:'finance.html' },
+      { key:'transport', label:'Transport', modules:['transport','transportpayment','schoolbus','bus'], path:'transporthtml/transportpayment.html' },
+      { key:'graduation', label:'Graduation', modules:['graduation','grad'], path:'Tostaffhtml/graduation.html' },
+      { key:'friday', label:'Friday Money', modules:['fridaymoney','friday','pocketmoney'], path:'Tofinancehtml/fridaymoney.html' },
+      { key:'other', label:'Other (Clothing / Remedials)', modules:['other','others','clothing','remedials','uniform','misc'], path:'upcoming' }
+    ];
+    const MODULE_LOOKUP = PAYMENT_ROWS.reduce((acc,row)=>{ row.modules.forEach(m=> acc[m.toLowerCase()] = row.key); return acc; },{});
+    const CLOUDINARY_FALLBACK = 'dg7vnrkgd';
+
+    const state = {
+      year: window.somapYearContext.getSelectedYear(),
+      queryStudent: urlParams.get('student') || '',
+      queryApproval: urlParams.get('approvalId') || '',
+      students:{},
+      enrollAnchor:{},
+      enrollYear:{},
+      studentId:null,
+      studentRecord:null,
+      approvals:[],
+      activeApproval:null,
+      targets: createEmptyTargets(),
+      summaryRows:{},
+      loading:false
+    };
+
+    let renderToken = 0;
+    const monthCache = new Map();
+
+    function createEmptyTargets(){
+      const base = {};
+      PAYMENT_ROWS.forEach(row => {
+        base[row.key] = { required:0, planLabel:'', debtStage:'', dueDate:'', colorTone:'warn' };
+      });
+      return base;
+    }
+
+    const formatCurrency = v => {
+      if (v == null || v === '') return '--';
+      const num = Number(v) || 0;
+      return `TSh ${num.toLocaleString('en-US',{maximumFractionDigits:0})}`;
+    };
+    const formatDateTime = v => {
+      const d = new Date(Number(v));
+      if (Number.isNaN(d.getTime())) return '--';
+      return d.toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    };
+    const formatDateOnly = v => {
+      const d = new Date(Number(v));
+      if (Number.isNaN(d.getTime())) return '--';
+      return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+    };
+    const toNumber = val => {
+      if (typeof val === 'number') return val;
+      if (typeof val === 'string'){
+        const cleaned = val.replace(/[^0-9.-]/g,'');
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : 0;
+      }
+      return Number(val)||0;
+    };
+
+    function numberToWordsTZS(val){
+      const belowTwenty=['Zero','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+      const tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+      const num = Math.abs(Math.floor(Number(val)||0));
+      if (num<20) return `${belowTwenty[num]} Tanzanian Shillings only`;
+      function helper(n){
+        if(n<20) return belowTwenty[n];
+        if(n<100) return tens[Math.floor(n/10)] + (n%10?` ${belowTwenty[n%10]}`:'');
+        if(n<1000) return `${helper(Math.floor(n/100))} Hundred${n%100?` ${helper(n%100)}`:''}`;
+        if(n<1e6) return `${helper(Math.floor(n/1000))} Thousand${n%1000?` ${helper(n%1000)}`:''}`;
+        if(n<1e9) return `${helper(Math.floor(n/1e6))} Million${n%1e6?` ${helper(n%1e6)}`:''}`;
+        return `${helper(Math.floor(n/1e9))} Billion${n%1e9?` ${helper(n%1e9)}`:''}`;
+      }
+      return `${helper(num)} Tanzanian Shillings only`;
+    }
+
+    function buildFullName(s){
+      if (!s) return '';
+      return `${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`.replace(/\s+/g,' ').trim();
+    }
+
+    function getInitials(name){
+      if (!name) return '--';
+      const parts = name.trim().split(/\s+/).slice(0,2);
+      return parts.map(p=>p[0]?.toUpperCase()||'').join('') || '--';
+    }
+
+    function collectPrimaryContact(student){
+      if (!student) return '';
+      const fields = [student.motherPhone, student.parentPhone, student.primaryParentContact, student.guardianPhone, student.phone1, student.phone2, student.whatsapp];
+      const val = fields.find(Boolean);
+      return val ? String(val) : '';
+    }
+
+    function resolvePhotoUrl(student, fallbackUrl){
+      if (!student && !fallbackUrl) return '';
+      const direct = student?.photoUrl || student?.passportPhoto || student?.passport || student?.imageUrl || student?.profilePhoto || fallbackUrl;
+      if (direct) return direct;
+      const publicId = student?.cloudinaryPublicId || student?.cloudinaryId || student?.passportPublicId || student?.photoPublicId;
+      const cloud = student?.cloudinaryCloud || window.SOMAP_CLOUDINARY_CLOUD || CLOUDINARY_FALLBACK;
+      if (publicId) {
+        return `https://res.cloudinary.com/${cloud}/image/upload/c_thumb,w_180,h_180,g_face,r_max/${publicId}.jpg`;
+      }
+      return '';
+    }
+
+    function moduleToRowKey(module){
+      if (!module) return 'other';
+      const key = module.toString().toLowerCase();
+      return MODULE_LOOKUP[key] || 'other';
+    }
+
+    function parseBreakdown(entries){
+      const arr = Array.isArray(entries) ? entries : Object.values(entries||{});
+      const map = {};
+      arr.forEach(item => {
+        if (!item) return;
+        const label = (item.label || item.title || item.name || '').toString().trim();
+        if (!label) return;
+        const lower = label.toLowerCase();
+        map[lower] = {
+          numeric: toNumber(item.value ?? item.amount ?? item.total ?? item.display ?? 0),
+          text: item.display || item.value || item.amount || item.total || ''
+        };
+      });
+      return map;
+    }
+
+    function extractFromBreakdown(map, needle){
+      if (!map) return { numeric:0, text:'' };
+      const key = Object.keys(map).find(k => k.includes(needle));
+      return key ? map[key] : { numeric:0, text:'' };
+    }
+    function normalizeApprovalRecord(id, raw){
+      if (!raw) return null;
+      const payload = (()=>{
+        if (!raw.modulePayload) return {};
+        if (typeof raw.modulePayload === 'string'){
+          try{ return JSON.parse(raw.modulePayload); }catch{return {}; }
+        }
+        return raw.modulePayload;
+      })();
+      const breakdown = parseBreakdown(payload.breakdown || raw.breakdown);
+      const sourceModule = raw.sourceModule || raw.module || raw.paymentModule || 'other';
+      const rowKey = moduleToRowKey(sourceModule);
+      const amountPaidNow = Number(raw.amountPaidNow ?? raw.amount ?? payload.amount ?? 0);
+      const paymentInfo = payload.payment || raw.payment || {};
+      const paymentMethod = raw.paymentMethod || paymentInfo.method || raw.method || 'Cash';
+      const approvedAt = Number(raw.approvedAt || raw.approved_on || raw.timestamp || raw.createdAt || raw.updatedAt || Date.now());
+      const paymentTimestamp = Number(paymentInfo.timestamp || paymentInfo.time || raw.paymentDate || raw.datePaid || payload.timestamp || approvedAt);
+      const referenceCode = raw.paymentReferenceCode || paymentInfo.referenceCode || paymentInfo.reference || raw.referenceCode || raw.reference || raw.ref || '';
+      const paidBy = raw.paidBy || paymentInfo.paidBy || paymentInfo.by || raw.payer || raw.parentName || raw.guardianName || 'Parent/Guardian';
+      const payerContact = raw.payerContact || paymentInfo.contact || raw.contactOfPayer || raw.parentPhone || raw.guardianPhone || '';
+      const totalRequired = Number(raw.totalRequired || extractFromBreakdown(breakdown,'fee').numeric || extractFromBreakdown(breakdown,'year').numeric || payload.totalRequired || 0);
+      const totalPaidBefore = Number(raw.totalPaidBefore || extractFromBreakdown(breakdown,'total paid before').numeric || 0);
+      const balanceAfter = Number(raw.newBalanceAfterThis || extractFromBreakdown(breakdown,'balance after').numeric || raw.balance || 0);
+      const planEntry = extractFromBreakdown(breakdown,'plan');
+      const debtEntry = extractFromBreakdown(breakdown,'debt');
+      const dueEntry = extractFromBreakdown(breakdown,'due');
+      const planLabel = raw.planLabel || payload.planLabel || payload.plan?.name || planEntry.text || (planEntry.numeric ? `${planEntry.numeric}` : '');
+      const debtStage = raw.debtStage || payload.debtStage || debtEntry.text || (debtEntry.numeric ? `Debt till ${debtEntry.numeric}` : '');
+      const dueDate = raw.dueDate || payload.dueDate || payload.plan?.nextDueDate || dueEntry.text || dueEntry.numeric;
+      const studentId = raw.studentKey || raw.studentId || raw.student_id || raw.studentUID || raw.studentKeyId || payload.studentKey;
+      const studentAdm = raw.studentAdm || raw.studentAdmission || raw.admissionNumber || raw.admissionNo || payload.studentAdm || payload.studentAdmission;
+      const className = raw.className || raw.studentClass || raw.classLevel || payload.className;
+      const motherPhone = raw.motherPhone || raw.parentPhone || payload.parentPhone;
+      const amountWords = numberToWordsTZS(amountPaidNow);
+      return {
+        id: id || raw.id || raw.approvalId || raw.receiptId || raw.uid,
+        sourceModule,
+        rowKey,
+        moduleLabel: (PAYMENT_ROWS.find(r=>r.key===rowKey)?.label) || 'Other',
+        modulePath: PAYMENT_ROWS.find(r=>r.key===rowKey)?.path || '--',
+        amountPaidNow,
+        paymentMethod,
+        paymentReferenceCode: referenceCode,
+        paidBy,
+        payerContact,
+        approvedAt,
+        approvedBy: raw.approvedBy || raw.approved_by || raw.approvedByName || '--',
+        paymentDate: paymentTimestamp,
+        receiptUpdatedAt: Number(raw.receiptUpdatedAt || raw.updatedAt || approvedAt),
+        totalRequired,
+        totalPaidBefore,
+        totalPaidAfter: totalPaidBefore + amountPaidNow,
+        balanceAfter,
+        planLabel,
+        debtStage,
+        dueDate,
+        studentId,
+        studentAdm,
+        studentName: raw.studentName || raw.student || raw.learnerName || payload.studentName,
+        className,
+        motherPhone,
+        amountWords,
+        breakdownMap: breakdown,
+        note: raw.note || raw.description || payload.note || payload.reason || raw.reason || '',
+        photoUrl: raw.studentPhoto || raw.photoUrl || payload.photoUrl || '',
+      };
+    }
+
+    function matchesStudent(approval, studentId, adm){
+      if (!approval) return false;
+      if (studentId && approval.studentId && String(approval.studentId) === String(studentId)) return true;
+      if (adm && approval.studentAdm && String(approval.studentAdm).toLowerCase() === String(adm).toLowerCase()) return true;
+      return false;
+    }
+
+    async function getApprovalsMonth(year, month){
+      const key = `${year}-${month}`;
+      if (monthCache.has(key)) return monthCache.get(key);
+      const snap = await db.ref(scopedPath(`approvalsHistory/${year}/${month}`)).once('value').catch(()=>null);
+      const val = snap?.val() || {};
+      monthCache.set(key, val);
+      return val;
+    }
+
+    async function findApprovalById(year, approvalId){
+      if (!approvalId) return null;
+      for (let i=1;i<=12;i++){
+        const month = String(i).padStart(2,'0');
+        const data = await getApprovalsMonth(year, month);
+        if (!data || typeof data !== 'object') continue;
+        if (data[approvalId]) return { ...data[approvalId], __month: month };
+        const found = Object.entries(data).find(([key,val]) => {
+          if (key === approvalId) return true;
+          return val && (val.id === approvalId || val.approvalId === approvalId || val.receiptId === approvalId);
+        });
+        if (found) return { ...found[1], __month: month };
+      }
+      return null;
+    }
+
+    async function fetchApprovalsForStudent(year, studentId, adm){
+      const months = Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'));
+      const list = [];
+      for (const month of months){
+        const data = await getApprovalsMonth(year, month);
+        if (!data) continue;
+        Object.entries(data).forEach(([id,value]) => {
+          const norm = normalizeApprovalRecord(id, value);
+          if (!norm) return;
+          if (matchesStudent(norm, studentId, adm)) list.push(norm);
+        });
+      }
+      return list.sort((a,b)=>(Number(b.approvedAt||0) - Number(a.approvedAt||0)));
+    }
+
+    function resolveStudentId(query, students){
+      if (!query) return null;
+      const normalized = String(query).trim().toLowerCase();
+      if (students[query]) return query;
+      const match = Object.keys(students).find(key => {
+        const s = students[key];
+        const admissions = [s.admissionNumber, s.admissionNo, s.admNo, s.registrationNumber, s.autoId];
+        return admissions.some(adm => adm && String(adm).trim().toLowerCase() === normalized);
+      });
+      return match || null;
+    }
+
+    function findStudentByName(name, students){
+      if (!name) return null;
+      const normalized = name.trim().toLowerCase();
+      return Object.keys(students).find(key => buildFullName(students[key]).toLowerCase() === normalized) || null;
+    }
+
+    async function loadTargetAmounts(year, studentId, admission){
+      const targets = createEmptyTargets();
+      if (!studentId) return targets;
+      const promises = [
+        db.ref(scopedPath(`studentFees/${year}/${studentId}`)).once('value').catch(()=>null),
+        db.ref(scopedPath(`financeStatuses/${year}/${studentId}`)).once('value').catch(()=>null),
+        db.ref(scopedPath(`transportExpected/${year}/${studentId}`)).once('value').catch(()=>null),
+        db.ref(scopedPath(`fridayPlans/${year}/${studentId}`)).once('value').catch(()=>null),
+        db.ref(scopedPath(`graduation/${year}/students/${sanitizeKey(admission||studentId)}`)).once('value').catch(()=>null)
+      ];
+      const [feeSnap,statusSnap,transportSnap,fridaySnap,gradSnap] = await Promise.all(promises);
+      const fee = feeSnap?.val() || {};
+      if (fee){
+        targets.schoolFees.required = Number(fee.feePerYear || fee.annualFee || fee.required || 0);
+        targets.schoolFees.planLabel = fee.planLabel || fee.paymentPlan || fee.plan || '';
+        targets.schoolFees.debtStage = fee.debtStage || '';
+        targets.schoolFees.dueDate = fee.nextDueDate || '';
+      }
+      const status = statusSnap?.val() || {};
+      if (status){
+        targets.schoolFees.debtStage = status.debtTill || status.debtStage || targets.schoolFees.debtStage;
+        targets.schoolFees.dueDate = status.nextDue || status.nextDueDate || targets.schoolFees.dueDate;
+      }
+      const transport = transportSnap?.val() || {};
+      if (transport){
+        targets.transport.required = Number(transport.expected || transport.annualFee || transport.target || 0);
+        targets.transport.planLabel = transport.plan || transport.schedule || '';
+        targets.transport.debtStage = transport.debtStage || '';
+        targets.transport.dueDate = transport.nextDue || '';
+      }
+      const friday = fridaySnap?.val() || {};
+      if (friday){
+        targets.friday.required = Number(friday.expected || friday.target || friday.total || 0);
+        targets.friday.planLabel = friday.plan || friday.frequency || '';
+      }
+      const grad = gradSnap?.val() || {};
+      if (grad){
+        targets.graduation.required = Number(grad.expectedFee || grad.expected || 0);
+        targets.graduation.planLabel = grad.plan || '';
+        targets.graduation.debtStage = grad.debtStage || '';
+        targets.graduation.dueDate = grad.dueDate || '';
+      }
+      return targets;
+    }
+
+    function sanitizeKey(val){
+      return String(val||'').replace(/[.#$/\[\]]/g,'_');
+    }
+
+    function deriveStatusTone(balance, stage){
+      if (balance <= 0) return { text: stage || 'Cleared', tone:'good' };
+      if (stage && /overdue|dirisha|late|mk|debt/i.test(stage)) return { text: stage, tone:'bad' };
+      return { text: stage || 'In progress', tone:'warn' };
+    }
+
+    function buildSummaryRows(approvals, activeApproval, targets){
+      const rows = {};
+      PAYMENT_ROWS.forEach(row => {
+        rows[row.key] = {
+          label: row.label,
+          paidNow: activeApproval && activeApproval.rowKey === row.key ? activeApproval.amountPaidNow : 0,
+          reference: activeApproval && activeApproval.rowKey === row.key ? (activeApproval.paymentReferenceCode || '--') : '--',
+          receiptUpdated: activeApproval && activeApproval.rowKey === row.key ? formatDateOnly(activeApproval.receiptUpdatedAt) : '--',
+          paymentDate: activeApproval && activeApproval.rowKey === row.key ? formatDateOnly(activeApproval.paymentDate) : '--',
+          totalPaid: 0,
+          required: targets[row.key]?.required || 0,
+          plan: targets[row.key]?.planLabel || '',
+          debtStage: targets[row.key]?.debtStage || '',
+          dueDate: targets[row.key]?.dueDate || '',
+          balance: 0,
+          tone:'warn'
+        };
+      });
+
+      approvals.forEach(rec => {
+        const bucket = rows[rec.rowKey] || rows.other;
+        bucket.totalPaid += Number(rec.amountPaidNow || 0);
+        if (!bucket.plan && rec.planLabel) bucket.plan = rec.planLabel;
+        if (!bucket.debtStage && rec.debtStage) bucket.debtStage = rec.debtStage;
+        if (!bucket.dueDate && rec.dueDate) bucket.dueDate = rec.dueDate;
+        if (!bucket.required && rec.totalRequired) bucket.required = rec.totalRequired;
+      });
+
+      PAYMENT_ROWS.forEach(row => {
+        const bucket = rows[row.key];
+        bucket.balance = bucket.required ? Math.max(bucket.required - bucket.totalPaid, 0) : (activeApproval && activeApproval.rowKey === row.key ? Math.max(activeApproval.balanceAfter,0) : 0);
+        const tone = deriveStatusTone(bucket.balance, bucket.debtStage);
+        bucket.tone = tone.tone;
+        bucket.debtStageLabel = tone.text || bucket.debtStage || '--';
+      });
+
+      return rows;
+    }
+    function setField(id, value){
+      const el = document.getElementById(id);
+      if (el) el.textContent = value ?? '--';
+    }
+
+    function toggle(el, condition){
+      if (!el) return;
+      el.classList.toggle('hidden', !condition);
+    }
+
+    function setLoading(isLoading){
+      const loader = document.getElementById('loadingState');
+      if (!loader) return;
+      loader.classList.toggle('hidden', !isLoading);
+    }
+
+    function showError(message){
+      const banner = document.getElementById('errorBanner');
+      if (!banner) return;
+      if (!message){ banner.classList.add('hidden'); return; }
+      banner.textContent = message;
+      banner.classList.remove('hidden');
+      setTimeout(()=>banner.classList.add('hidden'), 6000);
+    }
+
+    async function hydrateState(){
+      const token = ++renderToken;
+      setLoading(true);
+      showError('');
+      try{
+        const { y, students, enrollAnchor, enrollYear } = await loadYearData(window.somapYearContext.getSelectedYear());
+        if (token !== renderToken) return;
+        state.year = y;
+        state.students = students;
+        state.enrollAnchor = enrollAnchor;
+        state.enrollYear = enrollYear;
+
+        let normalizedApproval = null;
+        if (state.queryApproval){
+          const approvalRaw = await findApprovalById(state.year, state.queryApproval);
+          if (token !== renderToken) return;
+          if (approvalRaw) normalizedApproval = normalizeApprovalRecord(state.queryApproval, approvalRaw);
+          else showError('Receipt not found in this year.');
+        }
+
+        let studentId = resolveStudentId(state.queryStudent, students);
+        if (!studentId && normalizedApproval?.studentId && students[normalizedApproval.studentId]) studentId = normalizedApproval.studentId;
+        if (!studentId && normalizedApproval?.studentAdm) studentId = resolveStudentId(normalizedApproval.studentAdm, students);
+        if (!studentId && normalizedApproval?.studentName) studentId = findStudentByName(normalizedApproval.studentName, students);
+
+        state.studentId = studentId;
+        state.studentRecord = studentId ? students[studentId] : null;
+        const admission = state.studentRecord?.admissionNumber || normalizedApproval?.studentAdm || state.queryStudent || '';
+
+        if (!state.queryStudent && admission){
+          urlParams.set('student', admission);
+          history.replaceState({}, '', `${location.pathname}?${urlParams.toString()}`);
+          state.queryStudent = admission;
+        }
+
+        const approvals = (studentId || admission) ? await fetchApprovalsForStudent(state.year, studentId, admission) : [];
+        if (token !== renderToken) return;
+        state.approvals = approvals;
+
+        if (normalizedApproval){
+          const exists = approvals.find(a=>a.id === normalizedApproval.id);
+          if (!exists) state.approvals.unshift(normalizedApproval);
+          state.activeApproval = normalizedApproval;
+        } else {
+          state.activeApproval = approvals[0] || null;
+        }
+
+        state.targets = await loadTargetAmounts(state.year, state.studentId, admission);
+        if (token !== renderToken) return;
+        state.summaryRows = buildSummaryRows(state.approvals, state.activeApproval, state.targets);
+        renderPage();
+      }catch(err){
+        console.error(err);
+        showError(err?.message || 'Failed to load receipt.');
+      }finally{
+        if (token === renderToken) setLoading(false);
+      }
+    }
+
+    function renderPage(){
+      renderIdentity();
+      renderReceiptDetails();
+      renderSummaryTable();
+      renderReceiptsList();
+      updateActionButtons();
+    }
+
+    function renderIdentity(){
+      const name = state.studentRecord ? buildFullName(state.studentRecord) : (state.activeApproval?.studentName || 'Student');
+      setField('studentName', name || 'Student');
+      const admission = state.studentRecord?.admissionNumber || state.activeApproval?.studentAdm || state.queryStudent || '--';
+      setField('studentAdmission', `Admission: ${admission || '--'}`);
+      const contact = collectPrimaryContact(state.studentRecord) || state.activeApproval?.motherPhone || state.activeApproval?.payerContact || '--';
+      setField('motherContact', contact || '--');
+      const classLabel = state.studentId ? resolveClassForYear(state.studentId, state.enrollAnchor, state.enrollYear, state.year) : (state.activeApproval?.className || '--');
+      setField('studentClass', classLabel || '--');
+      const graduated = classLabel && classLabel.toUpperCase().includes('GRADUATED');
+      toggle(document.getElementById('graduatedBadge'), graduated);
+      if (graduated) setField('graduatedBadge', `Graduated (${state.year})`);
+      const photo = resolvePhotoUrl(state.studentRecord, state.activeApproval?.photoUrl);
+      const avatarImage = document.getElementById('avatarImage');
+      const avatarInitials = document.getElementById('avatarInitials');
+      if (photo){
+        avatarImage.src = photo;
+        avatarImage.classList.remove('hidden');
+        avatarInitials.classList.add('hidden');
+      } else {
+        avatarImage.classList.add('hidden');
+        avatarInitials.classList.remove('hidden');
+        avatarInitials.textContent = getInitials(name);
+      }
+    }
+
+    function renderReceiptDetails(){
+      const approval = state.activeApproval;
+      if (!approval){
+        setField('receiptNumber','--');
+        setField('receiptDate','--');
+        ['fieldReceivedFrom','fieldPaymentOf','fieldPaidBy','fieldPayerContact','fieldAmountFigures','fieldAmountWords','fieldReference','fieldPaymentDate','paymentLabel','paymentPathLabel','fieldMethod','fieldFiguresFooter','fieldWordsFooter','approvedOn','approvedBy'].forEach(id=>setField(id,'--'));
+        const badge = document.getElementById('statusBadge');
+        badge.textContent = 'Pending';
+        badge.className = 'status-pill bg-amber-50 text-amber-600 border border-amber-200';
+        return;
+      }
+      setField('receiptNumber', approval.id || '--');
+      setField('receiptDate', formatDateTime(approval.approvedAt));
+      setField('fieldReceivedFrom', approval.paidBy || 'Parent/Guardian');
+      setField('fieldPaymentOf', approval.moduleLabel || '--');
+      setField('fieldPaidBy', approval.paidBy || '--');
+      setField('fieldPayerContact', approval.payerContact || '--');
+      setField('fieldAmountFigures', formatCurrency(approval.amountPaidNow));
+      setField('fieldAmountWords', approval.amountWords || numberToWordsTZS(approval.amountPaidNow));
+      setField('fieldReference', approval.paymentReferenceCode || '--');
+      setField('fieldPaymentDate', formatDateOnly(approval.paymentDate));
+      setField('paymentLabel', `${approval.moduleLabel || 'Payment'} -- ${formatCurrency(approval.amountPaidNow)}`);
+      setField('paymentPathLabel', `Source: ${approval.modulePath}`);
+      setField('fieldMethod', approval.paymentMethod || 'Cash');
+      setField('fieldFiguresFooter', formatCurrency(approval.amountPaidNow));
+      setField('fieldWordsFooter', approval.amountWords || numberToWordsTZS(approval.amountPaidNow));
+      setField('approvedOn', formatDateTime(approval.approvedAt));
+      setField('approvedBy', approval.approvedBy || '--');
+      const badge = document.getElementById('statusBadge');
+      const tone = deriveStatusTone(Math.max(approval.balanceAfter||0,0), approval.debtStage);
+      badge.textContent = tone.text;
+      const toneClass = tone.tone==='good' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : tone.tone==='bad' ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-amber-50 text-amber-600 border border-amber-200';
+      badge.className = `status-pill ${toneClass}`;
+    }
+
+    function renderSummaryTable(){
+      state.summaryRows = buildSummaryRows(state.approvals, state.activeApproval, state.targets);
+      const tbody = document.getElementById('summaryBody');
+      if (!tbody) return;
+      tbody.innerHTML = PAYMENT_ROWS.map(row => {
+        const bucket = state.summaryRows[row.key];
+        const toneClass = bucket.tone==='good' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : bucket.tone==='bad' ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-amber-50 text-amber-600 border-amber-200';
+        return `
+          <tr class="border-t border-slate-100 text-slate-700">
+            <td class="px-3 py-3 font-semibold">${row.label}</td>
+            <td class="px-3 py-3 text-right">${bucket.paidNow ? formatCurrency(bucket.paidNow) : '--'}</td>
+            <td class="px-3 py-3">${bucket.reference || '--'}</td>
+            <td class="px-3 py-3">${bucket.receiptUpdated || '--'}</td>
+            <td class="px-3 py-3">${bucket.paymentDate || '--'}</td>
+            <td class="px-3 py-3 text-right">${bucket.totalPaid ? formatCurrency(bucket.totalPaid) : '--'}</td>
+            <td class="px-3 py-3 text-right">${bucket.required ? formatCurrency(bucket.required) : '--'}</td>
+            <td class="px-3 py-3 text-right">${bucket.balance ? formatCurrency(bucket.balance) : (bucket.required ? 'Cleared' : '--')}</td>
+            <td class="px-3 py-3">${bucket.plan || '--'}</td>
+            <td class="px-3 py-3"><span class="status-pill ${toneClass}">${bucket.debtStageLabel || '--'}</span></td>
+            <td class="px-3 py-3">${bucket.dueDate ? formatDateOnly(bucket.dueDate) : '--'}</td>
           </tr>`;
       }).join('');
     }
 
-    /* ===== Friday Money aggregator (NEW) ===== */
-    async function fetchFridayMoneyRecords(student){
-      // We look under fridayMoney/<YYYY-MM-DD>/<student.key> and count paid=FRIDAY_COST
-      // Pull only the most recent Fridays for speed.
-      const out = [];
-      try{
-        const snap = await db.ref('fridayMoney').orderByKey().limitToLast(FRIDAY_LOOKBACK).once('value');
-        const all = snap.val() || {};
-        for (const [fridayId, map] of Object.entries(all)){
-          const rec = map && map[student.key];
-          if (rec && rec.payment === 'paid'){
-            const ts = rec.timestamp || Date.parse(fridayId) || Date.now();
-            out.push(normalizePayment({
-              amount: FRIDAY_COST,
-              timestamp: ts,
-              method: 'Friday',
-              note: `Friday Money (${fridayId})`
-            }, `fridayMoney/${fridayId}/${student.key}`, 'friday'));
-          }
-        }
-      }catch(e){ console.warn('Friday money fetch failed', e?.message||e); }
-      return out;
-    }
-
-    /* ===== Finance summary (plan, debt till, annual) ===== */
-    async function computeFinanceSummary(st, payments, yearOverride = receiptsYear){
-      // Try to discover annual fee + plan from finance/fees nodes. Fall back to heuristics.
-      const adm = st.admissionNumber || st.pupilId || '';
-      const cls = st.classLevel || '';
-      const selectedYear = Number.isFinite(Number(yearOverride)) ? Number(yearOverride) : receiptsYear;
-      const year = Number.isFinite(selectedYear) ? selectedYear : new Date().getFullYear();
-      let annualFee = 0, planType='monthly', planCount=12, planLabel='Monthly (12)';
-
-      // Try several likely nodes
-      const tryPaths = [
-        `finance/${year}/${cls}/${adm}/meta`,
-        `finance/${year}/${cls}/${adm}`,
-        `fees/${year}/${adm}/meta`,
-        `fees/${year}/${adm}`
-      ];
-      for (const p of tryPaths){
-        try{
-          const v = (await db.ref(p).once('value')).val();
-          if (!v) continue;
-          annualFee = Number(v.annualFee || v.totalFee || v.feeAmount || v.expected || annualFee) || annualFee;
-          const plan = v.plan || v.paymentPlan || v.planType || v.cycle || '';
-          if (typeof plan === 'string'){
-            const m = plan.match(/(\d+)\s*-\s*inst/i);
-            if (m){ planType='instalments'; planCount=Number(m[1])||planCount; }
-            else if (/month/i.test(plan)){ planType='monthly'; planCount=12; }
-          } else if (typeof plan === 'object'){
-            if (/inst/i.test(plan.type||'')){ planType='instalments'; planCount=Number(plan.count||planCount)||planCount; }
-            if (/month/i.test(plan.type||'')){ planType='monthly'; planCount=12; }
-          }
-        }catch{}
+    function renderReceiptsList(){
+      const panel = document.getElementById('receiptsPanel');
+      if (!panel) return;
+      const list = document.getElementById('receiptsList');
+      const empty = document.getElementById('listEmpty');
+      const shouldShow = state.approvals.length > 1 || Boolean(state.queryStudent);
+      panel.classList.toggle('hidden', !shouldShow);
+      if (!shouldShow) return;
+      if (!state.approvals.length){
+        if (list) list.innerHTML = '';
+        if (empty) empty.classList.remove('hidden');
+        return;
       }
-      planLabel = planType==='monthly' ? 'Monthly (12)' : `${planCount}-Instalments`;
-
-      // Paid tuition this academic year (exclude Friday & "other")
-      const now = new Date();
-      const start = new Date(year, ACADEMIC_START_MONTH, 1);
-      const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
-      const cutoff = year === now.getFullYear() ? now : endOfYear;
-      const inYear = (ts)=> {
-        const d = new Date(ts);
-        return d >= start && d <= endOfYear;
-      };
-      const paidTuition = payments
-        .filter(p=> p._kind==='tuition' && inYear(p.timestamp))
-        .reduce((s,p)=> s+Number(p.amount||0), 0);
-
-      // Tuition debt "till" (month or instalment)
-      const monthsElapsed = Math.max(0, (cutoff.getFullYear() - start.getFullYear())*12 + (cutoff.getMonth() - start.getMonth()) + 1); // inclusive
-      let cyclesDue = 12;
-      if (planType==='monthly'){
-        cyclesDue = Math.min(12, Math.max(0, monthsElapsed));
-      } else {
-        // map months to instalments proportionally (ceil)
-        cyclesDue = Math.min(planCount, Math.max(0, Math.ceil((monthsElapsed/12)*planCount)));
-      }
-      const perCycle = (annualFee / (planType==='monthly' ? 12 : planCount)) || 0;
-      const dueTillNow = perCycle * cyclesDue;
-      const debtTill = Math.max(0, Math.round(dueTillNow - paidTuition));
-
-      const annualBalance = Math.max(0, Math.round(annualFee - paidTuition));
-
-      // Friday totals (same academic year window)
-      const paidFriday = payments
-        .filter(p=> p._kind==='friday' && inYear(p.timestamp))
-        .reduce((s,p)=> s+Number(p.amount||0), 0);
-
-      const tillLabel = planType==='monthly'
-        ? monthName(Math.max(0, Math.min(11, cutoff.getMonth())))
-        : `Inst ${cyclesDue}`;
-
-      // Graduation summary
-      let gradExpected = 0;
-      let gradPaid = 0;
-      const gradKey = sanitizeKey(adm);
-      try {
-        const gradSnap = await db.ref(`graduation/${year}/students/${gradKey}`).once('value');
-        const gradData = gradSnap.val();
-        if (gradData) {
-          gradExpected = Number(gradData.expectedFee || gradData.expected || 0);
-          gradPaid = Number(gradData.paid || 0);
-        }
-      } catch (err) {
-        console.warn('Graduation summary read failed', err?.message || err);
-      }
-      const gradFromPayments = payments
-        .filter(p => p._kind === 'graduation')
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-      if (!gradPaid && gradFromPayments) gradPaid = gradFromPayments;
-      const gradBalance = Math.max(0, gradExpected - gradPaid);
-
-      return {
-        planLabel,
-        annualFee,
-        paidTuition,
-        paidFriday,
-        debtTill,
-        annualBalance,
-        tillLabel,
-        graduationExpected: gradExpected,
-        graduationPaid: gradPaid,
-        graduationBalance: gradBalance
-      };
-    }
-
-    /* ===== Year-scoped payments fetch ===== */
-    async function fetchPaymentsForStudent(st, year = receiptsYear){
-      const yearKey = String(Number.isFinite(Number(year)) ? Number(year) : receiptsYear);
-      const merged = [];
-
-      try {
-        const ledgerSnap = await db.ref(`financeLedgers/${yearKey}/${st.key}/payments`).once('value');
-        let ledger = ledgerSnap.val() || {};
-        if (!Object.keys(ledger).length) {
-          const legacySnap = await db.ref(`financeLedgers/${st.key}/${yearKey}/payments`).once('value');
-          ledger = legacySnap.val() || {};
-        }
-        if (!Object.keys(ledger).length) {
-          const legacyBucketSnap = await db.ref(`financeLedgers/${st.key}/${yearKey}`).once('value');
-          const bucket = legacyBucketSnap.val();
-          if (bucket && typeof bucket === 'object') {
-            if (bucket.payments) ledger = bucket.payments;
-            else if (bucket.entries) ledger = bucket.entries;
-          }
-        }
-        Object.entries(ledger).forEach(([payId, payVal]) => {
-          merged.push(normalizePayment({ ...payVal, academicYear: Number(yearKey) }, `financeLedgers/${yearKey}/${st.key}/payments/${payId}`, 'tuition'));
-        });
-      } catch (err) {
-        console.warn('financeLedgers read failed', err?.message || err);
-      }
-
-      const friday = await fetchFridayMoneyRecords(st);
-      friday.forEach(p => {
-        const ay = Number(p.academicYear ?? new Date(p.timestamp).getFullYear());
-        if (!Number.isFinite(ay) || ay === Number(yearKey)) {
-          merged.push({ ...p, academicYear: Number.isFinite(ay) ? ay : Number(yearKey), _kind: 'friday' });
-        }
-      });
-
-      if (!merged.length && st.payments) {
-        const basePayments = Array.isArray(st.payments) ? st.payments : Object.values(st.payments || {});
-        basePayments.forEach((p, idx) => {
-          merged.push(normalizePayment({ ...p, academicYear: Number(yearKey) }, `students/${st.key}/payments/${idx}`, p._kind || 'tuition'));
-        });
-      }
-
-      const deduped = dedupe(merged).sort((a,b)=> a.timestamp - b.timestamp);
-      const last = deduped.slice(-1)[0] || null;
-
-      st.__paymentsByYear = st.__paymentsByYear || {};
-      st.__paymentsByYear[yearKey] = deduped;
-      st.__payments = deduped;
-      st.__receiptCount = deduped.length;
-      st.__lastPayment = last;
-
-      st.__financeByYear = st.__financeByYear || {};
-      st.__financeByYear[yearKey] = await computeFinanceSummary(st, deduped, Number(yearKey));
-      st.__finance = st.__financeByYear[yearKey];
-
-      const lastCell = document.querySelector(`td.js-last[data-key="${st.key}"]`);
-      const countCell = document.querySelector(`td.js-count[data-key="${st.key}"]`);
-      if (lastCell) lastCell.innerHTML = last ? `${formatDate(last.timestamp)} - ${formatCurrency(last.amount)}` : '<span class="text-slate-400">-</span>';
-      if (countCell) countCell.textContent = deduped.length;
-    }
-
-    async function openDrawer(meta){
-      const drawer = q('#drawer');
-      const content = q('#drawerContent');
-      const title = q('#drawerTitle');
-      const st = allStudents.find(s=>s.key===meta.key) || {};
-      const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
-      const yearLabel = String(Number.isFinite(Number(receiptsYear)) ? Number(receiptsYear) : receiptsYear);
-      title.textContent = `${name} - ${meta.adm}`;
-
-      content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">Loading receipts…</div>`;
-      if (!st.__paymentsByYear || !st.__paymentsByYear[yearLabel]) {
-        await fetchPaymentsForStudent(st, receiptsYear);
-      }
-
-      const payments = (st.__paymentsByYear?.[yearLabel] || []).slice().sort((a,b)=> a.timestamp-b.timestamp)
-        .map((p,i)=> ({ ...p, receiptNumber: String(i + 1).padStart(4,'0') }));
-      if (!payments.length) {
-        content.innerHTML = `<div class="p-4 rounded-lg bg-white/5">No payments captured for this child in ${yearLabel} yet.</div>`;
-      } else {
-        content.innerHTML = payments.slice().reverse().map(p=>`
-          <div class="p-3 rounded-lg bg-white/5 border border-white/10">
-            <div class="flex items-start justify-between gap-3">
+      if (empty) empty.classList.add('hidden');
+      if (!list) return;
+      list.innerHTML = state.approvals.map(item => {
+        const active = state.activeApproval && item.id === state.activeApproval.id;
+        return `
+          <div class="list-card ${active ? 'border-sky-400 ring-2 ring-sky-500/40' : ''}" data-id="${item.id}">
+            <div class="flex items-center justify-between gap-3">
               <div>
-                <p class="font-semibold text-white">${formatCurrency(p.amount)} <span class="tag">${p._kind || 'other'}</span></p>
-                <p class="text-xs muted uppercase tracking-[0.35em]">${new Date(p.timestamp).toLocaleDateString()} - ${safe(p.method)}</p>
-                ${p.note ? `<p class="text-sm mt-1">${p.note}</p>` : ``}
-                ${p._src ? `<p class="text-[10px] text-slate-400 mt-1">src: ${p._src}</p>` : ``}
+                <p class="text-sm font-semibold text-white">${item.moduleLabel}</p>
+                <p class="text-xs text-slate-300">${formatDateOnly(item.approvedAt)} - Ref ${item.paymentReferenceCode || '--'}</p>
               </div>
               <div class="text-right">
-                <p class="text-xs muted">Receipt #${p.receiptNumber}</p>
-                <button class="mt-2 px-3 py-1.5 rounded-md bg-emerald-500/80 hover:bg-emerald-500 text-white text-sm"
-                    onclick='generatePDF(${JSON.stringify({adm:meta.adm, key:st.key}).replace(/"/g,"&quot;")}, ${JSON.stringify(p).replace(/"/g,"&quot;")})'>
-                  <i class="fas fa-file-pdf mr-1"></i> PDF
-                </button>
+                <p class="text-base font-semibold text-emerald-300">${formatCurrency(item.amountPaidNow)}</p>
+                <button class="mt-1 inline-flex items-center gap-1 rounded-full border border-white/30 px-3 py-1 text-xs text-white" data-view="${item.id}"><i class="fa-regular fa-eye"></i><span>View</span></button>
               </div>
             </div>
-          </div>
-        `).join('');
+          </div>`;
+      }).join('');
+      list.querySelectorAll('button[data-view]').forEach(btn => {
+        btn.addEventListener('click', e => {
+          const id = e.currentTarget.getAttribute('data-view');
+          const found = state.approvals.find(a=>a.id===id);
+          if (!found) return;
+          state.activeApproval = found;
+          state.summaryRows = buildSummaryRows(state.approvals, state.activeApproval, state.targets);
+          urlParams.set('approvalId', id);
+          history.replaceState({}, '', `${location.pathname}?${urlParams.toString()}`);
+          renderPage();
+        });
+      });
+    }
+
+    function updateActionButtons(){
+      const downloadBtn = document.getElementById('downloadReceiptBtn');
+      if (downloadBtn){
+        downloadBtn.disabled = !state.activeApproval;
+        downloadBtn.classList.toggle('opacity-50', !state.activeApproval);
       }
-      drawer.classList.add('open');
     }
-    function closeDrawer(){ q('#drawer').classList.remove('open'); }
 
-    /* ===== PDF generation ===== */
-    async function generatePDF(meta, payment){
-      const st = allStudents.find(s=>s.key===meta.key) || {};
-      const name = `${safe(st.firstName)} ${safe(st.middleName||'')} ${safe(st.lastName)}`.replace(/\s+/g,' ').trim() || 'Student';
-
-      // Basic fields
-      q('#pdfReceiptNo').textContent   = `Receipt No: ${payment.receiptNumber}`;
-      q('#pdfReceiptDate').textContent = `Date: ${formatDate(payment.timestamp)}`;
-      q('#pdfReceivedFrom').textContent= name;
-      q('#pdfAmountWords').textContent = amountToWords(payment.amount);
-      q('#pdfAmountFigures').textContent = formatCurrency(payment.amount);
-      q('#pdfPurpose').textContent     = payment.note || 'Payment';
-      q('#pdfMethod').textContent      = payment.method || 'Cash';
-      q('#pdfInstrument').textContent  = payment.method || 'Cash';
-      q('#pdfCurrency').textContent    = formatCurrency(payment.amount);
-      q('#pdfChildName').textContent   = name;
-      q('#pdfChildAdm').textContent    = `ADM: ${meta.adm || '--'}`;
-      q('#pdfPhoto').src               = st.photoUrl || '../images/somap-logo.png.jpg';
-      q('#pdfKindBadge').textContent   = payment._kind ? ` ${payment._kind.toUpperCase()} ` : '';
-
-      // Finance summary for the PDF (uses cached compute)
-      const yearLabel = String(Number.isFinite(Number(receiptsYear)) ? Number(receiptsYear) : receiptsYear);
-      const paymentsForYear = st.__paymentsByYear?.[yearLabel] || st.__payments || [];
-      const fin = st.__financeByYear?.[yearLabel] || st.__finance || await computeFinanceSummary(st, paymentsForYear, receiptsYear);
-      st.__financeByYear = st.__financeByYear || {};
-      st.__financeByYear[yearLabel] = fin;
-      st.__finance = fin;
-      q('#sumPlan').textContent      = fin.planLabel;
-      q('#sumAnnual').textContent    = formatCurrency(fin.annualFee);
-      q('#sumPaidYear').textContent  = formatCurrency(fin.paidTuition);
-      q('#sumTillLabel').textContent = fin.tillLabel;
-      q('#sumDebtTill').textContent  = formatCurrency(fin.debtTill);
-      q('#sumBalance').textContent   = formatCurrency(fin.annualBalance);
-      q('#sumFridayPaid').textContent= formatCurrency(fin.paidFriday);
-      q('#sumGradPaid').textContent  = formatCurrency(fin.graduationPaid);
-      q('#sumGradBalance').textContent = formatCurrency(fin.graduationBalance);
-
-      // Make visible for capture
-      const host = q('#pdfStage');
-      host.classList.remove('hidden');
-      await new Promise(r=>setTimeout(r, 30));
-
-      const stage = q('#pdfPaper');
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF('landscape','pt','a4');
-      const canvas = await html2canvas(stage, { scale: 1.35, useCORS:true, allowTaint:true, backgroundColor:'#ffffff' });
-      const img = canvas.toDataURL('image/png');
-      const w = pdf.internal.pageSize.getWidth();
-      const iw = w - 40;
-      const ih = canvas.height * (iw / canvas.width);
-      pdf.addImage(img, 'PNG', 20, 20, iw, ih);
-
-      try { pdf.save(`${meta.adm || 'student'}_receipt_${payment.receiptNumber}.pdf`); }
-      catch(e){ window.open(pdf.output('bloburl'), '_blank'); }
-      finally { host.classList.add('hidden'); }
+    async function downloadReceiptPdf(){
+      if (!state.activeApproval) return;
+      const canvasEl = document.getElementById('receiptCanvas');
+      if (!canvasEl) return;
+      const canvas = await html2canvas(canvasEl, { scale:2, useCORS:true, backgroundColor:'#ffffff' });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jspdf.jsPDF('p','pt','a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+      const canvasWidth = canvas.width * ratio;
+      const canvasHeight = canvas.height * ratio;
+      pdf.addImage(imgData,'PNG',(pageWidth-canvasWidth)/2,20,canvasWidth,canvasHeight);
+      const adm = state.studentRecord?.admissionNumber || state.activeApproval?.studentAdm || 'student';
+      const filename = `receipt_${adm}_${state.year}_${state.activeApproval.id||Date.now()}.pdf`;
+      pdf.save(filename);
     }
+
+    function bindUiEvents(){
+      const printBtn = document.getElementById('printReceiptBtn');
+      if (printBtn) printBtn.addEventListener('click', ()=>window.print());
+      const downloadBtn = document.getElementById('downloadReceiptBtn');
+      if (downloadBtn) downloadBtn.addEventListener('click', downloadReceiptPdf);
+      const tableBtn = document.getElementById('tablePeekBtn');
+      if (tableBtn) tableBtn.addEventListener('click', ()=>{
+        const table = document.getElementById('yearSummaryTable');
+        if (table) table.scrollIntoView({behavior:'smooth'});
+      });
+    }
+
+    window.somapYearContext.onYearChanged(year => {
+      urlParams.set('year', year);
+      history.replaceState({}, '', `${location.pathname}?${urlParams.toString()}`);
+      state.year = year;
+      monthCache.clear();
+      hydrateState();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      bindUiEvents();
+      hydrateState();
+    });
   </script>
 </body>
 </html>
-
-
-
-

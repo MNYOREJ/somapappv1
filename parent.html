@@ -1749,9 +1749,23 @@
   function bindUI(){ /* all wired */ }
 
   // ===== Shared: build receipt URL for parent + finance views =====
+  function resolveReceiptStudentIdentifier(){
+    const candidates = [
+      currentStudent?.admissionNumber,
+      currentStudent?.admissionNo,
+      currentStudent?.registrationNumber,
+      currentStudent?.pupilId,
+      currentStudent?.autoId,
+      currentStudentKey,
+      localStorage.getItem('studentKey'),
+      localStorage.getItem('parentFocusStudent')
+    ];
+    const match = candidates.find(value => value && String(value).trim());
+    return match ? String(match).trim() : '';
+  }
+
   function buildChildReceiptUrlGlobal(){
-    const adm = currentStudent?.admissionNumber || currentStudent?.pupilId || '';
-    const fallbackId = adm || currentStudentKey || '';
+    const fallbackId = resolveReceiptStudentIdentifier();
     const params = new URLSearchParams();
     if (fallbackId) params.set('student', fallbackId);
     const yr = getActiveYearString();
@@ -1786,27 +1800,44 @@
     const closeBtn = document.getElementById('closeReceiptModal');
 
     function openModal(url){
+      if (!modal || !frame) return;
       frame.src = url;
       modal.classList.remove('hidden');
       modal.classList.add('flex');
     }
     function closeModal(){
+      if (!modal || !frame) return;
       frame.src = '';
       modal.classList.add('hidden');
       modal.classList.remove('flex');
     }
 
+    function ensureReceiptUrl(openFn){
+      const identifier = resolveReceiptStudentIdentifier();
+      const url = buildChildReceiptUrlGlobal();
+      if (!url){
+        if (window.Swal){
+          Swal.fire('Receipts not ready','We are still loading student data. Please try again in a moment.','info');
+        }
+        return;
+      }
+      if (!identifier && window.Swal){
+        Swal.fire('Pick a student','Use the student directory inside the receipt center to select your child.','info');
+      }
+      openFn(url);
+    }
+
     // Right-side card buttons
-    openBtn?.addEventListener('click', ()=> openModal(buildChildReceiptUrlGlobal()));
-    openNewTabBtn?.addEventListener('click', ()=> window.open(buildChildReceiptUrlGlobal(), '_blank'));
+    openBtn?.addEventListener('click', ()=> ensureReceiptUrl(openModal));
+    openNewTabBtn?.addEventListener('click', ()=> ensureReceiptUrl(url => window.open(url, '_blank')));
     closeBtn?.addEventListener('click', closeModal);
 
     // TOP stat card buttons
     document.getElementById('openReceiptVaultTop')?.addEventListener('click', ()=>{
-      openModal(buildChildReceiptUrlGlobal());
+      ensureReceiptUrl(openModal);
     });
     document.getElementById('openReceiptNewTabTop')?.addEventListener('click', ()=>{
-      window.open(buildChildReceiptUrlGlobal(), '_blank');
+      ensureReceiptUrl(url => window.open(url, '_blank'));
     });
   })();
   </script>

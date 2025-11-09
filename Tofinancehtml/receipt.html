@@ -24,6 +24,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="../shared/finance_math.js"></script>
 
   <style>
     :root{
@@ -1108,6 +1109,34 @@
       }
       if (!targets.schoolFees.debtStage && studentRecord?.debtStage){
         targets.schoolFees.debtStage = studentRecord.debtStage;
+      }
+      if ((studentId || admission) && typeof window.SomapFinance?.loadStudentFinance === 'function'){
+        try{
+          const identifier = studentId || admission;
+          const financeSnapshot = await window.SomapFinance.loadStudentFinance(year, identifier);
+          if (financeSnapshot){
+            const due = Number(financeSnapshot.due || 0);
+            if (due > 0){
+              targets.schoolFees.required = due;
+            }
+            if (!targets.schoolFees.planLabel && financeSnapshot.paymentPlan){
+              targets.schoolFees.planLabel = financeSnapshot.paymentPlan;
+            }
+            const record = financeSnapshot.record || {};
+            const recordCarry = Number(record.carryAmount || 0);
+            if (recordCarry > 0){
+              targets.schoolFees.carryForward = recordCarry;
+            }
+            if (!targets.schoolFees.debtStage && record.debtStage){
+              targets.schoolFees.debtStage = record.debtStage;
+            }
+            if (!targets.schoolFees.dueDate && record.nextDueDate){
+              targets.schoolFees.dueDate = record.nextDueDate;
+            }
+          }
+        }catch(err){
+          console.warn('Receipt: unable to sync finance snapshot', err);
+        }
       }
       return targets;
     }

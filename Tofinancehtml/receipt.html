@@ -154,6 +154,54 @@
     .list-card:hover{
       border-color:rgba(59,130,246,.65);
     }
+    .summary-scroll{
+      overflow-x:auto;
+    }
+    @media (min-width:768px){
+      .summary-scroll{
+        overflow:visible;
+      }
+    }
+    .summary-table{
+      width:100%;
+      border-collapse:collapse;
+      table-layout:fixed;
+      font-size:0.8rem;
+    }
+    .summary-table th,
+    .summary-table td{
+      padding:0.35rem 0.5rem;
+      white-space:nowrap;
+      border-bottom:1px solid rgba(15,23,42,.08);
+    }
+    .summary-table th{
+      font-size:0.6rem;
+      letter-spacing:0.18em;
+      text-transform:uppercase;
+      color:#475569;
+      background:#f8fafc;
+    }
+    .summary-table td{
+      font-size:0.78rem;
+      color:#0f172a;
+    }
+    .summary-table td:first-child{
+      min-width:140px;
+      white-space:normal;
+    }
+    .summary-table td .status-pill{
+      font-size:0.65rem;
+    }
+    @media print{
+      .summary-table th,
+      .summary-table td{
+        padding:0.25rem 0.35rem;
+        font-size:0.6rem;
+      }
+      .summary-table td:first-child{
+        min-width:120px;
+      }
+    }
     .print\:hidden{@media print{display:none!important;}}
     @media print{
       body{
@@ -371,8 +419,8 @@
                 </div>
                 <button id="tablePeekBtn" class="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><i class="fa-regular fa-eye"></i><span>View</span></button>
               </div>
-              <div class="overflow-auto rounded-2xl border border-slate-200">
-                <table id="yearSummaryTable" class="min-w-full text-sm">
+              <div class="summary-scroll rounded-2xl border border-slate-200">
+                <table id="yearSummaryTable" class="summary-table text-xs">
                   <thead class="bg-slate-50 text-xs uppercase tracking-[0.2em] text-slate-500">
                     <tr>
                       <th class="px-3 py-2 text-left">Being Payment Of</th>
@@ -925,48 +973,88 @@
       const recordFee = Number(studentRecord?.feePerYear || studentRecord?.feeDue || studentRecord?.totalFee || 0);
       if (!studentId){
         if (recordFee > 0) targets.schoolFees.required = recordFee;
+        if (!targets.schoolFees.planLabel && studentRecord?.paymentPlan){
+          targets.schoolFees.planLabel = studentRecord.paymentPlan;
+        }
+        if (!targets.schoolFees.debtStage && studentRecord?.debtStage){
+          targets.schoolFees.debtStage = studentRecord.debtStage;
+        }
         return targets;
       }
-      const promises = [
-        fetchScoped(`studentFees/${year}/${studentId}`),
-        fetchScoped(`financeStatuses/${year}/${studentId}`),
-        fetchScoped(`transportExpected/${year}/${studentId}`),
-        fetchScoped(`fridayPlans/${year}/${studentId}`),
-        fetchScoped(`graduation/${year}/students/${sanitizeKey(admission||studentId)}`)
-      ];
-      const [feeSnap,statusSnap,transportSnap,fridaySnap,gradSnap] = await Promise.all(promises);
-      const fee = feeSnap?.val() || {};
-      if (fee){
+      const admissionKey = sanitizeKey(admission || studentId);
+      const feeByIdPromise = fetchScoped(`studentFees/${year}/${studentId}`);
+      const feeByAdmPromise = admissionKey && admissionKey !== studentId
+        ? fetchScoped(`studentFees/${year}/${admissionKey}`)
+        : Promise.resolve(null);
+      const statusPromise = fetchScoped(`financeStatuses/${year}/${studentId}`);
+      const transportPromise = fetchScoped(`transportExpected/${year}/${studentId}`);
+      const fridayPromise = fetchScoped(`fridayPlans/${year}/${studentId}`);
+      const gradPromise = fetchScoped(`graduation/${year}/students/${admissionKey}`);
+      const carryByIdPromise = fetchScoped(`financeCarryForward/${year}/${studentId}`);
+      const carryByAdmPromise = admissionKey && admissionKey !== studentId
+        ? fetchScoped(`financeCarryForward/${year}/${admissionKey}`)
+        : Promise.resolve(null);
+      const [feeSnap,feeAdmSnap,statusSnap,transportSnap,fridaySnap,gradSnap,carrySnap,carryAdmSnap] = await Promise.all([
+        feeByIdPromise,
+        feeByAdmPromise,
+        statusPromise,
+        transportPromise,
+        fridayPromise,
+        gradPromise,
+        carryByIdPromise,
+        carryByAdmPromise
+      ]);
+      const fee = feeSnap?.val() || feeAdmSnap?.val() || {};
+      if (fee && Object.keys(fee).length){
         targets.schoolFees.required = Number(fee.feePerYear || fee.annualFee || fee.required || 0);
-        targets.schoolFees.planLabel = fee.planLabel || fee.paymentPlan || fee.plan || '';
-        targets.schoolFees.debtStage = fee.debtStage || '';
-        targets.schoolFees.dueDate = fee.nextDueDate || '';
+        targets.schoolFees.planLabel = fee.planLabel || fee.paymentPlan || fee.plan || targets.schoolFees.planLabel;
+        targets.schoolFees.debtStage = fee.debtStage || targets.schoolFees.debtStage;
+        targets.schoolFees.dueDate = fee.nextDueDate || targets.schoolFees.dueDate;
       }
       const status = statusSnap?.val() || {};
-      if (status){
+      if (status && Object.keys(status).length){
         targets.schoolFees.debtStage = status.debtTill || status.debtStage || targets.schoolFees.debtStage;
         targets.schoolFees.dueDate = status.nextDue || status.nextDueDate || targets.schoolFees.dueDate;
       }
       const transport = transportSnap?.val() || {};
-      if (transport){
+      if (transport && Object.keys(transport).length){
         targets.transport.required = Number(transport.expected || transport.annualFee || transport.target || 0);
-        targets.transport.planLabel = transport.plan || transport.schedule || '';
-        targets.transport.debtStage = transport.debtStage || '';
-        targets.transport.dueDate = transport.nextDue || '';
+        targets.transport.planLabel = transport.plan || transport.schedule || targets.transport.planLabel;
+        targets.transport.debtStage = transport.debtStage || targets.transport.debtStage;
+        targets.transport.dueDate = transport.nextDue || targets.transport.dueDate;
       }
       const friday = fridaySnap?.val() || {};
-      if (friday){
+      if (friday && Object.keys(friday).length){
         targets.friday.required = Number(friday.expected || friday.target || friday.total || 0);
-        targets.friday.planLabel = friday.plan || friday.frequency || '';
+        targets.friday.planLabel = friday.plan || friday.frequency || targets.friday.planLabel;
       }
       const grad = gradSnap?.val() || {};
-      if (grad){
+      if (grad && Object.keys(grad).length){
         targets.graduation.required = Number(grad.expectedFee || grad.expected || 0);
-        targets.graduation.planLabel = grad.plan || '';
-        targets.graduation.debtStage = grad.debtStage || '';
-        targets.graduation.dueDate = grad.dueDate || '';
+        targets.graduation.planLabel = grad.plan || targets.graduation.planLabel;
+        targets.graduation.debtStage = grad.debtStage || targets.graduation.debtStage;
+        targets.graduation.dueDate = grad.dueDate || targets.graduation.dueDate;
       }
-      if (recordFee > 0) targets.schoolFees.required = recordFee;
+      let baseFee = Number(targets.schoolFees.required) || 0;
+      if (baseFee <= 0 && recordFee > 0){
+        baseFee = recordFee;
+      }
+      const carryRaw = carrySnap?.val() || carryAdmSnap?.val() || null;
+      const carryAmount = Number(
+        typeof carryRaw === 'number'
+          ? carryRaw
+          : (carryRaw?.amount ?? carryRaw?.balance ?? carryRaw?.carry ?? carryRaw?.total ?? 0)
+      ) || 0;
+      if (carryAmount > 0){
+        targets.schoolFees.carryForward = carryAmount;
+      }
+      targets.schoolFees.required = Math.max(0, baseFee + carryAmount);
+      if (!targets.schoolFees.planLabel && studentRecord?.paymentPlan){
+        targets.schoolFees.planLabel = studentRecord.paymentPlan;
+      }
+      if (!targets.schoolFees.debtStage && studentRecord?.debtStage){
+        targets.schoolFees.debtStage = studentRecord.debtStage;
+      }
       return targets;
     }
 
@@ -1333,8 +1421,7 @@
       }
       if (emptyMsg) emptyMsg.classList.add('hidden');
       const activeAdmission = (state.studentRecord?.admissionNumber || state.queryStudent || '').trim().toLowerCase();
-      const maxRows = 400;
-      const printable = rows.slice(0, maxRows);
+      const printable = rows;
       tbody.innerHTML = printable.map(row => {
         const normalizedAdm = String(row.admission || '').trim().toLowerCase();
         const isActive = (state.studentId && state.studentId === row.id) || (activeAdmission && normalizedAdm && normalizedAdm === activeAdmission);
@@ -1356,9 +1443,6 @@
             </td>
           </tr>`;
       }).join('');
-      if (rows.length > maxRows){
-        tbody.insertAdjacentHTML('beforeend', `<tr><td colspan="5" class="px-4 py-3 text-center text-xs text-slate-400">Showing first ${maxRows} learners. Narrow the search to find others.</td></tr>`);
-      }
     }
 
     function focusStudentFromDirectory(studentId, admission){

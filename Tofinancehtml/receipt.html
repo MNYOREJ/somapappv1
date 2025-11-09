@@ -1016,6 +1016,23 @@
       return null;
     }
 
+    async function fetchStudentFeeSnapshot(year, keys){
+      if (!Array.isArray(keys)) return null;
+      for (const rawKey of keys){
+        const sanitized = sanitizeKey(String(rawKey || ''));
+        if (!sanitized) continue;
+        try{
+          const snap = await fetchScoped(`studentFees/${year}/${sanitized}`);
+          if (snap && snap.exists()) return snap;
+        }catch(_){}
+        try{
+          const legacy = await fetchScoped(`finance/${year}/studentFees/${sanitized}`);
+          if (legacy && legacy.exists()) return legacy;
+        }catch(_){}
+      }
+      return null;
+    }
+
     async function loadTargetAmounts(year, studentId, admission, studentRecord){
       const targets = createEmptyTargets();
       const recordFee = Number(studentRecord?.feePerYear || studentRecord?.feeDue || studentRecord?.totalFee || 0);
@@ -1030,13 +1047,16 @@
         return targets;
       }
       const identifierCandidates = buildStudentIdentifierCandidates(studentId, admission, studentRecord);
+      const feePromise = fetchStudentFeeSnapshot(year, identifierCandidates);
+      const gradPromise = fetchFirstMatch(identifierCandidates, key => `graduation/${year}/students/${key}`);
+      const carryPromise = fetchFirstMatch(identifierCandidates, key => `financeCarryForward/${year}/${key}`);
       const [feeSnap,statusSnap,transportSnap,fridaySnap,gradSnap,carrySnap] = await Promise.all([
-        fetchFirstMatch(identifierCandidates, key => `studentFees/${year}/${key}`),
+        feePromise,
         fetchScoped(`financeStatuses/${year}/${studentId}`),
         fetchScoped(`transportExpected/${year}/${studentId}`),
         fetchScoped(`fridayPlans/${year}/${studentId}`),
-        fetchFirstMatch(identifierCandidates, key => `graduation/${year}/students/${key}`),
-        fetchFirstMatch(identifierCandidates, key => `financeCarryForward/${year}/${key}`)
+        gradPromise,
+        carryPromise
       ]);
       const fee = feeSnap?.val() || {};
       if (fee && Object.keys(fee).length){

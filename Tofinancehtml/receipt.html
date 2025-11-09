@@ -257,7 +257,7 @@
       return shiftClass(baseClass, delta);
     }
 
-    const VIEW_KIND = 'detail';
+    const VIEW_KIND = (urlParams.get('scope') || '').toLowerCase() === 'parent' ? 'parent' : 'detail';
   </script>
 </head>
 <body class="antialiased">
@@ -919,9 +919,13 @@
       hydrateState();
     }
 
-    async function loadTargetAmounts(year, studentId, admission){
+    async function loadTargetAmounts(year, studentId, admission, studentRecord){
       const targets = createEmptyTargets();
-      if (!studentId) return targets;
+      const recordFee = Number(studentRecord?.feePerYear || studentRecord?.feeDue || studentRecord?.totalFee || 0);
+      if (!studentId){
+        if (recordFee > 0) targets.schoolFees.required = recordFee;
+        return targets;
+      }
       const promises = [
         fetchScoped(`studentFees/${year}/${studentId}`),
         fetchScoped(`financeStatuses/${year}/${studentId}`),
@@ -961,6 +965,7 @@
         targets.graduation.debtStage = grad.debtStage || '';
         targets.graduation.dueDate = grad.dueDate || '';
       }
+      if (recordFee > 0) targets.schoolFees.required = recordFee;
       return targets;
     }
 
@@ -1132,7 +1137,7 @@
 
         state.receiptNumbers = buildReceiptNumberMap(state.approvals);
 
-        state.targets = await loadTargetAmounts(state.year, state.studentId, admission);
+        state.targets = await loadTargetAmounts(state.year, state.studentId, admission, state.studentRecord);
         if (token !== renderToken) return;
         state.summaryRows = buildSummaryRows(state.approvals, state.activeApproval, state.targets);
         renderPage();
@@ -1149,7 +1154,7 @@
       renderReceiptDetails();
       renderSummaryTable();
       renderReceiptsList();
-      renderStudentDirectory();
+      if (VIEW_KIND !== 'parent') renderStudentDirectory();
       updateActionButtons();
     }
 
@@ -1311,6 +1316,7 @@
     }
 
     function renderStudentDirectory(){
+      if (VIEW_KIND === 'parent') return;
       const tbody = document.getElementById('studentsDirectoryBody');
       if (!tbody) return;
       const countEl = document.getElementById('studentsDirectoryCount');
@@ -1390,12 +1396,24 @@
       const canvas = await html2canvas(canvasEl, { scale:2, useCORS:true, backgroundColor:'#ffffff' });
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jspdf.jsPDF('p','pt','a4');
+      const margin = 24;
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
-      const canvasWidth = canvas.width * ratio;
-      const canvasHeight = canvas.height * ratio;
-      pdf.addImage(imgData,'PNG',(pageWidth-canvasWidth)/2,20,canvasWidth,canvasHeight);
+      const usableWidth = pageWidth - margin * 2;
+      const usableHeight = pageHeight - margin * 2;
+      const imgHeight = canvas.height * (usableWidth / canvas.width);
+      let heightLeft = imgHeight;
+      let position = margin;
+
+      pdf.addImage(imgData,'PNG', margin, position, usableWidth, imgHeight);
+      heightLeft -= usableHeight;
+
+      while (heightLeft > 0){
+        const offset = margin - (imgHeight - heightLeft);
+        pdf.addPage();
+        pdf.addImage(imgData,'PNG', margin, offset, usableWidth, imgHeight);
+        heightLeft -= usableHeight;
+      }
       const receiptNo = formatReceiptNumber(state.activeApproval) || state.activeApproval.id || `receipt_${Date.now()}`;
       const safeReceipt = receiptNo.replace(/[^A-Za-z0-9_-]/g,'');
       const filename = `${safeReceipt}_${state.year}.pdf`;
@@ -1433,23 +1451,32 @@
             : 'Admission number or student name';
         });
       }
-      const directorySearch = document.getElementById('studentsDirectorySearch');
-      if (directorySearch){
-        directorySearch.addEventListener('input', e=>{
-          state.studentFilter = e.target.value || '';
-          renderStudentDirectory();
-        });
+      if (VIEW_KIND !== 'parent'){
+        const directorySearch = document.getElementById('studentsDirectorySearch');
+        if (directorySearch){
+          directorySearch.addEventListener('input', e=>{
+            state.studentFilter = e.target.value || '';
+            renderStudentDirectory();
+          });
+        }
+        const directoryBody = document.getElementById('studentsDirectoryBody');
+        if (directoryBody){
+          directoryBody.addEventListener('click', e=>{
+            const btn = e.target.closest('[data-student-action="view"]');
+            if (!btn) return;
+            const studentId = btn.getAttribute('data-student-id') || '';
+            const admission = btn.getAttribute('data-student-adm') || '';
+            focusStudentFromDirectory(studentId, admission);
+          });
+        }
       }
-      const directoryBody = document.getElementById('studentsDirectoryBody');
-      if (directoryBody){
-        directoryBody.addEventListener('click', e=>{
-          const btn = e.target.closest('[data-student-action="view"]');
-          if (!btn) return;
-          const studentId = btn.getAttribute('data-student-id') || '';
-          const admission = btn.getAttribute('data-student-adm') || '';
-          focusStudentFromDirectory(studentId, admission);
-        });
-      }
+    }
+
+    function applyViewKindVisibility(){
+      if (VIEW_KIND !== 'parent') return;
+      document.getElementById('studentsDirectory')?.classList.add('hidden');
+      document.getElementById('studentsDirectory')?.setAttribute('aria-hidden','true');
+      document.getElementById('receiptLookupForm')?.classList.add('hidden');
     }
 
     window.somapYearContext.onYearChanged(year => {
@@ -1461,6 +1488,7 @@
     });
 
     document.addEventListener('DOMContentLoaded', () => {
+      applyViewKindVisibility();
       bindUiEvents();
       hydrateState();
     });

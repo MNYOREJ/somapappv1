@@ -232,24 +232,28 @@
       const anchorY = String(SOMAP_DEFAULT_YEAR);
 
       const [studentsSnap, anchorEnrollSnap, yearEnrollSnap] = await Promise.all([
-        db.ref(scopedPath('students')).once('value'),
-        db.ref(scopedPath(`enrollments/${anchorY}`)).once('value'),
-        db.ref(scopedPath(`enrollments/${y}`)).once('value').catch(()=>({val:()=>null}))
+        fetchScoped('students'),
+        fetchScoped(`enrollments/${anchorY}`),
+        fetchScoped(`enrollments/${y}`)
       ]);
 
-      const students = studentsSnap.val() || {};
-      const enrollAnchor = anchorEnrollSnap.val() || {};
+      const students = (studentsSnap && studentsSnap.val && studentsSnap.val()) || {};
+      const enrollAnchor = (anchorEnrollSnap && anchorEnrollSnap.val && anchorEnrollSnap.val()) || {};
       const enrollYear   = (yearEnrollSnap && yearEnrollSnap.val && yearEnrollSnap.val()) || {};
 
       return { y, students, enrollAnchor, enrollYear };
     }
 
-    function resolveClassForYear(studentId, anchorMap, yearMap, targetYear){
+    function resolveClassForYear(studentId, anchorMap, yearMap, targetYear, fallbackClass){
+      const yearRecord = (yearMap||{})[studentId];
+      if (yearRecord && (yearRecord.className || yearRecord.classLevel)){
+        return yearRecord.className || yearRecord.classLevel;
+      }
       const anchor = (anchorMap||{})[studentId] || {};
-      const baseClass = anchor.className || anchor.classLevel || 'Baby Class';
-      const yRec = (yearMap||{})[studentId];
-      if (yRec?.className || yRec?.classLevel) return (yRec.className || yRec.classLevel);
+      const baseClass = anchor.className || anchor.classLevel || fallbackClass || '';
+      if (!baseClass) return '';
       const delta = Number(targetYear) - SOMAP_DEFAULT_YEAR;
+      if (!Number.isFinite(delta)) return baseClass;
       return shiftClass(baseClass, delta);
     }
 
@@ -530,6 +534,47 @@
     let renderToken = 0;
     const monthCache = new Map();
 
+    function normalizeSchoolId(value){
+      return String(value || '').trim();
+    }
+
+    function applySchoolContext(candidate){
+      const normalized = normalizeSchoolId(candidate);
+      if (!normalized) return false;
+      if (window.currentSchoolId === normalized) return false;
+      window.currentSchoolId = normalized;
+      try{ localStorage.setItem('somap_school', normalized); }catch{}
+      monthCache.clear();
+      return true;
+    }
+
+    (function seedSchoolContext(){
+      const paramSchool = urlParams.get('school') || urlParams.get('schoolId');
+      let storedSchool = '';
+      try{ storedSchool = localStorage.getItem('somap_school') || ''; }catch{}
+      applySchoolContext(paramSchool || storedSchool);
+    })();
+
+    async function fetchScoped(path){
+      const primary = scopedPath(path);
+      let snap = null;
+      try{
+        snap = await db.ref(primary).once('value');
+      }catch(err){
+        console.warn('Scoped fetch failed', primary, err);
+      }
+      const needsFallback = (!snap || !snap.exists()) && primary !== path;
+      if (needsFallback){
+        try{
+          const fallback = await db.ref(path).once('value');
+          return fallback;
+        }catch(err){
+          console.warn('Fallback fetch failed', path, err);
+        }
+      }
+      return snap;
+    }
+
     function createEmptyTargets(){
       const base = {};
       PAYMENT_ROWS.forEach(row => {
@@ -737,7 +782,7 @@
     async function getApprovalsMonth(year, month){
       const key = `${year}-${month}`;
       if (monthCache.has(key)) return monthCache.get(key);
-      const snap = await db.ref(scopedPath(`approvalsHistory/${year}/${month}`)).once('value').catch(()=>null);
+      const snap = await fetchScoped(`approvalsHistory/${year}/${month}`);
       const val = snap?.val() || {};
       monthCache.set(key, val);
       return val;
@@ -813,6 +858,9 @@
       state.queryApproval = '';
       urlParams.set('student', admission);
       urlParams.delete('approvalId');
+      if (window.currentSchoolId){
+        urlParams.set('school', window.currentSchoolId);
+      }
       syncUrlParams();
       hydrateState();
     }
@@ -821,11 +869,11 @@
       const targets = createEmptyTargets();
       if (!studentId) return targets;
       const promises = [
-        db.ref(scopedPath(`studentFees/${year}/${studentId}`)).once('value').catch(()=>null),
-        db.ref(scopedPath(`financeStatuses/${year}/${studentId}`)).once('value').catch(()=>null),
-        db.ref(scopedPath(`transportExpected/${year}/${studentId}`)).once('value').catch(()=>null),
-        db.ref(scopedPath(`fridayPlans/${year}/${studentId}`)).once('value').catch(()=>null),
-        db.ref(scopedPath(`graduation/${year}/students/${sanitizeKey(admission||studentId)}`)).once('value').catch(()=>null)
+        fetchScoped(`studentFees/${year}/${studentId}`),
+        fetchScoped(`financeStatuses/${year}/${studentId}`),
+        fetchScoped(`transportExpected/${year}/${studentId}`),
+        fetchScoped(`fridayPlans/${year}/${studentId}`),
+        fetchScoped(`graduation/${year}/students/${sanitizeKey(admission||studentId)}`)
       ];
       const [feeSnap,statusSnap,transportSnap,fridaySnap,gradSnap] = await Promise.all(promises);
       const fee = feeSnap?.val() || {};
@@ -988,6 +1036,26 @@
             classLevel: normalizedApproval.className || ''
           };
         }
+        const candidateSchool = state.studentRecord?.schoolId || state.studentRecord?.school || state.studentRecord?.schoolKey || normalizedApproval?.schoolId || normalizedApproval?.school || urlParams.get('school') || '';
+        const changedSchool = applySchoolContext(candidateSchool);
+        if (changedSchool){
+          const refreshed = await loadYearData(state.year);
+          if (token !== renderToken) return;
+          state.students = refreshed.students;
+          state.enrollAnchor = refreshed.enrollAnchor;
+          state.enrollYear = refreshed.enrollYear;
+          if (state.studentId && !state.students[state.studentId]){
+            state.studentId = resolveStudentId(state.queryStudent, state.students);
+          }
+          if (!state.studentId && state.queryStudent){
+            state.studentId = resolveStudentId(state.queryStudent, state.students);
+          }
+          state.studentRecord = state.studentId ? state.students[state.studentId] : state.studentRecord;
+        }
+        if (window.currentSchoolId){
+          urlParams.set('school', window.currentSchoolId);
+          syncUrlParams();
+        }
         const admission = state.studentRecord?.admissionNumber || normalizedApproval?.studentAdm || state.queryStudent || '';
 
         if (!state.queryStudent && admission){
@@ -1036,7 +1104,10 @@
       setField('studentAdmission', `Admission: ${admission || '--'}`);
       const contact = collectPrimaryContact(state.studentRecord) || state.activeApproval?.motherPhone || state.activeApproval?.payerContact || '--';
       setField('motherContact', contact || '--');
-      const classLabel = state.studentId ? resolveClassForYear(state.studentId, state.enrollAnchor, state.enrollYear, state.year) : (state.activeApproval?.className || '--');
+      const fallbackClass = state.studentRecord?.classLevel || state.studentRecord?.className || state.activeApproval?.className || '';
+      const classLabel = state.studentId
+        ? (resolveClassForYear(state.studentId, state.enrollAnchor, state.enrollYear, state.year, fallbackClass) || fallbackClass)
+        : (fallbackClass || '--');
       setField('studentClass', classLabel || '--');
       const graduated = classLabel && classLabel.toUpperCase().includes('GRADUATED');
       toggle(document.getElementById('graduatedBadge'), graduated);
@@ -1171,7 +1242,8 @@
       const rows = Object.entries(dataset).map(([id, student]) => {
         const admission = resolveAdmissionNumber(student, id);
         const fullName = buildFullName(student) || 'Student';
-        const classLabel = resolveClassForYear(id, state.enrollAnchor, state.enrollYear, state.year) || student?.classLevel || '--';
+        const baseClass = student?.classLevel || student?.className || '';
+        const classLabel = resolveClassForYear(id, state.enrollAnchor, state.enrollYear, state.year, baseClass) || baseClass || '--';
         const contact = collectPrimaryContact(student) || '--';
         const searchBlob = `${admission} ${fullName} ${classLabel}`.toLowerCase();
         return { id, admission, fullName, classLabel, contact, searchBlob };
@@ -1238,6 +1310,9 @@
       state.queryStudent = target;
       urlParams.set('student', target);
       urlParams.delete('approvalId');
+      if (window.currentSchoolId){
+        urlParams.set('school', window.currentSchoolId);
+      }
       syncUrlParams();
       window.scrollTo({ top:0, behavior:'smooth' });
       hydrateState();

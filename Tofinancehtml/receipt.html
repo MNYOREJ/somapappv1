@@ -299,20 +299,21 @@
         <section id="receiptCanvas" class="receipt-sheet">
           <div class="inner space-y-8">
             <div class="flex flex-wrap items-start gap-6 border-b border-slate-200 pb-6">
-              <div class="flex items-center gap-4">
-                <img src="../images/somap-logo.png.jpg" alt="School logo" class="h-16 w-16 rounded-2xl border border-slate-200 bg-white object-contain shadow"/>
-                <div>
-                  <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">Socrates Modern Academy Programme</p>
-                  <h1 class="text-3xl font-bold text-slate-900">Receipt</h1>
-                  <p class="text-sm text-slate-500">SoMAp Integrated Finance Suite</p>
-                </div>
-              </div>
-              <div class="ml-auto text-right">
-                <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Receipt No.</p>
-                <p id="receiptNumber" class="text-2xl font-bold text-slate-900">--</p>
-                <p id="receiptDate" class="text-sm text-slate-500">--</p>
+            <div class="flex items-center gap-4">
+              <img src="../images/somap-logo.png.jpg" alt="School logo" class="h-16 w-16 rounded-2xl border border-slate-200 bg-white object-contain shadow"/>
+              <div class="space-y-1">
+                <p class="text-sm font-extrabold tracking-[0.6em] text-slate-600">SOCRATES INVESTMENT LIMITED</p>
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">Socrates School Arusha</p>
+                <p class="text-xs text-slate-500">TIN 135-547-565 &bull; P.O Box 14256 Arusha</p>
+                <p class="text-xs text-slate-500">Contacts: +255 686 828 732 / +255 689 649 822</p>
               </div>
             </div>
+            <div class="ml-auto text-right">
+              <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Receipt</p>
+              <p id="receiptNumber" class="text-2xl font-black text-slate-900">--</p>
+              <p id="receiptDate" class="text-sm text-slate-500">--</p>
+            </div>
+          </div>
 
             <div id="receiptEmptyState" class="hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 px-5 py-4 text-slate-700">
               <p class="text-base font-semibold text-slate-900">Ready to view receipts</p>
@@ -528,7 +529,8 @@
       targets: createEmptyTargets(),
       summaryRows:{},
       loading:false,
-      studentFilter:''
+      studentFilter:'',
+      receiptNumbers:{}
     };
 
     let renderToken = 0;
@@ -638,9 +640,9 @@
         .replace(/'/g,'&#39;');
     }
 
-    function getInitials(name){
+    function getInitials(name, max=2){
       if (!name) return '--';
-      const parts = name.trim().split(/\s+/).slice(0,2);
+      const parts = name.trim().split(/\s+/).filter(Boolean).slice(0,max);
       return parts.map(p=>p[0]?.toUpperCase()||'').join('') || '--';
     }
 
@@ -667,7 +669,17 @@
 
     function resolvePhotoUrl(student, fallbackUrl){
       if (!student && !fallbackUrl) return '';
-      const direct = student?.photoUrl || student?.passportPhoto || student?.passport || student?.imageUrl || student?.profilePhoto || fallbackUrl;
+      const direct = student?.photoUrl
+        || student?.passportPhotoUrl
+        || student?.passportPhotoURL
+        || student?.passportPhoto
+        || student?.passport
+        || student?.imageUrl
+        || student?.image
+        || student?.avatar
+        || student?.avatarUrl
+        || student?.profilePhoto
+        || fallbackUrl;
       if (direct) return direct;
       const publicId = student?.cloudinaryPublicId || student?.cloudinaryId || student?.passportPublicId || student?.photoPublicId;
       const cloud = student?.cloudinaryCloud || window.SOMAP_CLOUDINARY_CLOUD || CLOUDINARY_FALLBACK;
@@ -675,6 +687,48 @@
         return `https://res.cloudinary.com/${cloud}/image/upload/c_thumb,w_180,h_180,g_face,r_max/${publicId}.jpg`;
       }
       return '';
+    }
+
+    function deriveReceiptInitials(approval){
+      const baseName = approval?.studentName || buildFullName(state.studentRecord);
+      const initials = getInitials(baseName, 3).replace(/[^A-Z]/gi,'');
+      if (initials) return initials;
+      const fallbackAdm = resolveAdmissionNumber(state.studentRecord, state.studentId) || approval?.studentAdm || '';
+      const cleanFallback = String(fallbackAdm || '').replace(/[^A-Z]/gi,'');
+      return cleanFallback ? cleanFallback.slice(0,3).toUpperCase() : 'SIA';
+    }
+
+    function formatReceiptSequence(seq){
+      if (!seq) return '000';
+      const numeric = Number(seq);
+      if (!Number.isFinite(numeric) || numeric <= 0) return '000';
+      return numeric.toString().padStart(3,'0');
+    }
+
+    function formatReceiptNumber(approval){
+      if (!approval) return '--';
+      const seq = state.receiptNumbers?.[approval.id];
+      if (!seq) return approval.id || '--';
+      const initials = deriveReceiptInitials(approval);
+      return `${initials}${state.year}${formatReceiptSequence(seq)}`;
+    }
+
+    function buildReceiptNumberMap(approvals){
+      if (!Array.isArray(approvals) || !approvals.length) return {};
+      const sorted = approvals.slice().sort((a,b)=>{
+        const aTime = Number(a.approvedAt || a.paymentDate || a.receiptUpdatedAt || 0);
+        const bTime = Number(b.approvedAt || b.paymentDate || b.receiptUpdatedAt || 0);
+        if (aTime === bTime){
+          return (a.id || '').localeCompare(b.id || '');
+        }
+        return aTime - bTime;
+      });
+      const map = {};
+      sorted.forEach((item, index) => {
+        if (!item?.id) return;
+        map[item.id] = index + 1;
+      });
+      return map;
     }
 
     function moduleToRowKey(module){
@@ -1076,6 +1130,8 @@
           state.activeApproval = approvals[0] || null;
         }
 
+        state.receiptNumbers = buildReceiptNumberMap(state.approvals);
+
         state.targets = await loadTargetAmounts(state.year, state.studentId, admission);
         if (token !== renderToken) return;
         state.summaryRows = buildSummaryRows(state.approvals, state.activeApproval, state.targets);
@@ -1138,7 +1194,7 @@
         badge.className = 'status-pill bg-amber-50 text-amber-600 border border-amber-200';
         return;
       }
-      setField('receiptNumber', approval.id || '--');
+      setField('receiptNumber', formatReceiptNumber(approval));
       setField('receiptDate', formatDateTime(approval.approvedAt));
       setField('fieldReceivedFrom', approval.paidBy || 'Parent/Guardian');
       setField('fieldPaymentOf', approval.moduleLabel || '--');
@@ -1208,12 +1264,13 @@
       if (!list) return;
       list.innerHTML = state.approvals.map(item => {
         const active = state.activeApproval && item.id === state.activeApproval.id;
+        const receiptNo = formatReceiptNumber(item);
         return `
           <div class="list-card ${active ? 'border-sky-400 ring-2 ring-sky-500/40' : ''}" data-id="${item.id}">
             <div class="flex items-center justify-between gap-3">
               <div>
                 <p class="text-sm font-semibold text-white">${item.moduleLabel}</p>
-                <p class="text-xs text-slate-300">${formatDateOnly(item.approvedAt)} - Ref ${item.paymentReferenceCode || '--'}</p>
+                <p class="text-xs text-slate-300">${receiptNo} &bull; ${formatDateOnly(item.approvedAt)} &bull; Ref ${item.paymentReferenceCode || '--'}</p>
               </div>
               <div class="text-right">
                 <p class="text-base font-semibold text-emerald-300">${formatCurrency(item.amountPaidNow)}</p>
@@ -1339,8 +1396,9 @@
       const canvasWidth = canvas.width * ratio;
       const canvasHeight = canvas.height * ratio;
       pdf.addImage(imgData,'PNG',(pageWidth-canvasWidth)/2,20,canvasWidth,canvasHeight);
-      const adm = state.studentRecord?.admissionNumber || state.activeApproval?.studentAdm || 'student';
-      const filename = `receipt_${adm}_${state.year}_${state.activeApproval.id||Date.now()}.pdf`;
+      const receiptNo = formatReceiptNumber(state.activeApproval) || state.activeApproval.id || `receipt_${Date.now()}`;
+      const safeReceipt = receiptNo.replace(/[^A-Za-z0-9_-]/g,'');
+      const filename = `${safeReceipt}_${state.year}.pdf`;
       pdf.save(filename);
     }
 

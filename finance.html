@@ -712,6 +712,7 @@ function buildFinanceStudents(
   ledgers = {},
   carryForward = {},
   studentFees = {},
+  approvalsByStudent = {},
   year = activeYear
 ) {
     const targetYear = String(year || activeYear || SOMAP_DEFAULT_YEAR);
@@ -862,6 +863,24 @@ function buildFinanceStudents(
           paymentsSource = approvedFallback;
         }
       }
+      if (!Object.keys(paymentsSource || {}).length) {
+        const fallbackEntries = approvalsByStudent[id] || [];
+        if (fallbackEntries.length) {
+          paymentsSource = {};
+          fallbackEntries.forEach((entry, idx) => {
+            const entryKey = entry.approvalId || `appr-${id}-${idx}`;
+            paymentsSource[entryKey] = {
+              amount: Number(entry.amount || 0),
+              timestamp: Number(entry.timestamp || entry.approvedAt || Date.now()),
+              method: entry.method || '',
+              note: entry.note || '',
+              referenceCode: entry.referenceCode || '',
+              academicYear: Number(targetYear),
+              approvedAt: Number(entry.approvedAt || entry.timestamp || Date.now()),
+            };
+          });
+        }
+      }
       const payments = normalizePayments(paymentsSource, targetYear);
 
       const parentContact =
@@ -918,7 +937,55 @@ function buildFinanceStudents(
   }
 
   const financeYearDataCache = new Map();
+  const financeApprovalsCache = new Map();
   const financeBalanceCache = new Map();
+
+  async function loadApprovedFinanceApprovals(year, force = false) {
+    if (!db) return {};
+    const targetYear = String(year || financeYear || SOMAP_DEFAULT_YEAR);
+    if (!force && financeApprovalsCache.has(targetYear)) return financeApprovalsCache.get(targetYear);
+    try {
+      const snapshot = await db.ref('approvalsHistory').once('value');
+      const tree = snapshot.val() || {};
+      const grouped = {};
+      const normalizedTargetYear = Number(targetYear);
+      Object.entries(tree).forEach(([_, months]) => {
+        Object.entries(months || {}).forEach(([__, records]) => {
+          Object.entries(records || {}).forEach(([key, record]) => {
+            if (!record) return;
+            const recordYear = Number(record.forYear ?? record.academicYear ?? record.year);
+            if (!Number.isFinite(recordYear) || recordYear !== normalizedTargetYear) return;
+            const finalStatus = String(record.finalStatus || record.status || '').toLowerCase();
+            if (!['approved', 'completed'].includes(finalStatus)) return;
+            const moduleSource = String(record.sourceModule || record.module || '').toLowerCase();
+            if (!moduleSource.includes('finance')) return;
+            const studentKey = record.studentId || record.modulePayload?.studentKey || record.studentAdm;
+            if (!studentKey) return;
+            const amount = Number(record.amountPaidNow ?? record.amount ?? record.paidAmount ?? 0);
+            if (!(amount > 0)) return;
+            const timestamp = Number(record.approvedAt || record.datePaid || record.createdAt || Date.now());
+            if (!grouped[studentKey]) grouped[studentKey] = [];
+            grouped[studentKey].push({
+              approvalId: key,
+              amount,
+              timestamp,
+              method: record.method || record.paymentMethod || record.modulePayload?.payment?.method || '',
+              note: record.note || record.modulePayload?.payment?.note || '',
+              referenceCode: record.referenceCode || record.paymentReferenceCode || record.modulePayload?.payment?.referenceCode || '',
+              academicYear: normalizedTargetYear,
+              approvedAt: timestamp,
+            });
+          });
+        });
+      });
+      financeApprovalsCache.set(targetYear, grouped);
+      return grouped;
+    } catch (err) {
+      console.warn('Finance: approvals history read failed', err?.message || err);
+      financeApprovalsCache.set(targetYear, {});
+      return {};
+    }
+  }
 
   async function loadFinanceStudentsForYearCached(year) {
     const key = String(year || activeYear || SOMAP_DEFAULT_YEAR);
@@ -975,6 +1042,7 @@ function buildFinanceStudents(
           }
         }
 
+        const approvalsByStudent = await loadApprovedFinanceApprovals(key);
         const built = buildFinanceStudents(
           baseStudents,
           anchorEnrollSnap.val() || {},
@@ -985,6 +1053,7 @@ function buildFinanceStudents(
           ledgerData,
           carrySnap.val() || {},
           studentFeesData,
+          approvalsByStudent,
           key
         );
         if (!Object.keys(built || {}).length) {
@@ -1821,6 +1890,7 @@ function buildFinanceStudents(
           console.warn('Student fee override read failed', studentFeesErr?.message || studentFeesErr);
         }
       }
+      const approvalsByStudent = await loadApprovedFinanceApprovals(targetYear, true);
       cachedStudents = buildFinanceStudents(
         baseStudents,
         anchorEnrollSnap.val() || {},
@@ -1831,6 +1901,7 @@ function buildFinanceStudents(
         ledgerData,
         carrySnap.val() || {},
         studentFeesData,
+        approvalsByStudent,
         targetYear
       );
       if (!Object.keys(cachedStudents).length) {
@@ -2180,5 +2251,3 @@ function buildFinanceStudents(
 
 </body>
 </html>
-
-

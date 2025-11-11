@@ -48,6 +48,8 @@
     </div>
   </section>
 
+  <div id="lastQueued" class="text-sm text-slate-500 italic px-4">No recent queue activity.</div>
+
   <section class="bg-white border rounded-2xl p-4 shadow-sm">
     <div class="overflow-auto border rounded">
       <table class="min-w-full text-sm">
@@ -180,16 +182,18 @@
     const frag = document.createDocumentFragment();
     filtered.forEach((r,i)=>{
       const s = r.student, p=r.payment;
+      const displayName = studentName(s);
       const curY = resolvedYear(p);
       const badge = isLegacy(p) ? `<span class="tag tag-legacy">LEGACY</span>` : `<span class="tag tag-ok">OK</span>`;
       const tr = document.createElement('tr');
       tr.className = i%2?'bg-white':'bg-slate-50';
       tr.setAttribute('data-sid', r.studentId);
       tr.setAttribute('data-pkey', r.paymentKey);
+      tr.dataset.studentName = displayName;
 
       tr.innerHTML = `
         <td class="p-2"><input type="checkbox" class="rowChk"></td>
-        <td class="p-2">${esc(studentName(s))}</td>
+        <td class="p-2">${esc(displayName)}</td>
         <td class="p-2 mono">${esc(s.admissionNumber || r.studentId)}</td>
         <td class="p-2 mono">${esc(r.paymentKey)}</td>
         <td class="p-2">TSh ${fmt(p.amount)}</td>
@@ -201,6 +205,7 @@
         <td class="p-2"><div>${curY? esc(curY): '—'} ${badge}</div></td>
         <td class="p-2">${yearSelectHTML(curY || new Date().getFullYear())}</td>
         <td class="p-2">
+          <div class="queueHint text-xs text-slate-400">Ready</div>
           <button class="btnQueue btn bg-blue-600 text-white text-xs">Queue to Approvals</button>
         </td>
       `;
@@ -215,10 +220,19 @@
         const pkey = tr.getAttribute('data-pkey');
         const yr = Number(tr.querySelector('.yrSel')?.value);
         if(!yr) return alert('Pick a year.');
+        const origLabel = btn.textContent;
+        const hint = tr.querySelector('.queueHint');
+        const studentLabel = tr.dataset.studentName || 'student';
         try{
           btn.disabled = true;
           await queueToApprovals(sid, pkey, yr);
-          toast('Queued to Approvals');
+          if(hint) hint.textContent = `Queued for ${yr}`;
+          btn.textContent = 'Queued';
+          setTimeout(() => {
+            if(!btn.disabled) btn.textContent = origLabel;
+          }, 2000);
+          el('lastQueued').textContent = `Queued ${studentLabel} (${pkey}) for ${yr}`;
+          toast(`Queued ${studentLabel} for ${yr}`);
         }catch(e){
           alert('Queue failed: ' + e.message);
         }finally{
@@ -302,9 +316,16 @@
       for (const tr of picks){
         const sid = tr.getAttribute('data-sid');
         const pkey = tr.getAttribute('data-pkey');
-        try{ await queueToApprovals(sid, pkey, yr); ok++; }
-        catch{ fail++; }
+        try{
+          await queueToApprovals(sid, pkey, yr);
+          ok++;
+          const hint = tr.querySelector('.queueHint');
+          if(hint) hint.textContent = `Queued for ${yr}`;
+        }catch{
+          fail++;
+        }
       }
+      if(ok) el('lastQueued').textContent = `Queued ${ok} payment(s) for ${yr}`;
       toast(`Queued ${ok} payment(s) to Approvals${fail?`, ${fail} failed`:''}`);
     });
     el('btnReload').addEventListener('click', scan);

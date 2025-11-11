@@ -13,6 +13,9 @@
   .tag-legacy{background:#fee2e2;color:#991b1b}
   .tag-ok{background:#dcfce7;color:#166534}
   .btn{padding:.5rem .75rem;border-radius:.5rem}
+  .queued-row td{background:#dcfce7 !important}
+  .queued-row .queueHint{color:#166534}
+  .queue-count-badge{margin-top:.15rem;font-size:10px;font-weight:600;color:#15803d}
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -97,6 +100,11 @@
   const toast = (m,t=1600)=>{ el('opToast').textContent=m||''; if(m) setTimeout(()=>el('opToast').textContent='',t); };
   const studentName = s => (`${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`).replace(/\s+/g,' ').trim() || s.name || s.fullName || '—';
 
+  function queueCountForYear(payment, year){
+    if(!year || !payment) return 0;
+    const buckets = payment.queueCounts || {};
+    return Number(buckets[String(year)] || 0);
+  }
   function yearSelectHTML(selected){
     const opts = YEARS.map(y=>`<option value="${y}" ${String(selected)===String(y)?'selected':''}>${y}</option>`).join('');
     return `<select class="yrSel border rounded px-2 py-1">${opts}</select>`;
@@ -185,8 +193,17 @@
       const displayName = studentName(s);
       const curY = resolvedYear(p);
       const badge = isLegacy(p) ? `<span class="tag tag-legacy">LEGACY</span>` : `<span class="tag tag-ok">OK</span>`;
+      const queueYearKey = curY ? String(curY) : null;
+      const queueAttempts = queueCountForYear(p, queueYearKey);
+      const isQueuedForCurYear = queueAttempts > 0;
+      const queueHintText = isQueuedForCurYear
+        ? `Queued for ${queueYearKey}${queueAttempts > 1 ? ` (${queueAttempts}x)` : ''}`
+        : 'Ready';
+      const queueHintColor = isQueuedForCurYear ? 'text-emerald-700' : 'text-slate-400';
+      const queueCountBadge = isQueuedForCurYear ? `<div class="queue-count-badge">${queueAttempts}x queued</div>` : '';
       const tr = document.createElement('tr');
       tr.className = i%2?'bg-white':'bg-slate-50';
+      if(isQueuedForCurYear) tr.classList.add('queued-row');
       tr.setAttribute('data-sid', r.studentId);
       tr.setAttribute('data-pkey', r.paymentKey);
       tr.dataset.studentName = displayName;
@@ -205,7 +222,8 @@
         <td class="p-2"><div>${curY? esc(curY): '—'} ${badge}</div></td>
         <td class="p-2">${yearSelectHTML(curY || new Date().getFullYear())}</td>
         <td class="p-2">
-          <div class="queueHint text-xs text-slate-400">Ready</div>
+          <div class="queueHint text-xs ${queueHintColor}">${queueHintText}</div>
+          ${queueCountBadge}
           <button class="btnQueue btn bg-blue-600 text-white text-xs">Queue to Approvals</button>
         </td>
       `;
@@ -225,14 +243,15 @@
         const studentLabel = tr.dataset.studentName || 'student';
         try{
           btn.disabled = true;
-          await queueToApprovals(sid, pkey, yr);
-          if(hint) hint.textContent = `Queued for ${yr}`;
+          const queueAttempts = await queueToApprovals(sid, pkey, yr);
+          if(hint) hint.textContent = `Queued for ${yr}${queueAttempts > 1 ? ` (${queueAttempts}x)` : ''}`;
           btn.textContent = 'Queued';
           setTimeout(() => {
             if(!btn.disabled) btn.textContent = origLabel;
           }, 2000);
           el('lastQueued').textContent = `Queued ${studentLabel} (${pkey}) for ${yr}`;
           toast(`Queued ${studentLabel} for ${yr}`);
+          await scan();
         }catch(e){
           alert('Queue failed: ' + e.message);
         }finally{
@@ -257,6 +276,8 @@
 
     const fullName = (`${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`).replace(/\s+/g,' ').trim() || '—';
     const approvalId = `${studentId}_${paymentKey}`; // idempotent
+    const parsedYear = Number(year);
+    const normalizedYear = Number.isFinite(parsedYear) ? parsedYear : new Date().getFullYear();
 
     const amountNumber = Number(P.amount || 0);
     const paymentPayload = {
@@ -268,8 +289,8 @@
       timestamp: P.timestamp || P.approvedAt || Date.now(),
       paymentKey: paymentKey,
       recordedAt: P.recordedAt || P.timestamp || P.approvedAt || Date.now(),
-      targetYear: Number(year),
-      academicYear: Number(year),
+      targetYear: normalizedYear,
+      academicYear: normalizedYear,
     };
 
     const payload = {
@@ -282,7 +303,7 @@
       parentContact: S.primaryParentContact || S.parentPhone || '',
       module: 'School Fees',          // IMPORTANT: lane identification
       category: 'Finance',
-      targetYear: Number(year),
+      targetYear: normalizedYear,
       amount: amountNumber,
       method: P.method || '',
       referenceCode: P.referenceCode || '',
@@ -296,14 +317,27 @@
       status: 'PENDING'
     };
 
+    const queueCountsKey = String(normalizedYear);
+    let queueAttemptsForYear = 1;
+    try{
+      const queueTx = await db.ref(`students/${studentId}/payments/${paymentKey}/queueCounts/${queueCountsKey}`).transaction(
+        current => (Number(current) || 0) + 1
+      );
+      queueAttemptsForYear = Number(queueTx.snapshot?.val()) || queueAttemptsForYear;
+    }catch(err){
+      const fallback = Number(((P.queueCounts || {})[queueCountsKey]) || 0) + 1;
+      if (Number.isFinite(fallback)) queueAttemptsForYear = fallback;
+    }
+    payload.queueAttempts = queueAttemptsForYear;
+
     // Audit breadcrumb (does not set the real year here)
     await db.ref(`students/${studentId}/payments/${paymentKey}`).update({
-      proposedYear: Number(year),
+      proposedYear: normalizedYear,
       stagedToApprovalsAt: Date.now()
     });
 
     // Write to approvals pending queue (School Fees lane)
-    const pendingPath = `${APPROVALS_PENDING_ROOT}/${year}/${approvalId}`;
+    const pendingPath = `${APPROVALS_PENDING_ROOT}/${normalizedYear}/${approvalId}`;
     await db.ref(pendingPath).set(payload);
 
     const approvalsPendingPayload = {
@@ -313,8 +347,9 @@
       paymentReferenceCode: paymentPayload.referenceCode,
       sourceModule: 'finance',
       status: 'PENDING',
-      forYear: Number(year),
-      academicYear: Number(year),
+      forYear: normalizedYear,
+      academicYear: normalizedYear,
+      queueAttempts: queueAttemptsForYear,
       modulePayload: {
         studentKey: studentId,
         payment: {
@@ -333,9 +368,10 @@
     if (ref){
       const idxSnap = await db.ref(`approvalsIndex/byRef/${ref}`).once('value');
       if (!idxSnap.exists()){
-        await db.ref(`approvalsIndex/byRef/${ref}`).set(Number(year));
+        await db.ref(`approvalsIndex/byRef/${ref}`).set(normalizedYear);
       }
     }
+    return queueAttemptsForYear;
   }
 
   // ---------- WIRE UI ----------
@@ -356,15 +392,22 @@
         const sid = tr.getAttribute('data-sid');
         const pkey = tr.getAttribute('data-pkey');
         try{
-          await queueToApprovals(sid, pkey, yr);
+          const queueAttempts = await queueToApprovals(sid, pkey, yr);
           ok++;
           const hint = tr.querySelector('.queueHint');
-          if(hint) hint.textContent = `Queued for ${yr}`;
+          if(hint) hint.textContent = `Queued for ${yr}${queueAttempts > 1 ? ` (${queueAttempts}x)` : ''}`;
         }catch{
           fail++;
         }
       }
-      if(ok) el('lastQueued').textContent = `Queued ${ok} payment(s) for ${yr}`;
+      if(ok){
+        el('lastQueued').textContent = `Queued ${ok} payment(s) for ${yr}`;
+        try{
+          await scan();
+        }catch(e){
+          console.error('Re-scan after bulk queue failed', e);
+        }
+      }
       toast(`Queued ${ok} payment(s) to Approvals${fail?`, ${fail} failed`:''}`);
     });
     el('btnReload').addEventListener('click', scan);

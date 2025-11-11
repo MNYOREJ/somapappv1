@@ -345,6 +345,12 @@
     filtered.forEach((row) => {
       const tr = document.createElement('tr');
       const rowYear = getRecordYearString(row);
+      const queueAttempts = Number(row.queueAttempts) || 0;
+      const queueBadge = queueAttempts
+        ? `<div class="queued-count">Queued ${queueAttempts}×</div>`
+        : '';
+      const highlightRow = rowYear && rowYear === selectedYear && queueAttempts > 0;
+      if (highlightRow) tr.classList.add('queued-year-row');
       tr.innerHTML = `
         <td>${formatDate(row.datePaid || row.createdAt)}</td>
         <td>
@@ -360,6 +366,7 @@
         <td>${row.recordedBy || '--'}</td>
         <td>
           <span class="pill pill-pending">${(row.status || 'pending').toUpperCase()}</span>
+          ${queueBadge}
           ${!rowYear ? '<span class="ml-2 px-2 py-0.5 text-[0.6rem] uppercase tracking-wider rounded-full bg-amber-800/40 text-amber-100">Year missing</span>' : ''}
         </td>
         <td class="text-right">

@@ -4,6 +4,10 @@
 
   const ADMIN_EMAIL = 'socratesschool2020@gmail.com';
   const COST_PER_FRIDAY = 1000;
+  const SOMAP_DEFAULT_YEAR = 2025;
+  const yearContext = window.somapYearContext;
+  const trimText = (value) => (value == null ? '' : String(value).trim());
+  const getContextYear = () => String(yearContext?.getSelectedYear?.() || SOMAP_DEFAULT_YEAR);
   const MODULE_LABELS = {
     finance: 'School Fees',
     transport: 'Transport',
@@ -76,6 +80,7 @@
     pending: {},
     pendingList: [],
     selectedRecord: null,
+    selectedYear: getContextYear(),
     filters: {
       module: '',
       search: '',
@@ -108,6 +113,45 @@
     const date = new Date(Number(value));
     if (Number.isNaN(date.getTime())) return '--';
     return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  function normalizeYearValue(value) {
+    const candidate = Number(value);
+    if (Number.isFinite(candidate) && candidate >= SOMAP_DEFAULT_YEAR) return String(candidate);
+    return getContextYear();
+  }
+
+  function getRecordYearString(record) {
+    if (!record || typeof record !== 'object') return '';
+    const candidates = [
+      record.forYear,
+      record.academicYear,
+      record.financeYear,
+      record.year,
+      record.targetYear,
+      record._year,
+      record.modulePayload?.payment?.academicYear,
+      record.modulePayload?.payment?.year,
+    ];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const value = candidates[i];
+      if (value == null || value === '') continue;
+      const str = String(value).trim();
+      if (str) return str;
+    }
+    return '';
+  }
+
+  function handleYearChange(newYear) {
+    const normalized = normalizeYearValue(newYear || state.selectedYear);
+    const changed = state.selectedYear !== normalized;
+    state.selectedYear = normalized;
+    state.historyFilterMonth = '';
+    if (els.historyMonth) els.historyMonth.value = '';
+    buildHistoryMonthOptionsForYear();
+    renderHistory();
+    renderPendingTable();
+    return changed;
   }
 
   function showLoader(show) {
@@ -214,6 +258,9 @@
         renderHistory();
       });
     }
+    if (yearContext?.onYearChanged) {
+      yearContext.onYearChanged(handleYearChange);
+    }
   }
   function loadAllData() {
     showLoader(true);
@@ -262,6 +309,7 @@
     const moduleFilter = state.filters.module;
     const search = state.filters.search;
 
+    const selectedYear = state.selectedYear;
     const filtered = state.pendingList.filter((row) => {
       const matchesModule = !moduleFilter || row.sourceModule === moduleFilter;
       const matchesSearch = !search
@@ -278,7 +326,9 @@
           matchesMonth = false;
         }
       }
-      return matchesModule && matchesSearch && matchesMonth;
+      const recordYear = getRecordYearString(row);
+      const matchesYear = !recordYear || recordYear === selectedYear;
+      return matchesModule && matchesSearch && matchesMonth && matchesYear;
     });
 
     if (!filtered.length) {
@@ -294,6 +344,7 @@
     const frag = document.createDocumentFragment();
     filtered.forEach((row) => {
       const tr = document.createElement('tr');
+      const rowYear = getRecordYearString(row);
       tr.innerHTML = `
         <td>${formatDate(row.datePaid || row.createdAt)}</td>
         <td>
@@ -307,7 +358,10 @@
         </td>
         <td class="font-semibold text-emerald-200">${formatCurrency(row.amountPaidNow)}</td>
         <td>${row.recordedBy || '--'}</td>
-        <td><span class="pill pill-pending">${(row.status || 'pending').toUpperCase()}</span></td>
+        <td>
+          <span class="pill pill-pending">${(row.status || 'pending').toUpperCase()}</span>
+          ${!rowYear ? '<span class="ml-2 px-2 py-0.5 text-[0.6rem] uppercase tracking-wider rounded-full bg-amber-800/40 text-amber-100">Year missing</span>' : ''}
+        </td>
         <td class="text-right">
           <div class="flex justify-end gap-2">
             <button class="inline-flex items-center gap-1 rounded-full border border-slate-500/40 px-3 py-1 text-xs text-slate-200 hover:border-slate-300/60">
@@ -316,17 +370,61 @@
             <button class="inline-flex items-center gap-1 rounded-full border border-emerald-500/60 px-3 py-1 text-xs text-emerald-100 hover:border-emerald-300/60">
               <i class="fas fa-check"></i> Approve
             </button>
+            ${!rowYear ? `<button class="inline-flex items-center gap-1 rounded-full border border-slate-400/50 px-3 py-1 text-xs text-slate-100 hover:border-slate-200/60 assign-year-btn">Assign ${selectedYear}</button>` : ''}
           </div>
         </td>`;
 
       const [viewBtn, approveBtn] = tr.querySelectorAll('button');
       viewBtn?.addEventListener('click', () => openDetailModal(row));
       approveBtn?.addEventListener('click', () => approveRecord(row));
+      const assignBtn = tr.querySelector('.assign-year-btn');
+      if (assignBtn) assignBtn.addEventListener('click', () => assignYearToRecord(row, selectedYear));
       frag.appendChild(tr);
     });
     els.pendingBody.innerHTML = '';
     els.pendingBody.appendChild(frag);
   }
+
+  async function ensureApprovalHasYear(record, targetYear) {
+    if (!record || !db) return '';
+    const approvalId = record.approvalId;
+    if (!approvalId) return '';
+    const normalized = normalizeYearValue(targetYear || record.forYear || state.selectedYear);
+    const numeric = Number(normalized);
+    try {
+      await db.ref(`approvalsPending/${approvalId}`).update({
+        forYear: numeric,
+        academicYear: numeric,
+      });
+    } catch (err) {
+      console.error('Approvals: failed to stamp year', err);
+    }
+    record.forYear = numeric;
+    record.academicYear = numeric;
+    return normalized;
+  }
+
+  async function assignYearToRecord(record, targetYear) {
+    if (!record || !db) return;
+    const approvalId = record.approvalId;
+    if (!approvalId) return toast('Cannot assign year: missing approval ID', 'warning');
+    const yearValue = await ensureApprovalHasYear(record, targetYear);
+    if (!yearValue) return toast('Could not determine academic year', 'warning');
+    try {
+      if (record.sourceModule === 'finance') {
+        await mirrorFinanceLedger(record, yearValue, {
+          status: (record.status || 'pending'),
+          approvedAt: record.approvedAt || Date.now(),
+        });
+      }
+      toast(`Assigned ${yearValue} to ${record.studentName || 'this payment'}.`, 'success');
+      renderPendingTable();
+    } catch (err) {
+      console.error('Approvals: failed to assign year', err);
+      toast(err?.message || 'Failed to assign year', 'danger');
+    }
+  }
+
   function openDetailModal(record) {
     state.selectedRecord = record;
     if (!els.detailContent || !els.detailModal) return;
@@ -446,6 +544,49 @@
     });
   }
 
+  function buildFinanceLedgerPayload(record, targetYear, options = {}) {
+    const paymentData = record.modulePayload?.payment || {};
+    const timestamp = Number(
+      paymentData.timestamp ||
+      record.datePaid ||
+      record.createdAt ||
+      record.approvedAt ||
+      Date.now()
+    );
+    const amount = Number(paymentData.amount || record.amountPaidNow || 0);
+    const payload = {
+      amount,
+      timestamp,
+      method: paymentData.method || record.paymentMethod || '',
+      note: paymentData.note || record.notes || '',
+      paidBy: paymentData.paidBy || record.paidBy || '',
+      payerContact: paymentData.payerContact || record.payerContact || '',
+      recordedBy: paymentData.recordedBy || record.recordedBy || state.user?.email || ADMIN_EMAIL,
+      referenceCode: trimText(paymentData.referenceCode || record.paymentReferenceCode || paymentData.reference || ''),
+      approvedAt: Number(options.approvedAt || record.approvedAt || Date.now()),
+      approvedBy: options.approvedBy || record.approvedBy || state.user?.email || ADMIN_EMAIL,
+      module: MODULE_LABELS.finance,
+      status: options.status || (record.status || 'approved'),
+      forYear: Number(targetYear),
+    };
+    if (options.extra && typeof options.extra === 'object') {
+      Object.assign(payload, options.extra);
+    }
+    return payload;
+  }
+
+  async function mirrorFinanceLedger(record, targetYear, options = {}) {
+    if (!record || record.sourceModule !== 'finance') return;
+    if (!db) return;
+    const studentKey = record.modulePayload?.studentKey;
+    const approvalId = record.approvalId;
+    if (!studentKey || !approvalId) return;
+    const normalizedYear = normalizeYearValue(targetYear || record.forYear || state.selectedYear);
+    const ledgerPath = `financeLedgers/${normalizedYear}/${studentKey}/payments/${approvalId}`;
+    const payload = buildFinanceLedgerPayload(record, normalizedYear, options);
+    await db.ref(ledgerPath).set(payload);
+  }
+
   function rejectSelectedRecord() {
     const record = state.selectedRecord;
     if (!record) return;
@@ -471,11 +612,15 @@
   }
 
   async function processApproval(record) {
+    const targetYear = await ensureApprovalHasYear(record, record.forYear || state.selectedYear);
+    const approvedAt = Date.now();
+    record.approvedAt = record.approvedAt || approvedAt;
+    record.approvedBy = record.approvedBy || state.user?.email || ADMIN_EMAIL;
     showLoader(true);
     try {
       switch (record.sourceModule) {
         case 'finance':
-          await commitFinancePayment(record);
+          await commitFinancePayment(record, targetYear);
           break;
         case 'transport':
           await commitTransportPayment(record);
@@ -500,7 +645,7 @@
     }
   }
 
-  async function commitFinancePayment(record) {
+  async function commitFinancePayment(record, targetYear) {
     const studentKey = record.modulePayload?.studentKey;
     const paymentData = record.modulePayload?.payment;
     if (!studentKey || !paymentData) throw new Error('Missing finance payload.');
@@ -510,11 +655,15 @@
     updates[`students/${studentKey}/payments/${pushRef.key}`] = {
       ...paymentData,
       approvedAt: firebase.database.ServerValue.TIMESTAMP,
-      approvedBy: state.user?.email || ADMIN_EMAIL,
+      approvedBy: record.approvedBy,
       referenceCode: record.paymentReferenceCode || null,
     };
     updates[`students/${studentKey}/lastPaymentAt`] = firebase.database.ServerValue.TIMESTAMP;
     await db.ref().update(updates);
+    await mirrorFinanceLedger(record, targetYear, {
+      status: 'approved',
+      approvedAt: record.approvedAt,
+    });
   }
 
   async function commitTransportPayment(record) {
@@ -667,8 +816,10 @@
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const historyPath = `approvalsHistory/${year}/${month}/${approvalId}`;
 
+    const resolvedForYear = Number(record.forYear || record.academicYear || year);
     const payload = {
       ...record,
+      forYear: Number.isFinite(resolvedForYear) ? resolvedForYear : undefined,
       status: 'completed',
       finalStatus,
       approvedBy: state.user?.email || ADMIN_EMAIL,
@@ -684,17 +835,15 @@
     const snapshot = await db.ref('approvalsHistory').once('value');
     const tree = snapshot.val() || {};
     const entries = [];
-    const monthOptions = [];
 
     Object.entries(tree).forEach(([year, months]) => {
       Object.entries(months || {}).forEach(([month, records]) => {
-        const ym = `${year}-${month}`;
-        if (!monthOptions.includes(ym)) monthOptions.push(ym);
         Object.entries(records || {}).forEach(([key, value]) => {
           entries.push({
             approvalId: key,
             year: Number(year),
             month,
+            forYear: Number(value?.forYear || value?.academicYear || value?.year || year),
             ...(value || {}),
           });
         });
@@ -702,12 +851,24 @@
     });
 
     entries.sort((a, b) => Number(b.approvedAt || b.datePaid || 0) - Number(a.approvedAt || a.datePaid || 0));
-    monthOptions.sort().reverse();
 
     state.historyEntries = entries;
-    state.historyMonthOptions = monthOptions;
-    populateHistoryMonthOptions();
+    buildHistoryMonthOptionsForYear();
     renderHistory();
+  }
+
+  function buildHistoryMonthOptionsForYear() {
+    const year = state.selectedYear;
+    const months = new Set();
+    state.historyEntries.forEach((entry) => {
+      const entryYear = getRecordYearString(entry);
+      if (!entryYear || entryYear !== year) return;
+      if (!entry.month || !entry.year) return;
+      const padded = String(entry.month).padStart(2, '0');
+      months.add(`${entry.year}-${padded}`);
+    });
+    state.historyMonthOptions = Array.from(months).sort().reverse();
+    populateHistoryMonthOptions();
   }
 
   function populateHistoryMonthOptions() {
@@ -724,9 +885,10 @@
   function renderHistory() {
     if (!els.historyList || !els.historyEmpty) return;
     const { historyEntries, historyFilterMonth, historyLimit } = state;
+    const selectedEntries = historyEntries.filter((entry) => getRecordYearString(entry) === state.selectedYear);
     const filtered = historyFilterMonth
-      ? historyEntries.filter((entry) => `${entry.year}-${entry.month}` === historyFilterMonth)
-      : historyEntries.slice(0, historyLimit);
+      ? selectedEntries.filter((entry) => `${entry.year}-${String(entry.month).padStart(2, '0')}` === historyFilterMonth)
+      : selectedEntries.slice(0, historyLimit);
 
     if (!filtered.length) {
       els.historyEmpty.classList.remove('hidden');

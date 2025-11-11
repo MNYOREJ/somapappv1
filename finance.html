@@ -88,36 +88,108 @@ const FinancePaidAdapter = (function(){
 
     cache = { y: Y, yearMap, legacyMap, totalsByStu: {}, grand: 0 };
 
-    // Pre-aggregate “paid” per student for selected year
-    const addAll = (byStu, mode) => {
-      Object.keys(byStu||{}).forEach(stuId=>{
-        const payments = (byStu[stuId] && byStu[stuId].payments) ? byStu[stuId].payments : {};
-        Object.keys(payments||{}).forEach(pid=>{
-          const rec = payments[pid] || {};
-          if (!isApproved(rec)) return;
-          if (!isSchoolFees(rec)) return;
+    const seenRecords = new WeakSet();
 
-          // Route a record to a year:
-          const declared = getDeclaredYear(rec); // null if none
-          let goesTo = declared ? String(declared) : null;
+    const resolveStudentId = (rawId, rec) => {
+      const fromKey = String(rawId || '').trim();
+      if (fromKey && fromKey.toLowerCase() !== 'students') return fromKey;
+      const fallbacks = [
+        rec?.studentId, rec?.studentID, rec?.student_id, rec?.student,
+        rec?.studentKey, rec?.studentCode,
+        rec?.admissionNumber, rec?.admissionNo, rec?.admission, rec?.adm,
+        rec?.profileId, rec?.learnerId
+      ];
+      const chosen = fallbacks.find(v => v && String(v).trim());
+      return chosen ? String(chosen).trim() : null;
+    };
 
-          // Legacy rule: if no declared year and this came from LEGACY bucket,
-          // treat it as 2025 ANCHOR ONLY
-          if (!declared && mode==='legacy') goesTo = String(SOMAP_ANCHOR_YEAR);
+    const looksLikePayment = (node) => {
+      if (!node || typeof node !== 'object') return false;
+      const keys = Object.keys(node);
+      if (!keys.length) return false;
+      return [
+        'amount','amt','value','paid','paidAmount','totalPaid','paymentAmount','txAmount','transactionAmount'
+      ].some(k => node[k] !== undefined && node[k] !== null);
+    };
 
-          if (goesTo !== cache.y) return; // only count records for selected year
+    const applyRecord = (stuIdCandidate, rec, mode) => {
+      if (!rec || typeof rec !== 'object') return;
+      if (seenRecords.has(rec)) return;
+      seenRecords.add(rec);
+      if (!isApproved(rec)) return;
+      if (!isSchoolFees(rec)) return;
 
-          const amt = getAmount(rec);
-          if (!amt) return;
+      const declared = getDeclaredYear(rec);
+      let goesTo = declared ? String(declared) : null;
+      if (!declared && mode === 'legacy') goesTo = String(SOMAP_ANCHOR_YEAR);
+      if (goesTo !== cache.y) return;
 
-          cache.totalsByStu[stuId] = n(cache.totalsByStu[stuId]) + amt;
-          cache.grand += amt;
-        });
+      const amt = getAmount(rec);
+      if (!amt) return;
+
+      const stuId = resolveStudentId(stuIdCandidate, rec);
+      if (!stuId) return;
+
+      cache.totalsByStu[stuId] = n(cache.totalsByStu[stuId]) + amt;
+      cache.grand += amt;
+    };
+
+    const ingestPaymentContainer = (stuId, container, mode, depth = 0) => {
+      if (!container || typeof container !== 'object' || depth > 6) return;
+
+      if (Array.isArray(container)) {
+        container.forEach(item => ingestPaymentContainer(stuId, item, mode, depth + 1));
+        return;
+      }
+
+      if (looksLikePayment(container)) {
+        applyRecord(stuId, container, mode);
+      }
+
+      const nestedKeys = ['payments','entries','records','transactions','history','items','list'];
+      nestedKeys.forEach(key => {
+        const node = container[key];
+        if (node && typeof node === 'object') {
+          ingestPaymentContainer(stuId, node, mode, depth + 1);
+        }
+      });
+
+      Object.keys(container).forEach(key => {
+        if (nestedKeys.includes(key) || key === 'students') return;
+        const value = container[key];
+        if (!value) return;
+        if (/^\d{4}$/.test(key)) {
+          ingestPaymentContainer(stuId, value, mode, depth + 1);
+          return;
+        }
+        if (typeof value === 'object') {
+          ingestPaymentContainer(stuId === 'students' ? null : stuId, value, mode, depth + 1);
+        }
       });
     };
 
-    addAll(yearMap, 'year');
-    addAll(legacyMap, 'legacy');
+    const collectStudents = (map, mode) => {
+      if (!map || typeof map !== 'object') return;
+      Object.keys(map).forEach(key => {
+        const node = map[key];
+        if (!node || typeof node !== 'object') return;
+        if (key === 'students') {
+          Object.keys(node).forEach(stuKey => {
+            ingestPaymentContainer(stuKey, node[stuKey], mode);
+          });
+          return;
+        }
+        if (node.students && typeof node.students === 'object') {
+          Object.keys(node.students).forEach(stuKey => {
+            ingestPaymentContainer(stuKey, node.students[stuKey], mode);
+          });
+        }
+        ingestPaymentContainer(key, node, mode);
+      });
+    };
+
+    collectStudents(yearMap, 'year');
+    collectStudents(legacyMap, 'legacy');
   }
 
   function getPaidFor(stuId){

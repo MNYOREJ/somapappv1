@@ -1,4 +1,4 @@
-﻿﻿<!doctype html>
+﻿﻿﻿﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -919,13 +919,6 @@
         resolveCarryForwardDebt(currentStudentKey, yearStr, admissionRef)
       ]);
       latestFinanceSnapshot = fin;
-      const [perYearFee, perYearPaid] = await Promise.all([
-        getYearFee(yearStr, currentStudentKey),
-        sumYearPayments(yearStr, currentStudentKey),
-      ]);
-      const normalizedFee = Number.isFinite(Number(perYearFee)) ? Number(perYearFee) : Number(fin.due || fin.record?.feePerYear || 0);
-      const normalizedPaid = Number.isFinite(Number(perYearPaid)) ? Number(perYearPaid) : Number(fin.paid || 0);
-      const normalizedOutstanding = Math.max(0, normalizedFee - normalizedPaid);
 
       const currentFee = Number(fin.due || fin.record?.feePerYear || 0);
       const carryAmountFromRecord = Math.max(0, Number(fin.record?.carryAmount || fin.record?.carry || 0));
@@ -963,12 +956,18 @@
       } else {
         statFeeDue.textContent = fmtTsh(totalFeeDue);
       }
-
-      statPaid.textContent = fmtTsh(normalizedPaid);
-      statBalance.textContent = fmtTsh(normalizedOutstanding);
-
+      
+      statPaid.textContent = fmtTsh(fin.paid);
+      
+      // Calculate total outstanding
+      // Total outstanding = (current fee + previous debt) - payments made this year
+      const currentPaid = Number(fin.paid || 0);
+      let totalOutstanding = Math.max(0, totalFeeDue - currentPaid);
+      
+      statBalance.textContent = fmtTsh(totalOutstanding);
+      
       // Use totalFeeDue (which includes carry-forward debt) for badge calculation
-      applyFeeBadge(totalFeeDue, normalizedPaid);
+      applyFeeBadge(totalFeeDue, fin.paid);
       
       const planName = fin.record?.paymentPlan || fin.paymentPlan || currentStudent?.paymentPlan || '-';
       statPaymentPlan.textContent = safe(planName);
@@ -1864,45 +1863,6 @@
       ensureReceiptUrl(url => window.open(url, '_blank'));
     });
   })();
-  </script>
-  <script>
-  window.SOMAP_DEFAULT_YEAR = window.SOMAP_DEFAULT_YEAR || 2025;
-  window.somapYearContext = window.somapYearContext || (function(){
-    let selected = (sessionStorage.getItem('somap_selected_year') || String(window.SOMAP_DEFAULT_YEAR));
-    const listeners = new Set();
-    return {
-      getSelectedYear(){ return String(selected); },
-      setSelectedYear(y){
-        y = String(y);
-        if (selected === y) return;
-        selected = y;
-        try { sessionStorage.setItem('somap_selected_year', y); } catch (_) {}
-        listeners.forEach(fn => { try { fn(y); } catch (_) {} });
-      },
-      onYearChanged(fn){ if (typeof fn === 'function') listeners.add(fn); }
-    };
-  })();
-
-  const sharedDb = window.db || (firebase?.database ? firebase.database() : null);
-  const safeNum = value => (value === null || value === undefined) ? 0 : Number(value) || 0;
-
-  async function sumYearPayments(year, studentId) {
-    if (!sharedDb || !year || !studentId) return 0;
-    const snap = await sharedDb.ref(`financeLedgers/${year}/${studentId}/payments`).once('value');
-    const rows = snap.val() || {};
-    let total = 0;
-    Object.values(rows).forEach(p => {
-      total += safeNum(p?.amount || p?.paid || p?.value);
-    });
-    return total;
-  }
-
-  async function getYearFee(year, studentId) {
-    if (!sharedDb || !year || !studentId) return 0;
-    const snap = await sharedDb.ref(`studentFees/${year}/${studentId}/feePerYear`).once('value');
-    const val = snap.val();
-    return (val === null || val === undefined) ? 0 : safeNum(val);
-  }
   </script>
 </body>
 </html>

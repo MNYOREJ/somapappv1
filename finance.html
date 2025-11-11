@@ -1080,14 +1080,8 @@ function buildFinanceStudents(
 
       if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
 
-      const feeYearValue = Number.isFinite(student.yearFee) ? student.yearFee : Number(student.feePerYear) || 0;
-      const paidYearValue = Number.isFinite(student.yearPaid) ? student.yearPaid : Number(fin.paidAmount) || 0;
-      const outstandingValue = Number.isFinite(student.yearOutstanding)
-        ? student.yearOutstanding
-        : Math.max(0, feeYearValue - paidYearValue);
-
-      totalDue += feeYearValue;
-      totalCollected += paidYearValue;
+      totalDue += fin.feePerYear;
+      totalCollected += fin.paidAmount;
 
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
       const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '-';
@@ -1119,10 +1113,10 @@ function buildFinanceStudents(
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
         <td class="p-2 border align-top">${student.classLevel || ''}${statusNote}</td>
-        <td class="p-2 border align-top text-right">${fmt(feeYearValue)}${carryNote}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}${carryNote}</td>
         <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
-        <td class="p-2 border align-top text-right">${fmt(paidYearValue)}</td>
-        <td class="p-2 border align-top text-right">${fmt(outstandingValue)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
         <td class="p-2 border align-top">
           <div class="flex items-center justify-between gap-2">
             <span>${debtLabel}</span>
@@ -1834,7 +1828,6 @@ function buildFinanceStudents(
       if (!Object.keys(cachedStudents).length) {
         cachedStudents = baseStudents;
       }
-      await hydrateYearMetrics(cachedStudents, targetYear);
 
       // ===== Parent mode: filter to single learner =====
       if (parentCtx.enabled) {
@@ -1874,30 +1867,6 @@ function buildFinanceStudents(
       console.error('Error loading students:', err);
       alert('Error loading students: ' + err.message);
     }
-  }
-
-  async function hydrateYearMetrics(studentMap, year) {
-    if (!db || !studentMap) return;
-    const resolvedYear = String(year || activeYear || window.somapYearContext?.getSelectedYear?.() || SOMAP_DEFAULT_YEAR);
-    const entries = Object.entries(studentMap || {});
-    await Promise.all(entries.map(async ([id, student]) => {
-      try {
-        const [fee, paid] = await Promise.all([
-          getYearFee(resolvedYear, id),
-          sumYearPayments(resolvedYear, id),
-        ]);
-        const safeFee = Number.isFinite(Number(fee)) ? Number(fee) : 0;
-        const safePaid = Number.isFinite(Number(paid)) ? Number(paid) : 0;
-        student.yearFee = safeFee;
-        student.yearPaid = safePaid;
-        student.yearOutstanding = Math.max(0, safeFee - safePaid);
-      } catch (err) {
-        console.warn('Finance: failed to hydrate year metrics for', id, err);
-        student.yearFee = student.yearFee ?? 0;
-        student.yearPaid = student.yearPaid ?? 0;
-        student.yearOutstanding = student.yearOutstanding ?? 0;
-      }
-    }));
   }
 
   document.getElementById("downloadExpenseCsv").addEventListener("click", () => {
@@ -2201,46 +2170,8 @@ function buildFinanceStudents(
 })();
 </script>
 
-<script>
-window.SOMAP_DEFAULT_YEAR = window.SOMAP_DEFAULT_YEAR || 2025;
-window.somapYearContext = window.somapYearContext || (function(){
-  let selected = (sessionStorage.getItem('somap_selected_year') || String(window.SOMAP_DEFAULT_YEAR));
-  const listeners = new Set();
-  return {
-    getSelectedYear() { return String(selected); },
-    setSelectedYear(y) {
-      y = String(y);
-      if (selected === y) return;
-      selected = y;
-      try { sessionStorage.setItem('somap_selected_year', y); } catch (_) {}
-      listeners.forEach(fn => { try { fn(y); } catch (_) {} });
-    },
-    onYearChanged(fn) { if (typeof fn === 'function') listeners.add(fn); }
-  };
-})();
-
-const sharedDb = window.db || (firebase?.database ? firebase.database() : null);
-const safeNum = value => (value === null || value === undefined) ? 0 : Number(value) || 0;
-
-async function sumYearPayments(year, studentId) {
-  if (!sharedDb || !year || !studentId) return 0;
-  const snap = await sharedDb.ref(`financeLedgers/${year}/${studentId}/payments`).once('value');
-  const rows = snap.val() || {};
-  let total = 0;
-  Object.values(rows).forEach(p => {
-    total += safeNum(p?.amount || p?.paid || p?.value);
-  });
-  return total;
-}
-
-async function getYearFee(year, studentId) {
-  if (!sharedDb || !year || !studentId) return 0;
-  const snap = await sharedDb.ref(`studentFees/${year}/${studentId}/feePerYear`).once('value');
-  const val = snap.val();
-  if (val === null || val === undefined) return 0;
-  return safeNum(val);
-}
-</script>
-
 </body>
 </html>
+
+
+

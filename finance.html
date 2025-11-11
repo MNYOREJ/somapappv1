@@ -240,41 +240,6 @@
 
 <script>
 (function () {
-  // ===== YEAR + NUM HELPERS =====
-  const SOMAP_DEFAULT_YEAR = 2025;
-  window.somapYearContext = window.somapYearContext || (function(){
-    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
-    const listeners = new Set();
-    return {
-      getSelectedYear(){ return selected; },
-      setSelectedYear(y){
-        y = String(y);
-        if (selected===y) return;
-        selected = y;
-        try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
-        listeners.forEach(fn=>{ try{ fn(y); }catch{} });
-      },
-      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
-    };
-  })();
-
-  const num = v => {
-    if (v == null) return 0;
-    if (typeof v === 'number') return v;
-    return Number(String(v).replace(/[^\d\-\.]/g,'')) || 0;
-  };
-
-  function isApprovedPayment(p){
-    if (!p) return false;
-    const status = String(p.status || p.approvalStatus || '').trim().toUpperCase();
-    return p.approved === true || p.isApproved === true || status === 'APPROVED';
-  }
-
-  function withSchoolPrefix(path){
-    const sid = window.currentSchoolId;
-    return sid ? `schools/${sid}/${path}` : path;
-  }
-
   /* ===== Parent mode detection (non-destructive) ===== */
   const parentCtx = { enabled:false, studentId:null, adm:null, year:null, className:null };
   (function detectParentMode(){
@@ -301,6 +266,8 @@
       parentCtx.className = sessionStorage.getItem('parent_class');
     }
   })();
+
+  const SOMAP_DEFAULT_YEAR = 2025;
   const CARRY_FORWARD_START_YEAR = 2025;
   const FINANCE_ADMIN_EMAIL = 'socratesschool2020@gmail.com';
   const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
@@ -1088,9 +1055,9 @@ function buildFinanceStudents(
   // ===== Render table (unchanged except: uses placeholder breakdown row) =====
   function renderTable() {
     tbody.innerHTML = '';
+    let totalDue = 0, totalCollected = 0;
     const filterClass = classFilter.value;
     const isParentScope = parentCtx.enabled;
-    const rowInfos = [];
 
     Object.entries(cachedStudents).forEach(([id, student]) => {
       if (filterClass && student.classLevel !== filterClass) return;
@@ -1113,6 +1080,9 @@ function buildFinanceStudents(
 
       if (showingDebtorsOnly && (fin.balance <= 0 && fin.periodDebtValue <= 0)) return;
 
+      totalDue += fin.feePerYear;
+      totalCollected += fin.paidAmount;
+
       const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
       const debtLabel = fin.periodDebtValue > 0 ? `Debt till ${fin.periodDebtLabel}` : '-';
       const prevYearNum = Number(financeYear) - 1;
@@ -1131,11 +1101,9 @@ function buildFinanceStudents(
         ? `<button class="payBtn px-2 py-1 text-xs bg-slate-200 text-slate-500 rounded ml-1 cursor-not-allowed" data-id="${id}" disabled>Pay</button>`
         : `<button class="payBtn px-2 py-1 text-xs bg-indigo-600 text-white rounded ml-1" data-id="${id}">Pay</button>`;
 
-      const admissionNumber = student.admissionNumber || '';
       const tr = document.createElement('tr');
       tr.className = 'table-row';
       tr.dataset.studentId = id;
-      tr.dataset.admissionNumber = admissionNumber;
       tr.innerHTML = `
         <td class="p-2 border text-center align-top">
           <button class="expander text-indigo-600 hover:text-indigo-800" data-id="${id}" title="Expand/Collapse">
@@ -1145,16 +1113,10 @@ function buildFinanceStudents(
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
         <td class="p-2 border align-top">${student.classLevel || ''}${statusNote}</td>
-        <td class="p-2 border align-top text-right">
-          <span class="finance-fee-value">${fmt(fin.feePerYear)}</span>${carryNote}
-        </td>
+        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}${carryNote}</td>
         <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
-        <td class="p-2 border align-top text-right">
-          <span class="year-paid-cell">${fmt(fin.paidAmount)}</span>
-        </td>
-        <td class="p-2 border align-top text-right">
-          <span class="year-balance-cell">${fmt(fin.balance)}</span>
-        </td>
+        <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
+        <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
         <td class="p-2 border align-top">
           <div class="flex items-center justify-between gap-2">
             <span>${debtLabel}</span>
@@ -1167,14 +1129,28 @@ function buildFinanceStudents(
         </td>
       `;
       tbody.appendChild(tr);
-      const paidCell = tr.querySelector('.year-paid-cell');
-      const balanceCell = tr.querySelector('.year-balance-cell');
-      rowInfos.push({ adm: admissionNumber || id, paidCell, balanceCell });
 
       const brWrap = document.createElement('tbody');
       brWrap.innerHTML = breakdownRowHTML(id);
       tbody.appendChild(brWrap.firstElementChild);
     });
+
+    const totalOutstanding = totalDue - totalCollected;
+    const totalDueEl = document.getElementById('totalDue');
+    if (totalDueEl) {
+      totalDueEl.textContent = fmt(totalDue);
+      totalDueEl.dataset.amount = String(totalDue);
+    }
+    const totalCollectedEl = document.getElementById('totalCollected');
+    if (totalCollectedEl) {
+      totalCollectedEl.textContent = fmt(totalCollected);
+      totalCollectedEl.dataset.amount = String(totalCollected);
+    }
+    const totalOutstandingEl = document.getElementById('totalOutstanding');
+    if (totalOutstandingEl) {
+      totalOutstandingEl.textContent = fmt(totalOutstanding);
+      totalOutstandingEl.dataset.amount = String(totalOutstanding);
+    }
 
     tbody.querySelectorAll('.payBtn').forEach(btn => btn.addEventListener('click', (e) => {
       if (btn.disabled) return;
@@ -1187,125 +1163,8 @@ function buildFinanceStudents(
       console.warn('finance:tableRendered dispatch failed', eventErr);
     }
     // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
-    refreshYearPaidTotals(rowInfos);
   }
 
-  function updateSummaryCards(totalDueYear, totalPaidYear) {
-    const due = Number.isFinite(Number(totalDueYear)) ? Number(totalDueYear) : 0;
-    const paid = Number.isFinite(Number(totalPaidYear)) ? Number(totalPaidYear) : 0;
-    const balance = due - paid;
-    const totalDueEl = document.getElementById('totalDue');
-    if (totalDueEl) {
-      totalDueEl.textContent = fmt(due);
-      totalDueEl.dataset.amount = String(due);
-    }
-    const totalCollectedEl = document.getElementById('totalCollected');
-    if (totalCollectedEl) {
-      totalCollectedEl.textContent = fmt(paid);
-      totalCollectedEl.dataset.amount = String(paid);
-    }
-    const totalOutstandingEl = document.getElementById('totalOutstanding');
-    if (totalOutstandingEl) {
-      totalOutstandingEl.textContent = fmt(balance);
-      totalOutstandingEl.dataset.amount = String(balance);
-    }
-  }
-
-  function refreshYearPaidTotals(rowInfos) {
-    if (!rowInfos || !rowInfos.length) {
-      updateSummaryCards(0, 0);
-      return;
-    }
-    const year = String(window.somapYearContext?.getSelectedYear?.() || financeYear || SOMAP_DEFAULT_YEAR);
-    const tasks = rowInfos.map(async (entry) => {
-      if (!entry || !entry.adm) return { fee: 0, paid: 0 };
-      const [fee, paid] = await Promise.all([
-        getFeePerYear(entry.adm, year),
-        getPaidTotalForYear(entry.adm, year)
-      ]);
-      const balance = Math.max(fee - paid, 0);
-      if (entry.paidCell) entry.paidCell.textContent = fmt(paid);
-      if (entry.balanceCell) entry.balanceCell.textContent = fmt(balance);
-      return { fee, paid };
-    });
-    Promise.all(tasks)
-      .then(results => {
-        const totalFee = results.reduce((sum, item) => sum + (Number(item?.fee) || 0), 0);
-        const totalPaid = results.reduce((sum, item) => sum + (Number(item?.paid) || 0), 0);
-        updateSummaryCards(totalFee, totalPaid);
-      })
-      .catch(err => console.warn('refreshYearPaidTotals failed', err));
-  }
-
-  async function getFeePerYear(adm, year) {
-    const dbInstance = window.db || (firebase?.database ? firebase.database() : null);
-    if (!dbInstance || !adm) return 0;
-    const targetYear = String(year || financeYear || SOMAP_DEFAULT_YEAR);
-    const path = withSchoolPrefix(`studentFees/${targetYear}/${adm}/feePerYear`);
-    try {
-      const snap = await dbInstance.ref(path).get();
-      if (snap && snap.exists()) {
-        return num(snap.val());
-      }
-    } catch (err) {
-      console.warn('getFeePerYear failed', targetYear, adm, err?.message || err);
-    }
-    return 0;
-  }
-
-  async function getPaidTotalForYear(adm, year) {
-    const dbInstance = window.db || (firebase?.database ? firebase.database() : null);
-    if (!dbInstance || !adm) return 0;
-    const targetYear = String(year || financeYear || SOMAP_DEFAULT_YEAR);
-    const ledgerPath = withSchoolPrefix(`financeLedgers/${targetYear}/${adm}/payments`);
-    const approvedIndicator = (status) => String(status || '').trim().toUpperCase() === 'APPROVED';
-    try {
-      const ledgerSnap = await dbInstance.ref(ledgerPath).get();
-      if (ledgerSnap && ledgerSnap.exists()) {
-        const rows = ledgerSnap.val() || {};
-        let sum = 0;
-        Object.values(rows).forEach((p) => {
-          if (!p) return;
-          const amount = Number(p.amount || p.amountPaidNow || 0);
-          if (!Number.isFinite(amount)) return;
-          const isApproved = !!(p.approvedAt || p.approvedBy || p.isApproved === true || approvedIndicator(p.status));
-          if (p.isRejected) return;
-          if (isApproved) sum += amount;
-        });
-        return sum;
-      }
-    } catch (err) {
-      console.warn('getPaidTotalForYear ledger read failed', ledgerPath, err?.message || err);
-    }
-    let total = 0;
-    const yearsToScan = [targetYear];
-    const prevCal = String(Number(targetYear) - 1);
-    if (!yearsToScan.includes(prevCal)) yearsToScan.push(prevCal);
-    for (const calYear of yearsToScan) {
-      const historyPath = withSchoolPrefix(`approvalsHistory/${calYear}`);
-      try {
-        const historySnap = await dbInstance.ref(historyPath).get();
-        if (!historySnap || !historySnap.exists()) continue;
-        const months = historySnap.val() || {};
-        Object.values(months).forEach((bucket) => {
-          if (!bucket) return;
-          Object.values(bucket).forEach((record) => {
-            if (!record) return;
-            const admissionMatch = String(record.studentAdm || record.studentId || '').trim() === String(adm).trim();
-            const yearMatch = String(record.academicYear || '').trim() === targetYear;
-            const isApproved = !!(record.approvedBy || record.approvedAt || approvedIndicator(record.status));
-            if (admissionMatch && yearMatch && isApproved) {
-              const amount = Number(record.amountPaidNow || record.amount || 0);
-              if (Number.isFinite(amount)) total += amount;
-            }
-          });
-        });
-      } catch (err) {
-        console.warn('getPaidTotalForYear approvalsHistory failed', historyPath, err?.message || err);
-      }
-    }
-    return total;
-  }
   // ====== SPEED FIX: lazy-load a single iframe when clicked, and close others ======
   function injectIframeIfNeeded(id) {
     const row = document.getElementById(`br-${id}`);
@@ -2061,7 +1920,7 @@ function buildFinanceStudents(
       if (yearSelectEl && yearSelectEl.value !== normalized) {
         yearSelectEl.value = normalized;
       }
-      refreshFinanceData(normalized).catch((err) => console.warn('Finance refresh failed', err));
+      refreshFinanceData(normalized);
     });
   }
   window.addEventListener('click', ev => {
@@ -2313,3 +2172,6 @@ function buildFinanceStudents(
 
 </body>
 </html>
+
+
+

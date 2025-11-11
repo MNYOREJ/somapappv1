@@ -9,7 +9,8 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
   <script src="Todashboardhtml/yearContext.js"></script>
   <script src="firebase.js"></script>
-  <script>
+<script>
+
 /** Anchor year & year context are already defined elsewhere. We only read. */
 const SOMAP_ANCHOR_YEAR = 2025;
 
@@ -19,7 +20,7 @@ function n(v){ const x = Number(v); return isFinite(x) ? x : 0; }
 /** Normalize approval status (accept only approved/cleared-type payments) */
 function isApproved(rec){
   const s = String(rec?.status || rec?.State || rec?.approvalStatus || '').toLowerCase();
-  if(!s) return true;
+  if(!s) return true; // if no status stored, assume already posted to ledger -> count it
   return ['approved','cleared','ok','success','posted'].some(k => s.includes(k));
 }
 
@@ -29,7 +30,7 @@ function getDeclaredYear(rec){
   if (!y) return null;
   const s = String(y).trim();
   const m = s.match(/^(20\d{2})$/);
-  return m ? m[1] : (SOMAP_ANCHOR_YEAR + '');
+  return m ? m[1] : (SOMAP_ANCHOR_YEAR + ''); // fallback guard if y looked weird
 }
 
 /** Extract a payment amount from many legacy shapes */
@@ -37,6 +38,7 @@ function getAmount(rec){
   if (!rec || typeof rec !== 'object') return 0;
   const candidates = [
     rec.amount, rec.amt, rec.value, rec.paid, rec.paidAmount, rec.totalPaid,
+    // mpesa/mobile money sometimes nest:
     rec.txAmount, rec.transactionAmount, rec.paymentAmount
   ];
   const v = candidates.find(v => v !== undefined && v !== null);
@@ -46,10 +48,18 @@ function getAmount(rec){
 /** True if record is school fees (or unspecified type). We keep broad to avoid missing data. */
 function isSchoolFees(rec){
   const t = (rec?.type || rec?.category || rec?.module || '').toString().toLowerCase();
-  if(!t) return true;
+  if(!t) return true; // many ledgers don’t set a type -> treat as fees
   return ['school fees','fees','fee','schoolfees'].some(k => t.includes(k));
 }
 
+/**
+ * FinancePaidAdapter
+ * - Preloads once per selected year:
+ *    - Year ledger: financeLedgers/{y}
+ *    - Legacy (yearless) ledgers under financeLedgers/* that are not 4-digit years
+ * - Aggregates paid strictly for 'y'
+ * - Legacy with no declared year is counted as 2025 only (does not mutate DB)
+ */
 const FinancePaidAdapter = (function(){
   let cache = { y: null, yearMap: {}, legacyMap: {}, totalsByStu: {}, grand: 0 };
 
@@ -58,6 +68,8 @@ const FinancePaidAdapter = (function(){
     if (!db) throw new Error('DB not initialized');
 
     const Y = String(y);
+
+    // Read once
     const [yearSnap, allSnap] = await Promise.all([
       db.ref(`financeLedgers/${Y}`).get().catch(()=>null),
       db.ref(`financeLedgers`).get().catch(()=>null)
@@ -66,15 +78,17 @@ const FinancePaidAdapter = (function(){
     const yearMap = yearSnap?.exists() ? (yearSnap.val() || {}) : {};
     const allMap  = allSnap?.exists()  ? (allSnap.val()  || {}) : {};
 
+    // Build legacy (top-level children that aren’t year folders and contain payments)
     const legacyMap = {};
     Object.keys(allMap).forEach(k=>{
-      if (/^\d{4}$/.test(k)) return;
+      if (/^\d{4}$/.test(k)) return; // skip year folders
       const node = allMap[k] || {};
       if (node.payments) legacyMap[k] = node;
     });
 
     cache = { y: Y, yearMap, legacyMap, totalsByStu: {}, grand: 0 };
 
+    // Pre-aggregate “paid” per student for selected year
     const addAll = (byStu, mode) => {
       Object.keys(byStu||{}).forEach(stuId=>{
         const payments = (byStu[stuId] && byStu[stuId].payments) ? byStu[stuId].payments : {};
@@ -83,10 +97,15 @@ const FinancePaidAdapter = (function(){
           if (!isApproved(rec)) return;
           if (!isSchoolFees(rec)) return;
 
-          const declared = getDeclaredYear(rec);
+          // Route a record to a year:
+          const declared = getDeclaredYear(rec); // null if none
           let goesTo = declared ? String(declared) : null;
+
+          // Legacy rule: if no declared year and this came from LEGACY bucket,
+          // treat it as 2025 ANCHOR ONLY
           if (!declared && mode==='legacy') goesTo = String(SOMAP_ANCHOR_YEAR);
-          if (goesTo !== cache.y) return;
+
+          if (goesTo !== cache.y) return; // only count records for selected year
 
           const amt = getAmount(rec);
           if (!amt) return;
@@ -101,12 +120,19 @@ const FinancePaidAdapter = (function(){
     addAll(legacyMap, 'legacy');
   }
 
-  function getPaidFor(stuId){ return n(cache.totalsByStu[stuId]); }
-  function getGrandTotal(){ return n(cache.grand); }
-  function getSelectedYear(){ return cache.y; }
+  function getPaidFor(stuId){
+    return n(cache.totalsByStu[stuId]);
+  }
+  function getGrandTotal(){
+    return n(cache.grand);
+  }
+  function getSelectedYear(){
+    return cache.y;
+  }
 
   return { preload, getPaidFor, getGrandTotal, getSelectedYear };
 })();
+
 </script>
   <title>SoMAp - Finance</title>
 

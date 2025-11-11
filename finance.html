@@ -42,137 +42,6 @@
     }
     @keyframes shimmer { 100% { transform: translateX(100%); } }
   </style>
-  <script>
-    window.SOMAP_DEFAULT_YEAR = window.SOMAP_DEFAULT_YEAR || 2025;
-    window.somapYearContext = window.somapYearContext || (function(){
-      let selected = (sessionStorage.getItem('somap_selected_year') || String(window.SOMAP_DEFAULT_YEAR));
-      const listeners = new Set();
-      return {
-        getSelectedYear(){ return String(selected); },
-        setSelectedYear(y){
-          y = String(y);
-          if (selected === y) return;
-          selected = y;
-          try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
-          listeners.forEach(fn => { try{ fn(y); }catch{} });
-        },
-        onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
-      };
-    })();
-
-    const getDb = () => {
-      if (window.db) return window.db;
-      try {
-        if (firebase?.apps?.length) return firebase.database();
-        if (firebase?.database) return firebase.database();
-      } catch (_) {}
-      return null;
-    };
-    window.__somapGetDb = getDb;
-    const safeNum = window.__somapSafeNum || (window.__somapSafeNum = (v => (v === null || v === undefined) ? 0 : Number(v) || 0));
-    const fmt = window.__somapFmtCurrency || (window.__somapFmtCurrency = (n => `TSh ${Number(n || 0).toLocaleString('en-US')}`));
-    window.somapFmt = fmt;
-    window.somapFmtCurrency = fmt;
-    const __ledgerCache = window.__somapLedgerCache || (window.__somapLedgerCache = {});
-    const __feeCache = window.__somapFeeCache || (window.__somapFeeCache = {});
-
-    const sumYearPayments = window.sumYearPayments || (window.sumYearPayments = async function(year, studentId){
-      const dbInstance = getDb();
-      if (!dbInstance || !year || !studentId) return 0;
-      const y = String(year);
-      const id = String(studentId);
-      const cacheKey = `${y}::${id}`;
-      const cached = __ledgerCache[cacheKey];
-      if (cached && cached.total !== undefined) return cached.total;
-      try{
-        let rows = {};
-        const primaryRef = dbInstance.ref(`financeLedgers/${y}/${id}/payments`);
-        const altRefA = dbInstance.ref(`financeLedgers/${id}/${y}/payments`);
-        const altRefB = dbInstance.ref(`financeLedgers/${id}/${y}`);
-        const altRefRoot = dbInstance.ref(`financeLedgers/${id}`);
-
-        try {
-          const snap = await primaryRef.once('value');
-          rows = snap.val() || {};
-        } catch (primaryErr) {
-          console.warn('sumYearPayments primary path failed', y, id, primaryErr);
-        }
-
-        if (!rows || !Object.keys(rows).length) {
-          try {
-            const snap = await altRefA.once('value');
-            rows = snap.val() || {};
-          } catch (altErrA) {
-            // ignore
-          }
-        }
-
-        if (!rows || !Object.keys(rows).length) {
-          try {
-            const snap = await altRefB.once('value');
-            const val = snap.val();
-            if (val && typeof val === 'object') {
-              rows = val.payments || val.entries || val.records || val;
-            }
-          } catch (altErrB) {
-            // ignore
-          }
-        }
-
-        if (!rows || !Object.keys(rows).length) {
-          try {
-            const snap = await altRefRoot.once('value');
-            const all = snap.val() || {};
-            const bucket = all[y] ?? all[String(y)] ?? all[Number(y)];
-            if (bucket && typeof bucket === 'object') {
-              rows = bucket.payments || bucket.entries || bucket.records || bucket;
-            }
-          } catch (rootErr) {
-            // ignore
-          }
-        }
-
-        rows = rows && typeof rows === 'object' ? rows : {};
-        let total = 0;
-        Object.keys(rows).forEach(key => {
-          const row = rows[key];
-          const amount = safeNum(row?.amount ?? row?.paid ?? row?.value);
-          total += amount;
-          if (row && typeof row === 'object') {
-            rows[key] = { ...row, amount };
-            if (!rows[key].allocatedYear) rows[key].allocatedYear = y;
-            rows[key].approvalId = rows[key].approvalId || key;
-          } else {
-            rows[key] = { amount, allocatedYear: y, approvalId: key };
-          }
-        });
-        __ledgerCache[cacheKey] = { rows, total };
-        return total;
-      }catch(err){
-        console.warn('sumYearPayments failed', y, id, err);
-        return 0;
-      }
-    });
-
-    const getYearFee = window.getYearFee || (window.getYearFee = async function(year, studentId){
-      const dbInstance = getDb();
-      if (!dbInstance || !year || !studentId) return 0;
-      const y = String(year);
-      const id = String(studentId);
-      const cacheKey = `${y}::${id}`;
-      if (__feeCache[cacheKey] !== undefined) return __feeCache[cacheKey];
-      try{
-        const snap = await dbInstance.ref(`studentFees/${y}/${id}/feePerYear`).once('value');
-        const v1 = snap.val();
-        const fee = (v1 !== null && v1 !== undefined) ? safeNum(v1) : 0;
-        __feeCache[cacheKey] = fee;
-        return fee;
-      }catch(err){
-        console.warn('getYearFee failed', y, id, err);
-        return 0;
-      }
-    });
-  </script>
 </head>
 
 <body class="p-6">
@@ -523,30 +392,13 @@
     if (yearHint) yearHint.textContent = `${financeYear}`;
   }
 
-  function clearYearCaches(year) {
-    const target = String(year || '');
-    if (window.__somapLedgerCache) {
-      Object.keys(window.__somapLedgerCache).forEach((key) => {
-        if (!target || key.startsWith(`${target}::`)) {
-          delete window.__somapLedgerCache[key];
-        }
-      });
-    }
-    if (window.__somapFeeCache) {
-      Object.keys(window.__somapFeeCache).forEach((key) => {
-        if (!target || key.startsWith(`${target}::`)) {
-          delete window.__somapFeeCache[key];
-        }
-      });
-    }
-  }
-
   if (!db) {
     console.error('DB not found.');
     alert('DB not ready. Ensure firebase.js initializes window.db.');
   }
 
   // ===== Helpers (kept as-is) =====
+  function fmt(n) { n = Number(n) || 0; return n.toLocaleString(); }
   function clamp(n) { return Math.max(0, Math.round(Number(n) || 0)); }
   function todayYMD() {
     const now = new Date();
@@ -1421,7 +1273,6 @@ function buildFinanceStudents(
   }
 
   async function refreshFinanceData(year = activeYear) {
-    clearYearCaches(year);
     await loadStudents(year);
     await loadExpenses(year);
   }
@@ -1838,9 +1689,9 @@ function buildFinanceStudents(
           breakdown: [
             { label: 'Academic Year', value: financeYear },
             { label: 'Plan', value: student.paymentPlan || '--' },
-            { label: 'Fee (Year)', value: fmt(totalRequired) },
-            { label: 'Paid Before', value: fmt(totalPaidBefore) },
-            { label: 'Balance After Approval', value: fmt(newBalance) },
+            { label: 'Fee (Year)', value: `TSh ${fmt(totalRequired)}` },
+            { label: 'Paid Before', value: `TSh ${fmt(totalPaidBefore)}` },
+            { label: 'Balance After Approval', value: `TSh ${fmt(newBalance)}` },
             { label: 'Paid By', value: paidBy },
             { label: 'Payer Contact', value: payerContact },
           ],
@@ -1996,7 +1847,7 @@ function buildFinanceStudents(
           // Also lock KPIs to 0
           ['totalDue','totalCollected','totalOutstanding'].forEach(id=>{
             const el = document.getElementById(id);
-            if (el){ el.textContent = fmt(0); el.dataset.amount = '0'; }
+            if (el){ el.textContent = '0'; el.dataset.amount = '0'; }
           });
           // Stop further rendering in parent scope
           populateStudentSelect();
@@ -2006,32 +1857,6 @@ function buildFinanceStudents(
         // Reduce dataset to the single learner
         cachedStudents = { [targetId]: cachedStudents[targetId] };
       }
-
-      const idsForHydration = Object.keys(cachedStudents || {});
-      await Promise.all(idsForHydration.map(async (id) => {
-        const [feeYear, paidYear] = await Promise.all([
-          getYearFee(targetYear, id),
-          sumYearPayments(targetYear, id)
-        ]);
-        const cacheKey = `${String(targetYear)}::${String(id)}`;
-        const cachedLedger = window.__somapLedgerCache?.[cacheKey]?.rows || {};
-        const normalizedPayments = normalizePayments(cachedLedger, targetYear);
-        const studentRef = cachedStudents[id] || (cachedStudents[id] = {});
-        const priorFee = safeNum(studentRef.feePerYear);
-        const calculatedFee = safeNum(feeYear);
-        const feeValue = calculatedFee > 0 ? calculatedFee : priorFee;
-        const paidValue = safeNum(paidYear);
-        studentRef.feePerYear = feeValue;
-        studentRef.paidAmount = paidValue;
-        studentRef.balance = Math.max(feeValue - paidValue, 0);
-        studentRef.payments = normalizedPayments;
-        if (feeValue > 0 || paidValue > 0 || Object.keys(normalizedPayments || {}).length > 0) {
-          studentRef.hasYearData = true;
-        }
-        studentRef._yearFee = feeValue;
-        studentRef._yearPaid = paidValue;
-        studentRef._yearOutstanding = studentRef.balance;
-      }));
 
       populateStudentSelect();
       renderTable();
@@ -2166,9 +1991,22 @@ function buildFinanceStudents(
     return Number(String(x || '0').replace(/[^\d]/g, '')) || 0;
   }
 
-  function formatTSh(n) { return fmt(n); }
+  function formatTSh(n) {
+    const value = Number(n) || 0;
+    try {
+      return new Intl.NumberFormat('en-KE', {
+        style: 'currency',
+        currency: 'TZS',
+        maximumFractionDigits: 0,
+      }).format(value);
+    } catch (err) {
+      return 'TSh ' + value.toLocaleString('en-US');
+    }
+  }
 
-  function formatNumber(n) { return fmt(n); }
+  function formatNumber(n) {
+    return (Number(n) || 0).toLocaleString('en-US');
+  }
 
   function adjustKpis(delta) {
     if (!delta) return;

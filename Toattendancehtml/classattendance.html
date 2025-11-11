@@ -259,6 +259,18 @@
     key = key.replace(/STREAM/g, '');
     return key;
   }
+  function classVariants(base){
+    if (!base) return [''];
+    const match = (String(base).match(/\\d+/) || [''])[0];
+    if (!match) return [base];
+    return [
+      base,
+      `Class ${match}AB`,
+      `CLASS ${match} AB`,
+      `class ${match}`,
+      `class ${match}ab`,
+    ];
+  }
   function isSameClass(a, b){
     if (!a || !b) return false;
     const normA = normalizeClassName(a);
@@ -271,10 +283,15 @@
   }
   function resolveClassNameForData(candidate){
     if (!candidate) return '';
-    const targetKey = canonicalClassKey(candidate);
-    if (!targetKey) return candidate;
-    const direct = students.find(s => canonicalClassKey(s.class) === targetKey);
-    return direct ? direct.class : candidate;
+    const variants = classVariants(candidate);
+    for (const variant of variants){
+      if (!variant) continue;
+      const targetKey = canonicalClassKey(variant);
+      if (!targetKey) continue;
+      const direct = students.find(s => canonicalClassKey(s.class) === targetKey);
+      if (direct) return direct.class;
+    }
+    return candidate;
   }
   function isAbsentDay(rec){
     if(!rec) return false;
@@ -314,6 +331,13 @@
       if(isWeekend(dt) || isHoliday(dt)) continue; count++;
     }
     return count;
+  }
+  function toastOK(msg){
+    const t = document.createElement('div');
+    t.className = 'fixed bottom-4 right-4 z-50 bg-emerald-600 text-white text-sm px-3 py-2 rounded shadow';
+    t.textContent = msg || 'Attendance saved successfully';
+    document.body.appendChild(t);
+    setTimeout(()=>t.remove(), 2500);
   }
   function setStatusElem(elm, val){
     if(!elm) return;
@@ -897,6 +921,7 @@
       if (!currentClass) return alert('Pick a class');
       await saveDayAttendance(currentClass, currentDateStr);
       await loadMonthAttendance(currentClass, monthKey);
+      toastOK('Attendance saved successfully');
     });
     el('exportDaily').addEventListener('click', () => exportDailyPDF());
     el('exportMonthly').addEventListener('click', () => exportMonthlyPDF());
@@ -1058,6 +1083,43 @@
 
   await init();
 })();
+</script>
+<script>
+window.SOMAP_DEFAULT_YEAR = window.SOMAP_DEFAULT_YEAR || 2025;
+window.somapYearContext = window.somapYearContext || (function(){
+  let selected = (sessionStorage.getItem('somap_selected_year') || String(window.SOMAP_DEFAULT_YEAR));
+  const listeners = new Set();
+  return {
+    getSelectedYear(){ return String(selected); },
+    setSelectedYear(y){
+      y = String(y);
+      if (selected === y) return;
+      selected = y;
+      try{ sessionStorage.setItem('somap_selected_year', y); }catch(_){}
+      listeners.forEach(fn => { try{ fn(y); }catch(_){}} );
+    },
+    onYearChanged(fn){ if (typeof fn === 'function') listeners.add(fn); }
+  };
+})();
+
+const sharedDb = window.db || (firebase?.database ? firebase.database() : null);
+const safeNum = value => (value === null || value === undefined) ? 0 : Number(value) || 0;
+
+async function sumYearPayments(year, studentId){
+  if (!sharedDb || !year || !studentId) return 0;
+  const snap = await sharedDb.ref(`financeLedgers/${year}/${studentId}/payments`).once('value');
+  const rows = snap.val() || {};
+  let total = 0;
+  Object.values(rows).forEach(p => total += safeNum(p?.amount || p?.paid || p?.value));
+  return total;
+}
+
+async function getYearFee(year, studentId){
+  if (!sharedDb || !year || !studentId) return 0;
+  const snap = await sharedDb.ref(`studentFees/${year}/${studentId}/feePerYear`).once('value');
+  const val = snap.val();
+  return (val === null || val === undefined) ? 0 : safeNum(val);
+}
 </script>
 </body>
 </html>

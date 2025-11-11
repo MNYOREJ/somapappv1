@@ -269,6 +269,24 @@
     const canonicalB = canonicalClassKey(b);
     return canonicalA && canonicalA === canonicalB;
   }
+  // Treat Class 1 family and Class 2 family as the same cohort on this page
+  function classMatches(target, actual){
+    if (!target || !actual) return false;
+    // keep the existing "exact" logic first
+    if (isSameClass(target, actual)) return true;
+
+    const t = canonicalClassKey(target);   // e.g. "2AB" or "2"
+    const a = canonicalClassKey(actual);   // e.g. "2" or "2A"
+    // Grab the leading number if present
+    const tLead = (t.match(/^\d+/) || [''])[0];
+    const aLead = (a.match(/^\d+/) || [''])[0];
+
+    // If we're in Class 1/2 universe, treat AB/streams as equivalent
+    if ((tLead === '1' || tLead === '2') && (aLead === '1' || aLead === '2')) {
+      return tLead === aLead;
+    }
+    return false;
+  }
   function resolveClassNameForData(candidate){
     if (!candidate) return '';
     const targetKey = canonicalClassKey(candidate);
@@ -317,8 +335,16 @@
   }
   function setStatusElem(elm, val){
     if(!elm) return;
-    elm.textContent = val || '—';
+    elm.textContent = val || '–';
     elm.className = 'status-pill ' + (val==='P' ? 'bg-green-100 text-green-800' : (val||'').includes('A') ? 'bg-red-100 text-red-700' : (val||'').includes('S') ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700');
+  }
+  function saveToastOK(msg){
+    const t = el('saveToast');
+    if (!t) return;
+    t.textContent = msg || 'Attendance saved successfully';
+    t.style.color = '#065f46';
+    t.style.fontWeight = '600';
+    setTimeout(() => { t.textContent = ''; t.removeAttribute('style'); }, 1800);
   }
 
   // ---------- FIREBASE: initialize and load students ----------
@@ -421,8 +447,7 @@
     const path = `attendance/${cls}/${yymm}/${dateStr}`;
     try {
       await db.ref(path).update(attendanceCache);
-      el('saveToast').textContent = 'Saved ✓';
-      setTimeout(() => el('saveToast').textContent = '', 1400);
+      saveToastOK('Attendance saved successfully');
     } catch (e) {
       alert('Save failed: ' + e.message);
     }
@@ -444,7 +469,7 @@
     const q = (el('searchInput').value || '').toLowerCase();
     const classKey = canonicalClassKey(currentClass);
     filtered = students
-      .filter(s => classKey ? canonicalClassKey(s.class) === classKey : s.class === currentClass)
+      .filter(s => classKey ? classMatches(currentClass, s.class) : s.class === currentClass)
       .filter(s => !q || s.name.toLowerCase().includes(q) || String(s.admissionNo || '').includes(q));
     el('studentCount').textContent = filtered.length;
 
@@ -840,7 +865,7 @@
     currentClass = resolved;
     const select = el('classSelect');
     if (select) {
-      const match = Array.from(select.options).find(opt => isSameClass(opt.value, resolved));
+      const match = Array.from(select.options).find(opt => classMatches(resolved, opt.value));
       if (match) {
         select.value = match.value;
       } else {

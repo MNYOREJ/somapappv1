@@ -258,23 +258,40 @@
     const fullName = (`${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`).replace(/\s+/g,' ').trim() || '—';
     const approvalId = `${studentId}_${paymentKey}`; // idempotent
 
+    const amountNumber = Number(P.amount || 0);
+    const paymentPayload = {
+      amount: amountNumber,
+      method: P.method || '',
+      referenceCode: P.referenceCode || '',
+      recordedBy: P.recordedBy || 'unknown',
+      note: P.note || '',
+      timestamp: P.timestamp || P.approvedAt || Date.now(),
+      paymentKey: paymentKey,
+      recordedAt: P.recordedAt || P.timestamp || P.approvedAt || Date.now(),
+      targetYear: Number(year),
+      academicYear: Number(year),
+    };
+
     const payload = {
       id: approvalId,
       studentId: studentId,
       studentName: fullName,
       admissionNumber: S.admissionNumber || studentId,
+      studentAdm: S.admissionNumber || studentId,
       className: S.classLevel || S.class || '',
       parentContact: S.primaryParentContact || S.parentPhone || '',
       module: 'School Fees',          // IMPORTANT: lane identification
       category: 'Finance',
       targetYear: Number(year),
-      amount: Number(P.amount||0),
+      amount: amountNumber,
       method: P.method || '',
       referenceCode: P.referenceCode || '',
       recordedBy: P.recordedBy || 'unknown',
       note: P.note || '',
+      sourceModule: 'finance',
       source: 'Finance Reclassifier',
       createdAt: Date.now(),
+      datePaid: paymentPayload.timestamp,
       originalTimestamp: P.timestamp || P.approvedAt || null,
       status: 'PENDING'
     };
@@ -288,6 +305,28 @@
     // Write to approvals pending queue (School Fees lane)
     const pendingPath = `${APPROVALS_PENDING_ROOT}/${year}/${approvalId}`;
     await db.ref(pendingPath).set(payload);
+
+    const approvalsPendingPayload = {
+      ...payload,
+      approvalId,
+      amountPaidNow: paymentPayload.amount,
+      paymentReferenceCode: paymentPayload.referenceCode,
+      sourceModule: 'finance',
+      status: 'PENDING',
+      forYear: Number(year),
+      academicYear: Number(year),
+      modulePayload: {
+        studentKey: studentId,
+        payment: {
+          ...paymentPayload,
+          amount: paymentPayload.amount,
+          method: paymentPayload.method,
+          referenceCode: paymentPayload.referenceCode,
+        },
+        paymentRef: paymentKey,
+      },
+    };
+    await db.ref(`approvalsPending/${approvalId}`).set(approvalsPendingPayload);
 
     // Maintain approvalsIndex/byRef if payment has a reference code (help future resolution)
     const ref = String(P.referenceCode||'').trim();

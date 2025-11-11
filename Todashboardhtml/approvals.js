@@ -587,6 +587,14 @@
     await db.ref(ledgerPath).set(payload);
   }
 
+  async function commitReclassifiedFinancePayment(record, targetYear) {
+    if (!record || record.source !== 'Finance Reclassifier') return;
+    await mirrorFinanceLedger(record, targetYear, {
+      status: 'approved',
+      approvedAt: record.approvedAt || Date.now(),
+    });
+  }
+
   function rejectSelectedRecord() {
     const record = state.selectedRecord;
     if (!record) return;
@@ -618,24 +626,28 @@
     record.approvedBy = record.approvedBy || state.user?.email || ADMIN_EMAIL;
     showLoader(true);
     try {
-      switch (record.sourceModule) {
-        case 'finance':
-          await commitFinancePayment(record, targetYear);
-          break;
-        case 'transport':
-          await commitTransportPayment(record);
-          break;
-        case 'prefonefinance':
-          await commitPrefonePayment(record);
-          break;
-        case 'graduation':
-          await commitGraduationPayment(record);
-          break;
-        case 'fridaymoney':
-          await commitFridayPayment(record);
-          break;
-        default:
-          throw new Error(`Unknown module ${record.sourceModule}`);
+      if (record.source === 'Finance Reclassifier') {
+        await commitReclassifiedFinancePayment(record, targetYear);
+      } else {
+        switch (record.sourceModule) {
+          case 'finance':
+            await commitFinancePayment(record, targetYear);
+            break;
+          case 'transport':
+            await commitTransportPayment(record);
+            break;
+          case 'prefonefinance':
+            await commitPrefonePayment(record);
+            break;
+          case 'graduation':
+            await commitGraduationPayment(record);
+            break;
+          case 'fridaymoney':
+            await commitFridayPayment(record);
+            break;
+          default:
+            throw new Error(`Unknown module ${record.sourceModule}`);
+        }
       }
       await moveApprovalToHistory(record, 'approved');
       toast('Student approved. Payment saved.', 'success');

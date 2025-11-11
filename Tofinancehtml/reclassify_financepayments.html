@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SoMAp — Reclassify School Fee Payments (Admin)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+  *{font-family:Inter,system-ui,Arial}
+  .mono{font-family:ui-monospace, Menlo, Monaco, Consolas, monospace}
+  .tag{padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:700}
+  .tag-legacy{background:#fee2e2;color:#991b1b}
+  .tag-ok{background:#dcfce7;color:#166534}
+  .btn{padding:.5rem .75rem;border-radius:.5rem}
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+<header class="bg-white border-b sticky top-0 z-20">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="../Todashboardhtml/approvals.html" class="text-slate-700 hover:text-blue-600">← Back to Approvals</a>
+      <h1 class="text-lg font-semibold">Reclassify School Fee Payments → Queue to Approvals</h1>
+    </div>
+    <div id="rtState" class="text-sm text-slate-500">Connecting…</div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-4 py-4 space-y-4">
+  <section class="bg-white border rounded-2xl p-4 shadow-sm">
+    <p class="text-sm text-slate-600">
+      Assign a year to legacy payments and <b>send them to Approvals (School Fees · PENDING)</b>.
+      This page does <b>not</b> touch ledgers. Your approvals flow will post to
+      <span class="mono">financeLedgers/{year}</span> after approval.
+    </p>
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" id="toggleLegacyOnly" class="scale-110" checked>
+        <span>Show legacy only</span>
+      </label>
+      <input id="searchBox" class="border rounded px-3 py-2 w-72" placeholder="Search name/admission/ref/note…"/>
+      <select id="bulkYear" class="border rounded px-2 py-2"></select>
+      <button id="btnApplyBulk" class="btn bg-slate-900 text-white">Queue selected to Approvals</button>
+      <button id="btnReload" class="btn border">Reload</button>
+      <div class="ml-auto text-sm text-slate-700">
+        <span id="statStudents">0</span> students • <span id="statPayments">0</span> payments • <span id="statLegacy">0</span> legacy
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white border rounded-2xl p-4 shadow-sm">
+    <div class="overflow-auto border rounded">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-100">
+          <tr class="text-left">
+            <th class="p-2 w-10"><input type="checkbox" id="masterChk"></th>
+            <th class="p-2">Student</th>
+            <th class="p-2">Admission</th>
+            <th class="p-2">Payment Key</th>
+            <th class="p-2">Amount</th>
+            <th class="p-2">Ref</th>
+            <th class="p-2">Note / Method</th>
+            <th class="p-2">Current Year</th>
+            <th class="p-2">Assign Year</th>
+            <th class="p-2">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div id="opToast" class="mt-3 text-sm text-slate-500"></div>
+  </section>
+</main>
+
+<!-- Firebase compat -->
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+<script src="../firebase.js"></script>
+
+<script>
+(async function(){
+  // ---------- CONFIG ----------
+  const YEARS = Array.from({length:20},(_,i)=>2023+i); // 2023..2042
+  // Approvals pending root used by your approvals.html (School Fees lane)
+  const APPROVALS_PENDING_ROOT = 'approvals/finance/pending';
+
+  // ---------- STATE ----------
+  const el = id => document.getElementById(id);
+  const rowsEl = el('rows');
+  const fmt = n => Number(n||0).toLocaleString();
+  const esc = s => String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  let db=null, approvalsByRef={}, payments=[], filtered=[];
+
+  // ---------- HELPERS ----------
+  const toast = (m,t=1600)=>{ el('opToast').textContent=m||''; if(m) setTimeout(()=>el('opToast').textContent='',t); };
+  const studentName = s => (`${s.firstName||''} ${s.middleName||''} ${s.lastName||''}`).replace(/\s+/g,' ').trim() || s.name || s.fullName || '—';
+
+  function yearSelectHTML(selected){
+    const opts = YEARS.map(y=>`<option value="${y}" ${String(selected)===String(y)?'selected':''}>${y}</option>`).join('');
+    return `<select class="yrSel border rounded px-2 py-1">${opts}</select>`;
+  }
+
+  function resolvedYear(p){
+    if (p.forYear!=null) return Number(p.forYear);
+    if (p.year!=null) return Number(p.year);
+    if (p.targetYear!=null) return Number(p.targetYear);
+    const ref = String(p.referenceCode||'').trim();
+    if (ref && approvalsByRef && approvalsByRef[ref]!=null) return Number(approvalsByRef[ref]);
+    return null; // legacy
+  }
+  const isLegacy = p => resolvedYear(p)==null;
+
+  // ---------- DB ----------
+  async function initDb(){
+    db = window.db || (window.firebase && firebase.database ? firebase.database() : null);
+    if(!db) throw new Error('Firebase DB not initialized');
+    el('rtState').textContent='Connected';
+  }
+  async function loadApprovalsIndex(){
+    try{
+      const s = await db.ref('approvalsIndex/byRef').once('value');
+      approvalsByRef = s.exists()? (s.val()||{}) : {};
+    }catch(e){
+      approvalsByRef = {};
+      console.warn('approvalsIndex/byRef not found; continuing.');
+    }
+  }
+
+  // ---------- SCAN students/payments ----------
+  async function scan(){
+    payments = []; filtered = []; rowsEl.innerHTML='';
+    await loadApprovalsIndex();
+
+    const s = await db.ref('students').once('value');
+    const students = s.exists()? s.val() : {};
+    const ids = Object.keys(students);
+    el('statStudents').textContent = String(ids.length);
+
+    ids.forEach(id=>{
+      const stu = students[id]||{};
+      const pays = stu.payments||{};
+      Object.entries(pays).forEach(([pkey,p])=>{
+        payments.push({ studentId:id, student:stu, paymentKey:pkey, payment:p });
+      });
+    });
+
+    payments.sort((a,b)=>(Number(b.payment.timestamp||b.payment.approvedAt||0) - Number(a.payment.timestamp||a.payment.approvedAt||0)));
+    filterAndRender();
+  }
+
+  function filterAndRender(){
+    const q = (el('searchBox').value||'').toLowerCase().trim();
+    const legacyOnly = el('toggleLegacyOnly').checked;
+    let list = payments.slice();
+    if (legacyOnly) list = list.filter(r=> isLegacy(r.payment));
+    if (q){
+      list = list.filter(r=>{
+        const s = r.student, p=r.payment;
+        return (studentName(s).toLowerCase().includes(q)
+          || String(s.admissionNumber||r.studentId).toLowerCase().includes(q)
+          || String(r.paymentKey).toLowerCase().includes(q)
+          || String(p.referenceCode||'').toLowerCase().includes(q)
+          || String(p.note||'').toLowerCase().includes(q)
+          || String(p.method||'').toLowerCase().includes(q)
+          || String(p.amount||'').includes(q));
+      });
+    }
+    filtered = list;
+    el('statPayments').textContent = String(filtered.length);
+    el('statLegacy').textContent = String(filtered.filter(x=>isLegacy(x.payment)).length);
+    renderRows();
+  }
+
+  function renderRows(){
+    rowsEl.innerHTML='';
+    if(!filtered.length){
+      rowsEl.innerHTML = `<tr><td colspan="10" class="p-6 text-center text-slate-500">No matching payments</td></tr>`;
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    filtered.forEach((r,i)=>{
+      const s = r.student, p=r.payment;
+      const curY = resolvedYear(p);
+      const badge = isLegacy(p) ? `<span class="tag tag-legacy">LEGACY</span>` : `<span class="tag tag-ok">OK</span>`;
+      const tr = document.createElement('tr');
+      tr.className = i%2?'bg-white':'bg-slate-50';
+      tr.setAttribute('data-sid', r.studentId);
+      tr.setAttribute('data-pkey', r.paymentKey);
+
+      tr.innerHTML = `
+        <td class="p-2"><input type="checkbox" class="rowChk"></td>
+        <td class="p-2">${esc(studentName(s))}</td>
+        <td class="p-2 mono">${esc(s.admissionNumber || r.studentId)}</td>
+        <td class="p-2 mono">${esc(r.paymentKey)}</td>
+        <td class="p-2">TSh ${fmt(p.amount)}</td>
+        <td class="p-2 mono">${esc(p.referenceCode || '—')}</td>
+        <td class="p-2">
+          <div class="text-slate-700">${esc(p.note||'')}</div>
+          <div class="text-slate-500 text-xs">${esc(p.method||'')}</div>
+        </td>
+        <td class="p-2"><div>${curY? esc(curY): '—'} ${badge}</div></td>
+        <td class="p-2">${yearSelectHTML(curY || new Date().getFullYear())}</td>
+        <td class="p-2">
+          <button class="btnQueue btn bg-blue-600 text-white text-xs">Queue to Approvals</button>
+        </td>
+      `;
+      frag.appendChild(tr);
+    });
+    rowsEl.appendChild(frag);
+
+    rowsEl.querySelectorAll('.btnQueue').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const tr = btn.closest('tr');
+        const sid = tr.getAttribute('data-sid');
+        const pkey = tr.getAttribute('data-pkey');
+        const yr = Number(tr.querySelector('.yrSel')?.value);
+        if(!yr) return alert('Pick a year.');
+        try{
+          btn.disabled = true;
+          await queueToApprovals(sid, pkey, yr);
+          toast('Queued to Approvals');
+        }catch(e){
+          alert('Queue failed: ' + e.message);
+        }finally{
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  function selectedRows(){
+    return Array.from(rowsEl.querySelectorAll('tr')).filter(tr=> tr.querySelector('.rowChk')?.checked);
+  }
+
+  // ---------- QUEUE TO APPROVALS (School Fees) ----------
+  async function queueToApprovals(studentId, paymentKey, year){
+    const [stuSnap, paySnap] = await Promise.all([
+      db.ref(`students/${studentId}`).once('value'),
+      db.ref(`students/${studentId}/payments/${paymentKey}`).once('value')
+    ]);
+    if(!stuSnap.exists() || !paySnap.exists()) throw new Error('Student/payment missing');
+    const S = stuSnap.val()||{}, P = paySnap.val()||{};
+
+    const fullName = (`${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`).replace(/\s+/g,' ').trim() || '—';
+    const approvalId = `${studentId}_${paymentKey}`; // idempotent
+
+    const payload = {
+      id: approvalId,
+      studentId: studentId,
+      studentName: fullName,
+      admissionNumber: S.admissionNumber || studentId,
+      className: S.classLevel || S.class || '',
+      parentContact: S.primaryParentContact || S.parentPhone || '',
+      module: 'School Fees',          // IMPORTANT: lane identification
+      category: 'Finance',
+      targetYear: Number(year),
+      amount: Number(P.amount||0),
+      method: P.method || '',
+      referenceCode: P.referenceCode || '',
+      recordedBy: P.recordedBy || 'unknown',
+      note: P.note || '',
+      source: 'Finance Reclassifier',
+      createdAt: Date.now(),
+      originalTimestamp: P.timestamp || P.approvedAt || null,
+      status: 'PENDING'
+    };
+
+    // Audit breadcrumb (does not set the real year here)
+    await db.ref(`students/${studentId}/payments/${paymentKey}`).update({
+      proposedYear: Number(year),
+      stagedToApprovalsAt: Date.now()
+    });
+
+    // Write to approvals pending queue (School Fees lane)
+    const pendingPath = `${APPROVALS_PENDING_ROOT}/${year}/${approvalId}`;
+    await db.ref(pendingPath).set(payload);
+
+    // Maintain approvalsIndex/byRef if payment has a reference code (help future resolution)
+    const ref = String(P.referenceCode||'').trim();
+    if (ref){
+      const idxSnap = await db.ref(`approvalsIndex/byRef/${ref}`).once('value');
+      if (!idxSnap.exists()){
+        await db.ref(`approvalsIndex/byRef/${ref}`).set(Number(year));
+      }
+    }
+  }
+
+  // ---------- WIRE UI ----------
+  function wireUI(){
+    el('searchBox').addEventListener('input', filterAndRender);
+    el('toggleLegacyOnly').addEventListener('change', filterAndRender);
+    el('masterChk').addEventListener('change', e=>{
+      const on = e.target.checked;
+      rowsEl.querySelectorAll('.rowChk').forEach(ch=> ch.checked = on);
+    });
+    el('btnApplyBulk').addEventListener('click', async ()=>{
+      const picks = selectedRows();
+      if(!picks.length) return alert('Select at least one payment.');
+      const yr = Number(el('bulkYear').value);
+      if(!yr) return alert('Pick a bulk year.');
+      let ok=0, fail=0;
+      for (const tr of picks){
+        const sid = tr.getAttribute('data-sid');
+        const pkey = tr.getAttribute('data-pkey');
+        try{ await queueToApprovals(sid, pkey, yr); ok++; }
+        catch{ fail++; }
+      }
+      toast(`Queued ${ok} payment(s) to Approvals${fail?`, ${fail} failed`:''}`);
+    });
+    el('btnReload').addEventListener('click', scan);
+  }
+
+  function mountYears(){
+    const sel = el('bulkYear');
+    sel.innerHTML = YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+    sel.value = new Date().getFullYear();
+  }
+
+  // ---------- START ----------
+  try{
+    mountYears();
+    wireUI();
+    await initDb();
+    await scan();
+  }catch(e){
+    console.error(e);
+    el('rtState').textContent = 'Error: ' + e.message;
+    alert('Init failed: '+e.message);
+  }
+})();
+</script>
+</body>
+</html>

@@ -240,6 +240,41 @@
 
 <script>
 (function () {
+  // ===== YEAR + NUM HELPERS =====
+  const SOMAP_DEFAULT_YEAR = 2025;
+  window.somapYearContext = window.somapYearContext || (function(){
+    let selected = (sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR)+'';
+    const listeners = new Set();
+    return {
+      getSelectedYear(){ return selected; },
+      setSelectedYear(y){
+        y = String(y);
+        if (selected===y) return;
+        selected = y;
+        try{ sessionStorage.setItem('somap_selected_year', y); }catch{}
+        listeners.forEach(fn=>{ try{ fn(y); }catch{} });
+      },
+      onYearChanged(fn){ if (typeof fn==='function') listeners.add(fn); }
+    };
+  })();
+
+  const num = v => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return v;
+    return Number(String(v).replace(/[^\d\-\.]/g,'')) || 0;
+  };
+
+  function isApprovedPayment(p){
+    if (!p) return false;
+    const status = String(p.status || p.approvalStatus || '').trim().toUpperCase();
+    return p.approved === true || p.isApproved === true || status === 'APPROVED';
+  }
+
+  function withSchoolPrefix(path){
+    const sid = window.currentSchoolId;
+    return sid ? `schools/${sid}/${path}` : path;
+  }
+
   /* ===== Parent mode detection (non-destructive) ===== */
   const parentCtx = { enabled:false, studentId:null, adm:null, year:null, className:null };
   (function detectParentMode(){
@@ -266,8 +301,6 @@
       parentCtx.className = sessionStorage.getItem('parent_class');
     }
   })();
-
-  const SOMAP_DEFAULT_YEAR = 2025;
   const CARRY_FORWARD_START_YEAR = 2025;
   const FINANCE_ADMIN_EMAIL = 'socratesschool2020@gmail.com';
   const CLASS_ORDER = ['Baby Class','Middle Class','Pre Unit Class','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
@@ -1056,6 +1089,8 @@ function buildFinanceStudents(
   function renderTable() {
     tbody.innerHTML = '';
     let totalDue = 0, totalCollected = 0;
+    window.studentMap = cachedStudents;
+    const renderedStudentIds = [];
     const filterClass = classFilter.value;
     const isParentScope = parentCtx.enabled;
 
@@ -1113,10 +1148,16 @@ function buildFinanceStudents(
         <td class="p-2 border align-top">${student.admissionNumber || ''}</td>
         <td class="p-2 border align-top">${fullName}</td>
         <td class="p-2 border align-top">${student.classLevel || ''}${statusNote}</td>
-        <td class="p-2 border align-top text-right">${fmt(fin.feePerYear)}${carryNote}</td>
+        <td class="p-2 border align-top text-right">
+          <span class="finance-fee-value">${fmt(fin.feePerYear)}</span>${carryNote}
+        </td>
         <td class="p-2 border align-top">${student.paymentPlan || ''}</td>
-        <td class="p-2 border align-top text-right">${fmt(fin.paidAmount)}</td>
-        <td class="p-2 border align-top text-right">${fmt(fin.balance)}</td>
+        <td class="p-2 border align-top text-right">
+          <span class="finance-paid-value">${fmt(fin.paidAmount)}</span>
+        </td>
+        <td class="p-2 border align-top text-right">
+          <span class="finance-balance-year">${fmt(fin.balance)}</span>
+        </td>
         <td class="p-2 border align-top">
           <div class="flex items-center justify-between gap-2">
             <span>${debtLabel}</span>
@@ -1133,7 +1174,10 @@ function buildFinanceStudents(
       const brWrap = document.createElement('tbody');
       brWrap.innerHTML = breakdownRowHTML(id);
       tbody.appendChild(brWrap.firstElementChild);
+      renderedStudentIds.push(id);
     });
+
+    window.financeStudentIds = renderedStudentIds;
 
     const totalOutstanding = totalDue - totalCollected;
     const totalDueEl = document.getElementById('totalDue');
@@ -1162,7 +1206,125 @@ function buildFinanceStudents(
     } catch (eventErr) {
       console.warn('finance:tableRendered dispatch failed', eventErr);
     }
+    renderFinancePage().catch(err => console.warn('finance:renderPage failed', err));
     // NOTE: no per-row expander listeners added here (we use a single global delegated listener below)
+  }
+
+  function cssEscapeForSelector(value) {
+    const raw = String(value || '');
+    if (raw && typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(raw);
+    return raw.replace(/(["\\])/g, '\\$1');
+  }
+
+  async function readYearLedgerPayments(year, studentId){
+    const dbInstance = window.db || (firebase?.database ? firebase.database() : null);
+    if (!dbInstance || !studentId) return {};
+    const path = withSchoolPrefix(`financeLedgers/${year}/${studentId}/payments`);
+    try{
+      const snap = await dbInstance.ref(path).once('value');
+      return snap.exists() ? (snap.val() || {}) : {};
+    }catch(e){
+      console.warn('readYearLedgerPayments failed', year, studentId, e?.message || e);
+      return {};
+    }
+  }
+
+  async function sumPaidTotalForStudent(year, studentId){
+    const payments = await readYearLedgerPayments(year, studentId);
+    let sum = 0;
+    Object.keys(payments).forEach(k => {
+      const p = payments[k];
+      if (isApprovedPayment(p)){
+        sum += num(p.amount || p.amt || p.value || 0);
+      }
+    });
+    return sum;
+  }
+
+  async function readFeeForYear(year, studentId){
+    const dbInstance = window.db || (firebase?.database ? firebase.database() : null);
+    if (!dbInstance || !studentId) return 0;
+    const path = withSchoolPrefix(`studentFees/${year}/${studentId}/feePerYear`);
+    try{
+      const snap = await dbInstance.ref(path).once('value');
+      return num(snap.val());
+    }catch(e){
+      console.warn('readFeeForYear failed', year, studentId, e?.message || e);
+      return 0;
+    }
+  }
+
+  async function readCarryForYear(year, studentId){
+    const dbInstance = window.db || (firebase?.database ? firebase.database() : null);
+    if (!dbInstance || !studentId) return 0;
+    const path = withSchoolPrefix(`financeCarryForward/${year}/${studentId}/amount`);
+    try{
+      const snap = await dbInstance.ref(path).once('value');
+      return num(snap.val());
+    }catch(e){
+      console.warn('readCarryForYear failed', year, studentId, e?.message || e);
+      return 0;
+    }
+  }
+
+  async function computeFinanceRowForStudent(studentId){
+    const id = studentId || '';
+    if (!id) return { fee:0, carry:0, paid:0, balanceYear:0 };
+    const y = String(window.somapYearContext?.getSelectedYear?.() ?? financeYear ?? SOMAP_DEFAULT_YEAR);
+    const [fee, carry, paid] = await Promise.all([
+      readFeeForYear(y, id),
+      readCarryForYear(y, id),
+      sumPaidTotalForStudent(y, id)
+    ]);
+    const balanceYear = Math.max(0, (fee + carry) - paid);
+    return { fee, carry, paid, balanceYear };
+  }
+
+  async function refreshFinanceDashboardAndTable(studentIds = []){
+    const ids = Array.isArray(studentIds) ? studentIds : [];
+    let totalDueYear = 0;
+    let totalPaidYear = 0;
+    for (const studentId of ids){
+      if (!studentId) continue;
+      const row = await computeFinanceRowForStudent(studentId);
+      totalDueYear += (row.fee + row.carry);
+      totalPaidYear += row.paid;
+      const safeId = cssEscapeForSelector(studentId);
+      const rowEl = safeId ? document.querySelector(`tr[data-student-id="${safeId}"]`) : null;
+      if (rowEl) {
+        const feeEl = rowEl.querySelector('.finance-fee-value');
+        if (feeEl) feeEl.textContent = (row.fee + row.carry).toLocaleString();
+        const paidEl = rowEl.querySelector('.finance-paid-value');
+        if (paidEl) paidEl.textContent = row.paid.toLocaleString();
+        const balanceEl = rowEl.querySelector('.finance-balance-year');
+        if (balanceEl) balanceEl.textContent = row.balanceYear.toLocaleString();
+        rowEl.dataset.carryForward = String(row.carry || 0);
+      }
+    }
+
+    const totalBalance = totalDueYear - totalPaidYear;
+    const totalDueEl = document.getElementById('totalDue');
+    if (totalDueEl) {
+      totalDueEl.textContent = totalDueYear.toLocaleString();
+      totalDueEl.dataset.amount = String(totalDueYear);
+    }
+    const totalCollectedEl = document.getElementById('totalCollected');
+    if (totalCollectedEl) {
+      totalCollectedEl.textContent = totalPaidYear.toLocaleString();
+      totalCollectedEl.dataset.amount = String(totalPaidYear);
+    }
+    const totalOutstandingEl = document.getElementById('totalOutstanding');
+    if (totalOutstandingEl) {
+      totalOutstandingEl.textContent = totalBalance.toLocaleString();
+      totalOutstandingEl.dataset.amount = String(totalBalance);
+    }
+  }
+
+  async function renderFinancePage(){
+    const studentIds = (window.financeStudentIds || []).length
+      ? window.financeStudentIds
+      : Object.keys(window.studentMap || {});
+    await refreshFinanceDashboardAndTable(studentIds);
   }
 
   // ====== SPEED FIX: lazy-load a single iframe when clicked, and close others ======
@@ -1852,11 +2014,17 @@ function buildFinanceStudents(
           // Stop further rendering in parent scope
           populateStudentSelect();
           applyParentModeUI();
+          window.studentMap = {};
+          window.financeStudentIds = [];
+          await renderFinancePage().catch(() => {});
           return;
         }
         // Reduce dataset to the single learner
         cachedStudents = { [targetId]: cachedStudents[targetId] };
       }
+
+      window.studentMap = cachedStudents;
+      window.financeStudentIds = Object.keys(cachedStudents || {});
 
       populateStudentSelect();
       renderTable();
@@ -1920,17 +2088,21 @@ function buildFinanceStudents(
       if (yearSelectEl && yearSelectEl.value !== normalized) {
         yearSelectEl.value = normalized;
       }
-      refreshFinanceData(normalized);
+      refreshFinanceData(normalized).catch((err) => console.warn('Finance refresh failed', err));
     });
   }
   window.addEventListener('click', ev => {
     if (ev.target === paymentModal) closePaymentModalFn();
     if (ev.target === detailsModal) closeDetailsModalFn();
   });
+  window.somapYearContext?.onYearChanged?.(() => {
+    renderFinancePage().catch((err) => console.warn('finance:renderPage failed', err));
+  });
   classFilter.addEventListener('change', renderTable);
   document.addEventListener('DOMContentLoaded', () => {
     updateYearHint();
     refreshFinanceData(activeYear);
+    renderFinancePage().catch((err) => console.warn('finance:renderPage failed', err));
   });
 })();
 </script>
@@ -2172,6 +2344,3 @@ function buildFinanceStudents(
 
 </body>
 </html>
-
-
-

@@ -561,6 +561,8 @@
       Date.now()
     );
     const amount = Number(paymentData.amount || record.amountPaidNow || 0);
+    const fallbackYear = Number(new Date().getFullYear());
+    const resolvedYear = Number.isFinite(Number(targetYear)) ? Number(targetYear) : fallbackYear;
     const payload = {
       amount,
       timestamp,
@@ -574,7 +576,11 @@
       approvedBy: options.approvedBy || record.approvedBy || state.user?.email || ADMIN_EMAIL,
       module: MODULE_LABELS.finance,
       status: options.status || (record.status || 'approved'),
-      forYear: Number(targetYear),
+      forYear: resolvedYear,
+      academicYear: resolvedYear,
+      financeYear: resolvedYear,
+      year: resolvedYear,
+      targetYear: resolvedYear,
     };
     if (options.extra && typeof options.extra === 'object') {
       Object.assign(payload, options.extra);

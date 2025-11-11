@@ -54,155 +54,149 @@ function isSchoolFees(rec){
 
 /**
  * FinancePaidAdapter
- * - Preloads once per selected year:
- *    - Year ledger: financeLedgers/{y}
- *    - Legacy (yearless) ledgers under financeLedgers/* that are not 4-digit years
- * - Aggregates paid strictly for 'y'
- * - Legacy with no declared year is counted as 2025 only (does not mutate DB)
+ * - Counts approved ledger payments under financeLedgers/{year}/{studentId}/payments
+ * - Supplements with students/{id}/payments entries when they map to the selected year (explicit year, approvals index, legacy=2025)
+ * - Avoids double counting by de-duping on reference or fallback tokens
  */
 const FinancePaidAdapter = (function(){
-  let cache = { y: null, yearMap: {}, legacyMap: {}, totalsByStu: {}, grand: 0 };
+  const db = window.db || (firebase?.database ? firebase.database() : null);
+  const cache = new Map();
+  const YEAR_FIELDS = ['forYear','year','targetYear','academicYear'];
+  let approvalsIndex = null;
+  let approvalsPromise = null;
 
-  async function preload(y){
-    const db = window.db || (firebase?.database ? firebase.database() : null);
-    if (!db) throw new Error('DB not initialized');
+  function parseYearCandidate(value) {
+    if (value == null) return null;
+    const str = String(value).trim();
+    const match = str.match(/^(20\d{2})$/);
+    return match ? match[1] : null;
+  }
 
-    const Y = String(y);
+  function normalizeReference(record) {
+    if (!record || typeof record !== 'object') return '';
+    const refs = ['referenceCode','reference','ref','paymentRef','transactionRef','paymentCode'];
+    for (const key of refs) {
+      const val = record[key];
+      if (val) return String(val).trim();
+    }
+    return '';
+  }
 
-    // Read once
-    const [yearSnap, allSnap] = await Promise.all([
-      db.ref(`financeLedgers/${Y}`).get().catch(()=>null),
-      db.ref(`financeLedgers`).get().catch(()=>null)
-    ]);
+  function looksLikePayment(record) {
+    if (!record || typeof record !== 'object') return false;
+    if (getAmount(record)) return true;
+    return ['amount','paid','paidAmount','totalPaid','paymentAmount','value','txAmount','transactionAmount']
+      .some(key => record[key] != null);
+  }
 
-    const yearMap = yearSnap?.exists() ? (yearSnap.val() || {}) : {};
-    const allMap  = allSnap?.exists()  ? (allSnap.val()  || {}) : {};
+  async function ensureApprovalsIndex() {
+    if (approvalsIndex) return approvalsIndex;
+    if (!db) {
+      approvalsIndex = {};
+      return approvalsIndex;
+    }
+    if (!approvalsPromise) {
+      approvalsPromise = db.ref('approvalsIndex/byRef').once('value')
+        .then(snap => snap?.val?.() || {})
+        .catch(() => ({}));
+    }
+    approvalsIndex = await approvalsPromise;
+    return approvalsIndex;
+  }
 
-    // Build legacy (top-level children that aren’t year folders and contain payments)
-    const legacyMap = {};
-    Object.keys(allMap).forEach(k=>{
-      if (/^\d{4}$/.test(k)) return; // skip year folders
-      const node = allMap[k] || {};
-      if (node.payments) legacyMap[k] = node;
+  function determineRecordYear(record, index) {
+    for (const field of YEAR_FIELDS) {
+      const candidate = parseYearCandidate(record?.[field]);
+      if (candidate) return candidate;
+    }
+    const ref = normalizeReference(record);
+    if (ref && index && index[ref]) {
+      const mapped = parseYearCandidate(index[ref]);
+      if (mapped) return mapped;
+    }
+    return null;
+  }
+
+  function collectRecords(node, handler, depth = 0, path = []) {
+    if (!node || typeof node !== 'object' || depth > 8) return;
+    if (Array.isArray(node)) {
+      node.forEach((item, idx) => collectRecords(item, handler, depth + 1, path.concat(String(idx))));
+      return;
+    }
+    if (looksLikePayment(node)) {
+      handler(node, path.slice());
+      return;
+    }
+    Object.entries(node).forEach(([key, child]) => {
+      collectRecords(child, handler, depth + 1, path.concat(key));
     });
+  }
 
-    cache = { y: Y, yearMap, legacyMap, totalsByStu: {}, grand: 0 };
+  function makeToken(studentId, ref, fallback) {
+    const safeId = String(studentId || 'unknown');
+    const primary = ref?.length ? ref : fallback || 'payment';
+    return `${safeId}::${primary}`;
+  }
 
-    const seenRecords = new WeakSet();
+  async function sumFor(studentId, year) {
+    const cacheKey = `${studentId}@${year}`;
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    const normalizedYear = String(year || SOMAP_ANCHOR_YEAR);
+    const idx = await ensureApprovalsIndex();
+    let sum = 0;
+    const seen = new Set();
+    const fallbackTokens = { ledger: 0, student: 0 };
 
-    const resolveStudentId = (rawId, rec) => {
-      const fromKey = String(rawId || '').trim();
-      if (fromKey && fromKey.toLowerCase() !== 'students') return fromKey;
-      const fallbacks = [
-        rec?.studentId, rec?.studentID, rec?.student_id, rec?.student,
-        rec?.studentKey, rec?.studentCode,
-        rec?.admissionNumber, rec?.admissionNo, rec?.admission, rec?.adm,
-        rec?.profileId, rec?.learnerId
-      ];
-      const chosen = fallbacks.find(v => v && String(v).trim());
-      return chosen ? String(chosen).trim() : null;
-    };
+    if (db && studentId) {
+      try {
+        const [ledgerSnap, studentSnap] = await Promise.all([
+          db.ref(`financeLedgers/${normalizedYear}/${studentId}`).once('value').catch(() => null),
+          db.ref(`students/${studentId}/payments`).once('value').catch(() => null)
+        ]);
 
-    const looksLikePayment = (node) => {
-      if (!node || typeof node !== 'object') return false;
-      const keys = Object.keys(node);
-      if (!keys.length) return false;
-      return [
-        'amount','amt','value','paid','paidAmount','totalPaid','paymentAmount','txAmount','transactionAmount'
-      ].some(k => node[k] !== undefined && node[k] !== null);
-    };
+        const ledgerNode = ledgerSnap?.val?.() || {};
+        const ledgerCandidates = ledgerNode?.payments || ledgerNode?.entries || ledgerNode?.records || ledgerNode;
+        collectRecords(ledgerCandidates, (record, path) => {
+          if (!isApproved(record)) return;
+          const amount = getAmount(record);
+          if (!amount) return;
+          const ref = normalizeReference(record);
+          const token = makeToken(studentId, ref, `ledger:${path.join('.') || `entry${fallbackTokens.ledger++}`}`);
+          if (seen.has(token)) return;
+          seen.add(token);
+          sum += amount;
+        });
 
-    const applyRecord = (stuIdCandidate, rec, mode) => {
-      if (!rec || typeof rec !== 'object') return;
-      if (seenRecords.has(rec)) return;
-      seenRecords.add(rec);
-      if (!isApproved(rec)) return;
-      if (!isSchoolFees(rec)) return;
-
-      const declared = getDeclaredYear(rec);
-      let goesTo = declared ? String(declared) : null;
-      if (!declared && mode === 'legacy') goesTo = String(SOMAP_ANCHOR_YEAR);
-      if (goesTo !== cache.y) return;
-
-      const amt = getAmount(rec);
-      if (!amt) return;
-
-      const stuId = resolveStudentId(stuIdCandidate, rec);
-      if (!stuId) return;
-
-      cache.totalsByStu[stuId] = n(cache.totalsByStu[stuId]) + amt;
-      cache.grand += amt;
-    };
-
-    const ingestPaymentContainer = (stuId, container, mode, depth = 0) => {
-      if (!container || typeof container !== 'object' || depth > 6) return;
-
-      if (Array.isArray(container)) {
-        container.forEach(item => ingestPaymentContainer(stuId, item, mode, depth + 1));
-        return;
+        const studentCandidates = studentSnap?.val?.() || {};
+        collectRecords(studentCandidates, (record, path) => {
+          if (!isApproved(record)) return;
+          const amount = getAmount(record);
+          if (!amount) return;
+          let recordYear = determineRecordYear(record, idx);
+          if (!recordYear && normalizedYear === '2025') {
+            recordYear = '2025';
+          }
+          if (!recordYear || recordYear !== normalizedYear) return;
+          const ref = normalizeReference(record);
+          const token = makeToken(studentId, ref, `student:${path.join('.') || `entry${fallbackTokens.student++}`}`);
+          if (seen.has(token)) return;
+          seen.add(token);
+          sum += amount;
+        });
+      } catch (err) {
+        console.error('Unable to load payments for', studentId, normalizedYear, err);
       }
+    }
 
-      if (looksLikePayment(container)) {
-        applyRecord(stuId, container, mode);
-      }
-
-      const nestedKeys = ['payments','entries','records','transactions','history','items','list'];
-      nestedKeys.forEach(key => {
-        const node = container[key];
-        if (node && typeof node === 'object') {
-          ingestPaymentContainer(stuId, node, mode, depth + 1);
-        }
-      });
-
-      Object.keys(container).forEach(key => {
-        if (nestedKeys.includes(key) || key === 'students') return;
-        const value = container[key];
-        if (!value) return;
-        if (/^\d{4}$/.test(key)) {
-          ingestPaymentContainer(stuId, value, mode, depth + 1);
-          return;
-        }
-        if (typeof value === 'object') {
-          ingestPaymentContainer(stuId === 'students' ? null : stuId, value, mode, depth + 1);
-        }
-      });
-    };
-
-    const collectStudents = (map, mode) => {
-      if (!map || typeof map !== 'object') return;
-      Object.keys(map).forEach(key => {
-        const node = map[key];
-        if (!node || typeof node !== 'object') return;
-        if (key === 'students') {
-          Object.keys(node).forEach(stuKey => {
-            ingestPaymentContainer(stuKey, node[stuKey], mode);
-          });
-          return;
-        }
-        if (node.students && typeof node.students === 'object') {
-          Object.keys(node.students).forEach(stuKey => {
-            ingestPaymentContainer(stuKey, node.students[stuKey], mode);
-          });
-        }
-        ingestPaymentContainer(key, node, mode);
-      });
-    };
-
-    collectStudents(yearMap, 'year');
-    collectStudents(legacyMap, 'legacy');
+    cache.set(cacheKey, sum);
+    return sum;
   }
 
-  function getPaidFor(stuId){
-    return n(cache.totalsByStu[stuId]);
-  }
-  function getGrandTotal(){
-    return n(cache.grand);
-  }
-  function getSelectedYear(){
-    return cache.y;
+  function clear() {
+    cache.clear();
   }
 
-  return { preload, getPaidFor, getGrandTotal, getSelectedYear };
+  return { sumFor, clear };
 })();
 
 </script>
@@ -2131,38 +2125,26 @@ function buildFinanceStudents(
 async function recomputePaidTotalsForYear(){
   try {
     const y = String(window.somapYearContext?.getSelectedYear?.() || SOMAP_ANCHOR_YEAR);
-    await FinancePaidAdapter.preload(y);
-    const totalPaid = FinancePaidAdapter.getGrandTotal();
-    const headerPaidEls = [
-      document.querySelector('#totalPaidYear'),
-      document.querySelector('[data-total-paid-year]')
-    ].filter(Boolean);
-    headerPaidEls.forEach(el => {
-      el.textContent = totalPaid.toLocaleString();
-      el.dataset.amount = String(totalPaid);
-    });
-    const totalCollectedEl = document.getElementById('totalCollected');
-    if (totalCollectedEl) {
-      totalCollectedEl.textContent = totalPaid.toLocaleString();
-      totalCollectedEl.dataset.amount = String(totalPaid);
-    }
+    FinancePaidAdapter.clear();
+    const rows = Array.from(document.querySelectorAll('[data-student-row]'));
+    let schoolPaidTotal = 0;
 
-    const totalDueEl = document.getElementById('totalDue');
-    const dueValue = Number((totalDueEl?.dataset.amount || '0').toString().replace(/[^0-9.-]/g,'')) || 0;
-    const totalOutstandingEl = document.getElementById('totalOutstanding');
-    if (totalOutstandingEl) {
-      const outstanding = n(dueValue - totalPaid);
-      totalOutstandingEl.textContent = outstanding.toLocaleString();
-      totalOutstandingEl.dataset.amount = String(outstanding);
-    }
-
-    document.querySelectorAll('[data-student-row]').forEach(tr=>{
+    for (const tr of rows) {
       const stuId = tr.getAttribute('data-student-id') || tr.dataset.studentId;
-      if(!stuId) return;
-      const paid = FinancePaidAdapter.getPaidFor(stuId);
+      if (!stuId) continue;
+      let paid = 0;
+      try {
+        paid = await FinancePaidAdapter.sumFor(stuId, y);
+      } catch (fetchErr) {
+        console.error('Failed to compute paid total for', stuId, fetchErr);
+        paid = 0;
+      }
+      schoolPaidTotal += paid;
+
       const paidCell = tr.querySelector('[data-cell="paid"]');
       if (paidCell) {
         paidCell.textContent = paid.toLocaleString();
+        paidCell.dataset.amount = String(paid);
       }
       const feeCell = tr.querySelector('[data-cell="fee"]');
       const balCell = tr.querySelector('[data-cell="balance"]');
@@ -2171,8 +2153,33 @@ async function recomputePaidTotalsForYear(){
         const carry = Number((tr.getAttribute('data-carry') || '0').replace(/[^0-9.-]/g,'')) || 0;
         const bal = n(fee - paid + carry);
         balCell.textContent = bal.toLocaleString();
+        balCell.dataset.amount = String(bal);
       }
+    }
+
+    const headerPaidEls = [
+      document.querySelector('#totalPaidYear'),
+      document.querySelector('[data-total-paid-year]')
+    ].filter(Boolean);
+    headerPaidEls.forEach(el => {
+      el.textContent = schoolPaidTotal.toLocaleString();
+      el.dataset.amount = String(schoolPaidTotal);
     });
+
+    const totalCollectedEl = document.getElementById('totalCollected');
+    if (totalCollectedEl) {
+      totalCollectedEl.textContent = schoolPaidTotal.toLocaleString();
+      totalCollectedEl.dataset.amount = String(schoolPaidTotal);
+    }
+
+    const totalDueEl = document.getElementById('totalDue');
+    const dueValue = Number((totalDueEl?.dataset.amount || '0').toString().replace(/[^0-9.-]/g,'')) || 0;
+    const totalOutstandingEl = document.getElementById('totalOutstanding');
+    if (totalOutstandingEl) {
+      const outstanding = n(dueValue - schoolPaidTotal);
+      totalOutstandingEl.textContent = outstanding.toLocaleString();
+      totalOutstandingEl.dataset.amount = String(outstanding);
+    }
   } catch (err) {
     console.error('Paid totals refresh failed', err);
   }

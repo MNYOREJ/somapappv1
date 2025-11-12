@@ -610,6 +610,105 @@
     const monthCache = window.__somapReceiptMonthCache || new Map();
     window.__somapReceiptMonthCache = monthCache;
 
+    const approvalsScopeKey = () => {
+      return window.currentSchoolId ? `school::${window.currentSchoolId}` : 'global';
+    };
+
+    async function fetchApprovalsHistoryTree(){
+      const scopeKey = approvalsScopeKey();
+      if (approvalsHistoryCache.has(scopeKey)){
+        return approvalsHistoryCache.get(scopeKey);
+      }
+      let snapshot = null;
+      try{
+        snapshot = await fetchScoped('approvalsHistory');
+      }catch(err){
+        console.warn('Receipt: failed to fetch approvals history tree', err);
+      }
+      const tree = snapshot && typeof snapshot.val === 'function' ? (snapshot.val() || {}) : {};
+      approvalsHistoryCache.set(scopeKey, tree);
+      return tree;
+    }
+
+    function extractApprovalYear(raw){
+      if (!raw) return null;
+      const direct = raw.forYear ?? raw.academicYear ?? raw.year ?? raw.paymentYear ?? raw.approvedYear ?? raw.receiptYear;
+      if (direct != null && direct !== ''){
+        const numeric = Number(direct);
+        if (Number.isFinite(numeric)) return numeric;
+      }
+      let payload = raw.modulePayload;
+      if (typeof payload === 'string'){
+        try{
+          payload = JSON.parse(payload);
+        }catch(_){
+          payload = null;
+        }
+      }
+      if (payload && typeof payload === 'object'){
+        const payloadYear = payload.forYear ?? payload.academicYear ?? payload.year ?? payload.paymentYear ?? payload.approvedYear;
+        if (payloadYear != null && payloadYear !== ''){
+          const numeric = Number(payloadYear);
+          if (Number.isFinite(numeric)) return numeric;
+        }
+      }
+      const timestamp = Number(raw.approvedAt || raw.paymentDate || raw.paymentTimestamp || raw.timestamp || raw.createdAt || raw.updatedAt);
+      if (Number.isFinite(timestamp)){
+        const derived = new Date(timestamp).getFullYear();
+        if (Number.isFinite(derived)) return derived;
+      }
+      return null;
+    }
+
+    function matchesApprovalYear(raw, targetYear, bucketYear){
+      const normalizedTarget = Number(targetYear);
+      if (!Number.isFinite(normalizedTarget)) return false;
+      const recordYear = extractApprovalYear(raw);
+      if (Number.isFinite(recordYear)){
+        return recordYear === normalizedTarget;
+      }
+      const numericBucketYear = Number(bucketYear);
+      if (Number.isFinite(numericBucketYear)){
+        return numericBucketYear === normalizedTarget;
+      }
+      return false;
+    }
+
+    function cloneApprovalRecord(record){
+      if (!record) return record;
+      return { ...record };
+    }
+
+    async function loadApprovalsForYear(year){
+      const targetYear = String(year || window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      const scopeKey = approvalsScopeKey();
+      const cacheKey = `${scopeKey}::${targetYear}`;
+      if (approvalsByYearCache.has(cacheKey)){
+        const cached = approvalsByYearCache.get(cacheKey) || [];
+        return cached.map(cloneApprovalRecord);
+      }
+      const historyTree = await fetchApprovalsHistoryTree();
+      const normalizedYear = Number(targetYear);
+      const collected = [];
+      Object.entries(historyTree || {}).forEach(([bucketYear, months]) => {
+        Object.entries(months || {}).forEach(([bucketMonth, records]) => {
+          Object.entries(records || {}).forEach(([id, raw]) => {
+            if (!raw) return;
+            if (!matchesApprovalYear(raw, normalizedYear, bucketYear)) return;
+            const normalized = normalizeApprovalRecord(id, raw, { year: targetYear });
+            if (!normalized) return;
+            normalized.__bucketYear = bucketYear;
+            normalized.__month = bucketMonth;
+            collected.push(normalized);
+          });
+        });
+      });
+      collected.sort((a,b)=>(Number(b.approvedAt||0) - Number(a.approvedAt||0)));
+      const stored = collected.map(cloneApprovalRecord);
+      approvalsByYearCache.set(cacheKey, stored);
+      return stored.map(cloneApprovalRecord);
+    }
+
     function clearApprovalsCaches(){
       approvalsHistoryCache.clear();
       approvalsByYearCache.clear();
@@ -921,41 +1020,40 @@
     async function getApprovalsMonth(year, month){
       const key = `${year}-${month}`;
       if (monthCache.has(key)) return monthCache.get(key);
-      const snap = await fetchScoped(`approvalsHistory/${year}/${month}`);
-      const val = snap?.val() || {};
-      monthCache.set(key, val);
-      return val;
+      const historyTree = await fetchApprovalsHistoryTree();
+      const normalizedYear = Number(year);
+      const normalizedMonth = String(month).padStart(2,'0');
+      const bucket = {};
+      Object.entries(historyTree || {}).forEach(([bucketYear, months]) => {
+        const monthRecords = (months || {})[normalizedMonth];
+        if (!monthRecords) return;
+        Object.entries(monthRecords || {}).forEach(([id, raw]) => {
+          if (!raw) return;
+          if (!matchesApprovalYear(raw, normalizedYear, bucketYear)) return;
+          bucket[id] = { ...raw };
+        });
+      });
+      monthCache.set(key, bucket);
+      return bucket;
     }
 
     async function findApprovalById(year, approvalId){
       if (!approvalId) return null;
-      for (let i=1;i<=12;i++){
-        const month = String(i).padStart(2,'0');
-        const data = await getApprovalsMonth(year, month);
-        if (!data || typeof data !== 'object') continue;
-        if (data[approvalId]) return { ...data[approvalId], __month: month };
-        const found = Object.entries(data).find(([key,val]) => {
-          if (key === approvalId) return true;
-          return val && (val.id === approvalId || val.approvalId === approvalId || val.receiptId === approvalId);
-        });
-        if (found) return { ...found[1], __month: month };
-      }
-      return null;
+      const approvals = await loadApprovalsForYear(year);
+      const found = approvals.find(item => {
+        if (!item) return false;
+        if (String(item.id) === String(approvalId)) return true;
+        if (item.approvalId && String(item.approvalId) === String(approvalId)) return true;
+        if (item.receiptId && String(item.receiptId) === String(approvalId)) return true;
+        return false;
+      });
+      return found ? { ...found } : null;
     }
 
     async function fetchApprovalsForStudent(year, studentId, adm){
-      const months = Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'));
-      const list = [];
-      for (const month of months){
-        const data = await getApprovalsMonth(year, month);
-        if (!data) continue;
-        Object.entries(data).forEach(([id,value]) => {
-          const norm = normalizeApprovalRecord(id, value, { year });
-          if (!norm) return;
-          if (matchesStudent(norm, studentId, adm)) list.push(norm);
-        });
-      }
-      return list.sort((a,b)=>(Number(b.approvedAt||0) - Number(a.approvedAt||0)));
+      const approvals = await loadApprovalsForYear(year);
+      const filtered = approvals.filter(rec => matchesStudent(rec, studentId, adm));
+      return filtered;
     }
 
     function resolveStudentId(query, students){
@@ -1291,9 +1389,9 @@
 
         let normalizedApproval = null;
         if (state.queryApproval && !approvalLookupFailed){
-          const approvalRaw = await findApprovalById(state.year, state.queryApproval);
+          const approvalRecord = await findApprovalById(state.year, state.queryApproval);
           if (token !== renderToken) return;
-          if (approvalRaw) normalizedApproval = normalizeApprovalRecord(state.queryApproval, approvalRaw, { year: state.year });
+          if (approvalRecord) normalizedApproval = approvalRecord;
           else showError('Receipt not found in this year.');
         }
 

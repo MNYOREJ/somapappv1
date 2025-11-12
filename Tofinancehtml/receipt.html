@@ -160,6 +160,7 @@
       border-radius:18px;
       border:1px solid rgba(148,163,184,.5);
       background:#fff;
+      max-width:100%;
     }
     @media (min-width:768px){
       .summary-scroll{
@@ -169,15 +170,16 @@
     .summary-table{
       width:100%;
       border-collapse:collapse;
-      table-layout:fixed;
-      font-size:0.8rem;
-      min-width:900px;
+      table-layout:auto;
+      font-size:0.78rem;
+      min-width:0;
       background:#fff;
     }
     .summary-table th,
     .summary-table td{
       padding:0.4rem 0.65rem;
       border:1px solid #e2e8f0;
+      word-break:break-word;
     }
     .summary-table th{
       font-size:0.65rem;
@@ -197,7 +199,8 @@
     .summary-table td{
       font-size:0.78rem;
       color:#0f172a;
-      white-space:nowrap;
+      white-space:normal;
+      overflow-wrap:break-word;
     }
     .summary-table td:first-child{
       min-width:170px;
@@ -549,6 +552,10 @@
         window.somapYearContext.setSelectedYear(y);
         if (hint) hint.textContent = y;
       });
+      window.somapYearContext.onYearChanged(y => {
+        sel.value = String(y);
+        if (hint) hint.textContent = String(y);
+      });
     })();
   </script>
   <script>
@@ -774,7 +781,8 @@
       const seq = state.receiptNumbers?.[approval.id];
       if (!seq) return approval.id || '--';
       const initials = deriveReceiptInitials(approval);
-      return `${initials}${state.year}${formatReceiptSequence(seq)}`;
+      const receiptYear = approval.receiptYear || state.year || SOMAP_DEFAULT_YEAR;
+      return `${initials}${receiptYear}${formatReceiptSequence(seq)}`;
     }
 
     function buildReceiptNumberMap(approvals){
@@ -822,7 +830,7 @@
       const key = Object.keys(map).find(k => k.includes(needle));
       return key ? map[key] : { numeric:0, text:'' };
     }
-    function normalizeApprovalRecord(id, raw){
+    function normalizeApprovalRecord(id, raw, context = {}){
       if (!raw) return null;
       const payload = (()=>{
         if (!raw.modulePayload) return {};
@@ -856,6 +864,9 @@
       const className = raw.className || raw.studentClass || raw.classLevel || payload.className;
       const motherPhone = raw.motherPhone || raw.parentPhone || payload.parentPhone;
       const amountWords = numberToWordsTZS(amountPaidNow);
+      const resolvedYearCandidate = context.year || raw.year || raw.paymentYear || raw.academicYear || raw.academic_year || raw.approvalYear || raw.approvedYear || raw.yearId;
+      const derivedYear = Number.isFinite(approvedAt) ? new Date(approvedAt).getFullYear() : null;
+      const receiptYear = String(resolvedYearCandidate || derivedYear || SOMAP_DEFAULT_YEAR);
       return {
         id: id || raw.id || raw.approvalId || raw.receiptId || raw.uid,
         sourceModule,
@@ -887,6 +898,7 @@
         breakdownMap: breakdown,
         note: raw.note || raw.description || payload.note || payload.reason || raw.reason || '',
         photoUrl: raw.studentPhoto || raw.photoUrl || payload.photoUrl || '',
+        receiptYear,
       };
     }
 
@@ -929,7 +941,7 @@
         const data = await getApprovalsMonth(year, month);
         if (!data) continue;
         Object.entries(data).forEach(([id,value]) => {
-          const norm = normalizeApprovalRecord(id, value);
+          const norm = normalizeApprovalRecord(id, value, { year });
           if (!norm) return;
           if (matchesStudent(norm, studentId, adm)) list.push(norm);
         });
@@ -1013,6 +1025,17 @@
           const snap = await fetchScoped(pathBuilder(sanitized));
           if (snap && snap.exists()) return snap;
         }catch(_){}
+      }
+      return null;
+    }
+
+    async function ensureApprovalYear(approvalId, preferredYear){
+      if (!approvalId) return null;
+      const base = String(preferredYear || window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      const yearsToCheck = [base, ...SOMAP_ALLOWED_YEARS.map(String).filter(y=>y!==base)];
+      for (const candidateYear of yearsToCheck){
+        const result = await findApprovalById(candidateYear, approvalId);
+        if (result) return candidateYear;
       }
       return null;
     }
@@ -1235,6 +1258,21 @@
       setLoading(true);
       showError('');
       try{
+        const currentYear = window.somapYearContext.getSelectedYear();
+        let approvalLookupFailed = false;
+        if (state.queryApproval){
+          const resolvedYear = await ensureApprovalYear(state.queryApproval, currentYear);
+          if (token !== renderToken) return;
+          if (resolvedYear){
+            if (String(resolvedYear) !== String(currentYear)){
+              window.somapYearContext.setSelectedYear(resolvedYear);
+              return;
+            }
+          } else {
+            approvalLookupFailed = true;
+            showError('Receipt not found for any supported year.');
+          }
+        }
         const { y, students, enrollAnchor, enrollYear } = await loadYearData(window.somapYearContext.getSelectedYear());
         if (token !== renderToken) return;
         state.year = y;
@@ -1243,10 +1281,10 @@
         state.enrollYear = enrollYear;
 
         let normalizedApproval = null;
-        if (state.queryApproval){
+        if (state.queryApproval && !approvalLookupFailed){
           const approvalRaw = await findApprovalById(state.year, state.queryApproval);
           if (token !== renderToken) return;
-          if (approvalRaw) normalizedApproval = normalizeApprovalRecord(state.queryApproval, approvalRaw);
+          if (approvalRaw) normalizedApproval = normalizeApprovalRecord(state.queryApproval, approvalRaw, { year: state.year });
           else showError('Receipt not found in this year.');
         }
 
@@ -1571,14 +1609,16 @@
       const usableHeight = pageHeight - margin * 2;
       const widthScale = usableWidth / canvas.width;
       const heightScale = usableHeight / canvas.height;
-      const scale = Math.min(widthScale, heightScale, 1);
+      const scale = Math.min(widthScale, heightScale);
       const imgWidth = canvas.width * scale;
       const imgHeight = canvas.height * scale;
       const offsetX = margin + Math.max(0, (usableWidth - imgWidth) / 2);
-      pdf.addImage(imgData,'PNG', offsetX, margin, imgWidth, imgHeight);
+      const offsetY = margin + Math.max(0, (usableHeight - imgHeight) / 2);
+      pdf.addImage(imgData,'PNG', offsetX, offsetY, imgWidth, imgHeight);
       const receiptNo = formatReceiptNumber(state.activeApproval) || state.activeApproval.id || `receipt_${Date.now()}`;
       const safeReceipt = receiptNo.replace(/[^A-Za-z0-9_-]/g,'');
-      const filename = `${safeReceipt}_${state.year}.pdf`;
+      const receiptYear = state.activeApproval?.receiptYear || state.year || SOMAP_DEFAULT_YEAR;
+      const filename = `${safeReceipt}_${receiptYear}.pdf`;
       pdf.save(filename);
     }
 

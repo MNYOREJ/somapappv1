@@ -1706,21 +1706,51 @@
       if (!state.activeApproval) return;
       const canvasEl = document.getElementById('receiptCanvas');
       if (!canvasEl) return;
-      const canvas = await html2canvas(canvasEl, { scale:2, useCORS:true, backgroundColor:'#ffffff' });
+      const summaryScrollEl = canvasEl.querySelector('.summary-scroll');
+      const summaryTableEl = canvasEl.querySelector('.summary-table');
+      const originalSummaryOverflow = summaryScrollEl?.style.overflow;
+      const originalSummaryMaxWidth = summaryScrollEl?.style.maxWidth;
+      const originalSummaryWidth = summaryScrollEl?.style.width;
+      const originalTableWidth = summaryTableEl?.style.width;
+      if (summaryScrollEl){
+        summaryScrollEl.style.overflow = 'visible';
+        summaryScrollEl.style.maxWidth = '100%';
+        summaryScrollEl.style.width = '100%';
+      }
+      if (summaryTableEl){
+        summaryTableEl.style.width = '100%';
+      }
+      const originalScroll = canvasEl.style.scrollBehavior;
+      canvasEl.style.scrollBehavior = 'auto';
+      const canvas = await html2canvas(canvasEl, {
+        scale:3,
+        useCORS:true,
+        backgroundColor:'#ffffff',
+        windowWidth: canvasEl.scrollWidth,
+        windowHeight: canvasEl.scrollHeight
+      });
+      canvasEl.style.scrollBehavior = originalScroll;
+      if (summaryScrollEl){
+        summaryScrollEl.style.overflow = originalSummaryOverflow || '';
+        summaryScrollEl.style.maxWidth = originalSummaryMaxWidth || '';
+        summaryScrollEl.style.width = originalSummaryWidth || '';
+      }
+      if (summaryTableEl){
+        summaryTableEl.style.width = originalTableWidth || '';
+      }
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jspdf.jsPDF('p','pt','a4');
-      const margin = 24;
+      const margin = 12;
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const usableWidth = pageWidth - margin * 2;
-      const usableHeight = pageHeight - margin * 2;
-      const widthScale = usableWidth / canvas.width;
-      const heightScale = usableHeight / canvas.height;
-      const scale = Math.min(widthScale, heightScale);
-      const imgWidth = canvas.width * scale;
-      const imgHeight = canvas.height * scale;
-      const offsetX = margin + Math.max(0, (usableWidth - imgWidth) / 2);
-      const offsetY = margin + Math.max(0, (usableHeight - imgHeight) / 2);
+      let imgWidth = pageWidth - margin * 2;
+      let imgHeight = canvas.height * (imgWidth / canvas.width);
+      if (imgHeight > pageHeight - margin * 2){
+        imgHeight = pageHeight - margin * 2;
+        imgWidth = canvas.width * (imgHeight / canvas.height);
+      }
+      const offsetX = (pageWidth - imgWidth) / 2;
+      const offsetY = (pageHeight - imgHeight) / 2;
       pdf.addImage(imgData,'PNG', offsetX, offsetY, imgWidth, imgHeight);
       const receiptNo = formatReceiptNumber(state.activeApproval) || state.activeApproval.id || `receipt_${Date.now()}`;
       const safeReceipt = receiptNo.replace(/[^A-Za-z0-9_-]/g,'');

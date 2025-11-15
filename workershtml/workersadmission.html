@@ -26,6 +26,14 @@
     .workers-flex{display:grid;gap:12px}
     label{display:grid;gap:6px}
     input,select,textarea{padding:.6rem;border:1px solid #d1d5db;border-radius:10px}
+    .workers-section-count{margin:0 0 .5rem;color:#1f2937;font-weight:600}
+    .workers-table td.photo-cell{width:72px;text-align:center;vertical-align:middle}
+    .workers-table__photo{width:60px;height:60px;border-radius:12px;object-fit:cover;border:1px solid #e5e7eb}
+    .workers-table__photo-placeholder{width:60px;height:60px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;border:1px dashed #9ca3af;color:#6b7280;font-size:.65rem}
+    .workers-table td.actions-cell{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}
+    .workers-table td.actions-cell button{font-size:.75rem;padding:.4rem .65rem;border-radius:8px}
+    .workers-form-status{margin-top:10px;font-weight:600;color:#047857;min-height:1.2rem}
+    .workers-form-status.error{color:#b91c1c}
   </style>
 </head>
 <body>
@@ -146,10 +154,12 @@
       <button class="workers-btn" type="submit">Hifadhi Mfanyakazi</button>
       <button class="workers-btn secondary" type="reset">Futa & Anza upya</button>
     </div>
+    <p id="saveStatus" class="workers-form-status" aria-live="polite"></p>
   </form>
 
   <section>
     <h2 class="workers-section-title">Wafanyakazi Walio Sajiliwa</h2>
+    <p id="workerCount" class="workers-section-count" aria-live="polite"></p>
     <div id="workerTable"></div>
   </section>
 </main>
@@ -177,7 +187,6 @@
   const $ = (id)=>document.getElementById(id);
   $('currentDate').textContent =
     new Date().toLocaleString('sw-TZ',{timeZone:'Africa/Nairobi',weekday:'long',year:'numeric',month:'long',day:'numeric'});
-
   const ROLE_DOC_REQUIREMENTS = {
     teacher:['cv','formFourCert'],
     accountant:['cv'],
@@ -197,6 +206,26 @@
     roleCert:'Cheti cha Jukumu / Leseni (PDF/IMG)',
     villageLetter:'Barua ya Kijiji (PDF/IMG)'
   };
+  const formEl = document.getElementById('admissionForm');
+  const statusEl = document.getElementById('saveStatus');
+  const workerTableContainer = $('workerTable');
+  const workerCountEl = $('workerCount');
+  let workersData = [];
+  let currentEditingWorkerId = '';
+  let currentEditingDocs = {};
+  let skipResetHandler = false;
+
+  function setStatus(message='', isError=false){
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.toggle('error', isError);
+  }
+
+  function setField(name, value){
+    const field = formEl.querySelector(`[name="${name}"]`);
+    if (field) field.value = value ?? '';
+  }
+
   function renderRoleDocs(){
     const c = $('roleDocs'); c.innerHTML = '';
     const role = $('roleSelect').value;
@@ -204,7 +233,7 @@
       const lab = document.createElement('label');
       lab.textContent = DOC_LABELS[key] || key;
       const inp = document.createElement('input');
-      inp.type = 'file'; inp.name = key; inp.required = true;
+      inp.type = 'file'; inp.name = key;
       inp.accept = (key==='cv' || key==='formFourCert')?'.pdf':'.pdf,image/*';
       lab.appendChild(inp); c.appendChild(lab);
     });
@@ -240,10 +269,18 @@
     return data.secure_url;
   }
 
-  /* ---------- Nicer empty-state + table render ---------- */
+  function getDisplayName(profile){
+    if (!profile) return '—';
+    if (profile.fullNameUpper) return profile.fullNameUpper;
+    const parts = [profile.firstName, profile.middleName, profile.lastName].filter(Boolean);
+    return parts.join(' ') || '—';
+  }
+
   function renderWorkersTable(rows){
-    const el = $('workerTable');
-    el.innerHTML = '';
+    workerTableContainer.innerHTML = '';
+    workerCountEl.textContent = rows.length
+      ? `Idadi ya wafanyakazi: ${rows.length}`
+      : 'Hakuna wafanyakazi waliopatikana (bado).';
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.style.padding = '12px';
@@ -251,58 +288,158 @@
       empty.style.border = '1px solid #e5e7eb';
       empty.style.borderRadius = '10px';
       empty.textContent = 'Hakuna wafanyakazi waliopatikana (bado).';
-      el.appendChild(empty);
+      workerTableContainer.appendChild(empty);
       return;
     }
     const tbl = document.createElement('table'); tbl.className='workers-table';
     tbl.innerHTML = `
       <thead><tr>
-        <th>Jina Kamili</th><th>Jukumu</th><th>Simu</th><th>Mshahara (TZS)</th><th>Hali</th>
+        <th>Picha</th>
+        <th>Jina Kamili</th>
+        <th>Jukumu</th>
+        <th>Simu</th>
+        <th>Mshahara (TZS)</th>
+        <th>Hali</th>
+        <th>Tendo</th>
       </tr></thead><tbody></tbody>`;
     const tb = tbl.querySelector('tbody');
-    rows.forEach(r=>{
-      const tr=document.createElement('tr');
+    rows.forEach(worker=>{
+      const profile = worker.profile||{};
+      const docs = worker.docs||{};
+      const photoUrl = docs.idPhotoUrl || docs.passportPhotoUrl || '';
+      const photoHtml = photoUrl
+        ? `<img src="${photoUrl}" alt="${getDisplayName(profile)}" class="workers-table__photo">`
+        : `<span class="workers-table__photo-placeholder">Hakuna picha</span>`;
+      const statusText = profile.active !== false ? 'Active' : 'Inactive';
+      const salary = Number(profile.baseSalary||0).toLocaleString('sw-TZ');
+      const tr = document.createElement('tr');
+      tr.dataset.workerId = worker.id;
       tr.innerHTML = `
-        <td>${r.name}</td>
-        <td>${r.role}</td>
-        <td>${r.phone}</td>
-        <td>${Number(r.baseSalary||0).toLocaleString('sw-TZ')}</td>
-        <td>${r.active?'Active':'Inactive'}</td>`;
+        <td class="photo-cell">${photoHtml}</td>
+        <td>${getDisplayName(profile)}</td>
+        <td>${profile.role||''}</td>
+        <td>${profile.phone||''}</td>
+        <td>${salary}</td>
+        <td>${statusText}</td>
+        <td class="actions-cell">
+          <button type="button" class="workers-btn secondary" data-action="edit" data-worker-id="${worker.id}">Edit</button>
+          <button type="button" class="workers-btn secondary" data-action="delete" data-worker-id="${worker.id}">Delete</button>
+        </td>`;
       tb.appendChild(tr);
     });
-    el.appendChild(tbl);
+    workerTableContainer.appendChild(tbl);
   }
+
+  function populateForm(worker){
+    const profile = worker.profile||{};
+    currentEditingWorkerId = worker.id;
+    currentEditingDocs = worker.docs||{};
+    skipResetHandler = true;
+    formEl.reset();
+    $('roleSelect').value = profile.role||'';
+    renderRoleDocs();
+    setField('firstName', profile.firstName);
+    setField('middleName', profile.middleName);
+    setField('lastName', profile.lastName);
+    setField('phone', profile.phone);
+    setField('country', profile.country||'TZ');
+    setField('nextOfKinName', profile.nextOfKinName);
+    setField('nextOfKinPhone', profile.nextOfKinPhone);
+    setField('nssfNumber', profile.nssfNumber);
+    setField('nidaOrPassport', profile.nidaOrPassport);
+    setField('fatherName', profile.fatherName);
+    setField('motherName', profile.motherName);
+    setField('maritalStatus', profile.maritalStatus);
+    setField('spouseName', profile.spouseName);
+    setField('spousePhone', profile.spousePhone);
+    setField('area', profile.area);
+    setField('tribe', profile.tribe);
+    setField('villageHome', profile.villageHome);
+    setField('baseSalary', profile.baseSalary ?? '');
+    setField('medicalConditions', profile.medicalConditions);
+    const activeSelect = formEl.querySelector('[name="active"]');
+    if (activeSelect) activeSelect.value = profile.active !== false ? 'true' : 'false';
+    setStatus(`Editing ${getDisplayName(profile)} – save to update.`);
+    formEl.scrollIntoView({behavior:'smooth'});
+    const focusField = formEl.querySelector('[name="firstName"]');
+    if (focusField) focusField.focus();
+  }
+
+  async function deleteWorker(workerId){
+    try{
+      await db.ref(`workers/${workerId}`).remove();
+      if (currentEditingWorkerId === workerId){
+        currentEditingWorkerId = '';
+        currentEditingDocs = {};
+        setStatus('');
+        formEl.reset();
+        renderRoleDocs();
+      }
+      loadWorkers();
+    }catch(err){
+      console.error('Delete worker error:', err);
+      alert('Imeshindikana kufuta mfanyakazi. Jaribu tena.');
+    }
+  }
+
+  workerTableContainer.addEventListener('click', async (event)=>{
+    const btn = event.target.closest('button[data-action]');
+    if (!btn) return;
+    const workerId = btn.dataset.workerId;
+    const worker = workersData.find(item=>item.id===workerId);
+    if (!worker) return;
+    if (btn.dataset.action==='edit'){
+      populateForm(worker);
+      return;
+    }
+    if (btn.dataset.action==='delete'){
+      if (!confirm('Una hakika unataka kufuta mfanyakazi huyu?')) return;
+      await deleteWorker(workerId);
+    }
+  });
 
   async function loadWorkers(){
     try{
-      const snap = await db.ref('workers').get();    // <- no orderByChild (works even if field missing)
-      const rows=[];
+      const snap = await db.ref('workers').get();
+      const rows = [];
       (snap && snap.forEach) && snap.forEach(ch=>{
-        const v=ch.val()||{};
+        const v = ch.val()||{};
         rows.push({
-          name: v.profile?.fullNameUpper||'',
-          role: v.profile?.role||'',
-          phone: v.profile?.phone||'',
-          baseSalary: v.profile?.baseSalary||0,
-          active: v.profile?.active!==false
+          id: ch.key,
+          profile: v.profile||{},
+          docs: v.docs||{}
         });
       });
-      // Sort client-side by name to look nice
-      rows.sort((a,b)=>a.name.localeCompare(b.name,'sw-TZ'));
+      rows.sort((a,b)=>{
+        const nameA = (a.profile?.fullNameUpper||'').toUpperCase();
+        const nameB = (b.profile?.fullNameUpper||'').toUpperCase();
+        return nameA.localeCompare(nameB,'sw-TZ');
+      });
+      workersData = rows;
       renderWorkersTable(rows);
     }catch(e){
       console.error('Load workers error:', e);
+      workersData = [];
       renderWorkersTable([]);
     }
   }
   loadWorkers();
 
-  /* ---------- Save handler (Cloudinary + RTDB) ---------- */
-  document.getElementById('admissionForm').addEventListener('submit', async (e)=>{
+  formEl.addEventListener('reset', ()=>{
+    if (skipResetHandler){
+      skipResetHandler = false;
+      return;
+    }
+    currentEditingWorkerId = '';
+    currentEditingDocs = {};
+    setStatus('');
+    setTimeout(renderRoleDocs,0);
+  });
+
+  formEl.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
 
-    // Basics + validations
     const firstName = (fd.get('firstName')||'').trim();
     const middleName= (fd.get('middleName')||'').trim();
     const lastName  = (fd.get('lastName')||'').trim();
@@ -316,60 +453,60 @@
     if (!isTZWorkerPhone(phone)) return alert('Simu lazima iwe kama +2550XXXXXXXXX');
     if (!role) return alert('Chagua jukumu (Role)');
 
-    // Required photos
+    const isEditing = Boolean(currentEditingWorkerId);
+    const workerId = isEditing ? currentEditingWorkerId : db.ref('workers').push().key;
+    const baseHint = `w_${workerId}_${Date.now()}`;
+
     const idPhoto = fd.get('idPhoto');
     const passportPhoto = fd.get('passportPhoto');
-    if (!idPhoto?.size || !passportPhoto?.size) return alert('Weka Picha ya Kitambulisho na Picha ya Passport');
+    let idPhotoUrl = currentEditingDocs.idPhotoUrl || '';
+    let passportPhotoUrl = currentEditingDocs.passportPhotoUrl || '';
+    if (idPhoto?.size) idPhotoUrl = await cldUpload(idPhoto, `${baseHint}_id`);
+    if (passportPhoto?.size) passportPhotoUrl = await cldUpload(passportPhoto, `${baseHint}_passport`);
+    if (!idPhotoUrl || !passportPhotoUrl) return alert('Weka Picha ya Kitambulisho na Picha ya Passport');
 
-    // Role required docs
+    let medicalProofUrl = currentEditingDocs.medicalProofUrl || '';
+    const medicalProof = fd.get('medicalProof');
+    if (medicalProof?.size) medicalProofUrl = await cldUpload(medicalProof, `${baseHint}_medical`);
+
+    const extra = {};
     for (const k of (ROLE_DOC_REQUIREMENTS[role]||[])){
-      const f=fd.get(k);
-      if (!f?.size) return alert(`Faili ya lazima: ${DOC_LABELS[k]||k}`);
+      const f = fd.get(k);
+      const fieldKey = (k==='cv'?'cvPdf':k) + 'Url';
+      if (f?.size){
+        extra[fieldKey] = await cldUpload(f, `${baseHint}_${k}`);
+      }else if (currentEditingDocs[fieldKey]){
+        extra[fieldKey] = currentEditingDocs[fieldKey];
+      }else{
+        return alert(`Faili ya lazima: ${DOC_LABELS[k]||k}`);
+      }
     }
 
+    const profile = {
+      firstName, middleName, lastName, fullNameUpper,
+      phone,
+      country:(fd.get('country')||'TZ').trim(),
+      nextOfKinName:(fd.get('nextOfKinName')||'').trim(),
+      nextOfKinPhone:(fd.get('nextOfKinPhone')||'').trim(),
+      nssfNumber:(fd.get('nssfNumber')||'').trim(),
+      nidaOrPassport:(fd.get('nidaOrPassport')||'').trim(),
+      fatherName:(fd.get('fatherName')||'').trim(),
+      motherName:(fd.get('motherName')||'').trim(),
+      maritalStatus:(fd.get('maritalStatus')||'').trim(),
+      spouseName:(fd.get('spouseName')||'').trim(),
+      spousePhone:(fd.get('spousePhone')||'').trim(),
+      area:(fd.get('area')||'').trim(),
+      tribe:(fd.get('tribe')||'').trim(),
+      villageHome:(fd.get('villageHome')||'').trim(),
+      role,
+      baseSalary:Number(fd.get('baseSalary')||0),
+      active:(fd.get('active')||'true')!=='false',
+      medicalConditions:(fd.get('medicalConditions')||'').trim(),
+      createdBy: '',
+      admissionDate: Date.now()
+    };
+
     try{
-      // ONE workerId for everything
-      const workerId = db.ref('workers').push().key;
-      const baseHint = `w_${workerId}_${Date.now()}`;
-
-      // Uploads to Cloudinary
-      const idPhotoUrl       = await cldUpload(idPhoto,       `${baseHint}_id`);
-      const passportPhotoUrl = await cldUpload(passportPhoto, `${baseHint}_passport`);
-
-      let medicalProofUrl = '';
-      const medicalProof = fd.get('medicalProof');
-      if (medicalProof?.size) medicalProofUrl = await cldUpload(medicalProof, `${baseHint}_medical`);
-
-      const extra = {};
-      for (const k of (ROLE_DOC_REQUIREMENTS[role]||[])){
-        const f=fd.get(k);
-        extra[ (k==='cv'?'cvPdf':k) + 'Url' ] = await cldUpload(f, `${baseHint}_${k}`);
-      }
-
-      const profile = {
-        firstName, middleName, lastName, fullNameUpper,
-        phone,
-        country:(fd.get('country')||'TZ').trim(),
-        nextOfKinName:(fd.get('nextOfKinName')||'').trim(),
-        nextOfKinPhone:(fd.get('nextOfKinPhone')||'').trim(),
-        nssfNumber:(fd.get('nssfNumber')||'').trim(),
-        nidaOrPassport:(fd.get('nidaOrPassport')||'').trim(),
-        fatherName:(fd.get('fatherName')||'').trim(),
-        motherName:(fd.get('motherName')||'').trim(),
-        maritalStatus:(fd.get('maritalStatus')||'').trim(),
-        spouseName:(fd.get('spouseName')||'').trim(),
-        spousePhone:(fd.get('spousePhone')||'').trim(),
-        area:(fd.get('area')||'').trim(),
-        tribe:(fd.get('tribe')||'').trim(),
-        villageHome:(fd.get('villageHome')||'').trim(),
-        role,
-        baseSalary:Number(fd.get('baseSalary')||0),
-        active:(fd.get('active')||'true')!=='false',
-        medicalConditions:(fd.get('medicalConditions')||'').trim(),
-        createdBy: '',  // no auth required
-        admissionDate: Date.now()
-      };
-
       const payload = {
         profile,
         docs: { idPhotoUrl, passportPhotoUrl, medicalProofUrl, ...extra },
@@ -379,12 +516,13 @@
           accepted:false, acceptedTs:0, contractPdfUrl:''
         }
       };
-
-      // Save worker to /workers/ only (no index needed - login searches directly)
       await db.ref(`workers/${workerId}`).set(payload);
-
-      alert('Mfanyakazi amesajiliwa kikamilifu ✅');
-      e.currentTarget.reset();
+      setStatus('SAVED SUCCESSFULLY');
+      alert('SAVED SUCCESSFULLY');
+      currentEditingWorkerId = '';
+      currentEditingDocs = {};
+      skipResetHandler = true;
+      formEl.reset();
       renderRoleDocs();
       loadWorkers();
     }catch(err){
@@ -393,5 +531,7 @@
     }
   });
 </script>
+
 </body>
 </html>
+

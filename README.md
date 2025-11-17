@@ -1,7 +1,7 @@
 # SoMAp – Educational SuperApp
 
 **Your all-in-one school management solution.**  
-Built to help schools in Tanzania and beyond manage **academics, finance, health, communication, and even marketplace features** — all with speed, clarity, and a mission to build society.
+Built to help schools in Tanzania and beyond manage **academics, finance, health, communication,Books and even marketplace features** — all with speed, clarity, and a mission to build society.
 
 ---
 
@@ -21,7 +21,8 @@ We believe technology should serve society — SoMAp is built with that philosop
 - **Attendance**: Track daily attendance per class.  
 - **Finance**: Manage fees, payments, balances, and generate debt/expense reports.  
 - **Health**: Keep student health records in one place.  
-- **Communication**: Connect teachers, parents, and administration.  
+- **Communication**: Connect teachers, parents, and administration.
+- **Digital Books***: Helps students and teachers to get access to books, homeworks and quizes instantly 
 - **Marketplace (future)**: Enable schools to connect with suppliers and communities.  
 
 ---

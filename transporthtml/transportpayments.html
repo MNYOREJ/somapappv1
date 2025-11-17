@@ -347,6 +347,7 @@
         students: {},
         transportEnrollments: {},
         transportAssignments: {},
+        transportOverrides: {},
         financeData: {},
         transportPayments: {},
         expenses: {},
@@ -525,13 +526,17 @@
       // Calculate school debt till
       const pad2 = n => String(n).padStart(2,'0');
 
-      async function somapGetTransportMonthlyFee(db, year, studentId, assignment) {
+      async function somapGetTransportMonthlyFee(db, year, studentId, assignment, options = {}) {
         somapGetTransportMonthlyFee._cache = somapGetTransportMonthlyFee._cache || {};
         const cacheKey = `${year}:${studentId}`;
         if (somapGetTransportMonthlyFee._cache[cacheKey]) return somapGetTransportMonthlyFee._cache[cacheKey];
         const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
-        const oSnap = await db.ref(`${prefix}transportOverrides/${year}/${studentId}`).once('value').catch(()=>({exists:()=>false}));
-        const override = oSnap.exists() ? oSnap.val() : null;
+        const overrideMap = options.overrideMap || {};
+        let override = overrideMap?.[studentId] ?? null;
+        if (!override) {
+          const oSnap = await db.ref(`${prefix}transportOverrides/${year}/${studentId}`).once('value').catch(()=>({exists:()=>false}));
+          override = oSnap.exists() ? oSnap.val() : null;
+        }
 
         const routeFee = async (routeId) => {
           if (!routeId) return 0;
@@ -708,11 +713,12 @@
         let totalDebt = 0;
         const statusCache = {};
 
+        const overridesMap = state.transportOverrides || {};
         for (const [studentId, enrollment] of Object.entries(state.transportEnrollments)) {
           const payments = Object.values(state.transportPayments[studentId] || {});
           const assignment = state.transportAssignments?.[studentId];
           const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
-          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride, { overrideMap: overridesMap });
           const status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           statusCache[studentId] = status;
           
@@ -767,6 +773,7 @@
         const multipliers = cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
         if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
 
+        const overridesMap = state.transportOverrides || {};
         const allEntries = Object.entries(state.transportEnrollments);
         const filtered = [];
 
@@ -792,7 +799,7 @@
           const payments = Object.values(state.transportPayments[studentId] || {});
           const assignment = state.transportAssignments?.[studentId];
           const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
-          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride, { overrideMap: overridesMap });
           const status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           
           let matchesStatus = true;
@@ -908,6 +915,7 @@
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         const payments = Object.values(state.transportPayments[studentId] || {});
         const year = String(state.year);
+        const overridesMap = state.transportOverrides || {};
         
         const multipliers = cachedMultipliers[Number(year)] || (await TransportPricing.loadYearMultipliers(Number(year)));
         if (!cachedMultipliers[Number(year)]) cachedMultipliers[Number(year)] = multipliers;
@@ -927,13 +935,13 @@
           const assignSnap = await db.ref(`${prefix}transportAssignments/${year}/${studentId}`).once('value');
           const assign = assignSnap.val();
           const assignmentForOverride = assign?.status === 'Using' ? assign : enrollment;
-          const overrideFee = await somapGetTransportMonthlyFee(db, year, studentId, assignmentForOverride);
+          const overrideFee = await somapGetTransportMonthlyFee(db, year, studentId, assignmentForOverride, { overrideMap: overridesMap });
           status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           baseMonthlyFee = status.monthlyFee;
           currentMonthAmount = status.currentMonthExpected;
         } catch (err) {
           console.warn('Error loading assignment data, using fallback:', err);
-          const fallbackOverride = await somapGetTransportMonthlyFee(db, year, studentId, enrollment);
+          const fallbackOverride = await somapGetTransportMonthlyFee(db, year, studentId, enrollment, { overrideMap: overridesMap });
           status = await calculateTransportStatus(enrollment, payments, multipliers, fallbackOverride);
           baseMonthlyFee = status.monthlyFee;
           currentMonthAmount = status.currentMonthExpected;
@@ -994,7 +1002,7 @@
           if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
           const assignment = state.transportAssignments?.[studentId];
           const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
-          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride, { overrideMap: state.transportOverrides || {} });
           const status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           const recorder = resolveRecorder();
           // Convert payment date to timestamp (local timezone - Africa/Nairobi)
@@ -1317,6 +1325,7 @@
         
         const db = firebase.database();
         const yearStr = String(state.year);
+        const overridesMap = state.transportOverrides || {};
         const data = await Promise.all(Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
           const student = state.students[studentId];
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
@@ -1326,7 +1335,7 @@
           if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
           const assignment = state.transportAssignments?.[studentId];
           const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
-          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride, { overrideMap: overridesMap });
           const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           
           const feePerYear = Number(student.feePerYear) || 0;
@@ -1376,6 +1385,7 @@
             assignmentsSnap,
             ledgersSnap,
             legacyPaymentsSnap,
+            overridesSnap,
             expensesSnap
           ] = await Promise.all([
             db.ref(`${prefix}students`).once('value'),
@@ -1384,6 +1394,7 @@
             db.ref(`${prefix}transportAssignments/${year}`).once('value').catch(() => ({ val: () => null })),
             db.ref(`${prefix}transportLedgers/${year}`).once('value'),
             db.ref(`${prefix}transport_payments`).once('value'),
+            db.ref(`${prefix}transportOverrides/${year}`).once('value').catch(() => ({ val: () => null })),
             db.ref(`${prefix}transport_expenses`).once('value'),
           ]);
 
@@ -1441,6 +1452,7 @@
           });
           state.transportPayments = paymentsData;
 
+          const overrides = (overridesSnap && overridesSnap.val && overridesSnap.val()) || {};
           const expenses = (expensesSnap && expensesSnap.val && expensesSnap.val()) || {};
           state.expenses = {};
           Object.entries(expenses).forEach(([key, exp]) => {
@@ -1448,6 +1460,7 @@
               state.expenses[key] = exp;
             }
           });
+          state.transportOverrides = overrides;
 
           renderKPIs();
           renderPaymentsTable();
@@ -1705,10 +1718,11 @@
         );
         const base = Number(assign?.baseMonthlyFee||0);
         const db = firebase.database();
+        const overridesMap = state.transportOverrides || {};
         const assignmentForOverride = assign?.status === 'Using'
           ? assign
           : state.transportEnrollments[studentId] || {};
-        const overrideFee = await somapGetTransportMonthlyFee(db, year, studentId, assignmentForOverride);
+        const overrideFee = await somapGetTransportMonthlyFee(db, year, studentId, assignmentForOverride, { overrideMap: overridesMap });
         const overrideBase = overrideFee?.isOverride ? Number(overrideFee.monthlyTotal || 0) : null;
         const baseForLedger = overrideBase ?? base;
         const startDate = normalizeDateInput((assign && (assign.startDate || assign.start_date || assign.startTimestamp || assign.start_time)) || `${year}-01-01`, Number(year));

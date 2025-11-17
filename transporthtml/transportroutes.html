@@ -266,6 +266,86 @@
         </p>
       </details>
     </section>
+
+    <!-- ===== Per-Student Overrides (Transport) ===== -->
+    <section id="transportStudentOverrides" class="mt-6 bg-white border rounded-2xl shadow-sm">
+      <div class="px-4 py-3 border-b flex items-center gap-3">
+        <h3 class="text-base font-semibold">Per-Student Overrides (Transport)</h3>
+        <span class="text-xs text-slate-500">Year:</span>
+        <span id="tsoYearHint" class="text-xs font-semibold">—</span>
+      </div>
+      <div class="p-4 space-y-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <input id="tsoSearch" class="border rounded px-3 py-2 w-72" placeholder="Search admission or name…"/>
+          <button id="tsoClear" class="px-3 py-2 border rounded">Clear</button>
+          <span id="tsoStatus" class="text-sm text-slate-500"></span>
+        </div>
+
+        <div id="tsoResult" class="hidden border rounded-lg p-4">
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <div class="text-sm">
+                <div><b>Student:</b> <span id="tsoName">—</span></div>
+                <div><b>Admission:</b> <span id="tsoAdm" class="mono">—</span></div>
+                <div><b>Class:</b> <span id="tsoClass">—</span></div>
+                <div><b>Parent:</b> <span id="tsoPhone">—</span></div>
+              </div>
+              <div class="mt-3 text-sm">
+                <div><b>Route (Morning):</b> <span id="tsoRouteM">—</span></div>
+                <div><b>Route (Evening):</b> <span id="tsoRouteE">—</span></div>
+                <div class="mt-2">
+                  <b>Default monthly (computed):</b>
+                  <div class="text-slate-700">Morning: TSh <span id="tsoDefM">0</span> • Evening: TSh <span id="tsoDefE">0</span></div>
+                  <div class="text-slate-700">Combined: <b>TSh <span id="tsoDefSum">0</span></b></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-slate-50 border rounded-lg p-3">
+              <div class="text-sm font-semibold mb-2">Override for <span id="tsoYearText">—</span></div>
+              <div class="flex items-center gap-3 mb-2">
+                <label class="text-sm flex items-center gap-1">
+                  <input type="radio" name="tsoApplyTo" value="both" checked/> Both
+                </label>
+                <label class="text-sm flex items-center gap-1">
+                  <input type="radio" name="tsoApplyTo" value="morning"/> Morning
+                </label>
+                <label class="text-sm flex items-center gap-1">
+                  <input type="radio" name="tsoApplyTo" value="evening"/> Evening
+                </label>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-slate-600">Monthly fee (Morning)</label>
+                  <input id="tsoAmtM" type="number" min="0" class="border rounded px-2 py-1 w-full" placeholder="Leave blank to use route default">
+                </div>
+                <div>
+                  <label class="text-xs text-slate-600">Monthly fee (Evening)</label>
+                  <input id="tsoAmtE" type="number" min="0" class="border rounded px-2 py-1 w-full" placeholder="Leave blank to use route default">
+                </div>
+              </div>
+
+              <details class="mt-2">
+                <summary class="text-sm cursor-pointer">Limit to certain months (optional)</summary>
+                <div id="tsoMonths" class="mt-2 grid grid-cols-3 gap-2"></div>
+              </details>
+
+              <div class="mt-2">
+                <label class="text-xs text-slate-600">Note</label>
+                <input id="tsoNote" class="border rounded px-2 py-1 w-full" placeholder="Reason / agreement">
+              </div>
+
+              <div class="mt-3 flex items-center gap-2">
+                <button id="tsoSave" class="px-3 py-2 rounded bg-slate-900 text-white">Save Override</button>
+                <button id="tsoRemove" class="px-3 py-2 rounded border">Remove Override</button>
+                <span id="tsoOp" class="text-sm text-slate-500"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <!-- Price History Modal -->
@@ -1304,6 +1384,176 @@
       console.log('📄 DOM Content Loaded!');
       initializeApp();
     });
+  </script>
+
+  <script>
+  (function(){
+    const SOMAP_DEFAULT_YEAR = 2025;
+    const L = s => String(s||'').trim().toLowerCase();
+    const pad2 = n => String(n).padStart(2,'0');
+    const fmt = n => Number(n||0).toLocaleString();
+
+    const el = id => document.getElementById(id);
+    const db = window.db || (firebase?.database ? firebase.database() : null);
+    if(!db){ console.warn('DB not ready'); return; }
+
+    const yearCtx = window.somapYearContext || {
+      getSelectedYear(){ return String(SOMAP_DEFAULT_YEAR); },
+      onYearChanged(){} ,
+    };
+
+    const schoolPrefix = (path) => {
+      if (window.currentSchoolId) return `schools/${window.currentSchoolId}/${path}`;
+      return path;
+    };
+
+    const state = { y: String(yearCtx.getSelectedYear()), students:null, idx:[], pick:null };
+
+    function setYearUI(){
+      el('tsoYearHint').textContent = state.y;
+      el('tsoYearText').textContent = state.y;
+      const box = el('tsoMonths');
+      box.innerHTML = '';
+      for (let m=1;m<=12;m++){
+        const key = `${state.y}-${pad2(m)}`;
+        const div = document.createElement('label');
+        div.className='text-xs flex items-center gap-2';
+        div.innerHTML = `<input type="checkbox" data-month="${key}"/> ${key}`;
+        box.appendChild(div);
+      }
+    }
+
+    async function loadStudents(){
+      const snap = await db.ref(schoolPrefix('students')).once('value');
+      state.students = snap.val() || {};
+      state.idx = Object.entries(state.students).map(([id,S])=>{
+        const name = `${S.firstName||''} ${S.middleName||''} ${S.lastName||''}`.replace(/\s+/g,' ').trim();
+        return { id, name, adm: S.admissionNumber||id, phone: S.primaryParentContact||S.parentPhone||'', cls: S.classLevel||S.class||'' };
+      });
+    }
+
+    async function fetchAssignment(studentId){
+      const p1 = db.ref(schoolPrefix(`transportAssignments/${state.y}/${studentId}`)).once('value').catch(()=>({val:()=>null}));
+      const p2 = db.ref(schoolPrefix(`transportRoutes/${state.y}`)).once('value').catch(()=>({val:()=>null}));
+      const [asSnap, routesSnap] = await Promise.all([p1,p2]);
+      return { asg: (asSnap && asSnap.val && asSnap.val()) || {}, routes: (routesSnap && routesSnap.val && routesSnap.val()) || {} };
+    }
+
+    function resolveRouteName(routes, id){ return (routes && routes[id] && (routes[id].name||routes[id].routeName)) || '—'; }
+    function resolveRouteFee(routes, id){
+      const R = routes && routes[id] || {};
+      return Number(R.pricePerMonth ?? R.monthlyBase ?? R.base ?? R.fee ?? 0);
+    }
+
+    async function fetchOverride(studentId){
+      const snap = await db.ref(schoolPrefix(`transportOverrides/${state.y}/${studentId}`)).once('value');
+      return snap.exists()? snap.val() : null;
+    }
+
+    function renderPick(card){
+      const {S, asg, routes, override} = card;
+      el('tsoResult').classList.remove('hidden');
+      el('tsoName').textContent = `${S.name}`;
+      el('tsoAdm').textContent = S.adm;
+      el('tsoClass').textContent = S.cls || '—';
+      el('tsoPhone').textContent = S.phone || '—';
+
+      const rM = asg.routeMorningId || asg.routeMorning || asg.routeM || '';
+      const rE = asg.routeEveningId || asg.routeEvening || asg.routeE || '';
+      el('tsoRouteM').textContent = resolveRouteName(routes, rM);
+      el('tsoRouteE').textContent = resolveRouteName(routes, rE);
+
+      const defM = resolveRouteFee(routes, rM);
+      const defE = resolveRouteFee(routes, rE);
+      el('tsoDefM').textContent = fmt(defM);
+      el('tsoDefE').textContent = fmt(defE);
+      el('tsoDefSum').textContent = fmt(defM + defE);
+
+      const apply = (override?.applyTo)||'both';
+      document.querySelectorAll('input[name="tsoApplyTo"]').forEach(r=>{
+        r.checked = (r.value===apply);
+      });
+      el('tsoAmtM').value = (override?.feePerMonthMorning ?? '');
+      el('tsoAmtE').value = (override?.feePerMonthEvening ?? '');
+      el('tsoNote').value  = override?.note || '';
+
+      const monthsBox = el('tsoMonths');
+      monthsBox.querySelectorAll('input[type="checkbox"]').forEach(ch=>{
+        ch.checked = !!(override?.months?.[ch.getAttribute('data-month')]);
+      });
+    }
+
+    async function pickStudent(query){
+      const q = String(query||'').toLowerCase().trim();
+      if(!q){ el('tsoResult').classList.add('hidden'); state.pick=null; return; }
+      const hit = state.idx.find(x => L(x.adm).includes(q) || L(x.name).includes(q));
+      if(!hit){ el('tsoStatus').textContent = 'No match'; el('tsoResult').classList.add('hidden'); state.pick=null; return; }
+      el('tsoStatus').textContent = '';
+      const [{asg, routes}, override] = await Promise.all([
+        fetchAssignment(hit.id),
+        fetchOverride(hit.id)
+      ]);
+      state.pick = { id: hit.id, S: hit, asg, routes, override };
+      renderPick(state.pick);
+    }
+
+    async function saveOverride(){
+      if(!state.pick){ return; }
+      const id = state.pick.id;
+      const applyTo = (Array.from(document.querySelectorAll('input[name="tsoApplyTo"]')).find(r=>r.checked)?.value) || 'both';
+      const vM = el('tsoAmtM').value;
+      const vE = el('tsoAmtE').value;
+      const feeM = vM==='' ? null : Number(vM);
+      const feeE = vE==='' ? null : Number(vE);
+      const note = el('tsoNote').value || '';
+      const months = {};
+      el('tsoMonths').querySelectorAll('input[type="checkbox"]').forEach(ch=>{
+        if (ch.checked) months[ch.getAttribute('data-month')] = true;
+      });
+      const monthsObj = Object.keys(months).length ? months : null;
+
+      const payload = {
+        feePerMonthMorning: feeM,
+        feePerMonthEvening: feeE,
+        applyTo,
+        months: monthsObj || null,
+        note,
+        editedBy: (window.currentUserEmail || 'unknown'),
+        editedAt: Date.now()
+      };
+      await db.ref(schoolPrefix(`transportOverrides/${state.y}/${id}`)).set(payload);
+      el('tsoOp').textContent = 'Saved ✓';
+      setTimeout(()=> el('tsoOp').textContent='', 1500);
+      state.pick.override = payload;
+    }
+
+    async function removeOverride(){
+      if(!state.pick){ return; }
+      const id = state.pick.id;
+      await db.ref(schoolPrefix(`transportOverrides/${state.y}/${id}`)).set(null);
+      el('tsoOp').textContent = 'Removed ✓';
+      setTimeout(()=> el('tsoOp').textContent='', 1500);
+      state.pick.override = null;
+      renderPick(state.pick);
+    }
+
+    el('tsoClear').addEventListener('click', ()=>{ el('tsoSearch').value=''; el('tsoResult').classList.add('hidden'); el('tsoStatus').textContent=''; });
+    el('tsoSearch').addEventListener('keydown', e=>{ if(e.key==='Enter'){ pickStudent(e.target.value); }});
+    el('tsoSave').addEventListener('click', saveOverride);
+    el('tsoRemove').addEventListener('click', removeOverride);
+
+    yearCtx.onYearChanged(async(y)=>{
+      state.y = String(y);
+      setYearUI();
+      el('tsoResult').classList.add('hidden');
+    });
+
+    (async function init(){
+      state.y = String(yearCtx.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+      setYearUI();
+      await loadStudents();
+    })();
+  })();
   </script>
 
   <!--

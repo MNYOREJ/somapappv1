@@ -7,10 +7,12 @@
 
   // Unmultiplied baseMonthlyFee = sum(morning+evening) before month multiplier
   // Now supports date-aware pricing via amStop/pmStop OR legacy baseMonthlyFee
-  async function dueForMonth({year, month, baseMonthlyFee, amStop, pmStop, startDate, multipliers}){
+  async function dueForMonth({year, month, baseMonthlyFee, amStop, pmStop, startDate, multipliers, overrideBaseMonthlyFee}){
     // If stops provided, compute base fee for that month using priceHistory
     let base = baseMonthlyFee;
-    if (amStop || pmStop) {
+    if (typeof overrideBaseMonthlyFee === 'number' && !Number.isNaN(overrideBaseMonthlyFee)) {
+      base = Number(overrideBaseMonthlyFee);
+    } else if (amStop || pmStop) {
       base = await computeBaseMonthlyFeeOnMonth({year, month, amStop, pmStop});
     } else {
       base = Number(baseMonthlyFee||0);
@@ -33,7 +35,7 @@
     return base * mult;
   }
 
-  async function buildLedger({year, baseMonthlyFee, amStop, pmStop, startDate, payments, multipliers}){
+  async function buildLedger({year, baseMonthlyFee, amStop, pmStop, startDate, payments, multipliers, overrideBaseMonthlyFee}){
     const paidByMonth = {};
     (payments||[]).forEach(p => {
       const m = parseInt(p.month,10);
@@ -43,7 +45,16 @@
     const months = [];
     let totalDue=0, totalPaid=0;
     for(let m=1; m<=12; m++){
-      const due = await dueForMonth({year, month:m, baseMonthlyFee, amStop, pmStop, startDate, multipliers});
+      const due = await dueForMonth({
+        year,
+        month:m,
+        baseMonthlyFee,
+        amStop,
+        pmStop,
+        startDate,
+        multipliers,
+        overrideBaseMonthlyFee
+      });
       const paid = paidByMonth[m] || 0;
       const balance = Math.max(0, +(due - paid).toFixed(2));
       const status = (due===0) ? 'SKIP' : (paid<=0 ? 'UNPAID' : (balance>0?'PARTIAL':'PAID'));

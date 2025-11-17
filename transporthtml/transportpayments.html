@@ -346,6 +346,7 @@
         school: context.school || "socrates",
         students: {},
         transportEnrollments: {},
+        transportAssignments: {},
         financeData: {},
         transportPayments: {},
         expenses: {},
@@ -519,6 +520,60 @@
       }
 
       // Calculate school debt till
+      const pad2 = n => String(n).padStart(2,'0');
+
+      async function somapGetTransportMonthlyFee(db, year, studentId, assignment) {
+        somapGetTransportMonthlyFee._cache = somapGetTransportMonthlyFee._cache || {};
+        const cacheKey = `${year}:${studentId}`;
+        if (somapGetTransportMonthlyFee._cache[cacheKey]) return somapGetTransportMonthlyFee._cache[cacheKey];
+        const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
+        const oSnap = await db.ref(`${prefix}transportOverrides/${year}/${studentId}`).once('value').catch(()=>({exists:()=>false}));
+        const override = oSnap.exists() ? oSnap.val() : null;
+
+        const routeFee = async (routeId) => {
+          if (!routeId) return 0;
+          const rSnap = await db.ref(`${prefix}transportRoutes/${year}/${routeId}`).once('value').catch(()=>({exists:()=>false}));
+          if (!rSnap.exists()) return 0;
+          const R = rSnap.val() || {};
+          return Number(R.pricePerMonth ?? R.monthlyBase ?? R.base ?? R.fee ?? 0);
+        };
+
+        const rM = assignment?.routeMorningId || assignment?.routeMorning || assignment?.routeM || assignment?.amStop || '';
+        const rE = assignment?.routeEveningId || assignment?.routeEvening || assignment?.routeE || assignment?.pmStop || '';
+        const defM = await routeFee(rM);
+        const defE = await routeFee(rE);
+        let useM = defM;
+        let useE = defE;
+
+        if (override) {
+          const apply = override.applyTo || 'both';
+          if ((apply === 'both' || apply === 'morning') && override.feePerMonthMorning != null) {
+            useM = Number(override.feePerMonthMorning);
+          }
+          if ((apply === 'both' || apply === 'evening') && override.feePerMonthEvening != null) {
+            useE = Number(override.feePerMonthEvening);
+          }
+        }
+
+        const months = override?.months ? { ...override.months } : null;
+        const result = {
+          monthlyMorning: useM,
+          monthlyEvening: useE,
+          monthlyTotal: useM + useE,
+          defaultMorning: defM,
+          defaultEvening: defE,
+          defaultTotal: defM + defE,
+          isOverride: Boolean(override && ((useM !== defM) || (useE !== defE))),
+          applyTo: override?.applyTo || 'both',
+          months,
+          note: override?.note || '',
+          editedBy: override?.editedBy || '',
+          editedAt: override?.editedAt || null,
+        };
+        somapGetTransportMonthlyFee._cache[cacheKey] = result;
+        return result;
+      }
+
       function calculateDebtTill(student) {
         // This matches the finance.html logic
         const feePerYear = Number(student.feePerYear) || 0;
@@ -537,7 +592,7 @@
       }
 
       // Calculate transport payment status (now year-scoped with DB multipliers)
-      async function calculateTransportStatus(enrollment, payments, yearMultipliers) {
+      async function calculateTransportStatus(enrollment, payments, yearMultipliers, overrideFee) {
         const amStop = enrollment?.amStop || '';
         const pmStop = enrollment?.pmStop || '';
         const year = Number(state.year) || new Date().getFullYear();
@@ -549,7 +604,7 @@
         // Base monthly fee (without multipliers) - for display & calculations
         // Use date-aware pricing: compute base fee for focused month
         const selectedMonth = getFocusedMonth();
-        const baseMonthlyFee = Number(enrollment?.baseMonthlyFee) || 
+        const defaultBaseMonthlyFee = Number(enrollment?.baseMonthlyFee) || 
           (await calculateBaseMonthlyFee(amStop, pmStop, year, selectedMonth));
         const startDateIso = resolveStartDate(enrollment);
         const hasExplicitStart = Boolean(enrollment?.startDate || enrollment?.start_date || enrollment?.startTimestamp || enrollment?.start_time);
@@ -562,16 +617,22 @@
 
         // Calculate per month dues using year-specific multiplier logic + start date + date-aware pricing
         for (let month = 1; month <= 12; month++) {
+          const monthKey = `${year}-${pad2(month)}`;
+          const overrideForMonth = overrideFee?.isOverride && (!overrideFee.months || overrideFee.months[monthKey]);
+          const dueOptions = {
+            year,
+            month,
+            amStop,
+            pmStop,
+            baseMonthlyFee: defaultBaseMonthlyFee,
+            startDate: startDateIso,
+            multipliers,
+          };
+          if (overrideForMonth) {
+            dueOptions.overrideBaseMonthlyFee = Number(overrideFee.monthlyTotal || 0);
+          }
           const monthlyExpected = Math.round(
-            await TransportPricing.dueForMonth({
-              year,
-              month,
-              amStop,
-              pmStop,
-              baseMonthlyFee, // Fallback for legacy
-              startDate: startDateIso,
-              multipliers, // Pass year-specific multipliers
-            }) || 0
+            await TransportPricing.dueForMonth(dueOptions) || 0
           );
           totalExpected += monthlyExpected;
 
@@ -592,25 +653,35 @@
         const debt = Math.max(0, totalExpected - totalPaid);
 
         // Current month expected (with multiplier) - for KPI calculations
+        const selectedMonthKey = `${year}-${pad2(selectedMonth)}`;
+        const overrideForSelectedMonth = overrideFee?.isOverride && (!overrideFee.months || overrideFee.months[selectedMonthKey]);
+        const currentMonthOptions = {
+          year,
+          month: selectedMonth,
+          amStop,
+          pmStop,
+          baseMonthlyFee: defaultBaseMonthlyFee,
+          startDate: startDateIso,
+          multipliers,
+        };
+        if (overrideForSelectedMonth) {
+          currentMonthOptions.overrideBaseMonthlyFee = Number(overrideFee.monthlyTotal || 0);
+        }
         const currentMonthExpected = Math.round(
-          await TransportPricing.dueForMonth({
-            year,
-            month: selectedMonth,
-            amStop,
-            pmStop,
-            baseMonthlyFee, // Fallback for legacy
-            startDate: startDateIso,
-            multipliers, // Pass year-specific multipliers
-          }) || 0
+          await TransportPricing.dueForMonth(currentMonthOptions) || 0
         );
 
+        const monthlyFeeForTable = overrideForSelectedMonth ? Number(overrideFee.monthlyTotal || 0) : defaultBaseMonthlyFee;
+        const overrideApplied = overrideForSelectedMonth;
         return {
           totalExpected,
           totalPaid,
           debt,
           unpaidMonths: unpaidMonths.join(', ') || 'None',
-          monthlyFee: baseMonthlyFee, // Base fee for table display (e.g., 35,500)
+          monthlyFee: monthlyFeeForTable, // Base fee for table display (e.g., 35,500)
           currentMonthExpected, // Month-specific fee with multiplier for KPIs
+          overrideApplied,
+          overrideDetails: overrideFee || null,
           startDateIso,
           startDateDisplay: hasExplicitStart ? formatStartDateDisplay(startDateIso) : 'N/A',
         };
@@ -631,14 +702,23 @@
         const year = Number(state.year);
         const multipliers = cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
         if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
+        const db = firebase.database();
+        const yearStr = String(year);
         
         let totalExpected = 0;
         let totalCollected = 0;
         let totalDebt = 0;
+        const db = firebase.database();
+        const yearStr = String(year);
+        const statusCache = {};
 
         for (const [studentId, enrollment] of Object.entries(state.transportEnrollments)) {
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = await calculateTransportStatus(enrollment, payments, multipliers);
+          const assignment = state.transportAssignments?.[studentId];
+          const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
+          statusCache[studentId] = status;
           
           // Use currentMonthExpected for KPI (includes month multiplier)
           totalExpected += status.currentMonthExpected;
@@ -665,13 +745,7 @@
         document.getElementById('otherExpenses').textContent = formatCurrency(otherExp);
 
         // Critical alerts for unpaid students
-        const criticalDebtors = await Promise.all(
-          Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
-            const payments = Object.values(state.transportPayments[studentId] || {});
-            const status = await calculateTransportStatus(enrollment, payments, multipliers);
-            return status.debt > 0;
-          })
-        ).then(results => results.filter(Boolean).length);
+        const criticalDebtors = Object.values(statusCache).filter(status => status.debt > 0).length;
 
         if (criticalDebtors > 0) {
           document.getElementById('criticalAlerts').innerHTML = `
@@ -720,7 +794,10 @@
             (student.admissionNumber || '').toLowerCase().includes(searchTerm);
 
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = await calculateTransportStatus(enrollment, payments, multipliers);
+          const assignment = state.transportAssignments?.[studentId];
+          const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           
           let matchesStatus = true;
           if (filterStatus === 'paid') matchesStatus = status.debt === 0;
@@ -730,7 +807,7 @@
           const matchesDebtFilter = !state.showDebtorsOnly || status.debt > 0;
 
           if (matchesClass && matchesSearch && matchesStatus && matchesDebtFilter) {
-            filtered.push([studentId, enrollment, status]);
+            filtered.push([studentId, enrollment, status, overrideFee]);
           }
         }
 
@@ -747,7 +824,7 @@
         // Sort by debt (highest first)
         filtered.sort((a, b) => b[2].debt - a[2].debt);
 
-        paymentsBody.innerHTML = filtered.map(([studentId, enrollment, transportStatus]) => {
+        paymentsBody.innerHTML = filtered.map(([studentId, enrollment, transportStatus, overrideFee]) => {
           const student = state.students[studentId];
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
           
@@ -760,6 +837,7 @@
           const startDateDisplay = transportStatus.startDateDisplay || 'N/A';
           const baseFeeDisplay = formatCurrency(transportStatus.monthlyFee);
           const currentMonthDue = transportStatus.currentMonthExpected;
+          const overrideBadge = transportStatus.overrideApplied ? '<span class="chip ok" style="font-size: 0.65rem; margin-left: 0.4rem;">Overridden</span>' : '';
           
           // School finance data
           const feePerYear = Number(student.feePerYear) || 0;
@@ -795,8 +873,8 @@
               <td>${enrollment.pmStop || '&mdash;'}</td>
               <td title="Base fee before multiplier: ${baseFeeDisplay}">
                 ${formatCurrency(currentMonthDue)}<br>
-                <span style="font-size: 0.7rem; color: var(--text-muted, #94a3b8);">
-                  Base: ${baseFeeDisplay} &#183; ${selectedMonthName}
+                <span style="font-size: 0.7rem; color: var(--text-muted, #94a3b8); display:flex; align-items:center; gap:0.25rem;">
+                  <span>Base: ${baseFeeDisplay} &#183; ${selectedMonthName}</span>${overrideBadge}
                 </span>
               </td>
               <td style="color: var(--accent-success);">${formatCurrency(transportStatus.totalPaid)}</td>
@@ -833,87 +911,36 @@
         
         const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
         const payments = Object.values(state.transportPayments[studentId] || {});
-        
-        // Check if we have year-scoped assignment data (parent view)
         const year = String(state.year);
         
-        // Load year multipliers for accurate calculations
         const multipliers = cachedMultipliers[Number(year)] || (await TransportPricing.loadYearMultipliers(Number(year)));
         if (!cachedMultipliers[Number(year)]) cachedMultipliers[Number(year)] = multipliers;
+        const enrollmentStart = resolveStartDate(enrollment);
         
-        let status, baseMonthlyFee, currentMonthAmount, currentMonthLabel;
+        const db = firebase.database();
+        const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
         const focusedMonth = getFocusedMonth();
         const focusedMonthLabel = MONTH_NAMES[focusedMonth] || ('Month ' + focusedMonth);
-        const enrollmentStart = resolveStartDate(enrollment);
 
+        let status = null;
+        let baseMonthlyFee = 0;
+        let currentMonthAmount = 0;
+        let currentMonthLabel = focusedMonthLabel;
+        
         try {
-          const assignSnap = await firebase.database().ref(`transportAssignments/${year}/${studentId}`).once('value');
+          const assignSnap = await db.ref(`${prefix}transportAssignments/${year}/${studentId}`).once('value');
           const assign = assignSnap.val();
-          
-          if (assign && assign.status === 'Using') {
-            baseMonthlyFee = Number(assign.baseMonthlyFee || 0) || Number(enrollment.baseMonthlyFee || 0);
-            const startDate = normalizeDateInput(assign.startDate || enrollmentStart, Number(year));
-        const hasAssignedStart = Boolean(assign?.startDate || assign?.start_date || assign?.startTimestamp || assign?.start_time);
-            
-            currentMonthLabel = focusedMonthLabel;
-            currentMonthAmount = Math.round(await TransportPricing.dueForMonth({
-              year: Number(year),
-              month: focusedMonth,
-              amStop: assign?.amStop || enrollment?.amStop,
-              pmStop: assign?.pmStop || enrollment?.pmStop,
-              baseMonthlyFee,
-              startDate,
-              multipliers // Pass year-specific multipliers
-            }));
-            
-            const ledger = await TransportPricing.buildLedger({
-              year: Number(year),
-              amStop: assign?.amStop || enrollment?.amStop,
-              pmStop: assign?.pmStop || enrollment?.pmStop,
-              baseMonthlyFee,
-              startDate,
-              payments,
-              multipliers // Pass year-specific multipliers
-            });
-            
-            status = {
-              monthlyFee: baseMonthlyFee,
-              currentMonthExpected: currentMonthAmount,
-              debt: ledger.totals.balance,
-              totalExpected: ledger.totals.due,
-              totalPaid: ledger.totals.paid,
-              unpaidMonths: ledger.months.filter(m => m.status === 'UNPAID' || m.status === 'PARTIAL').map(m => MONTH_NAMES[m.month]).join(', ') || 'None',
-              startDateIso: startDate,
-              startDateDisplay: formatStartDateDisplay(startDate),
-            };
-          } else {
-            status = await calculateTransportStatus(enrollment, payments, multipliers);
-            baseMonthlyFee = status.monthlyFee;
-            currentMonthLabel = focusedMonthLabel;
-            currentMonthAmount = Math.round(await TransportPricing.dueForMonth({
-              year: Number(year),
-              month: focusedMonth,
-              amStop: enrollment?.amStop,
-              pmStop: enrollment?.pmStop,
-              baseMonthlyFee,
-              startDate: enrollmentStart,
-              multipliers // Pass year-specific multipliers
-            }) || status.currentMonthExpected || status.monthlyFee);
-          }
-        } catch (err) {
-          console.warn('Error loading assignment data, using legacy:', err);
-          status = await calculateTransportStatus(enrollment, payments, multipliers);
+          const assignmentForOverride = assign?.status === 'Using' ? assign : enrollment;
+          const overrideFee = await somapGetTransportMonthlyFee(db, year, studentId, assignmentForOverride);
+          status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           baseMonthlyFee = status.monthlyFee;
-          currentMonthLabel = focusedMonthLabel;
-          currentMonthAmount = Math.round(await TransportPricing.dueForMonth({
-            year: Number(year),
-            month: focusedMonth,
-            amStop: enrollment?.amStop,
-            pmStop: enrollment?.pmStop,
-            baseMonthlyFee,
-            startDate: enrollmentStart,
-            multipliers // Pass year-specific multipliers
-          }) || status.currentMonthExpected || status.monthlyFee);
+          currentMonthAmount = status.currentMonthExpected;
+        } catch (err) {
+          console.warn('Error loading assignment data, using fallback:', err);
+          const fallbackOverride = await somapGetTransportMonthlyFee(db, year, studentId, enrollment);
+          status = await calculateTransportStatus(enrollment, payments, multipliers, fallbackOverride);
+          baseMonthlyFee = status.monthlyFee;
+          currentMonthAmount = status.currentMonthExpected;
         }
         
         document.getElementById('paymentStudentInfo').innerHTML = `
@@ -969,7 +996,10 @@
           const payments = Object.values(state.transportPayments[studentId] || {});
           const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
           if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
-          const status = await calculateTransportStatus(enrollment, payments, multipliers);
+          const assignment = state.transportAssignments?.[studentId];
+          const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const status = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           const recorder = resolveRecorder();
           // Convert payment date to timestamp (local timezone - Africa/Nairobi)
           const paidAt = new Date(paymentDate + 'T12:00:00').getTime();
@@ -982,8 +1012,6 @@
           const newBalance = Math.max(0, totalRequired - Math.min(totalRequired, totalPaidBefore + amount));
 
           // Also write to transport ledger as pending (for parent view and history)
-          const db = firebase.database();
-          const yearStr = String(state.year);
           const prefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
           const payRef = db.ref(`${prefix}transportLedgers/${yearStr}/${studentId}/payments`).push();
           
@@ -1294,6 +1322,8 @@
         const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
         if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
         
+        const db = firebase.database();
+        const yearStr = String(state.year);
         const data = await Promise.all(Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
           const student = state.students[studentId];
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
@@ -1301,7 +1331,10 @@
           const payments = Object.values(state.transportPayments[studentId] || {});
           const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
           if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
-          const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers);
+          const assignment = state.transportAssignments?.[studentId];
+          const assignmentForOverride = assignment?.status === 'Using' ? assignment : enrollment;
+          const overrideFee = await somapGetTransportMonthlyFee(db, yearStr, studentId, assignmentForOverride);
+          const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers, overrideFee);
           
           const feePerYear = Number(student.feePerYear) || 0;
           const schoolPayments = student.payments || {};
@@ -1340,7 +1373,8 @@
         try {
           const db = firebase.database();
           const year = String(state.year);
-          const prefix = currentSchoolPrefix();
+        const prefix = currentSchoolPrefix();
+        somapGetTransportMonthlyFee._cache = {};
           
           // Load students (identity data - constant across years)
           const studentsSnap = await db.ref(`${prefix}students`).once('value');
@@ -1381,15 +1415,16 @@
             Object.entries(assignments).forEach(([studentId, assignRecord]) => {
               if (assignRecord && assignRecord.status === 'Using') {
                 const existing = state.transportEnrollments[studentId] || {};
-                state.transportEnrollments[studentId] = {
-                  ...existing,
-                  startDate: assignRecord.startDate || existing.startDate,
-                  baseMonthlyFee: assignRecord.baseMonthlyFee || existing.baseMonthlyFee,
-                  amStop: existing.amStop || assignRecord.amStop || assignRecord.morningRouteId || existing.routeId || '',
-                  pmStop: existing.pmStop || assignRecord.pmStop || assignRecord.eveningRouteId || existing.stopName || '',
-                };
-              }
-            });
+            state.transportEnrollments[studentId] = {
+              ...existing,
+              startDate: assignRecord.startDate || existing.startDate,
+              baseMonthlyFee: assignRecord.baseMonthlyFee || existing.baseMonthlyFee,
+              amStop: existing.amStop || assignRecord.amStop || assignRecord.morningRouteId || existing.routeId || '',
+              pmStop: existing.pmStop || assignRecord.pmStop || assignRecord.eveningRouteId || existing.stopName || '',
+            };
+          }
+        });
+          state.transportAssignments = assignments;
           } catch (err) {
             console.warn('Could not load transportAssignments:', err);
           }
@@ -1678,6 +1713,13 @@
           assign?.start_time
         );
         const base = Number(assign?.baseMonthlyFee||0);
+        const db = firebase.database();
+        const assignmentForOverride = assign?.status === 'Using'
+          ? assign
+          : state.transportEnrollments[studentId] || {};
+        const overrideFee = await somapGetTransportMonthlyFee(db, year, studentId, assignmentForOverride);
+        const overrideBase = overrideFee?.isOverride ? Number(overrideFee.monthlyTotal || 0) : null;
+        const baseForLedger = overrideBase ?? base;
         const startDate = normalizeDateInput((assign && (assign.startDate || assign.start_date || assign.startTimestamp || assign.start_time)) || `${year}-01-01`, Number(year));
         const amStop = assign?.amStop || assign?.morningRouteId || '';
         const pmStop = assign?.pmStop || assign?.eveningRouteId || '';
@@ -1685,10 +1727,11 @@
           year: Number(year), 
           amStop,
           pmStop,
-          baseMonthlyFee: base, 
+          baseMonthlyFee: baseForLedger, 
           startDate, 
           payments, 
-          multipliers 
+          multipliers,
+          overrideBaseMonthlyFee: overrideBase
         });
 
         const focusedMonth = getFocusedMonth();
@@ -1698,9 +1741,10 @@
           month:focusedMonth, 
           amStop,
           pmStop,
-          baseMonthlyFee: base, 
+          baseMonthlyFee: baseForLedger, 
           startDate, 
-          multipliers 
+          multipliers,
+          overrideBaseMonthlyFee: overrideBase 
         });
         const startDisplay = hasAssignedStart ? formatStartDateDisplay(startDate) : 'N/A';
 
@@ -1731,7 +1775,8 @@
           const morningRoute = assign?.amStop || assign?.morningRouteId || '&mdash;';
           const eveningRoute = assign?.pmStop || assign?.eveningRouteId || '&mdash;';
           const currentMonthDue = Math.round(dueThisMonth);
-          const baseDisplay = formatCurrency(base);
+          const baseDisplay = formatCurrency(overrideBase ?? base);
+          const overrideBadge = overrideBase ? '<span class="chip ok" style="font-size: 0.65rem; margin-left: 0.4rem;">Overridden</span>' : '';
           const rowClass = (combinedDebt>0) ? 'style="background: rgba(239, 68, 68, 0.15); font-weight: 600;"' : '';
           tbody.innerHTML = `
             <tr ${rowClass}>
@@ -1749,8 +1794,8 @@
               <td>${eveningRoute}</td>
               <td title="Base fee before multiplier: ${baseDisplay}">
                 ${formatCurrency(currentMonthDue)}<br>
-                <span style="font-size: 0.7rem; color: var(--text-muted, #94a3b8);">
-                  Base: ${baseDisplay} &#183; ${selectedMonthLabel}
+                <span style="font-size: 0.7rem; color: var(--text-muted, #94a3b8); display:flex; align-items:center; gap:0.25rem;">
+                  <span>Base: ${baseDisplay} &#183; ${selectedMonthLabel}</span>${overrideBadge}
                 </span>
               </td>
               <td style="color: var(--accent-success);">${formatCurrency(paidToDate)}</td>

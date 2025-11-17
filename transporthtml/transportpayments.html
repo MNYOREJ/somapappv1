@@ -354,6 +354,9 @@
         currentPaymentStudentId: null,
       };
 
+      let parentViewActive = false;
+      let parentViewStudentId = null;
+
       state.year = Number(state.year) || new Date().getFullYear();
       state.month = Number(state.month) || new Date().getMonth() + 1;
 
@@ -689,14 +692,9 @@
 
       // Render KPIs - only for admin view, not parent view (now async for DB multipliers)
       async function renderKPIs() {
-        // Skip if parent view (stat cards already rendered by renderParentTransportPayment)
+        if (parentViewActive) return; // Don't render KPIs in parent view
         const monthForKpi = getFocusedMonth();
         const kpiMonthLabel = MONTH_NAMES[monthForKpi] || ('Month ' + monthForKpi);
-        const urlParams = new URLSearchParams(window.location.search);
-        const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
-        if (studentParam) {
-          return; // Don't render KPIs in parent view
-        }
         
         // Load year multipliers once for all calculations
         const year = Number(state.year);
@@ -1109,12 +1107,9 @@
           closePaymentModal();
           
           // Refresh based on view mode
-          const studentParam = localStorage.getItem('parentFocusStudent');
-          if (studentParam) {
-            // Parent view - reload single student
-            renderParentTransportPayment(studentParam);
+          if (parentViewActive && parentViewStudentId) {
+            renderParentTransportPayment(parentViewStudentId);
           } else {
-            // Admin view - reload all data
             loadAllData();
           }
         } catch (error) {
@@ -1514,6 +1509,8 @@
       // Parent transport payment renderer - unified view with existing KPIs and table
       async function renderParentTransportPayment(studentId) {
         try {
+          parentViewActive = true;
+          parentViewStudentId = studentId;
           const y = String(state.year);
           const prefix = currentSchoolPrefix();
           
@@ -1807,10 +1804,11 @@
 
       // Check for parent/single-student view IMMEDIATELY
       const urlParams = new URLSearchParams(window.location.search);
-      const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
+      const queryStudentParam = urlParams.get('student');
       const yearParam = urlParams.get('year');
       const monthParam = parseInt(urlParams.get('month'), 10);
       const schoolParam = urlParams.get('school');
+      const parentScope = sessionStorage.getItem('parent_scope') === '1';
       
       // Initialize year from URL or context
       if (yearParam) {
@@ -1834,10 +1832,12 @@
       }
       if (yearSelect && state.year) yearSelect.value = state.year;
       
-      if (studentParam) {
+      if (queryStudentParam) {
+        parentViewActive = true;
+        parentViewStudentId = queryStudentParam;
         // Parent view mode - render immediately without waiting for auth
-        localStorage.setItem('parentFocusStudent', studentParam);
-        state.currentPaymentStudentId = studentParam;
+        localStorage.setItem('parentFocusStudent', queryStudentParam);
+        state.currentPaymentStudentId = queryStudentParam;
         
         // Hide expense/balance cards IMMEDIATELY for parent view
         const expensesCard = document.getElementById('totalExpenses')?.closest('.stat-card');
@@ -1873,13 +1873,14 @@
         if (debtorsBtn) debtorsBtn.style.display = 'none';
         
         // Load and render immediately using strict year-scoped data
-        resolveSchoolIdIfNeeded().then(() => renderYearScopedStudentView(studentParam)).catch(err => {
+        resolveSchoolIdIfNeeded().then(() => renderYearScopedStudentView(queryStudentParam)).catch(err => {
           console.error('Error rendering parent transport payment:', err);
           if (totalExpectedEl) totalExpectedEl.textContent = 'Error';
           if (totalCollectedEl) totalCollectedEl.textContent = 'Error';
           if (totalDebtEl) totalDebtEl.textContent = 'Error';
         });
-      } else {
+      } else if (parentScope) {
+        parentViewActive = true;
         // No student param: resolve parent context automatically
         const backBtn = document.getElementById('backButton');
         if (backBtn) { backBtn.href = '../parent.html'; backBtn.textContent = '← Back to Parent Dashboard'; }
@@ -1890,6 +1891,7 @@
             || localStorage.getItem('parent_student')
             || localStorage.getItem('studentKey');
           if (sid) {
+            parentViewStudentId = sid;
             state.currentPaymentStudentId = sid;
             await renderYearScopedStudentView(sid);
             return true;
@@ -1898,7 +1900,6 @@
         };
         
         // If explicit school is provided in URL, only load ALL data if no focused student can be resolved
-        const schoolParam = urlParams.get('school');
         if (schoolParam) {
           state.school = schoolParam;
           if (yearSelect && state.year) yearSelect.value = state.year;
@@ -1912,11 +1913,12 @@
             let sid = localStorage.getItem('parentFocusStudent')
               || localStorage.getItem('parent_student')
               || localStorage.getItem('studentKey');
-            if (sid) {
-              state.currentPaymentStudentId = sid;
-              await renderYearScopedStudentView(sid);
-              return;
-            }
+              if (sid) {
+                parentViewStudentId = sid;
+                state.currentPaymentStudentId = sid;
+                await renderYearScopedStudentView(sid);
+                return;
+              }
             // Try phone mapping to students
             const phone = (user && user.phoneNumber) ? String(user.phoneNumber).replace(/\D/g,'') : (localStorage.getItem('parentPhone')||'');
             const normPhone = phone ? phone.replace(/\D/g,'') : '';
@@ -1940,11 +1942,12 @@
                   matches.sort((a,b)=> (Number(b[1]?.timestamp||0) - Number(a[1]?.timestamp||0)));
                   picked = matches[0][0];
                 }
-                sid = picked;
-                localStorage.setItem('parentFocusStudent', sid);
-                state.currentPaymentStudentId = sid;
-                await renderYearScopedStudentView(sid);
-                return;
+                  sid = picked;
+                  localStorage.setItem('parentFocusStudent', sid);
+                  parentViewStudentId = sid;
+                  state.currentPaymentStudentId = sid;
+                  await renderYearScopedStudentView(sid);
+                  return;
               }
             }
             // Fallback: show friendly message
@@ -1974,20 +1977,19 @@
             });
           });
         }
-        }
+      } else {
+        resolveSchoolIdIfNeeded().then(() => loadAllData());
       }
       
       // Listen to year changes for parent view
       if (window.somapYearContext) {
         window.somapYearContext.onYearChanged((year) => {
-          const studentId = state.currentPaymentStudentId || localStorage.getItem('parentFocusStudent');
-          const urlParams = new URLSearchParams(window.location.search);
-          const studentParam = urlParams.get('student') || localStorage.getItem('parentFocusStudent');
-          if (studentParam) {
-            const newYear = parseInt(year) || state.year;
-            state.year = newYear;
-            renderYearScopedStudentView(studentId || studentParam);
-          }
+          if (!parentViewActive) return;
+          const studentId = parentViewStudentId || state.currentPaymentStudentId || localStorage.getItem('parentFocusStudent');
+          if (!studentId) return;
+          const newYear = parseInt(year) || state.year;
+          state.year = newYear;
+          renderYearScopedStudentView(studentId);
         });
       }
     </script>

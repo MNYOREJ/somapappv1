@@ -1,4 +1,6 @@
-# SoMAp – Educational SuperApp
+# SoMAp – Society Management App
+
+**Educational and Society SuperApp**
 
 **Your all-in-one school management solution.**  
 Built to help schools in Tanzania and beyond manage **academics, finance, health, communication,Books and even marketplace features** — all with speed, clarity, and a mission to build society.

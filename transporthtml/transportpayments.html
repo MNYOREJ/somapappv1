@@ -1371,88 +1371,84 @@
         try {
           const db = firebase.database();
           const year = String(state.year);
-        const prefix = currentSchoolPrefix();
-        somapGetTransportMonthlyFee._cache = {};
-          
-          // Load students (identity data - constant across years)
-          const studentsSnap = await db.ref(`${prefix}students`).once('value');
-          state.students = studentsSnap.val() || {};
+          const prefix = currentSchoolPrefix();
+          somapGetTransportMonthlyFee._cache = {};
 
-          // Load transport enrollments - check legacy path first (this is what's actually being used)
-          const legacyEnrollSnap = await db.ref(`${prefix}transport_enrollments`).once('value');
-          const legacyEnrollments = legacyEnrollSnap.val() || {};
+          const [
+            studentsSnap,
+            legacyEnrollSnap,
+            registrySnap,
+            assignmentsSnap,
+            ledgersSnap,
+            legacyPaymentsSnap,
+            expensesSnap
+          ] = await Promise.all([
+            db.ref(`${prefix}students`).once('value'),
+            db.ref(`${prefix}transport_enrollments`).once('value'),
+            db.ref(`${prefix}transportRegistry/${year}`).once('value').catch(() => ({ val: () => null })),
+            db.ref(`${prefix}transportAssignments/${year}`).once('value').catch(() => ({ val: () => null })),
+            db.ref(`${prefix}transportLedgers/${year}`).once('value'),
+            db.ref(`${prefix}transport_payments`).once('value'),
+            db.ref(`${prefix}transport_expenses`).once('value'),
+          ]);
+
+          state.students = (studentsSnap && studentsSnap.val && studentsSnap.val()) || {};
+
+          const legacyEnrollments = (legacyEnrollSnap && legacyEnrollSnap.val && legacyEnrollSnap.val()) || {};
           state.transportEnrollments = {};
           Object.entries(legacyEnrollments).forEach(([studentId, enrollment]) => {
             if (enrollment) {
               state.transportEnrollments[studentId] = enrollment;
             }
           });
-          
-          // Also check new registry format for year-scoped data
-          try {
-            const enrollSnap = await db.ref(`${prefix}transportRegistry/${year}`).once('value');
-            const registry = enrollSnap.val() || {};
-            Object.entries(registry).forEach(([studentId, reg]) => {
-              if (reg && reg.using) {
-                // Merge with legacy or add new
-                if (!state.transportEnrollments[studentId]) {
-                  state.transportEnrollments[studentId] = {
-                    amStop: reg.routeId || '',
-                    pmStop: reg.stopName || '',
-                    monthlyFee: reg.monthlyFee || 0
-                  };
-                }
-              }
-            });
-          } catch (err) {
-            console.warn('Could not load transportRegistry:', err);
-          }
-          try {
-            const assignmentsSnap = await db.ref(`${prefix}transportAssignments/${year}`).once('value');
-            const assignments = assignmentsSnap.val() || {};
-            Object.entries(assignments).forEach(([studentId, assignRecord]) => {
-              if (assignRecord && assignRecord.status === 'Using') {
-                const existing = state.transportEnrollments[studentId] || {};
-            state.transportEnrollments[studentId] = {
-              ...existing,
-              startDate: assignRecord.startDate || existing.startDate,
-              baseMonthlyFee: assignRecord.baseMonthlyFee || existing.baseMonthlyFee,
-              amStop: existing.amStop || assignRecord.amStop || assignRecord.morningRouteId || existing.routeId || '',
-              pmStop: existing.pmStop || assignRecord.pmStop || assignRecord.eveningRouteId || existing.stopName || '',
-            };
-          }
-        });
-          state.transportAssignments = assignments;
-          } catch (err) {
-            console.warn('Could not load transportAssignments:', err);
-          }
 
-          // Load transport payments (year-scoped)
+          const registry = (registrySnap && registrySnap.val && registrySnap.val()) || {};
+          Object.entries(registry).forEach(([studentId, reg]) => {
+            if (reg && reg.using) {
+              if (!state.transportEnrollments[studentId]) {
+                state.transportEnrollments[studentId] = {
+                  amStop: reg.routeId || '',
+                  pmStop: reg.stopName || '',
+                  monthlyFee: reg.monthlyFee || 0
+                };
+              }
+            }
+          });
+
+          const assignments = (assignmentsSnap && assignmentsSnap.val && assignmentsSnap.val()) || {};
+          Object.entries(assignments).forEach(([studentId, assignRecord]) => {
+            if (assignRecord && assignRecord.status === 'Using') {
+              const existing = state.transportEnrollments[studentId] || {};
+              state.transportEnrollments[studentId] = {
+                ...existing,
+                startDate: assignRecord.startDate || existing.startDate,
+                baseMonthlyFee: assignRecord.baseMonthlyFee || existing.baseMonthlyFee,
+                amStop: existing.amStop || assignRecord.amStop || assignRecord.morningRouteId || existing.routeId || '',
+                pmStop: existing.pmStop || assignRecord.pmStop || assignRecord.eveningRouteId || existing.stopName || '',
+              };
+            }
+          });
+          state.transportAssignments = assignments;
+
+          const ledgers = (ledgersSnap && ledgersSnap.val && ledgersSnap.val()) || {};
           const paymentsData = {};
-          const paymentsSnap = await db.ref(`${prefix}transportLedgers/${year}`).once('value');
-          const ledgers = paymentsSnap.val() || {};
           Object.entries(ledgers).forEach(([studentId, ledger]) => {
             if (ledger && ledger.payments) {
               paymentsData[studentId] = Object.values(ledger.payments);
             }
           });
-          
-          // Also check legacy path
-          const legacyPaymentsSnap = await db.ref(`${prefix}transport_payments`).once('value');
-          const legacyPayments = legacyPaymentsSnap.val() || {};
+
+          const legacyPayments = (legacyPaymentsSnap && legacyPaymentsSnap.val && legacyPaymentsSnap.val()) || {};
           Object.entries(legacyPayments).forEach(([studentId, payments]) => {
             if (!paymentsData[studentId]) {
               paymentsData[studentId] = Array.isArray(payments) ? payments : Object.values(payments || {});
             }
           });
-          
           state.transportPayments = paymentsData;
 
-          // Load expenses (year-scoped)
-          const expensesSnap = await db.ref(`${prefix}transport_expenses`).once('value');
-          const allExpenses = expensesSnap.val() || {};
+          const expenses = (expensesSnap && expensesSnap.val && expensesSnap.val()) || {};
           state.expenses = {};
-          Object.entries(allExpenses).forEach(([key, exp]) => {
+          Object.entries(expenses).forEach(([key, exp]) => {
             if (exp && (exp.year == year || !exp.year)) {
               state.expenses[key] = exp;
             }

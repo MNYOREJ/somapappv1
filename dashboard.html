@@ -1320,6 +1320,15 @@
     let currentClassScope = '';
     let yearListenerBound = false;
 
+    const withSchool = (path) => {
+        const trimmed = String(path || '').replace(/^\/+/, '');
+        if (!trimmed) return trimmed;
+        if (window.currentSchoolId) {
+            return `schools/${window.currentSchoolId}/${trimmed}`;
+        }
+        return trimmed;
+    };
+
     function scopeEntries(entriesMap, role, className) {
         const records = Object.entries(entriesMap || {}).map(([id, entry]) => ({ id, ...entry }));
         if (role === 'teacher' && className) {
@@ -1329,13 +1338,57 @@
         return records;
     }
 
-    function scopeStudents(studentsMap, role, className) {
-        const records = Object.entries(studentsMap || {}).map(([id, student]) => ({ id, ...student }));
-        if (role === 'teacher' && className) {
-            const target = L(className);
-            return records.filter(rec => L(rec.classLevel || rec.className || '') === target);
+    function resolveClassForYear(studentId, fallbackClass, year, anchorEnrollments, yearEnrollments) {
+        const overrides = (yearEnrollments || {})[studentId] || {};
+        if (overrides && (overrides.className || overrides.classLevel)) {
+            return overrides.className || overrides.classLevel;
         }
-        return records;
+        const anchor = (anchorEnrollments || {})[studentId] || {};
+        const baseClass = anchor.className || anchor.classLevel || fallbackClass || '';
+        const delta = Number(year) - SOMAP_DEFAULT_YEAR;
+        return shiftClass(baseClass, delta);
+    }
+
+    async function loadStudentRoster(year) {
+        const yearStr = String(year || SOMAP_DEFAULT_YEAR);
+        try {
+            const [studentsSnap, anchorSnap, yearSnap] = await Promise.all([
+                db.ref(withSchool('students')).once('value'),
+                db.ref(withSchool(`enrollments/${SOMAP_DEFAULT_YEAR}`)).once('value'),
+                db.ref(withSchool(`enrollments/${yearStr}`)).once('value'),
+            ]);
+            return {
+                students: studentsSnap.val() || {},
+                anchorEnrollments: anchorSnap.val() || {},
+                yearEnrollments: yearSnap.val() || {}
+            };
+        } catch (error) {
+            console.warn('Failed to load roster data', error);
+            return { students: {}, anchorEnrollments: {}, yearEnrollments: {} };
+        }
+    }
+
+    function buildActiveStudentRoster(rosterData, year, role, classScope) {
+        const normalizedRole = L(role || '');
+        const normalizedScope = classScope ? L(classScope) : '';
+        const targetYear = String(year || SOMAP_DEFAULT_YEAR);
+        const { students = {}, anchorEnrollments = {}, yearEnrollments = {} } = rosterData || {};
+        return Object.entries(students).reduce((list, [id, student]) => {
+            if (!student) return list;
+            const fallbackClass = student.classLevel || student.className || '';
+            const resolved = (resolveClassForYear(id, fallbackClass, targetYear, anchorEnrollments, yearEnrollments) || '').trim();
+            if (resolved.toUpperCase() === 'GRADUATED') return list;
+            if (normalizedRole === 'teacher' && normalizedScope && L(resolved) !== normalizedScope) return list;
+            const gender = String(student.gender || student.sex || student.meta?.gender || '').trim().toLowerCase();
+            list.push({
+                id,
+                ...student,
+                classLevel: resolved,
+                className: resolved,
+                gender,
+            });
+            return list;
+        }, []);
     }
 
     function bindYearChangeListener() {
@@ -1365,16 +1418,17 @@
         const year = getSelectedYear();
         updateYearHint();
         try {
-            const [entriesMap, studentsMap, payments] = await Promise.all([
+            const rosterPromise = loadStudentRoster(year);
+            const [entriesMap, payments, rosterData] = await Promise.all([
                 window.SomapFinance.getYearFinanceEntries(year),
-                window.SomapFinance.getYearStudents(year),
-                window.SomapFinance.listRecentPayments(year, 6)
+                window.SomapFinance.listRecentPayments(year, 6),
+                rosterPromise
             ]);
             const entries = scopeEntries(entriesMap, currentRole, currentClassScope);
-            const students = scopeStudents(studentsMap, currentRole, currentClassScope);
+            const roster = buildActiveStudentRoster(rosterData, year, currentRole, currentClassScope);
             await renderFinanceStats(entries, year);
-            await renderStudentSnapshot(students);
-            await renderAttendanceSummary(students, year);
+            await renderStudentSnapshot(roster);
+            await renderAttendanceSummary(roster, year);
             await loadWorkerSnapshot(year);
             renderRecentActivitiesFromPayments(payments, new Set(entries.map(entry => entry.id)));
         } catch (error) {
@@ -1400,67 +1454,30 @@
     }
 
     function renderStudentSnapshot(students) {
-        // Convert students object/map to array if needed (scopeStudents already returns array)
-        const studentsArray = Array.isArray(students) ? students : Object.values(students || {});
-        
-        // Filter out graduated students - use EXACT same logic as studentlist.html
-        // Only check isGraduated flag (studentlist.html uses: if (rec.isGraduated) return false;)
-        // Also filter out orphaned records (ledger-only entries without student/enrollment data)
-        const active = studentsArray.filter(st => {
-            if (!st) return false;
-            // Filter out orphaned records: students must have either identity OR valid classLevel
-            // (studentlist.html only counts students from db.ref('students'), but enrollments can provide identity)
-            const hasIdentity = (st.firstName || st.lastName || st.admissionNumber || st.admissionNo || '').trim();
-            const hasClassLevel = (st.classLevel || st.className || '').trim();
-            // Exclude if neither identity nor classLevel exists (orphaned ledger/carryForward-only records)
-            if (!hasIdentity && !hasClassLevel) return false;
-            // Match studentlist.html filtering: filter out if isGraduated is truthy
-            if (st.isGraduated) return false;
-            // Also filter out if classLevel is GRADUATED (double-check)
-            const classLevel = String(st.classLevel || st.className || '').trim().toUpperCase();
-            if (classLevel === 'GRADUATED') return false;
-            // Include all other students
-            return true;
-        });
-        
-        const totalCount = active.length;
-        document.getElementById('total-students').innerHTML = `${totalCount} <small class="text-xs text-slate-300">Live count</small>`;
-        let boys = 0, girls = 0;
-        active.forEach(st => {
+        const studentsArray = Array.isArray(students) ? students : [];
+        const totalCount = studentsArray.length;
+        const totalElement = document.getElementById('total-students');
+        if (totalElement) {
+            totalElement.innerHTML = `${totalCount} <small class="text-xs text-slate-300">Live count</small>`;
+        }
+        let boys = 0;
+        let girls = 0;
+        studentsArray.forEach(st => {
+            if (!st) return;
             const gender = String(st.gender || st.sex || st.meta?.gender || '').trim().toLowerCase();
             if (gender.startsWith('m')) boys++;
             else if (gender.startsWith('f')) girls++;
         });
-        document.getElementById('students-boys-count').textContent = boys;
-        document.getElementById('students-girls-count').textContent = girls;
+        const boysElement = document.getElementById('students-boys-count');
+        const girlsElement = document.getElementById('students-girls-count');
+        if (boysElement) boysElement.textContent = boys;
+        if (girlsElement) girlsElement.textContent = girls;
     }
 
     async function renderAttendanceSummary(students, year) {
-        // Convert students object/map to array if needed (scopeStudents already returns array)
-        const studentsArray = Array.isArray(students) ? students : Object.values(students || {});
-        
-        // Filter out graduated students - use EXACT same logic as studentlist.html
-        // Only check isGraduated flag (studentlist.html uses: if (rec.isGraduated) return false;)
-        // Also filter out orphaned records (ledger-only entries without student/enrollment data)
-        const active = studentsArray.filter(st => {
-            if (!st) return false;
-            // Filter out orphaned records: students must have either identity OR valid classLevel
-            // (studentlist.html only counts students from db.ref('students'), but enrollments can provide identity)
-            const hasIdentity = (st.firstName || st.lastName || st.admissionNumber || st.admissionNo || '').trim();
-            const hasClassLevel = (st.classLevel || st.className || '').trim();
-            // Exclude if neither identity nor classLevel exists (orphaned ledger/carryForward-only records)
-            if (!hasIdentity && !hasClassLevel) return false;
-            // Match studentlist.html filtering: filter out if isGraduated is truthy
-            if (st.isGraduated) return false;
-            // Also filter out if classLevel is GRADUATED (double-check)
-            const classLevel = String(st.classLevel || st.className || '').trim().toUpperCase();
-            if (classLevel === 'GRADUATED') return false;
-            // Include all other students
-            return true;
-        });
-        
+        const studentsArray = Array.isArray(students) ? students : [];
         const { studentMonthKey, studentDayKey } = buildDateKeys(year);
-        const classNames = Array.from(new Set(active.map(st => (st.classLevel || st.className || '').trim()).filter(Boolean)));
+        const classNames = Array.from(new Set(studentsArray.map(st => (st.classLevel || st.className || '').trim()).filter(Boolean)));
         let present = 0;
         let recordedAbsent = 0;
         await Promise.all(classNames.map(async cls => {
@@ -1473,13 +1490,18 @@
                 else if (status.includes('A')) recordedAbsent++;
             });
         }));
-        const totalStudents = active.length;
+        const totalStudents = studentsArray.length;
         const computedAbsent = Math.max(0, totalStudents - present);
         const absent = Math.max(recordedAbsent, computedAbsent);
-        document.getElementById('students-present-today').textContent = present;
-        document.getElementById('students-absent-today').textContent = absent;
+        const presentElement = document.getElementById('students-present-today');
+        const absentElement = document.getElementById('students-absent-today');
+        if (presentElement) presentElement.textContent = present;
+        if (absentElement) absentElement.textContent = absent;
         const rate = totalStudents ? Math.round((present / totalStudents) * 1000) / 10 : 0;
-        document.getElementById('attendance-rate').innerHTML = `${rate}% <small class="text-xs text-slate-200">Live</small>`;
+        const rateElement = document.getElementById('attendance-rate');
+        if (rateElement) {
+            rateElement.innerHTML = `${rate}% <small class="text-xs text-slate-200">Live</small>`;
+        }
     }
 
     async function loadWorkerSnapshot(year) {

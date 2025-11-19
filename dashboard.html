@@ -364,6 +364,7 @@
         .badge-pulse {
           animation: pulse 2s infinite;
         }
+        .glass-panel {
           background: rgba(15,23,42,0.75);
           border: 1px solid rgba(148,163,184,0.2);
           box-shadow: 0 18px 35px rgba(2,6,23,0.6);
@@ -1399,13 +1400,24 @@
     }
 
     function renderStudentSnapshot(students) {
-        // Filter out graduated students - check both classLevel and isGraduated flag
-        const active = students.filter(st => {
+        // Convert students object/map to array if needed (scopeStudents already returns array)
+        const studentsArray = Array.isArray(students) ? students : Object.values(students || {});
+        
+        // Filter out graduated students - use same logic as studentlist.html
+        // Check isGraduated flag first, then check classLevel
+        const active = studentsArray.filter(st => {
+            if (!st) return false;
+            // Check isGraduated flag (set by finance module when classLevel resolves to GRADUATED)
+            if (st.isGraduated === true) return false;
+            // Also check classLevel directly
             const classLevel = (st.classLevel || st.className || '').toUpperCase();
-            const isGraduated = st.isGraduated === true || classLevel === 'GRADUATED';
-            return !isGraduated;
+            if (classLevel === 'GRADUATED') return false;
+            // Include all other students
+            return true;
         });
-        document.getElementById('total-students').innerHTML = `${active.length} <small class="text-xs text-slate-300">Live count</small>`;
+        
+        const totalCount = active.length;
+        document.getElementById('total-students').innerHTML = `${totalCount} <small class="text-xs text-slate-300">Live count</small>`;
         let boys = 0, girls = 0;
         active.forEach(st => {
             const gender = String(st.gender || st.sex || st.meta?.gender || '').trim().toLowerCase();
@@ -1417,17 +1429,27 @@
     }
 
     async function renderAttendanceSummary(students, year) {
-        // Filter out graduated students - check both classLevel and isGraduated flag
-        const active = students.filter(st => {
+        // Convert students object/map to array if needed (scopeStudents already returns array)
+        const studentsArray = Array.isArray(students) ? students : Object.values(students || {});
+        
+        // Filter out graduated students - use same logic as renderStudentSnapshot and studentlist.html
+        const active = studentsArray.filter(st => {
+            if (!st) return false;
+            // Check isGraduated flag first (set by finance module when classLevel resolves to GRADUATED)
+            if (st.isGraduated === true) return false;
+            // Also check classLevel directly
             const classLevel = (st.classLevel || st.className || '').toUpperCase();
-            const isGraduated = st.isGraduated === true || classLevel === 'GRADUATED';
-            return !isGraduated;
+            if (classLevel === 'GRADUATED') return false;
+            // Include all other students
+            return true;
         });
+        
         const { studentMonthKey, studentDayKey } = buildDateKeys(year);
-        const classNames = Array.from(new Set(active.map(st => st.classLevel).filter(Boolean)));
+        const classNames = Array.from(new Set(active.map(st => (st.classLevel || st.className || '').trim()).filter(Boolean)));
         let present = 0;
         let recordedAbsent = 0;
         await Promise.all(classNames.map(async cls => {
+            if (!cls) return;
             const snap = await db.ref(`attendance/${cls}/${studentMonthKey}/${studentDayKey}`).once('value');
             const records = snap.val() || {};
             Object.values(records).forEach(rec => {

@@ -13,8 +13,9 @@
   .tag-legacy{background:#fee2e2;color:#991b1b}
   .tag-ok{background:#dcfce7;color:#166534}
   .btn{padding:.5rem .75rem;border-radius:.5rem}
-  .queued-row td{background:#dcfce7 !important}
+  .queued-row td{background:#dcfce7 !important;color:#166534 !important}
   .queued-row .queueHint{color:#166534}
+  .queued-row input[type="checkbox"]{opacity:0.5;cursor:not-allowed}
   .queue-count-badge{margin-top:.15rem;font-size:10px;font-weight:600;color:#15803d}
 </style>
 </head>
@@ -94,7 +95,7 @@
   const rowsEl = el('rows');
   const fmt = n => Number(n||0).toLocaleString();
   const esc = s => String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
-  let db=null, approvalsByRef={}, payments=[], filtered=[];
+  let db=null, approvalsByRef={}, payments=[], filtered=[], approvedPayments={};
 
   // ---------- HELPERS ----------
   const toast = (m,t=1600)=>{ el('opToast').textContent=m||''; if(m) setTimeout(()=>el('opToast').textContent='',t); };
@@ -104,6 +105,20 @@
     if(!year || !payment) return 0;
     const buckets = payment.queueCounts || {};
     return Number(buckets[String(year)] || 0);
+  }
+  
+  function isPaymentQueuedForAnyYear(payment){
+    if(!payment) return false;
+    const buckets = payment.queueCounts || {};
+    return Object.values(buckets).some(count => Number(count) > 0);
+  }
+  
+  function getQueuedYears(payment){
+    if(!payment) return [];
+    const buckets = payment.queueCounts || {};
+    return Object.entries(buckets)
+      .filter(([year, count]) => Number(count) > 0)
+      .map(([year]) => year);
   }
   function yearSelectHTML(selected){
     const opts = YEARS.map(y=>`<option value="${y}" ${String(selected)===String(y)?'selected':''}>${y}</option>`).join('');
@@ -136,10 +151,39 @@
     }
   }
 
+  async function loadApprovedPayments(){
+    approvedPayments = {};
+    try{
+      // Check all years for approved payments in financeLedgers
+      const years = Array.from({length:20},(_,i)=>2023+i);
+      const checks = years.map(async year => {
+        try{
+          const ledgerSnap = await db.ref(`financeLedgers/${year}`).once('value');
+          if(!ledgerSnap.exists()) return;
+          const students = ledgerSnap.val() || {};
+          Object.keys(students).forEach(studentId => {
+            const studentLedger = students[studentId];
+            const payments = studentLedger?.payments || {};
+            Object.keys(payments).forEach(paymentKey => {
+              const approvalId = `${studentId}_${paymentKey}`;
+              approvedPayments[approvalId] = true;
+            });
+          });
+        }catch(e){
+          console.warn(`Failed to check financeLedgers/${year}`, e);
+        }
+      });
+      await Promise.all(checks);
+    }catch(e){
+      console.warn('Failed to load approved payments; continuing.', e);
+    }
+  }
+
   // ---------- SCAN students/payments ----------
   async function scan(){
     payments = []; filtered = []; rowsEl.innerHTML='';
     await loadApprovalsIndex();
+    await loadApprovedPayments();
 
     const s = await db.ref('students').once('value');
     const students = s.exists()? s.val() : {};
@@ -150,7 +194,11 @@
       const stu = students[id]||{};
       const pays = stu.payments||{};
       Object.entries(pays).forEach(([pkey,p])=>{
-        payments.push({ studentId:id, student:stu, paymentKey:pkey, payment:p });
+        const approvalId = `${id}_${pkey}`;
+        // Filter out approved payments
+        if(!approvedPayments[approvalId]){
+          payments.push({ studentId:id, student:stu, paymentKey:pkey, payment:p });
+        }
       });
     });
 
@@ -193,23 +241,42 @@
       const displayName = studentName(s);
       const curY = resolvedYear(p);
       const badge = isLegacy(p) ? `<span class="tag tag-legacy">LEGACY</span>` : `<span class="tag tag-ok">OK</span>`;
-      const queueYearKey = curY ? String(curY) : null;
-      const queueAttempts = queueCountForYear(p, queueYearKey);
-      const isQueuedForCurYear = queueAttempts > 0;
-      const queueHintText = isQueuedForCurYear
-        ? `Queued for ${queueYearKey}${queueAttempts > 1 ? ` (${queueAttempts}x)` : ''}`
-        : 'Ready';
-      const queueHintColor = isQueuedForCurYear ? 'text-emerald-700' : 'text-slate-400';
-      const queueCountBadge = isQueuedForCurYear ? `<div class="queue-count-badge">${queueAttempts}x queued</div>` : '';
+      
+      // Check if payment is queued for ANY year
+      const isQueued = isPaymentQueuedForAnyYear(p);
+      const queuedYears = getQueuedYears(p);
+      let queueHintText = 'Ready';
+      if(isQueued){
+        const yearList = queuedYears.join(', ');
+        const totalAttempts = queuedYears.reduce((sum, year) => {
+          return sum + queueCountForYear(p, year);
+        }, 0);
+        queueHintText = `Queued for ${yearList}${totalAttempts > queuedYears.length ? ` (${totalAttempts}x total)` : ''}`;
+      }
+      const queueHintColor = isQueued ? 'text-emerald-700' : 'text-slate-400';
+      const queueCountBadge = isQueued ? `<div class="queue-count-badge">Queued</div>` : '';
+      
       const tr = document.createElement('tr');
-      tr.className = i%2?'bg-white':'bg-slate-50';
-      if(isQueuedForCurYear) tr.classList.add('queued-row');
+      // Make entire row green if queued
+      if(isQueued) {
+        tr.className = 'queued-row';
+      } else {
+        tr.className = i%2?'bg-white':'bg-slate-50';
+      }
       tr.setAttribute('data-sid', r.studentId);
       tr.setAttribute('data-pkey', r.paymentKey);
       tr.dataset.studentName = displayName;
+      tr.dataset.isQueued = isQueued ? 'true' : 'false';
+
+      // Button text and state based on queue status
+      const buttonText = isQueued ? 'ALREADY QUEUED' : 'Queue to Approvals';
+      const buttonClass = isQueued 
+        ? 'btnQueue btn bg-slate-400 text-white text-xs cursor-not-allowed opacity-75' 
+        : 'btnQueue btn bg-blue-600 text-white text-xs';
+      const buttonDisabled = isQueued ? 'disabled' : '';
 
       tr.innerHTML = `
-        <td class="p-2"><input type="checkbox" class="rowChk"></td>
+        <td class="p-2"><input type="checkbox" class="rowChk" ${isQueuedForCurYear ? 'disabled' : ''}></td>
         <td class="p-2">${esc(displayName)}</td>
         <td class="p-2 mono">${esc(s.admissionNumber || r.studentId)}</td>
         <td class="p-2 mono">${esc(r.paymentKey)}</td>
@@ -224,7 +291,7 @@
         <td class="p-2">
           <div class="queueHint text-xs ${queueHintColor}">${queueHintText}</div>
           ${queueCountBadge}
-          <button class="btnQueue btn bg-blue-600 text-white text-xs">Queue to Approvals</button>
+          <button class="${buttonClass}" ${buttonDisabled}>${buttonText}</button>
         </td>
       `;
       frag.appendChild(tr);
@@ -234,28 +301,62 @@
     rowsEl.querySelectorAll('.btnQueue').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const tr = btn.closest('tr');
+        const isQueued = tr.dataset.isQueued === 'true';
+        
+        // If already queued, show message and return
+        if(isQueued || btn.disabled || btn.textContent === 'ALREADY QUEUED'){
+          toast('This payment has already been queued to approvals', 'warning');
+          return;
+        }
+        
         const sid = tr.getAttribute('data-sid');
         const pkey = tr.getAttribute('data-pkey');
         const yr = Number(tr.querySelector('.yrSel')?.value);
         if(!yr) return alert('Pick a year.');
-        const origLabel = btn.textContent;
+        
+        // Check if already queued for this specific year
+        const paymentData = payments.find(p => p.studentId === sid && p.paymentKey === pkey);
+        if(paymentData){
+          const alreadyQueuedForYear = queueCountForYear(paymentData.payment, String(yr)) > 0;
+          if(alreadyQueuedForYear){
+            toast(`This payment has already been queued for year ${yr}`, 'warning');
+            return;
+          }
+        }
+        
         const hint = tr.querySelector('.queueHint');
         const studentLabel = tr.dataset.studentName || 'student';
         try{
           btn.disabled = true;
+          btn.textContent = 'Queuing...';
           const queueAttempts = await queueToApprovals(sid, pkey, yr);
-          if(hint) hint.textContent = `Queued for ${yr}${queueAttempts > 1 ? ` (${queueAttempts}x)` : ''}`;
-          btn.textContent = 'Queued';
-          setTimeout(() => {
-            if(!btn.disabled) btn.textContent = origLabel;
-          }, 2000);
+          
+          // Update the row to show queued state
+          tr.classList.add('queued-row');
+          tr.dataset.isQueued = 'true';
+          if(hint) {
+            const queuedYears = getQueuedYears(paymentData?.payment || {});
+            const yearList = queuedYears.join(', ');
+            hint.textContent = `Queued for ${yearList || yr}`;
+            hint.className = 'queueHint text-xs text-emerald-700';
+          }
+          btn.textContent = 'ALREADY QUEUED';
+          btn.className = 'btnQueue btn bg-slate-400 text-white text-xs cursor-not-allowed opacity-75';
+          btn.disabled = true;
+          
+          // Disable checkbox
+          const checkbox = tr.querySelector('.rowChk');
+          if(checkbox) checkbox.disabled = true;
+          
           el('lastQueued').textContent = `Queued ${studentLabel} (${pkey}) for ${yr}`;
-          toast(`Queued ${studentLabel} for ${yr}`);
+          toast(`Queued ${studentLabel} for ${yr}`, 'success');
+          
+          // Reload to refresh the list (this will also check for approved payments)
           await scan();
         }catch(e){
           alert('Queue failed: ' + e.message);
-        }finally{
           btn.disabled = false;
+          btn.textContent = 'Queue to Approvals';
         }
       });
     });

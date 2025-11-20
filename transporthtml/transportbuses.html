@@ -245,8 +245,9 @@
           </div>
 
           <!-- Action Buttons -->
-          <div class="flex mt-3" style="justify-content:flex-end; gap: 1rem;">
+          <div class="flex mt-3" style="justify-content:flex-end; gap: 1rem; flex-wrap: wrap;">
             <button class="btn secondary" type="button" id="cancelBtn">Cancel</button>
+            <button class="btn danger hidden" type="button" id="deleteVehicleBtn">🗑️ Delete Vehicle</button>
             <button class="btn success" type="submit" id="saveVehicleBtn">💾 Save Vehicle</button>
           </div>
         </form>
@@ -374,6 +375,7 @@
       const modalAlert = document.getElementById("modalAlert");
       const yearSelect = document.getElementById("yearSelect");
       const currentDateEl = document.getElementById("currentDate");
+      const deleteVehicleBtn = document.getElementById("deleteVehicleBtn");
 
       // Utility Functions
       function showToast(message, tone = "ok") {
@@ -566,6 +568,7 @@
 
           const actions = [];
           actions.push(`<button class="btn secondary" data-edit="${vehicle.id}">✏️ Edit</button>`);
+          actions.push(`<button class="btn danger" data-delete="${vehicle.id}">🗑️ Delete</button>`);
           actions.push(`<button class="btn info" data-pdf="${vehicle.id}">📄 PDF</button>`);
           
           return `
@@ -594,6 +597,9 @@
         // Attach event listeners
         vehiclesBody.querySelectorAll("button[data-edit]").forEach((btn) => {
           btn.addEventListener("click", () => openModal(btn.dataset.edit));
+        });
+        vehiclesBody.querySelectorAll("button[data-delete]").forEach((btn) => {
+          btn.addEventListener("click", () => handleDeleteVehicle(btn.dataset.delete));
         });
         vehiclesBody.querySelectorAll("button[data-pdf]").forEach((btn) => {
           btn.addEventListener("click", () => generatePDF(btn.dataset.pdf));
@@ -798,6 +804,11 @@
         addRouteCard(); // Add one default route card
         state.uploads = {};
         state.currentId = null;
+        if (deleteVehicleBtn) {
+          deleteVehicleBtn.classList.add("hidden");
+          deleteVehicleBtn.disabled = false;
+          deleteVehicleBtn.textContent = '🗑️ Delete Vehicle';
+        }
       }
 
       // Open Modal
@@ -866,9 +877,17 @@
             modalAlert.classList.remove("hidden");
             modalAlert.classList.add("red");
           }
+          if (deleteVehicleBtn) {
+            deleteVehicleBtn.classList.remove("hidden");
+            deleteVehicleBtn.disabled = false;
+            deleteVehicleBtn.textContent = '🗑️ Delete Vehicle';
+          }
         } else {
           document.getElementById("modalTitle").textContent = "Add New Vehicle";
           addRouteCard(); // Add one default route card for new vehicles
+          if (deleteVehicleBtn) {
+            deleteVehicleBtn.classList.add("hidden");
+          }
         }
         
         modal.classList.remove("hidden");
@@ -885,6 +904,13 @@
 
       document.getElementById("closeModalBtn").addEventListener("click", closeModal);
       document.getElementById("cancelBtn").addEventListener("click", closeModal);
+      if (deleteVehicleBtn) {
+        deleteVehicleBtn.addEventListener("click", () => {
+          if (state.currentId) {
+            handleDeleteVehicle(state.currentId, { fromModal: true });
+          }
+        });
+      }
 
       // Save Vehicle
       document.getElementById("vehicleForm").addEventListener("submit", async (e) => {
@@ -1047,6 +1073,40 @@
           saveBtn.textContent = '💾 Save Vehicle';
         }
       });
+      async function handleDeleteVehicle(vehicleId, options = {}) {
+        const vehicle = state.vehicles.find((v) => v.id === vehicleId);
+        if (!vehicle) return;
+        if (!state.user || !state.user.uid) {
+          showToast("Error: please sign in again before deleting.", "bad");
+          return;
+        }
+        const confirmed = window.confirm(`Delete vehicle ${vehicle.plate || vehicle.id}? This action cannot be undone.`);
+        if (!confirmed) return;
+
+        const { fromModal = false } = options;
+        if (fromModal && deleteVehicleBtn) {
+          deleteVehicleBtn.disabled = true;
+          deleteVehicleBtn.textContent = '🗑️ Deleting...';
+        }
+
+        try {
+          showToast("Deleting vehicle...");
+          const path = `transport/${state.school}/${state.year}/buses/${vehicleId}`;
+          await firebase.database().ref(path).remove();
+          showToast("Vehicle deleted successfully.", "ok");
+          if (state.currentId === vehicleId) {
+            closeModal();
+          }
+        } catch (error) {
+          console.error("Failed to delete vehicle", error);
+          showToast("Failed to delete vehicle", "bad");
+          if (fromModal && deleteVehicleBtn) {
+            deleteVehicleBtn.disabled = false;
+            deleteVehicleBtn.textContent = '🗑️ Delete Vehicle';
+          }
+        }
+      }
+
 
       // Generate PDF
       function generatePDF(vehicleId) {

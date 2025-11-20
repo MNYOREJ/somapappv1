@@ -1841,11 +1841,8 @@
           if (totalDebtEl) totalDebtEl.textContent = 'Error';
         });
       } else {
-        // No student param: resolve parent context automatically
-        const backBtn = document.getElementById('backButton');
-        if (backBtn) { backBtn.href = '../parent.html'; backBtn.textContent = '← Back to Parent Dashboard'; }
-        
-        // Prefer resolving a focused student from storage FIRST, even if `school` is present
+        // No student param: Admin view - load all data
+        // Check if there's a focused student in storage (parent might have navigated here)
         const tryLocalFirst = async () => {
           let sid = localStorage.getItem('parentFocusStudent')
             || localStorage.getItem('parent_student')
@@ -1858,83 +1855,89 @@
           return false;
         };
         
-        // If explicit school is provided in URL, only load ALL data if no focused student can be resolved
-        const schoolParam = urlParams.get('school');
+        // If explicit school is provided in URL, load ALL data (admin view)
         if (schoolParam) {
           state.school = schoolParam;
           if (yearSelect && state.year) yearSelect.value = state.year;
+          // Check for focused student first (parent might have navigated here)
           tryLocalFirst().then(found => {
-            if (!found) resolveSchoolIdIfNeeded().then(() => loadAllData());
+            if (!found) {
+              // Admin view - load all students
+              resolveSchoolIdIfNeeded().then(() => loadAllData());
+            }
+          }).catch(() => {
+            // If tryLocalFirst fails, still load all data
+            resolveSchoolIdIfNeeded().then(() => loadAllData());
           });
         } else {
-        const tryResolveAndRender = async (user) => {
-          try {
-            // Try local sources first
-            let sid = localStorage.getItem('parentFocusStudent')
-              || localStorage.getItem('parent_student')
-              || localStorage.getItem('studentKey');
-            if (sid) {
-              state.currentPaymentStudentId = sid;
-              await renderYearScopedStudentView(sid);
-              return;
-            }
-            // Try phone mapping to students
-            const phone = (user && user.phoneNumber) ? String(user.phoneNumber).replace(/\D/g,'') : (localStorage.getItem('parentPhone')||'');
-            const normPhone = phone ? phone.replace(/\D/g,'') : '';
-            if (normPhone) {
-              const snap = await firebase.database().ref('students').once('value');
-              const all = snap.val() || {};
-              const matches = Object.entries(all).filter(([k,v]) => {
-                const sp = String(v?.primaryParentContact||v?.parentPhone||'').replace(/\D/g,'');
-                return sp && sp.endsWith(normPhone);
-              });
-              if (matches.length) {
-                // Prefer a child with an assignment in the selected year
-                const year = String(state.year);
-                let picked = null;
-                for (const [kid] of matches) {
-                  const a = await firebase.database().ref(`transportAssignments/${year}/${kid}`).once('value');
-                  if (a.exists()) { picked = kid; break; }
+          // No school param: Load all data (admin view) by default
+          // Also check for parent context in parallel, but don't block on it
+          resolveSchoolIdIfNeeded().then(() => {
+            // Load all data immediately (admin view)
+            loadAllData();
+            
+            // In parallel, check if user is a parent and render parent view if found
+            const checkParentContext = async (user) => {
+              try {
+                // Try local sources first
+                let sid = localStorage.getItem('parentFocusStudent')
+                  || localStorage.getItem('parent_student')
+                  || localStorage.getItem('studentKey');
+                if (sid) {
+                  state.currentPaymentStudentId = sid;
+                  await renderYearScopedStudentView(sid);
+                  return;
                 }
-                if (!picked) {
-                  // fallback: pick the most recently created student
-                  matches.sort((a,b)=> (Number(b[1]?.timestamp||0) - Number(a[1]?.timestamp||0)));
-                  picked = matches[0][0];
+                // Try phone mapping to students (parent detection)
+                const phone = (user && user.phoneNumber) ? String(user.phoneNumber).replace(/\D/g,'') : (localStorage.getItem('parentPhone')||'');
+                const normPhone = phone ? phone.replace(/\D/g,'') : '';
+                if (normPhone) {
+                  const snap = await firebase.database().ref('students').once('value');
+                  const all = snap.val() || {};
+                  const matches = Object.entries(all).filter(([k,v]) => {
+                    const sp = String(v?.primaryParentContact||v?.parentPhone||'').replace(/\D/g,'');
+                    return sp && sp.endsWith(normPhone);
+                  });
+                  if (matches.length) {
+                    // Prefer a child with an assignment in the selected year
+                    const year = String(state.year);
+                    let picked = null;
+                    for (const [kid] of matches) {
+                      const a = await firebase.database().ref(`transportAssignments/${year}/${kid}`).once('value');
+                      if (a.exists()) { picked = kid; break; }
+                    }
+                    if (!picked) {
+                      // fallback: pick the most recently created student
+                      matches.sort((a,b)=> (Number(b[1]?.timestamp||0) - Number(a[1]?.timestamp||0)));
+                      picked = matches[0][0];
+                    }
+                    sid = picked;
+                    localStorage.setItem('parentFocusStudent', sid);
+                    state.currentPaymentStudentId = sid;
+                    await renderYearScopedStudentView(sid);
+                  }
                 }
-                sid = picked;
-                localStorage.setItem('parentFocusStudent', sid);
-                state.currentPaymentStudentId = sid;
-                await renderYearScopedStudentView(sid);
-                return;
+              } catch (e) {
+                console.error('Parent context check error', e);
+                // Ignore errors - admin view is already loaded
               }
+            };
+
+            // Check auth state for parent context
+            const current = firebase.auth().currentUser;
+            if (current) {
+              checkParentContext(current);
+            } else {
+              firebase.auth().onAuthStateChanged((user) => {
+                if (user) {
+                  checkParentContext(user);
+                }
+              });
             }
-            // Fallback: show friendly message
-            renderNoDataStrict('No child found for your account for this year.');
-          } catch (e) {
-            console.error('Parent resolve error', e);
-            renderNoDataStrict('Unable to load transport information.');
-          }
-        };
-
-        const totalExpectedEl = document.getElementById('totalExpected');
-        const totalCollectedEl = document.getElementById('totalCollected');
-        const totalDebtEl = document.getElementById('totalDebt');
-        if (totalExpectedEl) totalExpectedEl.textContent = 'Loading...';
-        if (totalCollectedEl) totalCollectedEl.textContent = 'Loading...';
-        if (totalDebtEl) totalDebtEl.textContent = 'Loading...';
-
-        // Use auth state if available, else attempt without
-        const current = firebase.auth().currentUser;
-        if (current) {
-          resolveSchoolIdIfNeeded().then(() => tryResolveAndRender(current));
-        } else {
-          firebase.auth().onAuthStateChanged((user) => {
-            resolveSchoolIdIfNeeded().then(() => {
-              if (!user) { tryResolveAndRender(null); return; }
-              tryResolveAndRender(user);
-            });
+          }).catch(() => {
+            // If school resolution fails, still try to load data
+            loadAllData();
           });
-        }
         }
       }
       

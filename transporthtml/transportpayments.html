@@ -536,7 +536,7 @@
         return await TransportPricing.computeBaseMonthlyFeeOnMonth({ year, month, amStop, pmStop });
       }
 
-      // Calculate transport payment status (now year-scoped with DB multipliers)
+      // Calculate transport payment status (now year-scoped with DB multipliers) - OPTIMIZED with parallel month calculations
       async function calculateTransportStatus(enrollment, payments, yearMultipliers) {
         const amStop = enrollment?.amStop || '';
         const pmStop = enrollment?.pmStop || '';
@@ -556,51 +556,56 @@
 
         const paymentsArray = Array.isArray(payments) ? payments : Object.values(payments || {});
 
+        // OPTIMIZATION: Calculate all 12 months in parallel instead of sequentially
+        const monthCalculations = Array.from({ length: 12 }, (_, i) => i + 1).map(month =>
+          TransportPricing.dueForMonth({
+            year,
+            month,
+            amStop,
+            pmStop,
+            baseMonthlyFee,
+            startDate: startDateIso,
+            multipliers,
+          }).then(monthlyExpected => {
+            const expected = Math.round(monthlyExpected || 0);
+            // Handle both number and month name formats for payments
+            const monthPayments = paymentsArray.filter(p => {
+              if (typeof p.month === 'number') return p.month === month;
+              if (typeof p.month === 'string') return MONTH_NAMES[month] === p.month;
+              return false;
+            });
+            const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+            return { month, expected, paid: monthPaid };
+          })
+        );
+
+        const monthResults = await Promise.all(monthCalculations);
+        
         let totalExpected = 0;
         let totalPaid = 0;
         const unpaidMonths = [];
 
-        // Calculate per month dues using year-specific multiplier logic + start date + date-aware pricing
-        for (let month = 1; month <= 12; month++) {
-          const monthlyExpected = Math.round(
-            await TransportPricing.dueForMonth({
-              year,
-              month,
-              amStop,
-              pmStop,
-              baseMonthlyFee, // Fallback for legacy
-              startDate: startDateIso,
-              multipliers, // Pass year-specific multipliers
-            }) || 0
-          );
-          totalExpected += monthlyExpected;
-
-          // Handle both number and month name formats for payments
-          const monthPayments = paymentsArray.filter(p => {
-            if (typeof p.month === 'number') return p.month === month;
-            if (typeof p.month === 'string') return MONTH_NAMES[month] === p.month;
-            return false;
-          });
-          const monthPaid = monthPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-          totalPaid += monthPaid;
-
-          if ((monthPaid + 0.01) < monthlyExpected && monthlyExpected > 0) {
+        monthResults.forEach(({ month, expected, paid }) => {
+          totalExpected += expected;
+          totalPaid += paid;
+          if ((paid + 0.01) < expected && expected > 0) {
             unpaidMonths.push(MONTH_NAMES[month]);
           }
-        }
+        });
 
         const debt = Math.max(0, totalExpected - totalPaid);
 
-        // Current month expected (with multiplier) - for KPI calculations
-        const currentMonthExpected = Math.round(
+        // Current month expected (already calculated above, reuse result)
+        const currentMonthResult = monthResults.find(r => r.month === selectedMonth);
+        const currentMonthExpected = currentMonthResult ? currentMonthResult.expected : Math.round(
           await TransportPricing.dueForMonth({
             year,
             month: selectedMonth,
             amStop,
             pmStop,
-            baseMonthlyFee, // Fallback for legacy
+            baseMonthlyFee,
             startDate: startDateIso,
-            multipliers, // Pass year-specific multipliers
+            multipliers,
           }) || 0
         );
 
@@ -616,7 +621,7 @@
         };
       }
 
-      // Render KPIs - only for admin view, not parent view (now async for DB multipliers)
+      // Render KPIs - only for admin view, not parent view (now async for DB multipliers) - OPTIMIZED with parallel processing
       async function renderKPIs() {
         // Skip if parent view (stat cards already rendered by renderParentTransportPayment)
         const monthForKpi = getFocusedMonth();
@@ -632,19 +637,26 @@
         const multipliers = cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
         if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
         
+        // OPTIMIZATION: Process all students in parallel instead of sequentially
+        const statusPromises = Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
+          const payments = Object.values(state.transportPayments[studentId] || {});
+          return await calculateTransportStatus(enrollment, payments, multipliers);
+        });
+
+        const allStatuses = await Promise.all(statusPromises);
+        
         let totalExpected = 0;
         let totalCollected = 0;
         let totalDebt = 0;
+        let criticalDebtors = 0;
 
-        for (const [studentId, enrollment] of Object.entries(state.transportEnrollments)) {
-          const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = await calculateTransportStatus(enrollment, payments, multipliers);
-          
+        allStatuses.forEach(status => {
           // Use currentMonthExpected for KPI (includes month multiplier)
           totalExpected += status.currentMonthExpected;
           totalCollected += status.totalPaid;
           totalDebt += status.debt;
-        }
+          if (status.debt > 0) criticalDebtors++;
+        });
 
         // Calculate expenses
         const expensesArray = Object.values(state.expenses);
@@ -665,14 +677,6 @@
         document.getElementById('otherExpenses').textContent = formatCurrency(otherExp);
 
         // Critical alerts for unpaid students
-        const criticalDebtors = await Promise.all(
-          Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
-            const payments = Object.values(state.transportPayments[studentId] || {});
-            const status = await calculateTransportStatus(enrollment, payments, multipliers);
-            return status.debt > 0;
-          })
-        ).then(results => results.filter(Boolean).length);
-
         if (criticalDebtors > 0) {
           document.getElementById('criticalAlerts').innerHTML = `
             <div class="alert red" style="animation: pulse 2s infinite;">
@@ -685,7 +689,7 @@
         }
       }
 
-      // Render payments table (now async for DB multipliers)
+      // Render payments table (now async for DB multipliers) - OPTIMIZED with parallel processing and early filtering
       async function renderPaymentsTable() {
         const filterClass = classFilter.value;
         const searchTerm = searchInput.value.toLowerCase();
@@ -698,8 +702,9 @@
         if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
 
         const allEntries = Object.entries(state.transportEnrollments);
-        const filtered = [];
-
+        
+        // OPTIMIZATION: Pre-filter students before expensive calculations
+        const preFiltered = [];
         for (const [studentId, enrollment] of allEntries) {
           const student = state.students[studentId];
           if (!student) continue;
@@ -719,8 +724,33 @@
             fullName.includes(searchTerm) || 
             (student.admissionNumber || '').toLowerCase().includes(searchTerm);
 
+          // Only add to pre-filtered if class and search match (status and debt filters need calculation)
+          if (matchesClass && matchesSearch) {
+            preFiltered.push([studentId, enrollment, student, shiftedClass]);
+          }
+        }
+
+        if (preFiltered.length === 0) {
+          paymentsBody.innerHTML = '';
+          document.getElementById('emptyState').classList.remove('hidden');
+          document.getElementById('paymentSummary').textContent = '0 students found';
+          return;
+        }
+
+        // OPTIMIZATION: Process all pre-filtered students in parallel
+        const statusPromises = preFiltered.map(async ([studentId, enrollment]) => {
           const payments = Object.values(state.transportPayments[studentId] || {});
           const status = await calculateTransportStatus(enrollment, payments, multipliers);
+          return [studentId, enrollment, status];
+        });
+
+        const allStatuses = await Promise.all(statusPromises);
+        
+        // Apply status and debt filters after calculations
+        const filtered = [];
+        for (let i = 0; i < allStatuses.length; i++) {
+          const [studentId, enrollment, status] = allStatuses[i];
+          const [, , student, shiftedClass] = preFiltered[i];
           
           let matchesStatus = true;
           if (filterStatus === 'paid') matchesStatus = status.debt === 0;
@@ -729,7 +759,7 @@
 
           const matchesDebtFilter = !state.showDebtorsOnly || status.debt > 0;
 
-          if (matchesClass && matchesSearch && matchesStatus && matchesDebtFilter) {
+          if (matchesStatus && matchesDebtFilter) {
             filtered.push([studentId, enrollment, status]);
           }
         }
@@ -1289,18 +1319,20 @@
         `).join('');
       }
 
-      // Export to Excel
+      // Export to Excel - OPTIMIZED (already uses Promise.all, but removed redundant multiplier loading)
       async function exportToExcel() {
-        const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
-        if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
+        const yearNum = Number(state.year);
+        const multipliers = cachedMultipliers[yearNum] || (await TransportPricing.loadYearMultipliers(yearNum));
+        if (!cachedMultipliers[yearNum]) cachedMultipliers[yearNum] = multipliers;
         
+        // OPTIMIZATION: Process all students in parallel (already using Promise.all, but removed redundant multiplier loading)
         const data = await Promise.all(Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
           const student = state.students[studentId];
+          if (!student) return null;
+          
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
           
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const multipliers = cachedMultipliers[Number(state.year)] || (await TransportPricing.loadYearMultipliers(Number(state.year)));
-          if (!cachedMultipliers[Number(state.year)]) cachedMultipliers[Number(state.year)] = multipliers;
           const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers);
           
           const feePerYear = Number(student.feePerYear) || 0;
@@ -1328,26 +1360,46 @@
           };
         }));
         
-        const ws = XLSX.utils.json_to_sheet(data);
+        // Filter out null entries (students that don't exist)
+        const filteredData = data.filter(d => d !== null);
+        
+        const ws = XLSX.utils.json_to_sheet(filteredData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Transport Payments');
         XLSX.writeFile(wb, `transport_payments_${state.year}.xlsx`);
         showToast('Export successful!');
       }
 
-      // Load all data
+      // Load all data - OPTIMIZED with parallel Firebase reads
       async function loadAllData() {
         try {
           const db = firebase.database();
           const year = String(state.year);
           const prefix = currentSchoolPrefix();
           
-          // Load students (identity data - constant across years)
-          const studentsSnap = await db.ref(`${prefix}students`).once('value');
+          // OPTIMIZATION: Load all independent data sources in parallel
+          const [
+            studentsSnap,
+            legacyEnrollSnap,
+            enrollSnap,
+            assignmentsSnap,
+            paymentsSnap,
+            legacyPaymentsSnap,
+            expensesSnap
+          ] = await Promise.all([
+            db.ref(`${prefix}students`).once('value'),
+            db.ref(`${prefix}transport_enrollments`).once('value'),
+            db.ref(`${prefix}transportRegistry/${year}`).once('value').catch(() => ({ val: () => null })),
+            db.ref(`transportAssignments/${year}`).once('value').catch(() => ({ val: () => null })),
+            db.ref(`${prefix}transportLedgers/${year}`).once('value'),
+            db.ref(`${prefix}transport_payments`).once('value').catch(() => ({ val: () => null })),
+            db.ref(`${prefix}transport_expenses`).once('value')
+          ]);
+
+          // Process students
           state.students = studentsSnap.val() || {};
 
-          // Load transport enrollments - check legacy path first (this is what's actually being used)
-          const legacyEnrollSnap = await db.ref(`${prefix}transport_enrollments`).once('value');
+          // Process transport enrollments - check legacy path first
           const legacyEnrollments = legacyEnrollSnap.val() || {};
           state.transportEnrollments = {};
           Object.entries(legacyEnrollments).forEach(([studentId, enrollment]) => {
@@ -1358,7 +1410,6 @@
           
           // Also check new registry format for year-scoped data
           try {
-            const enrollSnap = await db.ref(`${prefix}transportRegistry/${year}`).once('value');
             const registry = enrollSnap.val() || {};
             Object.entries(registry).forEach(([studentId, reg]) => {
               if (reg && reg.using) {
@@ -1375,8 +1426,8 @@
           } catch (err) {
             console.warn('Could not load transportRegistry:', err);
           }
+          
           try {
-            const assignmentsSnap = await db.ref(`transportAssignments/${year}`).once('value');
             const assignments = assignmentsSnap.val() || {};
             Object.entries(assignments).forEach(([studentId, assignRecord]) => {
               if (assignRecord && assignRecord.status === 'Using') {
@@ -1394,9 +1445,8 @@
             console.warn('Could not load transportAssignments:', err);
           }
 
-          // Load transport payments (year-scoped)
+          // Process transport payments (year-scoped)
           const paymentsData = {};
-          const paymentsSnap = await db.ref(`${prefix}transportLedgers/${year}`).once('value');
           const ledgers = paymentsSnap.val() || {};
           Object.entries(ledgers).forEach(([studentId, ledger]) => {
             if (ledger && ledger.payments) {
@@ -1405,7 +1455,6 @@
           });
           
           // Also check legacy path
-          const legacyPaymentsSnap = await db.ref(`${prefix}transport_payments`).once('value');
           const legacyPayments = legacyPaymentsSnap.val() || {};
           Object.entries(legacyPayments).forEach(([studentId, payments]) => {
             if (!paymentsData[studentId]) {
@@ -1415,8 +1464,7 @@
           
           state.transportPayments = paymentsData;
 
-          // Load expenses (year-scoped)
-          const expensesSnap = await db.ref(`${prefix}transport_expenses`).once('value');
+          // Process expenses (year-scoped)
           const allExpenses = expensesSnap.val() || {};
           state.expenses = {};
           Object.entries(allExpenses).forEach(([key, exp]) => {
@@ -1425,9 +1473,18 @@
             }
           });
 
-          renderKPIs();
-          renderPaymentsTable();
-          renderExpensesTable();
+          // OPTIMIZATION: Pre-load multipliers before rendering
+          const yearNum = Number(state.year);
+          if (!cachedMultipliers[yearNum]) {
+            cachedMultipliers[yearNum] = await TransportPricing.loadYearMultipliers(yearNum);
+          }
+
+          // Render all views in parallel (they're independent)
+          await Promise.all([
+            renderKPIs(),
+            renderPaymentsTable(),
+            Promise.resolve(renderExpensesTable()) // renderExpensesTable is synchronous
+          ]);
         } catch (error) {
           console.error('Error loading data:', error);
           showToast('Error loading data', 'bad');

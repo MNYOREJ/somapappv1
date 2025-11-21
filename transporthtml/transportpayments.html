@@ -121,6 +121,10 @@
         </div>
 
         <div style="overflow-x: auto; margin-top: 1.5rem;">
+          <div id="loadingIndicator" class="empty" style="text-align: center; padding: 2rem; display: none;">
+            <div style="font-size: 1.2rem; margin-bottom: 0.5rem;">⏳ Loading student data...</div>
+            <div style="font-size: 0.875rem; color: var(--text-muted, #94a3b8);" id="loadingProgress">Please wait</div>
+          </div>
           <table class="table" id="paymentsTable">
             <thead>
               <tr>
@@ -536,8 +540,16 @@
         return await TransportPricing.computeBaseMonthlyFeeOnMonth({ year, month, amStop, pmStop });
       }
 
-      // Calculate transport payment status (now year-scoped with DB multipliers) - OPTIMIZED with parallel month calculations
-      async function calculateTransportStatus(enrollment, payments, yearMultipliers) {
+      // Calculate transport payment status (now year-scoped with DB multipliers) - OPTIMIZED with parallel month calculations and caching
+      async function calculateTransportStatus(enrollment, payments, yearMultipliers, studentId = null) {
+        // Check cache first to avoid recalculation
+        if (studentId) {
+          const cacheKey = getCacheKey(studentId, state.year);
+          if (statusCache.has(cacheKey)) {
+            return statusCache.get(cacheKey);
+          }
+        }
+
         const amStop = enrollment?.amStop || '';
         const pmStop = enrollment?.pmStop || '';
         const year = Number(state.year) || new Date().getFullYear();
@@ -609,7 +621,7 @@
           }) || 0
         );
 
-        return {
+        const result = {
           totalExpected,
           totalPaid,
           debt,
@@ -619,6 +631,14 @@
           startDateIso,
           startDateDisplay: hasExplicitStart ? formatStartDateDisplay(startDateIso) : 'N/A',
         };
+
+        // Cache the result
+        if (studentId) {
+          const cacheKey = getCacheKey(studentId, state.year);
+          statusCache.set(cacheKey, result);
+        }
+
+        return result;
       }
 
       // Render KPIs - only for admin view, not parent view (now async for DB multipliers) - OPTIMIZED with parallel processing
@@ -637,10 +657,10 @@
         const multipliers = cachedMultipliers[year] || (await TransportPricing.loadYearMultipliers(year));
         if (!cachedMultipliers[year]) cachedMultipliers[year] = multipliers;
         
-        // OPTIMIZATION: Process all students in parallel instead of sequentially
+        // OPTIMIZATION: Process all students in parallel instead of sequentially with caching
         const statusPromises = Object.entries(state.transportEnrollments).map(async ([studentId, enrollment]) => {
           const payments = Object.values(state.transportPayments[studentId] || {});
-          return await calculateTransportStatus(enrollment, payments, multipliers);
+          return await calculateTransportStatus(enrollment, payments, multipliers, studentId);
         });
 
         const allStatuses = await Promise.all(statusPromises);
@@ -689,12 +709,20 @@
         }
       }
 
-      // Render payments table (now async for DB multipliers) - OPTIMIZED with parallel processing and early filtering
+      // Render payments table (now async for DB multipliers) - OPTIMIZED with parallel processing, early filtering, and progressive rendering
       async function renderPaymentsTable() {
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const loadingProgress = document.getElementById('loadingProgress');
         const filterClass = classFilter.value;
         const searchTerm = searchInput.value.toLowerCase();
         const filterStatus = statusFilter.value;
         const yearDelta = state.year - BASE_YEAR;
+
+        // Show loading indicator
+        if (loadingIndicator) {
+          loadingIndicator.style.display = 'block';
+          paymentsBody.innerHTML = '';
+        }
 
         // Load year multipliers once for all calculations
         const year = Number(state.year);
@@ -731,20 +759,41 @@
         }
 
         if (preFiltered.length === 0) {
+          if (loadingIndicator) loadingIndicator.style.display = 'none';
           paymentsBody.innerHTML = '';
           document.getElementById('emptyState').classList.remove('hidden');
           document.getElementById('paymentSummary').textContent = '0 students found';
           return;
         }
 
-        // OPTIMIZATION: Process all pre-filtered students in parallel
-        const statusPromises = preFiltered.map(async ([studentId, enrollment]) => {
-          const payments = Object.values(state.transportPayments[studentId] || {});
-          const status = await calculateTransportStatus(enrollment, payments, multipliers);
-          return [studentId, enrollment, status];
-        });
+        // Update progress
+        if (loadingProgress) {
+          loadingProgress.textContent = `Calculating status for ${preFiltered.length} students...`;
+        }
 
-        const allStatuses = await Promise.all(statusPromises);
+        // OPTIMIZATION: Process in smaller batches for progressive rendering on slow connections
+        const BATCH_SIZE = 20;
+        const allStatuses = [];
+        
+        for (let i = 0; i < preFiltered.length; i += BATCH_SIZE) {
+          const batch = preFiltered.slice(i, i + BATCH_SIZE);
+          const statusPromises = batch.map(async ([studentId, enrollment]) => {
+            const payments = Object.values(state.transportPayments[studentId] || {});
+            const status = await calculateTransportStatus(enrollment, payments, multipliers, studentId);
+            return [studentId, enrollment, status];
+          });
+          
+          const batchResults = await Promise.all(statusPromises);
+          allStatuses.push(...batchResults);
+          
+          // Update progress
+          if (loadingProgress && i % (BATCH_SIZE * 2) === 0) {
+            loadingProgress.textContent = `Processing ${Math.min(i + BATCH_SIZE, preFiltered.length)}/${preFiltered.length} students...`;
+          }
+        }
+        
+        // Hide loading indicator
+        if (loadingIndicator) loadingIndicator.style.display = 'none';
         
         // Apply status and debt filters after calculations
         const filtered = [];
@@ -1333,7 +1382,7 @@
           const fullName = `${student.firstName || ''} ${student.middleName || ''} ${student.lastName || ''}`.trim();
           
           const payments = Object.values(state.transportPayments[studentId] || {});
-          const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers);
+          const transportStatus = await calculateTransportStatus(enrollment, payments, multipliers, studentId);
           
           const feePerYear = Number(student.feePerYear) || 0;
           const schoolPayments = student.payments || {};
@@ -1370,50 +1419,44 @@
         showToast('Export successful!');
       }
 
-      // Load all data - OPTIMIZED with parallel Firebase reads
+      // Cache for calculated statuses to avoid recalculation
+      const statusCache = new Map();
+      const getCacheKey = (studentId, year) => `${studentId}_${year}`;
+
+      // Load all data - ULTRA-OPTIMIZED: Load only transport students, progressive loading
       async function loadAllData() {
         try {
+          showToast('Loading transport data...', 'ok');
           const db = firebase.database();
           const year = String(state.year);
           const prefix = currentSchoolPrefix();
           
-          // OPTIMIZATION: Load all independent data sources in parallel
-          const [
-            studentsSnap,
-            legacyEnrollSnap,
-            enrollSnap,
-            assignmentsSnap,
-            paymentsSnap,
-            legacyPaymentsSnap,
-            expensesSnap
-          ] = await Promise.all([
-            db.ref(`${prefix}students`).once('value'),
+          // STEP 1: Load transport enrollments FIRST (smaller dataset) - this tells us which students to load
+          const [legacyEnrollSnap, enrollSnap, assignmentsSnap] = await Promise.all([
             db.ref(`${prefix}transport_enrollments`).once('value'),
             db.ref(`${prefix}transportRegistry/${year}`).once('value').catch(() => ({ val: () => null })),
-            db.ref(`transportAssignments/${year}`).once('value').catch(() => ({ val: () => null })),
-            db.ref(`${prefix}transportLedgers/${year}`).once('value'),
-            db.ref(`${prefix}transport_payments`).once('value').catch(() => ({ val: () => null })),
-            db.ref(`${prefix}transport_expenses`).once('value')
+            db.ref(`transportAssignments/${year}`).once('value').catch(() => ({ val: () => null }))
           ]);
 
-          // Process students
-          state.students = studentsSnap.val() || {};
-
-          // Process transport enrollments - check legacy path first
-          const legacyEnrollments = legacyEnrollSnap.val() || {};
+          // Build list of student IDs on transport
           state.transportEnrollments = {};
+          const transportStudentIds = new Set();
+          
+          // Process legacy enrollments
+          const legacyEnrollments = legacyEnrollSnap.val() || {};
           Object.entries(legacyEnrollments).forEach(([studentId, enrollment]) => {
             if (enrollment) {
               state.transportEnrollments[studentId] = enrollment;
+              transportStudentIds.add(studentId);
             }
           });
           
-          // Also check new registry format for year-scoped data
+          // Process registry
           try {
             const registry = enrollSnap.val() || {};
             Object.entries(registry).forEach(([studentId, reg]) => {
               if (reg && reg.using) {
-                // Merge with legacy or add new
+                transportStudentIds.add(studentId);
                 if (!state.transportEnrollments[studentId]) {
                   state.transportEnrollments[studentId] = {
                     amStop: reg.routeId || '',
@@ -1427,10 +1470,12 @@
             console.warn('Could not load transportRegistry:', err);
           }
           
+          // Process assignments
           try {
             const assignments = assignmentsSnap.val() || {};
             Object.entries(assignments).forEach(([studentId, assignRecord]) => {
               if (assignRecord && assignRecord.status === 'Using') {
+                transportStudentIds.add(studentId);
                 const existing = state.transportEnrollments[studentId] || {};
                 state.transportEnrollments[studentId] = {
                   ...existing,
@@ -1445,26 +1490,65 @@
             console.warn('Could not load transportAssignments:', err);
           }
 
-          // Process transport payments (year-scoped)
+          // STEP 2: Load ONLY students who are on transport (not all students!)
+          const studentIds = Array.from(transportStudentIds);
+          if (studentIds.length === 0) {
+            state.students = {};
+            state.transportPayments = {};
+            state.expenses = {};
+            renderKPIs();
+            renderPaymentsTable();
+            renderExpensesTable();
+            showToast('No students on transport', 'ok');
+            return;
+          }
+
+          // Load students in batches to avoid timeout on slow connections
+          const BATCH_SIZE = 50;
+          state.students = {};
+          for (let i = 0; i < studentIds.length; i += BATCH_SIZE) {
+            const batch = studentIds.slice(i, i + BATCH_SIZE);
+            const studentPromises = batch.map(id => 
+              db.ref(`${prefix}students/${id}`).once('value').then(snap => ({ id, data: snap.val() }))
+            );
+            const students = await Promise.all(studentPromises);
+            students.forEach(({ id, data }) => {
+              if (data) state.students[id] = data;
+            });
+            // Show progress
+            if (i % (BATCH_SIZE * 2) === 0) {
+              showToast(`Loading students... ${Math.min(i + BATCH_SIZE, studentIds.length)}/${studentIds.length}`, 'ok');
+            }
+          }
+
+          // STEP 3: Load payments ONLY for transport students (year-scoped)
+          showToast('Loading payments...', 'ok');
+          const [paymentsSnap, legacyPaymentsSnap] = await Promise.all([
+            db.ref(`${prefix}transportLedgers/${year}`).once('value'),
+            db.ref(`${prefix}transport_payments`).once('value').catch(() => ({ val: () => null }))
+          ]);
+
           const paymentsData = {};
           const ledgers = paymentsSnap.val() || {};
-          Object.entries(ledgers).forEach(([studentId, ledger]) => {
-            if (ledger && ledger.payments) {
-              paymentsData[studentId] = Object.values(ledger.payments);
+          studentIds.forEach(studentId => {
+            if (ledgers[studentId] && ledgers[studentId].payments) {
+              paymentsData[studentId] = Object.values(ledgers[studentId].payments);
             }
           });
           
-          // Also check legacy path
+          // Check legacy path only for transport students
           const legacyPayments = legacyPaymentsSnap.val() || {};
-          Object.entries(legacyPayments).forEach(([studentId, payments]) => {
-            if (!paymentsData[studentId]) {
+          studentIds.forEach(studentId => {
+            if (!paymentsData[studentId] && legacyPayments[studentId]) {
+              const payments = legacyPayments[studentId];
               paymentsData[studentId] = Array.isArray(payments) ? payments : Object.values(payments || {});
             }
           });
           
           state.transportPayments = paymentsData;
 
-          // Process expenses (year-scoped)
+          // STEP 4: Load expenses (lightweight, can load all)
+          const expensesSnap = await db.ref(`${prefix}transport_expenses`).once('value');
           const allExpenses = expensesSnap.val() || {};
           state.expenses = {};
           Object.entries(allExpenses).forEach(([key, exp]) => {
@@ -1473,21 +1557,25 @@
             }
           });
 
-          // OPTIMIZATION: Pre-load multipliers before rendering
+          // STEP 5: Pre-load multipliers
           const yearNum = Number(state.year);
           if (!cachedMultipliers[yearNum]) {
             cachedMultipliers[yearNum] = await TransportPricing.loadYearMultipliers(yearNum);
           }
 
-          // Render all views in parallel (they're independent)
-          await Promise.all([
-            renderKPIs(),
-            renderPaymentsTable(),
-            Promise.resolve(renderExpensesTable()) // renderExpensesTable is synchronous
-          ]);
+          // STEP 6: Clear status cache for this year
+          statusCache.clear();
+
+          // STEP 7: Render progressively - show table first, then KPIs
+          showToast('Rendering data...', 'ok');
+          await renderPaymentsTable();
+          await renderKPIs();
+          renderExpensesTable();
+          
+          showToast('Data loaded successfully!', 'ok');
         } catch (error) {
           console.error('Error loading data:', error);
-          showToast('Error loading data', 'bad');
+          showToast('Error loading data: ' + error.message, 'bad');
         }
       }
 
@@ -1501,6 +1589,7 @@
         yearSelect.value = state.year;
         yearSelect.addEventListener('change', (e) => {
           state.year = parseInt(e.target.value);
+          statusCache.clear(); // Clear cache on year change
           if (window.somapYearContext) {
             window.somapYearContext.setSelectedYear(String(state.year));
           }
@@ -1514,6 +1603,7 @@
           const newYear = parseInt(year) || state.year;
           if (newYear !== state.year) {
             state.year = newYear;
+            statusCache.clear(); // Clear cache on year change
             if (yearSelect) yearSelect.value = state.year;
             loadAllData();
           }

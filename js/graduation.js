@@ -157,6 +157,265 @@
     if (shell) shell.style.display = allowed ? 'block' : 'none';
   }
 
+  /* =======================
+     GRAD CERTS – PATCH
+     ======================= */
+
+  // 1) Year context & class ladders (ECD + Primary)
+  const SOMAP_DEFAULT_YEAR = 2025;
+  const CLASS_ORDER_ECD = ['Baby Class', 'Middle Class', 'Pre-Unit'];
+  const CLASS_ORDER_PRI = ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
+  const CLASS_ORDER_ALL = [...CLASS_ORDER_ECD, ...CLASS_ORDER_PRI];
+
+  const L = (s) => String(s || '').trim().toLowerCase();
+  function shiftClass(baseClass, deltaYears) {
+    const i = CLASS_ORDER_ALL.findIndex((c) => L(c) === L(baseClass));
+    if (i < 0) return baseClass || '';
+    const j = i + Number(deltaYears || 0);
+    if (j < 0) return 'PRE-ADMISSION';
+    if (j >= CLASS_ORDER_ALL.length) return 'GRADUATED';
+    return CLASS_ORDER_ALL[j];
+  }
+
+  // Use global year context if present
+  window.somapYearContext = window.somapYearContext || (() => {
+    let selected = (`${sessionStorage.getItem('somap_selected_year') || SOMAP_DEFAULT_YEAR}`);
+    const listeners = new Set();
+    return {
+      getSelectedYear() { return selected; },
+      setSelectedYear(y) {
+        const next = String(y);
+        if (next === selected) return;
+        selected = next;
+        try { sessionStorage.setItem('somap_selected_year', next); } catch (err) { console.warn(err); }
+        listeners.forEach((fn) => { try { fn(next); } catch (err) { console.warn(err); } });
+      },
+      onYearChanged(fn) { if (typeof fn === 'function') listeners.add(fn); },
+    };
+  })();
+
+  // 2) Helpers – lazy load libs for speed
+  async function ensureLibs() {
+    const needH2C = (typeof window.html2canvas === 'undefined');
+    const needPDF = (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF);
+    const loaders = [];
+    if (needH2C) loaders.push(loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'));
+    if (needPDF) loaders.push(loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
+    if (loaders.length) await Promise.all(loaders);
+  }
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  // Small concurrency gate (limit=2)
+  function pLimit(limit) {
+    const queue = [];
+    let active = 0;
+    const next = () => {
+      if (!queue.length || active >= limit) return;
+      active += 1;
+      const { fn, resolve, reject } = queue.shift();
+      fn().then((v) => { active -= 1; resolve(v); next(); })
+        .catch((e) => { active -= 1; reject(e); next(); });
+    };
+    return (fn) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
+  }
+  const limit2 = pLimit(2);
+
+  // Cloudinary sizing for speed (if url is a cloudinary resource)
+  function speedPortrait(url) {
+    try {
+      if (!url) return url;
+      if (/res\.cloudinary\.com/.test(url)) {
+        return url.replace('/upload/', '/upload/f_auto,q_auto,w_600/');
+      }
+    } catch (err) { /* ignore */ }
+    return url;
+  }
+
+  // 3) Fetch roster and compute who graduates in selected year
+  async function loadGraduandsForYear(targetYear) {
+    const database = firebase.database();
+    const y = String(targetYear || window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+    const anchorY = String(SOMAP_DEFAULT_YEAR);
+    const schoolPrefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
+
+    const [studentsSnap, anchorEnrollSnap, yearEnrollSnap, certSnap] = await Promise.all([
+      database.ref(`${schoolPrefix}students`).once('value'),
+      database.ref(`${schoolPrefix}enrollments/${anchorY}`).once('value'),
+      database.ref(`${schoolPrefix}enrollments/${y}`).once('value').catch(() => ({ val: () => null })),
+      database.ref(`${schoolPrefix}graduationCertificates/${y}`).once('value').catch(() => ({ val: () => null })),
+    ]);
+
+    const students = studentsSnap.val() || {};
+    const enrollAnchor = anchorEnrollSnap.val() || {};
+    const enrollYear = (yearEnrollSnap && yearEnrollSnap.val && yearEnrollSnap.val()) || {};
+    const certs = (certSnap && certSnap.val && certSnap.val()) || {};
+
+    const graduands = [];
+
+    for (const id of Object.keys(students)) {
+      const S = students[id] || {};
+      const anchor = enrollAnchor[id] || {};
+      const override = enrollYear[id] || {};
+      const baseClass = override.className || override.classLevel || anchor.className || anchor.classLevel || S.classLevel || 'Baby Class';
+      const displayClass = override.className || override.classLevel || shiftClass(baseClass, Number(y) - SOMAP_DEFAULT_YEAR);
+
+      const isPreUnit = L(displayClass) === L('Pre-Unit') || L(displayClass) === L('Preunit');
+      const isClass7 = L(displayClass) === L('Class 7') || L(displayClass) === L('Std 7') || L(displayClass) === L('Standard 7');
+
+      if (isPreUnit || isClass7) {
+        graduands.push({
+          id,
+          admission: S.admissionNumber || id,
+          fullName: `${(S.firstName || '').trim()} ${(S.middleName || '').trim()} ${(S.lastName || '').trim()}`.replace(/\s+/g, ' ').trim(),
+          classLevel: displayClass,
+          portrait: speedPortrait(S.passportPhotoUrl || ''),
+          generated: !!certs[id],
+          generatedBy: certs[id]?.generatedBy || '',
+          generatedAt: certs[id]?.generatedAt || '',
+          fileUrl: certs[id]?.fileUrl || '',
+        });
+      }
+    }
+    return { y, graduands };
+  }
+
+  // 4) UI render (table + chips) – reuse existing DOM
+  async function renderGraduationList() {
+    const { y, graduands } = await loadGraduandsForYear();
+    state.currentYear = Number(y);
+    mountYearChips(y);
+
+    const body = document.getElementById('certificatesBody');
+    if (!body) return;
+    body.innerHTML = '';
+    graduands.sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    for (const g of graduands) {
+      const tr = document.createElement('tr');
+      const downloads = g.fileUrl
+        ? `<a class="action-btn tertiary" href="${g.fileUrl}" target="_blank">PDF</a>`
+        : '<span class="text-xs text-slate-500">—</span>';
+
+      tr.innerHTML = `
+        <td><div class="font-semibold">${g.fullName}</div><div class="text-xs text-slate-500">${g.admission} · ${g.classLevel}</div></td>
+        <td>${g.generated ? '<span class="text-green-700 font-semibold">Ready</span>' : '<span class="text-amber-700 font-semibold">Pending</span>'}</td>
+        <td>${g.generatedAt ? new Date(g.generatedAt).toLocaleString() : '—'}</td>
+        <td>${g.generatedBy || '—'}</td>
+        <td class="text-right">
+          <button class="action-btn" ${g.generated ? 'disabled' : ''} data-gen="${g.id}">Generate</button>
+        </td>
+        <td class="text-right">${downloads}</td>
+      `;
+      body.appendChild(tr);
+    }
+
+    body.querySelectorAll('button[data-gen]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        await generateOne(btn.getAttribute('data-gen'));
+        await renderGraduationList();
+      });
+    });
+
+    const genAll = document.getElementById('generateAllCertificates');
+    if (genAll) {
+      genAll.onclick = async () => {
+        const pending = graduands.filter((g) => !g.generated).map((g) => g.id);
+        if (!pending.length) return;
+        await ensureLibs();
+        await Promise.all(pending.map((id) => limit2(() => generateOne(id))));
+        await renderGraduationList();
+      };
+    }
+  }
+
+  function mountYearChips(current) {
+    const wrap = document.getElementById('yearTabs');
+    if (!wrap) return;
+    const years = Array.from({ length: 20 }, (_, i) => 2023 + i);
+    wrap.innerHTML = years.map((y) => `
+      <button class="year-chip ${String(y) === String(current) ? 'active' : ''}" data-year="${y}">${y}</button>
+    `).join('');
+    wrap.querySelectorAll('[data-year]').forEach((btn) => {
+      btn.onclick = () => window.somapYearContext.setSelectedYear(btn.getAttribute('data-year'));
+    });
+  }
+
+  window.somapYearContext.onYearChanged(() => {
+    if (state.page === 'certificates') renderGraduationList();
+  });
+
+  // 5) Generate one certificate → html2canvas → PDF → store record
+  async function generateOne(studentId) {
+    await ensureLibs();
+    const { y, graduands } = await loadGraduandsForYear();
+    const info = graduands.find((g) => g.id === studentId);
+    if (!info) return;
+
+    const tpl = document.getElementById('certificateTemplate');
+    if (!tpl || !tpl.content) return;
+    const node = tpl.content.firstElementChild.cloneNode(true);
+
+    node.querySelector('[data-cert="studentName"]').textContent = info.fullName;
+    node.querySelector('[data-cert="classLevel"]').textContent = info.classLevel;
+    node.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString();
+    node.querySelector('[data-cert="admission"]').textContent = info.admission;
+    node.querySelector('[data-cert="year"]').textContent = y;
+
+    const imgEl = node.querySelector('[data-cert="photo"]');
+    if (imgEl && info.portrait) imgEl.src = info.portrait;
+
+    const sandbox = document.getElementById('renderSandbox');
+    if (!sandbox) return;
+    sandbox.innerHTML = '';
+    sandbox.appendChild(node);
+
+    try { if (imgEl && imgEl.decode) await imgEl.decode(); } catch (err) { /* ignore */ }
+
+    const canvas = await window.html2canvas(node, {
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      scale: 2,
+      logging: false,
+    });
+
+    const jsPDFLib = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf : window.jspdf || {};
+    const { jsPDF } = jsPDFLib;
+    if (!jsPDF) throw new Error('jsPDF not loaded');
+    const pdf = new jsPDF('landscape', 'pt', [1122, 793]);
+    const dataURL = canvas.toDataURL('image/png');
+    pdf.addImage(dataURL, 'PNG', 0, 0, 1122, 793, 'FAST', 'FAST');
+    const pdfBlob = pdf.output('blob');
+
+    let fileUrl = '';
+    try {
+      const store = firebase.storage();
+      const path = `${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}certificates/${y}/${info.admission}.pdf`;
+      const ref = store.ref(path);
+      await ref.put(pdfBlob, { contentType: 'application/pdf', customMetadata: { studentId, admission: info.admission, year: y } });
+      fileUrl = await ref.getDownloadURL();
+    } catch (err) {
+      console.warn('Storage upload failed, using local blob', err);
+      fileUrl = URL.createObjectURL(pdfBlob);
+    }
+
+    await firebase.database().ref(`${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}graduationCertificates/${y}/${studentId}`)
+      .set({
+        generatedAt: Date.now(),
+        generatedBy: (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'unknown',
+        fileUrl,
+      });
+  }
+
   // ---------- PUBLIC API ----------
   window.GraduationSuite = {
     init,
@@ -169,9 +428,14 @@
   // ---------- INIT ----------
   function init(options = {}) {
     state.page = options.page || document.body.dataset.page || 'dashboard';
-    state.currentYear = normalizeYear(options.year || new Date().getFullYear());
-    buildYearSelector();
-    attachBaseListeners();
+    if (state.page === 'certificates') {
+      const selected = window.somapYearContext.getSelectedYear ? window.somapYearContext.getSelectedYear() : SOMAP_DEFAULT_YEAR;
+      state.currentYear = Number(selected) || SOMAP_DEFAULT_YEAR;
+    } else {
+      state.currentYear = normalizeYear(options.year || new Date().getFullYear());
+      buildYearSelector();
+      attachBaseListeners();
+    }
     auth().onAuthStateChanged(handleAuthChange);
   }
 
@@ -265,6 +529,12 @@
     const allowed = isAuthorized(user?.email || '');
     showAuthGate(allowed);
     if (!allowed) return;
+
+    if (state.page === 'certificates') {
+      state.currentYear = Number(window.somapYearContext.getSelectedYear ? window.somapYearContext.getSelectedYear() : SOMAP_DEFAULT_YEAR);
+      renderGraduationList();
+      return;
+    }
 
     ensureYearReady(state.currentYear)
       .then(() => {

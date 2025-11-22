@@ -268,7 +268,9 @@
       const baseClass = override.className || override.classLevel || anchor.className || anchor.classLevel || S.classLevel || 'Baby Class';
       const displayClass = override.className || override.classLevel || shiftClass(baseClass, Number(y) - SOMAP_DEFAULT_YEAR);
 
-      const isPreUnit = L(displayClass) === L('Pre-Unit') || L(displayClass) === L('Preunit');
+      const clsLabel = L(displayClass);
+      const preTokens = ['pre-unit', 'pre unit', 'preunit', 'preparatory', 'kg3', 'kg 3', 'preprimary', 'pre-primary', 'pre primary'];
+      const isPreUnit = preTokens.some((t) => clsLabel === t || clsLabel.includes(t));
       const isClass7 = L(displayClass) === L('Class 7') || L(displayClass) === L('Std 7') || L(displayClass) === L('Standard 7');
 
       if (isPreUnit || isClass7) {
@@ -374,8 +376,16 @@
     const imgEl = node.querySelector('[data-cert="photo"]');
     if (imgEl && info.portrait) imgEl.src = info.portrait;
 
-    const sandbox = document.getElementById('renderSandbox');
-    if (!sandbox) return;
+    let sandbox = document.getElementById('renderSandbox');
+    if (!sandbox) {
+      sandbox = document.createElement('div');
+      sandbox.id = 'renderSandbox';
+      sandbox.style.position = 'fixed';
+      sandbox.style.left = '-10000px';
+      sandbox.style.top = '-10000px';
+      sandbox.style.pointerEvents = 'none';
+      document.body.appendChild(sandbox);
+    }
     sandbox.innerHTML = '';
     sandbox.appendChild(node);
 

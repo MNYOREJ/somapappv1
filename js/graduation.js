@@ -163,11 +163,18 @@
 
   // 1) Year context & class ladders (ECD + Primary)
   const SOMAP_DEFAULT_YEAR = 2025;
+  const GRAD_YEAR_MIN = 2023;
+  const GRAD_YEAR_MAX = 2042;
   const CLASS_ORDER_ECD = ['Baby Class', 'Middle Class', 'Pre-Unit'];
   const CLASS_ORDER_PRI = ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
   const CLASS_ORDER_ALL = [...CLASS_ORDER_ECD, ...CLASS_ORDER_PRI];
 
   const L = (s) => String(s || '').trim().toLowerCase();
+  function normalizeGradYear(yearCandidate) {
+    const y = Number(yearCandidate || SOMAP_DEFAULT_YEAR);
+    if (!Number.isFinite(y)) return SOMAP_DEFAULT_YEAR;
+    return Math.min(GRAD_YEAR_MAX, Math.max(GRAD_YEAR_MIN, y));
+  }
   function shiftClass(baseClass, deltaYears) {
     const i = CLASS_ORDER_ALL.findIndex((c) => L(c) === L(baseClass));
     if (i < 0) return baseClass || '';
@@ -175,6 +182,12 @@
     if (j < 0) return 'PRE-ADMISSION';
     if (j >= CLASS_ORDER_ALL.length) return 'GRADUATED';
     return CLASS_ORDER_ALL[j];
+  }
+  function projectClassFromAnchor(baseClass, targetYear) {
+    // Move a base class forward/backward relative to the anchor year (2025).
+    const normalizedYear = normalizeGradYear(targetYear);
+    const delta = normalizedYear - SOMAP_DEFAULT_YEAR;
+    return shiftClass(baseClass, delta);
   }
 
   // Use global year context if present
@@ -184,7 +197,7 @@
     return {
       getSelectedYear() { return selected; },
       setSelectedYear(y) {
-        const next = String(y);
+        const next = String(normalizeGradYear(y));
         if (next === selected) return;
         selected = next;
         try { sessionStorage.setItem('somap_selected_year', next); } catch (err) { console.warn(err); }
@@ -243,7 +256,8 @@
   // 3) Fetch roster and compute who graduates in selected year
   async function loadGraduandsForYear(targetYear) {
     const database = firebase.database();
-    const y = String(targetYear || window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+    const selectedYear = normalizeGradYear(targetYear || window.somapYearContext.getSelectedYear() || SOMAP_DEFAULT_YEAR);
+    const y = String(selectedYear);
     const anchorY = String(SOMAP_DEFAULT_YEAR);
     const schoolPrefix = window.currentSchoolId ? `schools/${window.currentSchoolId}/` : '';
 
@@ -266,7 +280,7 @@
       const anchor = enrollAnchor[id] || {};
       const override = enrollYear[id] || {};
       const baseClass = override.className || override.classLevel || anchor.className || anchor.classLevel || S.classLevel || 'Baby Class';
-      const displayClass = override.className || override.classLevel || shiftClass(baseClass, Number(y) - SOMAP_DEFAULT_YEAR);
+      const displayClass = override.className || override.classLevel || projectClassFromAnchor(baseClass, selectedYear);
 
       const clsLabel = L(displayClass);
       const preTokens = ['pre-unit', 'pre unit', 'preunit', 'preparatory', 'kg3', 'kg 3', 'preprimary', 'pre-primary', 'pre primary'];
@@ -274,16 +288,17 @@
       const isClass7 = L(displayClass) === L('Class 7') || L(displayClass) === L('Std 7') || L(displayClass) === L('Standard 7');
 
       if (isPreUnit || isClass7) {
+        const certInfo = certs[id] || {};
         graduands.push({
           id,
           admission: S.admissionNumber || id,
           fullName: `${(S.firstName || '').trim()} ${(S.middleName || '').trim()} ${(S.lastName || '').trim()}`.replace(/\s+/g, ' ').trim(),
           classLevel: displayClass,
           portrait: speedPortrait(S.passportPhotoUrl || ''),
-          generated: !!certs[id],
-          generatedBy: certs[id]?.generatedBy || '',
-          generatedAt: certs[id]?.generatedAt || '',
-          fileUrl: certs[id]?.fileUrl || '',
+          generated: !!certInfo.fileUrl,
+          generatedBy: certInfo.generatedBy || '',
+          generatedAt: certInfo.generatedAt || '',
+          fileUrl: certInfo.fileUrl || '',
         });
       }
     }
@@ -304,16 +319,17 @@
     for (const g of graduands) {
       const tr = document.createElement('tr');
       const downloads = g.fileUrl
-        ? `<a class="action-btn tertiary" href="${g.fileUrl}" target="_blank">PDF</a>`
-        : '<span class="text-xs text-slate-500">—</span>';
+        ? `<a class="action-btn tertiary" href="${g.fileUrl}" target="_blank" rel="noopener" download>PDF</a>`
+        : '<span class="text-xs text-slate-500">-</span>';
+      const buttonLabel = g.generated ? 'Regenerate' : 'Generate';
 
       tr.innerHTML = `
-        <td><div class="font-semibold">${g.fullName}</div><div class="text-xs text-slate-500">${g.admission} · ${g.classLevel}</div></td>
+        <td><div class="font-semibold">${g.fullName}</div><div class="text-xs text-slate-500">${g.admission} - ${g.classLevel}</div></td>
         <td>${g.generated ? '<span class="text-green-700 font-semibold">Ready</span>' : '<span class="text-amber-700 font-semibold">Pending</span>'}</td>
         <td>${g.generatedAt ? new Date(g.generatedAt).toLocaleString() : '—'}</td>
         <td>${g.generatedBy || '—'}</td>
         <td class="text-right">
-          <button class="action-btn" ${g.generated ? 'disabled' : ''} data-gen="${g.id}">Generate</button>
+          <button class="action-btn" data-gen="${g.id}">${buttonLabel}</button>
         </td>
         <td class="text-right">${downloads}</td>
       `;
@@ -355,7 +371,7 @@
   function mountYearChips(current) {
     const wrap = document.getElementById('yearTabs');
     if (!wrap) return;
-    const years = Array.from({ length: 20 }, (_, i) => 2023 + i);
+    const years = Array.from({ length: (GRAD_YEAR_MAX - GRAD_YEAR_MIN) + 1 }, (_, i) => GRAD_YEAR_MIN + i);
     wrap.innerHTML = years.map((y) => `
       <button class="year-chip ${String(y) === String(current) ? 'active' : ''}" data-year="${y}">${y}</button>
     `).join('');
@@ -419,22 +435,37 @@
     const pdfBlob = pdf.output('blob');
 
     let fileUrl = '';
+    let uploaded = false;
     try {
       const store = firebase.storage();
       const path = `${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}certificates/${y}/${info.admission}.pdf`;
       const ref = store.ref(path);
       await ref.put(pdfBlob, { contentType: 'application/pdf', customMetadata: { studentId, admission: info.admission, year: y } });
       fileUrl = await ref.getDownloadURL();
+      uploaded = true;
     } catch (err) {
       console.warn('Storage upload failed, using local blob', err);
-      fileUrl = URL.createObjectURL(pdfBlob);
+      // Offer a local download so the user still gets the PDF, but avoid persisting an invalid blob URL.
+      const tempUrl = URL.createObjectURL(pdfBlob);
+      const fallbackName = `${info.fullName || info.admission}_${y}.pdf`.replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_');
+      const link = document.createElement('a');
+      link.href = tempUrl;
+      link.download = fallbackName || `${info.admission}_${y}.pdf`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(tempUrl);
+        link.remove();
+      }, 1200);
+      showToast('Upload failed. Downloaded locally instead - regenerate to retry upload.', 'warn', 5200);
     }
 
     await firebase.database().ref(`${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}graduationCertificates/${y}/${studentId}`)
       .set({
         generatedAt: Date.now(),
         generatedBy: (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'unknown',
-        fileUrl,
+        fileUrl: uploaded ? fileUrl : '',
       });
   }
 
@@ -1708,3 +1739,6 @@
   }, 6 * 60 * 60 * 1000);
 
 }(window));
+
+
+

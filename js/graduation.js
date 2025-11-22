@@ -289,16 +289,17 @@
 
       if (isPreUnit || isClass7) {
         const certInfo = certs[id] || {};
+        const safeUrl = (certInfo.fileUrl && !/^blob:/i.test(certInfo.fileUrl)) ? certInfo.fileUrl : '';
         graduands.push({
           id,
           admission: S.admissionNumber || id,
           fullName: `${(S.firstName || '').trim()} ${(S.middleName || '').trim()} ${(S.lastName || '').trim()}`.replace(/\s+/g, ' ').trim(),
           classLevel: displayClass,
           portrait: speedPortrait(S.passportPhotoUrl || ''),
-          generated: !!certInfo.fileUrl,
+          generated: !!safeUrl,
           generatedBy: certInfo.generatedBy || '',
           generatedAt: certInfo.generatedAt || '',
-          fileUrl: certInfo.fileUrl || '',
+          fileUrl: safeUrl,
         });
       }
     }
@@ -1739,6 +1740,4 @@
   }, 6 * 60 * 60 * 1000);
 
 }(window));
-
-
 

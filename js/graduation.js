@@ -323,8 +323,14 @@
     body.querySelectorAll('button[data-gen]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         btn.disabled = true;
-        await generateOne(btn.getAttribute('data-gen'));
-        await renderGraduationList();
+        try {
+          await generateOne(btn.getAttribute('data-gen'));
+        } catch (err) {
+          console.error(err);
+          showToast(err?.message || 'Generation failed', 'error');
+        } finally {
+          await renderGraduationList();
+        }
       });
     });
 
@@ -333,9 +339,15 @@
       genAll.onclick = async () => {
         const pending = graduands.filter((g) => !g.generated).map((g) => g.id);
         if (!pending.length) return;
-        await ensureLibs();
-        await Promise.all(pending.map((id) => limit2(() => generateOne(id))));
-        await renderGraduationList();
+        try {
+          await ensureLibs();
+          await Promise.all(pending.map((id) => limit2(() => generateOne(id))));
+        } catch (err) {
+          console.error(err);
+          showToast(err?.message || 'Bulk generation failed', 'error');
+        } finally {
+          await renderGraduationList();
+        }
       };
     }
   }

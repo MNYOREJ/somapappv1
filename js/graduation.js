@@ -452,7 +452,7 @@
   });
 
   // 5) Generate one certificate → html2canvas → PDF → store record
-  async function generateOne(studentId) {
+  async function generateOne(studentId, options = {}) {
     await ensureLibs();
     const { y, graduands } = await loadGraduandsForYear();
     const info = graduands.find((g) => g.id === studentId);
@@ -466,10 +466,15 @@
     node.querySelector('[data-cert="classLevel"]').textContent = info.classLevel;
     node.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString();
     node.querySelector('[data-cert="admission"]').textContent = info.admission;
-    node.querySelector('[data-cert="year"]').textContent = y;
 
     const imgEl = node.querySelector('[data-cert="photo"]');
-    if (imgEl && info.portrait) imgEl.src = info.portrait;
+    if (imgEl) {
+      // Ensure crossOrigin is set for canvas rendering
+      imgEl.crossOrigin = 'anonymous';
+      // Use optimized portrait URL for faster loading
+      const portraitUrl = info.portrait ? speedPortrait(info.portrait) : '../images/somap-logo.png.jpg';
+      imgEl.src = portraitUrl;
+    }
 
     let sandbox = document.getElementById('renderSandbox');
     if (!sandbox) {
@@ -484,21 +489,43 @@
     sandbox.innerHTML = '';
     sandbox.appendChild(node);
 
-    try { if (imgEl && imgEl.decode) await imgEl.decode(); } catch (err) { /* ignore */ }
+    // Wait for image to load/decode before rendering
+    if (imgEl && info.portrait) {
+      try {
+        if (imgEl.complete && imgEl.naturalHeight !== 0) {
+          // Image already loaded
+        } else if (imgEl.decode) {
+          await imgEl.decode();
+        } else {
+          await new Promise((resolve, reject) => {
+            imgEl.onload = resolve;
+            imgEl.onerror = resolve; // Don't block on error
+            if (imgEl.complete) resolve();
+          });
+        }
+      } catch (err) {
+        // Continue even if image fails
+      }
+    }
 
-    const renderScale = Math.min(1.8, Math.max(1.35, window.devicePixelRatio || 1.6));
+    // Optimized render scale for speed vs quality balance
+    const renderScale = Math.min(1.5, Math.max(1.2, (window.devicePixelRatio || 1.5) * 0.8));
     const canvas = await window.html2canvas(node, {
       useCORS: true,
+      allowTaint: false,
       backgroundColor: '#ffffff',
       scale: renderScale,
       logging: false,
+      removeContainer: false,
+      imageTimeout: 5000, // Timeout for images
+      onclone: null, // Skip cloning optimization
     });
 
     const jsPDFLib = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf : window.jspdf || {};
     const { jsPDF } = jsPDFLib;
     if (!jsPDF) throw new Error('jsPDF not loaded');
     const pdf = new jsPDF('landscape', 'pt', [1122, 793]);
-    const dataURL = canvas.toDataURL('image/png');
+    const dataURL = canvas.toDataURL('image/png', 0.92); // Slight compression for speed
     pdf.addImage(dataURL, 'PNG', 0, 0, 1122, 793, 'FAST', 'FAST');
     const pdfBlob = pdf.output('blob');
 
@@ -525,7 +552,7 @@
       setTimeout(() => {
         URL.revokeObjectURL(tempUrl);
         link.remove();
-      }, 1200);
+      }, 200);
       showToast('Upload failed. Downloaded locally instead - regenerate to retry upload.', 'warn', 5200);
     }
 
@@ -535,6 +562,50 @@
         generatedBy: (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'unknown',
         fileUrl: uploaded ? fileUrl : '',
       });
+
+    // Auto-download if requested
+    if (options.forceDownload) {
+      const safeName = `${info.fullName || info.admission}_${y}.pdf`.replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_');
+      const link = document.createElement('a');
+      link.href = uploaded ? fileUrl : URL.createObjectURL(pdfBlob);
+      link.download = safeName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (!uploaded) URL.revokeObjectURL(link.href);
+        link.remove();
+      }, 100);
+    }
+  }
+
+  // Download certificate file helper
+  async function downloadCertificateFile({ studentId, admission, year, url, name }) {
+    if (!url) {
+      showToast('Certificate not available. Please generate it first.', 'warn');
+      return;
+    }
+    try {
+      const response = await fetch(url, { mode: 'cors' });
+      if (!response.ok) throw new Error('Failed to fetch certificate');
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const safeName = `${name || admission || studentId}_${year || new Date().getFullYear()}.pdf`.replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_');
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = safeName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(downloadUrl);
+        link.remove();
+      }, 200);
+      showToast('Certificate downloaded.', 'success', 2000);
+    } catch (err) {
+      console.error('Download error:', err);
+      throw new Error('Download failed. Please try regenerating the certificate.');
+    }
   }
 
   // ---------- PUBLIC API ----------

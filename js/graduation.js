@@ -30,6 +30,7 @@
     certificates: {},
     galleries: {},
     audits: {},
+    graduandsCache: { year: null, list: [] },
     masterStudents: null,
     totalPresentToday: null,
     filters: { search: '', classLevel: 'all' },
@@ -207,24 +208,57 @@
     };
   })();
 
-  // 2) Helpers – lazy load libs for speed
+  // 2) Helpers - lazy load libs for speed
+  const HTML2CANVAS_SRCS = [
+    'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+    'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+  ];
+  const JSPDF_SRCS = [
+    'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  ];
+  let libsReadyPromise = null;
+
   async function ensureLibs() {
-    const needH2C = (typeof window.html2canvas === 'undefined');
-    const needPDF = (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF);
-    const loaders = [];
-    if (needH2C) loaders.push(loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'));
-    if (needPDF) loaders.push(loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
-    if (loaders.length) await Promise.all(loaders);
+    if (libsReadyPromise) return libsReadyPromise;
+    libsReadyPromise = (async () => {
+      const needH2C = (typeof window.html2canvas === 'undefined');
+      const needPDF = (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF);
+      const loaders = [];
+      if (needH2C) loaders.push(loadScriptWithFallback(HTML2CANVAS_SRCS));
+      if (needPDF) loaders.push(loadScriptWithFallback(JSPDF_SRCS));
+      if (loaders.length) await Promise.all(loaders);
+    })().catch((err) => {
+      libsReadyPromise = null;
+      throw err;
+    });
+    return libsReadyPromise;
   }
+
+  function loadScriptWithFallback(list) {
+    const sources = Array.isArray(list) ? list : [list];
+    return sources.reduce((chain, src) => (
+      chain.catch(() => loadScript(src))
+    ), Promise.reject()).catch(() => {
+      throw new Error(`Could not load library from any source: ${sources.join(', ')}`);
+    });
+  }
+
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = src;
       s.async = true;
-      s.onload = resolve;
-      s.onerror = reject;
+      s.crossOrigin = 'anonymous';
+      s.referrerPolicy = 'no-referrer';
+      s.onload = () => resolve();
+      s.onerror = (err) => reject(err || new Error(`Failed to load ${src}`));
       document.head.appendChild(s);
     });
+  }
+
+  function warmCertificateLibs() {
+    ensureLibs().catch((err) => console.warn('Certificate libs preload failed', err?.message || err));
   }
 
   // Small concurrency gate (limit=2)
@@ -303,6 +337,7 @@
         });
       }
     }
+    state.graduandsCache = { year: y, list: graduands };
     return { y, graduands };
   }
 
@@ -319,21 +354,29 @@
 
     for (const g of graduands) {
       const tr = document.createElement('tr');
-      const downloads = g.fileUrl
-        ? `<a class="action-btn tertiary" href="${g.fileUrl}" target="_blank" rel="noopener" download>PDF</a>`
-        : '<span class="text-xs text-slate-500">-</span>';
       const buttonLabel = g.generated ? 'Regenerate' : 'Generate';
 
       tr.innerHTML = `
         <td><div class="font-semibold">${g.fullName}</div><div class="text-xs text-slate-500">${g.admission} - ${g.classLevel}</div></td>
         <td>${g.generated ? '<span class="text-green-700 font-semibold">Ready</span>' : '<span class="text-amber-700 font-semibold">Pending</span>'}</td>
-        <td>${g.generatedAt ? new Date(g.generatedAt).toLocaleString() : '—'}</td>
-        <td>${g.generatedBy || '—'}</td>
+        <td>${g.generatedAt ? new Date(g.generatedAt).toLocaleString() : '-'}</td>
+        <td>${g.generatedBy || '-'}</td>
         <td class="text-right">
-          <button class="action-btn" data-gen="${g.id}">${buttonLabel}</button>
+          <button class="action-btn" data-gen="${g.id}" data-year="${y}">${buttonLabel}</button>
         </td>
-        <td class="text-right">${downloads}</td>
+        <td class="text-right">${
+          g.fileUrl
+            ? '<button class="action-btn tertiary" data-download="' + g.id + '">PDF</button>'
+            : '<span class="text-xs text-slate-500">-</span>'
+        }</td>
       `;
+      const downloadBtn = tr.querySelector('[data-download]');
+      if (downloadBtn) {
+        downloadBtn.dataset.url = g.fileUrl;
+        downloadBtn.dataset.name = g.fullName;
+        downloadBtn.dataset.adm = g.admission;
+        downloadBtn.dataset.year = y;
+      }
       body.appendChild(tr);
     }
 
@@ -341,12 +384,35 @@
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
-          await generateOne(btn.getAttribute('data-gen'));
+          await generateOne(btn.getAttribute('data-gen'), {
+            year: btn.getAttribute('data-year') || y,
+            forceDownload: true,
+          });
         } catch (err) {
           console.error(err);
           showToast(err?.message || 'Generation failed', 'error');
         } finally {
           await renderGraduationList();
+        }
+      });
+    });
+
+    body.querySelectorAll('button[data-download]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await downloadCertificateFile({
+            studentId: btn.getAttribute('data-download'),
+            admission: btn.getAttribute('data-adm') || btn.dataset.adm || '',
+            year: btn.getAttribute('data-year') || state.currentYear,
+            url: btn.getAttribute('data-url') || btn.dataset.url,
+            name: btn.getAttribute('data-name') || btn.dataset.name || '',
+          });
+        } catch (err) {
+          console.error(err);
+          showToast(err?.message || 'Download failed. Please regenerate.', 'error');
+        } finally {
+          btn.disabled = false;
         }
       });
     });
@@ -485,6 +551,7 @@
     if (state.page === 'certificates') {
       const selected = window.somapYearContext.getSelectedYear ? window.somapYearContext.getSelectedYear() : SOMAP_DEFAULT_YEAR;
       state.currentYear = Number(selected) || SOMAP_DEFAULT_YEAR;
+      warmCertificateLibs(); // preload html2canvas + jsPDF so single generate is instant
     } else {
       state.currentYear = normalizeYear(options.year || new Date().getFullYear());
       buildYearSelector();
@@ -1740,4 +1807,3 @@
   }, 6 * 60 * 60 * 1000);
 
 }(window));
-

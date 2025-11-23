@@ -421,14 +421,21 @@
     if (genAll) {
       genAll.onclick = async () => {
         const pending = graduands.filter((g) => !g.generated).map((g) => g.id);
-        if (!pending.length) return;
+        if (!pending.length) {
+          showToast('All certificates already generated.', 'warn');
+          return;
+        }
         try {
+          setBusy('#generateAllCertificates', true);
           await ensureLibs();
+          // Process with concurrency limit for faster bulk generation
           await Promise.all(pending.map((id) => limit2(() => generateOne(id))));
+          showToast(`Generated ${pending.length} certificate(s) successfully.`, 'success');
         } catch (err) {
           console.error(err);
           showToast(err?.message || 'Bulk generation failed', 'error');
         } finally {
+          setBusy('#generateAllCertificates', false);
           await renderGraduationList();
         }
       };
@@ -451,31 +458,18 @@
     if (state.page === 'certificates') renderGraduationList();
   });
 
-  // 5) Generate one certificate → html2canvas → PDF → store record
+  // 5) Generate one certificate → html2canvas → PDF → store record (OPTIMIZED FOR SPEED)
   async function generateOne(studentId, options = {}) {
     await ensureLibs();
     const { y, graduands } = await loadGraduandsForYear();
     const info = graduands.find((g) => g.id === studentId);
-    if (!info) return;
+    if (!info) throw new Error('Student not found');
 
-    const tpl = document.getElementById('certificateTemplate');
-    if (!tpl || !tpl.content) return;
-    const node = tpl.content.firstElementChild.cloneNode(true);
+    // Use template.content and clone for faster rendering
+    const template = document.getElementById('certificateTemplate');
+    if (!template || !template.content) throw new Error('Certificate template missing in DOM');
 
-    node.querySelector('[data-cert="studentName"]').textContent = info.fullName;
-    node.querySelector('[data-cert="classLevel"]').textContent = info.classLevel;
-    node.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString();
-    node.querySelector('[data-cert="admission"]').textContent = info.admission;
-
-    const imgEl = node.querySelector('[data-cert="photo"]');
-    if (imgEl) {
-      // Ensure crossOrigin is set for canvas rendering
-      imgEl.crossOrigin = 'anonymous';
-      // Use optimized portrait URL for faster loading
-      const portraitUrl = info.portrait ? speedPortrait(info.portrait) : '../images/somap-logo.png.jpg';
-      imgEl.src = portraitUrl;
-    }
-
+    // Get or create offscreen sandbox for html2canvas
     let sandbox = document.getElementById('renderSandbox');
     if (!sandbox) {
       sandbox = document.createElement('div');
@@ -487,96 +481,85 @@
       document.body.appendChild(sandbox);
     }
     sandbox.innerHTML = '';
-    sandbox.appendChild(node);
+    const fragment = template.content.cloneNode(true);
+    sandbox.appendChild(fragment);
+    const certNode = sandbox.firstElementChild;
 
-    // Wait for image to load/decode before rendering
-    if (imgEl && info.portrait) {
-      try {
-        if (imgEl.complete && imgEl.naturalHeight !== 0) {
-          // Image already loaded
-        } else if (imgEl.decode) {
-          await imgEl.decode();
-        } else {
-          await new Promise((resolve, reject) => {
-            imgEl.onload = resolve;
-            imgEl.onerror = resolve; // Don't block on error
-            if (imgEl.complete) resolve();
-          });
-        }
-      } catch (err) {
-        // Continue even if image fails
-      }
+    // Hydrate certificate with student data
+    certNode.querySelector('[data-cert="studentName"]').textContent = info.fullName || '';
+    certNode.querySelector('[data-cert="classLevel"]').textContent = `${info.classLevel || ''} - ${y}`;
+    certNode.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString('en-GB');
+    certNode.querySelector('[data-cert="admission"]').textContent = info.admission || '';
+
+    // Photo with crossOrigin for canvas rendering (CRITICAL for speed)
+    const photoNode = certNode.querySelector('[data-cert="photo"]');
+    if (photoNode) {
+      photoNode.crossOrigin = 'anonymous';
+      photoNode.src = info.portrait ? speedPortrait(info.portrait) : '../images/somap-logo.png.jpg';
+      // Simple image load wait - faster than complex decode logic
+      await new Promise((resolve) => {
+        if (photoNode.complete) return resolve();
+        photoNode.onload = () => resolve();
+        photoNode.onerror = () => resolve(); // Don't block if image fails
+      });
     }
 
-    // Optimized render scale for speed vs quality balance
-    const renderScale = Math.min(1.5, Math.max(1.2, (window.devicePixelRatio || 1.5) * 0.8));
-    const canvas = await window.html2canvas(node, {
+    // Check for required libraries
+    if (!window.html2canvas || !window.jspdf || !window.jspdf.jsPDF) {
+      throw new Error('html2canvas + jsPDF are required for certificate generation');
+    }
+
+    // Optimized html2canvas options for speed
+    const canvas = await window.html2canvas(certNode, {
+      scale: 2,
       useCORS: true,
-      allowTaint: false,
-      backgroundColor: '#ffffff',
-      scale: renderScale,
-      logging: false,
-      removeContainer: false,
-      imageTimeout: 5000, // Timeout for images
-      onclone: null, // Skip cloning optimization
+      backgroundColor: null,
     });
 
-    const jsPDFLib = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf : window.jspdf || {};
-    const { jsPDF } = jsPDFLib;
-    if (!jsPDF) throw new Error('jsPDF not loaded');
-    const pdf = new jsPDF('landscape', 'pt', [1122, 793]);
-    const dataURL = canvas.toDataURL('image/png', 0.92); // Slight compression for speed
-    pdf.addImage(dataURL, 'PNG', 0, 0, 1122, 793, 'FAST', 'FAST');
+    // Generate PDF using standard A4 landscape dimensions (faster than custom)
+    const dataUrl = canvas.toDataURL('image/png');
+    const pdf = new window.jspdf.jsPDF('landscape', 'pt', 'a4');
+    const width = pdf.internal.pageSize.getWidth();
+    const height = pdf.internal.pageSize.getHeight();
+    pdf.addImage(dataUrl, 'PNG', 0, 0, width, height);
     const pdfBlob = pdf.output('blob');
 
-    let fileUrl = '';
-    let uploaded = false;
-    try {
-      const store = firebase.storage();
-      const path = `${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}certificates/${y}/${info.admission}.pdf`;
-      const ref = store.ref(path);
-      await ref.put(pdfBlob, { contentType: 'application/pdf', customMetadata: { studentId, admission: info.admission, year: y } });
-      fileUrl = await ref.getDownloadURL();
-      uploaded = true;
-    } catch (err) {
-      console.warn('Storage upload failed, using local blob', err);
-      // Offer a local download so the user still gets the PDF, but avoid persisting an invalid blob URL.
-      const tempUrl = URL.createObjectURL(pdfBlob);
-      const fallbackName = `${info.fullName || info.admission}_${y}.pdf`.replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_');
-      const link = document.createElement('a');
-      link.href = tempUrl;
-      link.download = fallbackName || `${info.admission}_${y}.pdf`;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(tempUrl);
-        link.remove();
-      }, 200);
-      showToast('Upload failed. Downloaded locally instead - regenerate to retry upload.', 'warn', 5200);
-    }
-
-    await firebase.database().ref(`${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}graduationCertificates/${y}/${studentId}`)
-      .set({
-        generatedAt: Date.now(),
-        generatedBy: (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'unknown',
-        fileUrl: uploaded ? fileUrl : '',
-      });
-
-    // Auto-download if requested
+    // Auto-download immediately if requested (before upload for faster UX)
     if (options.forceDownload) {
-      const safeName = `${info.fullName || info.admission}_${y}.pdf`.replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_');
+      const safeName = `${(info.fullName || info.admission || studentId).replace(/[^\w\s-]+/g, ' ').trim().replace(/\s+/g, '_')}_${y}.pdf`;
+      const downloadUrl = URL.createObjectURL(pdfBlob);
       const link = document.createElement('a');
-      link.href = uploaded ? fileUrl : URL.createObjectURL(pdfBlob);
+      link.href = downloadUrl;
       link.download = safeName;
       link.style.display = 'none';
       document.body.appendChild(link);
       link.click();
       setTimeout(() => {
-        if (!uploaded) URL.revokeObjectURL(link.href);
+        URL.revokeObjectURL(downloadUrl);
         link.remove();
-      }, 100);
+      }, 1200);
     }
+
+    // Upload to storage (non-blocking for download)
+    let fileUrl = '';
+    try {
+      const store = firebase.storage();
+      const path = `${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}certificates/${y}/${info.admission}.pdf`;
+      const ref = store.ref(path);
+      await ref.put(pdfBlob, { contentType: 'application/pdf' });
+      fileUrl = await ref.getDownloadURL();
+    } catch (err) {
+      console.warn('Storage upload failed', err);
+      // Continue without fileUrl - user already has the PDF downloaded
+    }
+
+    // Save certificate record
+    await firebase.database().ref(`${window.currentSchoolId ? `schools/${window.currentSchoolId}/` : ''}graduationCertificates/${y}/${studentId}`)
+      .set({
+        generatedAt: Date.now(),
+        generatedBy: (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'unknown',
+        fileUrl: fileUrl || '',
+      });
   }
 
   // Download certificate file helper

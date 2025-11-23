@@ -1,18 +1,7 @@
 window.addEventListener('DOMContentLoaded', async () => {
   const appEl = document.getElementById('app');
-  const gateEl = document.getElementById('authGate');
-
-  // AUTH GATE (read-only for signed-in; restrict page behind login)
-  firebase.auth().onAuthStateChanged(async (user) => {
-    if (!user) {
-      gateEl.style.display = 'grid';
-      appEl.style.display = 'none';
-      return;
-    }
-    gateEl.style.display = 'none';
-    appEl.style.display = '';
-    initStudio();
-  });
+  if (appEl) appEl.style.display = '';
+  initStudio();
 });
 
 function pick(obj, pathList){

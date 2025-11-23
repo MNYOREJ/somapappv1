@@ -23,21 +23,23 @@ async function fetchWorkers(){
 }
 
 function normalize(wk, key){
-  const first = wk.firstName || '';
-  const mid   = wk.middleName || '';
-  const last  = wk.lastName || wk.surname || '';
-  const full  = [first, mid, last].join(' ').replace(/\s+/g,' ').trim() || (wk.name || '—');
+  const profile = wk.profile || {};
+  const docs = wk.docs || {};
+  const first = pick(profile, ['firstName']) || wk.firstName || '';
+  const mid   = pick(profile, ['middleName']) || wk.middleName || '';
+  const last  = pick(profile, ['lastName','surname']) || wk.lastName || wk.surname || '';
+  const full  = (profile.fullNameUpper || [first, mid, last].join(' ')).replace(/\s+/g,' ').trim() || (wk.name || '—');
   return {
     key,
     name: full,
-    staffId: wk.staffId || wk.employeeId || key,
-    role: wk.role || wk.title || 'Staff',
-    department: wk.department || wk.dept || '—',
-    phone: wk.phone || wk.contact || wk.mobile || '',
-    photo: wk.photoUrl || wk.passportPhotoUrl || wk.avatarUrl || '',
-    blood: wk.bloodGroup || '—',
-    emergency: wk.emergencyContact || '',
-    issued: wk.issuedAt ? new Date(wk.issuedAt).toLocaleDateString() : new Date().toLocaleDateString(),
+    staffId: pick(profile, ['staffId','employeeId']) || wk.staffId || wk.employeeId || key,
+    role: profile.role || wk.role || wk.title || 'Staff',
+    department: profile.department || wk.department || wk.dept || '—',
+    phone: profile.phone || wk.phone || wk.contact || wk.mobile || '',
+    photo: docs.passportPhotoUrl || docs.idPhotoUrl || profile.photoUrl || wk.photoUrl || wk.passportPhotoUrl || wk.avatarUrl || '',
+    blood: profile.bloodGroup || wk.bloodGroup || '—',
+    emergency: profile.nextOfKinPhone || wk.emergencyContact || '',
+    issued: profile.admissionDate ? new Date(profile.admissionDate).toLocaleDateString() : (wk.issuedAt ? new Date(wk.issuedAt).toLocaleDateString() : new Date().toLocaleDateString()),
     valid: wk.validTo ? new Date(wk.validTo).getFullYear() : (new Date().getFullYear() + 1)
   };
 }

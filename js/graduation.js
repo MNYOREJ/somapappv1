@@ -486,10 +486,11 @@
 
     try { if (imgEl && imgEl.decode) await imgEl.decode(); } catch (err) { /* ignore */ }
 
+    const renderScale = Math.min(1.8, Math.max(1.35, window.devicePixelRatio || 1.6));
     const canvas = await window.html2canvas(node, {
       useCORS: true,
       backgroundColor: '#ffffff',
-      scale: 2,
+      scale: renderScale,
       logging: false,
     });
 
@@ -1603,8 +1604,9 @@
       throw new Error('html2canvas + jsPDF are required for certificate generation');
     }
 
+    const scale = Math.min(1.8, Math.max(1.35, window.devicePixelRatio || 1.6));
     const canvas = await window.html2canvas(certNode, {
-      scale: 2,
+      scale,
       useCORS: true,
       backgroundColor: null,
     });

@@ -356,7 +356,7 @@
       entry.parentPhone = extractPrimaryPhone(entry);
       entry.parentName = extractPrimaryName(entry);
       entry.parentEmail = extractPrimaryEmail(entry);
-      entry.photoUrl = entry.photoUrl || entry.photo || '';
+      entry.photoUrl = entry.photoUrl || entry.passportPhotoUrl || entry.photo || '';
       entry.isGraduand = isGraduand(entry.classLevel);
       return entry;
     });

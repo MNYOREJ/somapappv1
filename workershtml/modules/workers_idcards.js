@@ -57,10 +57,28 @@ async function initStudio(){
   const { path, map } = await fetchWorkers();
   const list = Object.entries(map).map(([k,v]) => normalize(v,k));
 
+  // Attempt to resolve currently signed-in worker for quicker access
+  const workerIdLS = (localStorage.getItem('workerId') || '').toLowerCase();
+  const fullNameLS = (localStorage.getItem('fullNameUpper') || '').toLowerCase();
+  const roleLS = localStorage.getItem('role') || '';
+
   const results = document.getElementById('results');
   const countHint = document.getElementById('countHint');
   const searchBox = document.getElementById('searchBox');
   const downloadBtn = document.getElementById('downloadPdf');
+
+  function resolveActiveWorker(){
+    if (!list.length) return null;
+    // Match by key or staffId first
+    let match = list.find(w => w.key.toLowerCase() === workerIdLS || String(w.staffId).toLowerCase() === workerIdLS);
+    if (match) return match;
+    // Fallback: match by name fragment
+    if (fullNameLS){
+      match = list.find(w => w.name.toLowerCase().includes(fullNameLS));
+      if (match) return match;
+    }
+    return null;
+  }
 
   function renderList(filter=''){
     const f = filter.trim().toLowerCase();
@@ -139,7 +157,14 @@ async function initStudio(){
   });
 
   searchBox.addEventListener('input', (e)=> renderList(e.target.value));
-  renderList('');
-  // Auto-load first record if exists
-  if (list.length) loadWorker(list[0]);
+  const active = resolveActiveWorker();
+  const defaultFilter = active ? (active.staffId || active.name) : '';
+  renderList(defaultFilter);
+  // Auto-load active worker if found; else first record
+  if (active) {
+    searchBox.value = defaultFilter;
+    loadWorker(active);
+  } else if (list.length) {
+    loadWorker(list[0]);
+  }
 }

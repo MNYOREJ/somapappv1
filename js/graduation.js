@@ -1196,11 +1196,25 @@
     certNode.querySelector('[data-cert="issuedDate"]').textContent = new Date().toLocaleDateString('en-GB');
     certNode.querySelector('[data-cert="admission"]').textContent = toStr(student.admissionNo);
 
-    // photo with crossOrigin
+    // photo with crossOrigin - fetch from master students if not in graduation record
     const photoNode = certNode.querySelector('[data-cert="photo"]');
     if (photoNode) {
       photoNode.crossOrigin = 'anonymous';
-      photoNode.src = student.photoUrl || '../images/somap-logo.png.jpg';
+      let photoUrl = student.photoUrl || '';
+      // If no photo in graduation record, fetch from master students RTDB
+      if (!photoUrl) {
+        try {
+          const masterSnapshot = await db().ref('students').orderByChild('admissionNumber').equalTo(student.admissionNo).once('value');
+          const masterData = masterSnapshot.val() || {};
+          const masterStudent = Object.values(masterData)[0];
+          if (masterStudent) {
+            photoUrl = masterStudent.passportPhotoUrl || masterStudent.passportPhotoURL || masterStudent.photoUrl || masterStudent.photo || '';
+          }
+        } catch (err) {
+          console.warn('Failed to fetch photo from RTDB:', err?.message || err);
+        }
+      }
+      photoNode.src = photoUrl || '../images/somap-logo.png.jpg';
       await new Promise((resolve) => {
         if (photoNode.complete) return resolve();
         photoNode.onload = () => resolve();

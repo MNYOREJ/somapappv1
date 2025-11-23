@@ -123,17 +123,28 @@ async function initStudio(){
     const frontEl = document.getElementById('front');
     const backEl  = document.getElementById('back');
 
-    const scale = 2; // sharp
+    const scale = 2; // sharp canvas for printing
     const frontCanvas = await html2canvas(frontEl, { scale, useCORS:true, logging:false });
     const backCanvas  = await html2canvas(backEl,  { scale, useCORS:true, logging:false });
 
-    // Fit width (A4: 210x297 mm). Leave margins.
-    const pageW = 210, margin = 10, drawW = pageW - margin*2;
+    // CR80 physical size ~85.6 x 54 mm. Render both sides at real size, centered on A4 for easy cutting.
+    const pageW = 210, pageH = 297;
+    const cardW = 86; // slight bleed
     const ratio = frontCanvas.width / frontCanvas.height;
-    const drawH = drawW / ratio;
+    const cardH = cardW / ratio; // keep aspect so text is not clipped
+    const marginX = (pageW - cardW) / 2;
+    const topY = 20;
+    const gapY = 12;
 
-    pdf.addImage(frontCanvas.toDataURL('image/png'), 'PNG', margin, margin, drawW, drawH);
-    pdf.addImage(backCanvas.toDataURL('image/png'),  'PNG', margin, margin + drawH + 6, drawW, drawH);
+    pdf.addImage(frontCanvas.toDataURL('image/png'), 'PNG', marginX, topY, cardW, cardH);
+
+    const backY = topY + cardH + gapY;
+    if (backY + cardH + topY <= pageH){
+      pdf.addImage(backCanvas.toDataURL('image/png'),  'PNG', marginX, backY, cardW, cardH);
+    } else {
+      pdf.addPage();
+      pdf.addImage(backCanvas.toDataURL('image/png'),  'PNG', marginX, topY, cardW, cardH);
+    }
 
     pdf.save(`${(w.name||'ID').replace(/\\s+/g,'_')}_Socrates_ID.pdf`);
   }

@@ -68,11 +68,11 @@
   }
 
   function getLocalSession() {
-    const workerId = localStorage.getItem('workerId');
-    const role = localStorage.getItem('role');
-    const fullNameUpper = localStorage.getItem('fullNameUpper');
+    const workerId = localStorage.getItem('workerId') || sessionStorage.getItem('workerId');
+    const role = localStorage.getItem('role') || sessionStorage.getItem('role') || 'worker';
+    const fullNameUpper = localStorage.getItem('fullNameUpper') || sessionStorage.getItem('fullNameUpper');
     if (workerId) {
-      return { workerId, role: role || 'worker', fullNameUpper };
+      return { workerId, role, fullNameUpper };
     }
     return null;
   }
@@ -138,6 +138,22 @@
     for (const p of [`workers/${id}`, `staff/${id}`]) {
       const data = await readOnce(p);
       if (data) return normalizeWorker(data, id);
+    }
+    return null;
+  }
+
+  async function findWorkerByNameUpper(nameUpper) {
+    if (!nameUpper) return null;
+    for (const path of ['workers', 'staff']) {
+      const data = await readOnce(path);
+      if (data && typeof data === 'object') {
+        for (const [uid, val] of Object.entries(data)) {
+          const profile = val.profile || {};
+          if ((profile.fullNameUpper || '').toLowerCase() === nameUpper.toLowerCase()) {
+            return normalizeWorker(val, uid);
+          }
+        }
+      }
     }
     return null;
   }
@@ -354,7 +370,10 @@
     const localSession = getLocalSession();
 
     if (!user && !localSession) {
-      location.href = '../index.html';
+      const main = document.querySelector('main');
+      if (main) {
+        main.innerHTML = '<div class="shell"><div class="glass p-6 text-slate-800 rounded-xl">Please sign in from the workers dashboard to generate certificates.</div></div>';
+      }
       return;
     }
 
@@ -388,7 +407,15 @@
         }
       };
     } else {
-      const worker = user ? await getWorkerByUid(user.uid) : await getWorkerById(localSession?.workerId);
+      let worker = null;
+      if (user) {
+        worker = await getWorkerByUid(user.uid);
+      } else if (localSession?.workerId) {
+        worker = await getWorkerById(localSession.workerId);
+      }
+      if (!worker && localSession?.fullNameUpper) {
+        worker = await findWorkerByNameUpper(localSession.fullNameUpper);
+      }
       if (!worker) {
         $('#selfPreview').innerHTML = '<div class="text-sm text-red-600">Worker record not found.</div>';
         return;

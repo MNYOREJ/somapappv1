@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SoMAp • Worker Certificates</title>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase.js"></script>
+
+  <!-- UI / Export libs -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    body{min-height:100vh;background:linear-gradient(180deg,#0f172a,#020617);color:#0f172a}
+    .shell{max-width:1100px;margin:0 auto;padding:24px;color:#fff}
+    .glass{background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.45);border-radius:18px;backdrop-filter:blur(16px);color:#111827}
+    .gold{background:linear-gradient(135deg,#fbbf24,#d97706);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .seal{width:96px;height:96px;border-radius:999px;border:4px solid #eab308;
+          background:radial-gradient(circle at 30% 30%,#fde68a,#f59e0b 60%,#b45309 100%);
+          box-shadow:0 10px 30px rgba(234,179,8,.35);}
+    /* Offscreen canvas for export */
+    #offscreen{position:fixed;left:-9999px;top:-9999px}
+  </style>
+</head>
+<body data-page="workers-certificates">
+  <main class="shell space-y-6">
+    <header class="glass p-6 space-y-2">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-xs text-slate-500">Workers</p>
+          <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900">Certificate of Appreciation</h1>
+          <p class="text-sm text-slate-600">Auto-filled from workers’ records — export in PNG/PDF.</p>
+        </div>
+        <div class="text-right">
+          <label class="text-xs font-semibold">Academic Year</label>
+          <select id="yearSelect" class="border rounded px-2 py-1 text-sm"></select>
+          <div class="text-[11px] text-slate-500">Working year: <b id="yearHint">--</b></div>
+        </div>
+      </div>
+      <div id="windowBanner" class="hidden mt-3 text-[13px] text-amber-700 bg-amber-50 border border-amber-300 rounded p-2">
+        Certificates are available in November–December. (Admins can override with <code>?force=1</code>.)
+      </div>
+    </header>
+
+    <!-- Worker mode: single card -->
+    <section id="selfBox" class="glass p-6 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-lg font-semibold" id="selfName">—</div>
+          <div class="text-sm text-slate-600" id="selfRole">—</div>
+          <div class="text-sm text-slate-600">Phone: <span id="selfPhone">—</span></div>
+        </div>
+        <div class="flex gap-2">
+          <button id="btnPreviewSelf" class="px-3 py-2 rounded border">Preview</button>
+          <button id="btnPngSelf" class="px-3 py-2 rounded border">Download PNG</button>
+          <button id="btnPdfSelf" class="px-3 py-2 rounded bg-slate-900 text-white">Download PDF</button>
+        </div>
+      </div>
+      <div id="selfPreview" class="mt-4"></div>
+    </section>
+
+    <!-- Admin mode: list & search -->
+    <section id="adminBox" class="glass p-6 hidden">
+      <div class="flex items-center justify-between">
+        <input id="searchBox" class="border rounded px-3 py-2 w-full max-w-md" placeholder="Search worker name / phone…" />
+        <div class="flex gap-2 ml-4">
+          <button id="btnGenerateAll" class="px-3 py-2 rounded border">Generate All</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto mt-4">
+        <table class="w-full">
+          <thead class="text-xs uppercase tracking-widest text-slate-500">
+            <tr><th class="p-2 text-left">Worker</th><th class="p-2">Role</th><th class="p-2">Phone</th><th class="p-2 text-right">Actions</th></tr>
+          </thead>
+          <tbody id="workersTbody" class="text-sm"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Offscreen render target -->
+  <div id="offscreen"></div>
+
+  <!-- Certificate Template (cloned per render) -->
+  <template id="workerCertTemplate">
+    <div style="width:1120px;height:794px;padding:44px;background:#f8fafc;border:10px solid #0f766e;border-radius:24px;position:relative;font-family:'Cinzel',serif;color:#0f172a;">
+      <div style="position:absolute;inset:26px;opacity:.06;background:url('../images/somap-logo.png.jpg') center/contain no-repeat;"></div>
+      <div style="position:absolute;top:28px;left:28px" class="seal"></div>
+      <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:space-between;">
+        <header style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <img id="logoImg" src="../images/somap-logo.png.jpg" alt="Logo" style="width:60px;height:60px;border-radius:12px;object-fit:cover;border:3px solid #d97706"/>
+            <div>
+              <div style="font-weight:900;letter-spacing:.28em">SOCRATES SCHOOL</div>
+              <div class="gold" style="font-weight:700;letter-spacing:.18em">CERTIFICATE OF APPRECIATION</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="text-align:right;font-size:12px;color:#334155">
+              <div>PO Box 14256, Arusha</div>
+              <div>+255 686 828 732 · +255 689 649 822</div>
+            </div>
+            <img id="passport" crossOrigin="anonymous" src="" alt="Photo" style="width:110px;height:110px;border-radius:16px;border:4px solid #d97706;object-fit:cover;box-shadow:0 10px 20px rgba(0,0,0,.15)"/>
+          </div>
+        </header>
+
+        <main style="text-align:center;padding:10px 80px;">
+          <div style="font-size:18px;color:#334155">This certificate is proudly presented to</div>
+          <div id="fullName" style="font-size:48px;font-weight:800;margin-top:6px;text-transform:uppercase;letter-spacing:.04em">—</div>
+          <div style="margin-top:8px;font-size:18px">for outstanding service as <b id="roleText">—</b> during the year <b id="yearText">—</b>.</div>
+          <div style="margin-top:8px;font-size:14px;color:#475569">Issued on <span id="issuedDate">—</span> • Phone <span id="phoneText">—</span></div>
+        </main>
+
+        <footer style="display:flex;justify-content:space-between;align-items:flex-end;padding:0 60px 6px;">
+          <div style="text-align:center;">
+            <div style="width:200px;height:2px;background:#0f766e;margin-bottom:8px;"></div>
+            <div style="font-weight:700">Head Teacher</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="width:200px;height:2px;background:#0f766e;margin-bottom:8px;"></div>
+            <div style="font-weight:700">Manager</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="width:200px;height:2px;background:#0f766e;margin-bottom:8px;"></div>
+            <div style="font-weight:700">Authorised</div>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </template>
+
+  <script src="modules/workers_certificates.js"></script>
+</body>
+</html>

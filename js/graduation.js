@@ -459,6 +459,7 @@
       populateStudentSelect();
       renderStudentTable();
       renderDashboardSummary();
+      renderExpenseTotals();
     });
     const needsPayments = document.querySelector('#paymentsBody') || document.querySelector('#paymentStudent') || document.querySelector('#paymentForm');
     if (needsPayments) {
@@ -466,6 +467,7 @@
         state.payments = payments;
         renderPaymentsTable();
         renderDashboardSummary();
+        renderExpenseTotals();
       });
     }
     const needsExpenses = document.querySelector('#expensesBody') || document.querySelector('#expenseForm');
@@ -686,8 +688,21 @@
     const expenses = Object.values(state.expenses || {});
     const total = expenses.reduce((sum, expense) => sum + Number(expense.total || (Number(expense.priceEach || 0) * Number(expense.quantity || 0))), 0);
     const count = expenses.length;
+    const collectedFromStudents = Object.values(state.students || {}).reduce((sum, student) => sum + Number(student.paid || 0), 0);
+    const collectedFromPayments = Object.values(state.payments || {}).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const collected = collectedFromStudents || collectedFromPayments || 0;
+    const balance = collected - total;
+
     setText('#expensesTotal', formatCurrency(total));
     setText('#expensesCount', count ? `${count} entr${count === 1 ? 'y' : 'ies'}` : '0 entries');
+    setText('#expensesCollectedTotal', formatCurrency(collected));
+    setText('#expensesNetBalance', formatCurrency(balance));
+
+    const balanceNode = $('#expensesNetBalance');
+    if (balanceNode) {
+      balanceNode.classList.toggle('negative', balance < 0);
+      balanceNode.classList.toggle('positive', balance >= 0);
+    }
   }
 
   function renderAuditLog() {
@@ -854,7 +869,7 @@
     });
   }
 
-  function handleExpenseSubmit(event) {
+  async function handleExpenseSubmit(event) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
@@ -882,16 +897,16 @@
     }
 
     setBusy('#expenseSubmit', true);
-    recordExpense(payload)
-      .then(() => {
-        form.reset();
-        showToast('Expense recorded with proof.');
-      })
-      .catch((err) => {
-        console.error(err);
-        showToast(err?.message || 'Expense failed', 'error');
-      })
-      .finally(() => setBusy('#expenseSubmit', false));
+    try {
+      await recordExpense(payload);
+      form.reset();
+      showToast('Expense recorded with proof.');
+    } catch (err) {
+      console.error(err);
+      showToast(err?.message || 'Expense failed', 'error');
+    } finally {
+      setBusy('#expenseSubmit', false);
+    }
   }
 
   function recordExpense({ item, seller, sellerPhone, quantity, priceEach, note, proofFile }) {

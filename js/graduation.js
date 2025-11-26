@@ -34,6 +34,7 @@
     totalPresentToday: null,
     filters: { search: '', classLevel: 'all' },
     watchers: [],
+    galleryUploading: false,
   };
 
   // ---------- DOM HELPERS ----------
@@ -231,6 +232,7 @@
 
     const galleryForm = $('#galleryForm');
     if (galleryForm) galleryForm.addEventListener('submit', handleGallerySubmit);
+    wireGalleryDropzone();
 
     document.querySelectorAll('[data-export]').forEach((button) => {
       button.addEventListener('click', (event) => {
@@ -1046,35 +1048,72 @@
     return String(pathHint || 'file').replace(/[^a-z0-9_\-]/gi, '_');
   }
 
-  function handleGallerySubmit(event) {
+  async function handleGallerySubmit(event) {
     event.preventDefault();
     if (!isAuthorized(state.user?.email || '')) {
       showToast('Only staff can upload gallery photos.', 'error');
       return;
     }
     const form = event.currentTarget;
-    const data = new FormData(form);
-    const payload = {
-      caption: toStr(data.get('caption')),
-      file: data.get('photo'),
-    };
+    const captionInput = toStr(form.querySelector('[name="caption"]')?.value);
+    const files = Array.from(form.querySelector('input[name="photo"]')?.files || []);
 
-    if (!payload.file || !payload.file.size) {
+    if (!files.length) {
       showToast('Select a photo to upload.', 'error');
       return;
     }
 
     setBusy('#gallerySubmit', true);
-    uploadGalleryPhoto(payload)
-      .then(() => {
-        form.reset();
-        showToast('Gallery photo uploaded.');
-      })
-      .catch((err) => {
-        console.error(err);
-        showToast(err?.message || 'Upload failed', 'error');
-      })
-      .finally(() => setBusy('#gallerySubmit', false));
+    try {
+      await processGalleryFiles(files, captionInput);
+      form.reset();
+      setGalleryStatus('All photos uploaded. Parents can view instantly.', 'success');
+      showToast('Gallery photo uploaded.');
+    } catch (err) {
+      console.error(err);
+      setGalleryStatus(err?.message || 'Upload failed', 'error');
+      showToast(err?.message || 'Upload failed', 'error');
+    } finally {
+      setBusy('#gallerySubmit', false);
+    }
+  }
+
+  async function processGalleryFiles(files, captionInput) {
+    const list = (files || []).filter((file) => file && file.size).slice(0, 10);
+    if (!list.length) throw new Error('Drop image files only.');
+    if (!isAuthorized(state.user?.email || '')) throw new Error('Only staff can upload gallery photos.');
+    if (state.galleryUploading) throw new Error('Another gallery upload is still running. Please wait.');
+
+    state.galleryUploading = true;
+    setGalleryStatus(`Uploading ${list.length} photo${list.length > 1 ? 's' : ''}...`, 'info');
+    try {
+      for (const file of list) {
+        const caption = captionInput || deriveCaptionFromFile(file);
+        setGalleryStatus(`Uploading ${file.name || 'photo'}...`, 'info');
+        await uploadGalleryPhoto({ caption, file });
+        setGalleryStatus(`Saved ${file.name || 'photo'}`, 'success');
+      }
+      setGalleryStatus('Uploads complete. Gallery refreshed.', 'success');
+    } catch (err) {
+      setGalleryStatus(err?.message || 'Upload failed', 'error');
+      throw err;
+    } finally {
+      state.galleryUploading = false;
+    }
+  }
+
+  function deriveCaptionFromFile(file) {
+    if (!file?.name) return 'Graduation moment';
+    const base = file.name.replace(/\.[^.]+$/, '');
+    return base.replace(/[_-]+/g, ' ').trim() || 'Graduation moment';
+  }
+
+  function setGalleryStatus(message, tone = 'info') {
+    const node = $('#galleryUploadStatus');
+    if (!node) return;
+    node.textContent = toStr(message);
+    const palette = tone === 'error' ? '#dc2626' : tone === 'success' ? '#059669' : '#475569';
+    node.style.color = palette;
   }
 
   function uploadGalleryPhoto({ caption, file }) {
@@ -1497,6 +1536,70 @@
         console.error(err);
         showToast(err?.message || 'Failed to switch academic year', 'error');
       });
+  }
+
+  function wireGalleryDropzone() {
+    const dropArea = $('#galleryDropArea');
+    const fileInput = $('#galleryPhotoInput') || document.querySelector('input[name="photo"]');
+    const captionInput = $('#galleryCaptionInput');
+    if (!dropArea || !fileInput) return;
+
+    const activate = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropArea.classList.add('dragging');
+    };
+    const deactivate = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropArea.classList.remove('dragging');
+    };
+
+    ['dragenter', 'dragover'].forEach((evt) => dropArea.addEventListener(evt, activate));
+    ['dragleave', 'dragend', 'drop'].forEach((evt) => dropArea.addEventListener(evt, deactivate));
+
+    dropArea.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer?.files || []).filter((file) => file && (!file.type || file.type.startsWith('image/')));
+      if (!files.length) {
+        showToast('Only image files can be dropped here.', 'error');
+        return;
+      }
+      if (!isAuthorized(state.user?.email || '')) {
+        showToast('Only staff can upload gallery photos.', 'error');
+        return;
+      }
+      try {
+        await processGalleryFiles(files, captionInput?.value || '');
+        if (typeof DataTransfer !== 'undefined') {
+          const dt = new DataTransfer();
+          files.forEach((file) => dt.items.add(file));
+          fileInput.files = dt.files;
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    });
+
+    dropArea.addEventListener('click', () => fileInput.click());
+    dropArea.addEventListener('keypress', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    fileInput.addEventListener('change', () => {
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) {
+        setGalleryStatus('', 'info');
+        return;
+      }
+      const msg = files.length === 1
+        ? `${files[0].name} ready to upload`
+        : `${files.length} photos selected. Click Upload to start.`;
+      setGalleryStatus(msg, 'info');
+    });
   }
 
   function compressImage(file, maxWidth = 1600, maxHeight = 1600, quality = 0.82) {

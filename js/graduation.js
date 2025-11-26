@@ -51,6 +51,11 @@
     return firebase.storage();
   }
 
+  // Cloudinary defaults (align with other modules)
+  const CLD_CLOUD_NAME = localStorage.getItem('cloud_name') || 'dg7vnrkgd';
+  const CLD_UPLOAD_PRESET = localStorage.getItem('upload_preset') || 'books_unsigned';
+  const CLD_EXPENSE_FOLDER = 'somapappv1/graduation/expenses';
+
   function toStr(value) { return value == null ? '' : String(value); }
   function sanitizeKey(raw) { return toStr(raw).replace(/[.#$/[\]]/g, '_'); }
 
@@ -914,13 +919,12 @@
     }
   }
 
-  function recordExpense({ item, seller, sellerPhone, quantity, priceEach, note, proofFile }) {
+  async function recordExpense({ item, seller, sellerPhone, quantity, priceEach, note, proofFile }) {
     const year = state.currentYear;
     const expenseRef = db().ref(`graduation/${year}/expenses`).push();
     const expenseId = expenseRef.key;
     const total = Number(quantity || 0) * Number(priceEach || 0);
-    const storagePath = `graduation/${year}/expenses/${expenseId}/${encodeURIComponent(proofFile.name)}`;
-    const storageRef = storage().ref(storagePath);
+    let uploadFile = proofFile;
 
     if (proofFile.type && proofFile.type.startsWith('video/')) {
       return Promise.reject(new Error('Videos are not allowed. Please upload an image or PDF.'));
@@ -928,6 +932,15 @@
     if (proofFile.size > 25 * 1024 * 1024) {
       return Promise.reject(new Error('Proof file too large. Max 25MB.'));
     }
+    if (proofFile.type && proofFile.type.startsWith('image/') && proofFile.size > 2 * 1024 * 1024) {
+      try {
+        uploadFile = await compressImage(proofFile, 1600, 1600, 0.82);
+      } catch (err) {
+        console.warn('Compression skipped', err?.message || err);
+      }
+    }
+    const safeName = uploadFile.name || proofFile.name || 'proof.jpg';
+    const storagePath = `graduation/${year}/expenses/${expenseId}/${encodeURIComponent(safeName)}`;
 
     // First write the expense so it appears immediately, then upload proof in background.
     const basePayload = {
@@ -941,13 +954,16 @@
       proofPath: storagePath,
       proofStatus: 'uploading',
       proofProgress: 0,
+      proofOriginalName: proofFile.name || 'file',
+      proofOriginalSize: proofFile.size || 0,
+      proofUploadedSize: uploadFile.size || proofFile.size || 0,
       note,
       recordedBy: state.user?.email || 'unknown',
       createdAt: firebase.database.ServerValue.TIMESTAMP,
     };
 
     return expenseRef.set(basePayload).then(() => {
-      uploadWithProgress(storageRef, proofFile, (progress) => {
+      uploadExpenseProof(uploadFile, `${expenseId}-${safeName}`, (progress) => {
         expenseRef.update({ proofProgress: progress }).catch(() => {});
       })
         .then((url) => {
@@ -968,6 +984,60 @@
 
       return expenseId;
     });
+  }
+
+  function uploadExpenseProof(file, pathHint, onProgress, timeoutMs = 120000) {
+    const resource = (file?.type || '').startsWith('image/') ? 'image' : 'raw';
+    const url = `https://api.cloudinary.com/v1_1/${CLD_CLOUD_NAME}/${resource}/upload`;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('upload_preset', CLD_UPLOAD_PRESET);
+    fd.append('folder', CLD_EXPENSE_FOLDER);
+    fd.append('public_id', cldPublicIdFrom(pathHint));
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const timer = setTimeout(() => {
+        try { xhr.abort(); } catch (_) { /* ignore */ }
+        reject(new Error('Upload taking too long. Please retry on a stable connection or compress the image (max 25MB).'));
+      }, timeoutMs);
+
+      xhr.upload.onprogress = (evt) => {
+        if (!evt.lengthComputable) return;
+        const pct = Math.round((evt.loaded / evt.total) * 100);
+        if (onProgress) onProgress(pct);
+      };
+      xhr.onreadystatechange = () => {
+        if (xhr.readyState !== 4) return;
+        clearTimeout(timer);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const res = JSON.parse(xhr.responseText || '{}');
+            if (res.secure_url) return resolve(res.secure_url);
+            return reject(new Error('Cloudinary did not return a URL'));
+          } catch (err) {
+            return reject(err);
+          }
+        } else {
+          let message = 'Cloudinary upload failed';
+          try {
+            const res = JSON.parse(xhr.responseText || '{}');
+            message = res?.error?.message || message;
+          } catch (_) { /* ignore */ }
+          reject(new Error(message));
+        }
+      };
+      xhr.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error('Network error during upload'));
+      };
+      xhr.open('POST', url, true);
+      xhr.send(fd);
+    });
+  }
+
+  function cldPublicIdFrom(pathHint) {
+    return String(pathHint || 'file').replace(/[^a-z0-9_\-]/gi, '_');
   }
 
   function handleGallerySubmit(event) {
@@ -1396,25 +1466,35 @@
       });
   }
 
-  // Upload helper with progress + timeout for faster feedback on large files or stalled uploads.
-  function uploadWithProgress(storageRef, file, onProgress, timeoutMs = 60000) {
+  function compressImage(file, maxWidth = 1600, maxHeight = 1600, quality = 0.82) {
     return new Promise((resolve, reject) => {
-      const task = storageRef.put(file);
-      const timer = setTimeout(() => {
-        try { task.cancel(); } catch (_) { /* ignore */ }
-        reject(new Error('Upload taking too long. Please retry on a stable connection or compress the image (max 25MB).'));
-      }, timeoutMs);
-
-      task.on('state_changed', (snapshot) => {
-        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-        if (onProgress) onProgress(pct);
-      }, (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }, () => {
-        clearTimeout(timer);
-        storageRef.getDownloadURL().then(resolve).catch(reject);
-      });
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width <= maxWidth && height <= maxHeight) {
+            return resolve(file);
+          }
+          const scale = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            if (!blob) return reject(new Error('Unable to compress image.'));
+            const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '') + '-compressed.jpg', { type: 'image/jpeg' });
+            resolve(compressed);
+          }, 'image/jpeg', quality);
+        };
+        img.onerror = () => reject(new Error('Could not read image for compression.'));
+        img.src = e.target.result;
+      };
+      reader.onerror = () => reject(new Error('Could not load image for compression.'));
+      reader.readAsDataURL(file);
     });
   }
 

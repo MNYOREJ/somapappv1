@@ -55,6 +55,7 @@
   const CLD_CLOUD_NAME = localStorage.getItem('cloud_name') || 'dg7vnrkgd';
   const CLD_UPLOAD_PRESET = localStorage.getItem('upload_preset') || 'books_unsigned';
   const CLD_EXPENSE_FOLDER = 'somapappv1/graduation/expenses';
+  const CLD_GALLERY_FOLDER = 'somapappv1/graduation/gallery';
 
   function toStr(value) { return value == null ? '' : String(value); }
   function sanitizeKey(raw) { return toStr(raw).replace(/[.#$/[\]]/g, '_'); }
@@ -268,8 +269,9 @@
   function handleAuthChange(user) {
     state.user = user;
     const allowed = isAuthorized(user?.email || '');
-    showAuthGate(allowed);
-    if (!allowed) return;
+    const allowGalleryRead = allowed || state.page === 'galleries';
+    showAuthGate(allowGalleryRead);
+    if (!allowGalleryRead) return;
 
     ensureYearReady(state.currentYear)
       .then(() => {
@@ -987,12 +989,16 @@
   }
 
   function uploadExpenseProof(file, pathHint, onProgress, timeoutMs = 120000) {
+    return uploadToCloudinary(file, CLD_EXPENSE_FOLDER, pathHint, onProgress, timeoutMs);
+  }
+
+  function uploadToCloudinary(file, folder, pathHint, onProgress, timeoutMs = 120000) {
     const resource = (file?.type || '').startsWith('image/') ? 'image' : 'raw';
     const url = `https://api.cloudinary.com/v1_1/${CLD_CLOUD_NAME}/${resource}/upload`;
     const fd = new FormData();
     fd.append('file', file);
     fd.append('upload_preset', CLD_UPLOAD_PRESET);
-    fd.append('folder', CLD_EXPENSE_FOLDER);
+    fd.append('folder', folder);
     fd.append('public_id', cldPublicIdFrom(pathHint));
 
     return new Promise((resolve, reject) => {
@@ -1042,6 +1048,10 @@
 
   function handleGallerySubmit(event) {
     event.preventDefault();
+    if (!isAuthorized(state.user?.email || '')) {
+      showToast('Only staff can upload gallery photos.', 'error');
+      return;
+    }
     const form = event.currentTarget;
     const data = new FormData(form);
     const payload = {
@@ -1071,17 +1081,40 @@
     const year = state.currentYear;
     const entryRef = db().ref(`graduation/${year}/galleries`).push();
     const galleryId = entryRef.key;
-    const storagePath = `graduation/${year}/gallery/${galleryId}-${encodeURIComponent(file.name)}`;
-    const storageRef = storage().ref(storagePath);
+    const pathHint = `${year}-${galleryId}-${file.name || 'photo'}`;
+    let uploadFile = file;
 
-    return storageRef.put(file)
-      .then(() => storageRef.getDownloadURL())
+    if (uploadFile.type && uploadFile.type.startsWith('video/')) {
+      return Promise.reject(new Error('Videos are not allowed. Upload image files.'));
+    }
+    if (uploadFile.type && uploadFile.type.startsWith('image/') && uploadFile.size > 2 * 1024 * 1024) {
+      uploadFile = uploadFile.slice ? uploadFile : file; // safe fallback
+      return compressImage(uploadFile, 1920, 1920, 0.85)
+        .then((compressed) => uploadToCloudinary(compressed, CLD_GALLERY_FOLDER, pathHint))
+        .then((url) => entryRef.set({
+          caption,
+          url,
+          uploadedBy: state.user?.email || 'unknown',
+          uploadedAt: firebase.database.ServerValue.TIMESTAMP,
+          storagePath: `${CLD_GALLERY_FOLDER}/${pathHint}`,
+        }).then(() => url))
+        .then((url) => db().ref(`graduation/${year}/audits`).push({
+          actor: state.user?.email || 'unknown',
+          action: 'gallery:add',
+          refType: 'gallery',
+          refId: galleryId,
+          after: { caption, url },
+          at: firebase.database.ServerValue.TIMESTAMP,
+        }));
+    }
+
+    return uploadToCloudinary(uploadFile, CLD_GALLERY_FOLDER, pathHint)
       .then((url) => entryRef.set({
         caption,
         url,
         uploadedBy: state.user?.email || 'unknown',
         uploadedAt: firebase.database.ServerValue.TIMESTAMP,
-        storagePath,
+        storagePath: `${CLD_GALLERY_FOLDER}/${pathHint}`,
       }).then(() => url))
       .then((url) => db().ref(`graduation/${year}/audits`).push({
         actor: state.user?.email || 'unknown',

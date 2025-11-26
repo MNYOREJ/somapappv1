@@ -670,6 +670,11 @@
     tbody.innerHTML = rows.map((expense) => {
       const total = Number(expense.total || (Number(expense.priceEach || 0) * Number(expense.quantity || 0)));
       const timestamp = new Date(Number(expense.createdAt || Date.now()));
+      const proofLabel = expense.proofStatus === 'failed'
+        ? '<span class="text-xs text-red-500">Upload failed</span>'
+        : expense.proofStatus === 'uploading'
+          ? `<span class="text-xs text-amber-600">Uploading ${expense.proofProgress || 0}%</span>`
+          : (expense.proofUrl ? `<a href="${expense.proofUrl}" target="_blank" class="proof-link">Proof</a>` : '<span class="text-xs text-red-500">Missing</span>');
       return `
         <tr>
           <td>${toStr(expense.item)}</td>
@@ -678,7 +683,7 @@
           <td>${formatCurrency(expense.priceEach)}</td>
           <td>${formatCurrency(total)}</td>
           <td>${timestamp.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}<div class="text-xs text-slate-400 uppercase">${toStr(expense.recordedBy || '').split('@')[0]}</div></td>
-          <td>${expense.proofUrl ? `<a href="${expense.proofUrl}" target="_blank" class="proof-link">Proof</a>` : '<span class="text-xs text-red-500">Missing</span>'}</td>
+          <td>${proofLabel}</td>
         </tr>`;
     }).join('');
     renderExpenseTotals();
@@ -900,7 +905,7 @@
     try {
       await recordExpense(payload);
       form.reset();
-      showToast('Expense recorded with proof.');
+      showToast('Expense saved. Proof uploading in background.');
     } catch (err) {
       console.error(err);
       showToast(err?.message || 'Expense failed', 'error');
@@ -917,35 +922,52 @@
     const storagePath = `graduation/${year}/expenses/${expenseId}/${encodeURIComponent(proofFile.name)}`;
     const storageRef = storage().ref(storagePath);
 
-    if (proofFile.size > 12 * 1024 * 1024) {
-      return Promise.reject(new Error('Proof file too large. Max 12MB.'));
+    if (proofFile.type && proofFile.type.startsWith('video/')) {
+      return Promise.reject(new Error('Videos are not allowed. Please upload an image or PDF.'));
+    }
+    if (proofFile.size > 25 * 1024 * 1024) {
+      return Promise.reject(new Error('Proof file too large. Max 25MB.'));
     }
 
-    return uploadWithProgress(storageRef, proofFile, (progress) => {
-      const btn = $('#expenseSubmit');
-      if (btn) btn.textContent = progress < 100 ? `Uploading ${progress}%...` : 'Processing...';
-    })
-      .then((url) => expenseRef.set({
-        item,
-        seller,
-        sellerPhone,
-        quantity: Number(quantity),
-        priceEach: Number(priceEach),
-        total,
-        proofUrl: url,
-        proofPath: storagePath,
-        note,
-        recordedBy: state.user?.email || 'unknown',
-        createdAt: firebase.database.ServerValue.TIMESTAMP,
-      }).then(() => url))
-      .then((url) => db().ref(`graduation/${year}/audits`).push({
-        actor: state.user?.email || 'unknown',
-        action: 'expense:add',
-        refType: 'expense',
-        refId: expenseId,
-        after: { item, seller, sellerPhone, quantity, priceEach, total, proofUrl: url },
-        at: firebase.database.ServerValue.TIMESTAMP,
-      }));
+    // First write the expense so it appears immediately, then upload proof in background.
+    const basePayload = {
+      item,
+      seller,
+      sellerPhone,
+      quantity: Number(quantity),
+      priceEach: Number(priceEach),
+      total,
+      proofUrl: '',
+      proofPath: storagePath,
+      proofStatus: 'uploading',
+      proofProgress: 0,
+      note,
+      recordedBy: state.user?.email || 'unknown',
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+    };
+
+    return expenseRef.set(basePayload).then(() => {
+      uploadWithProgress(storageRef, proofFile, (progress) => {
+        expenseRef.update({ proofProgress: progress }).catch(() => {});
+      })
+        .then((url) => {
+          expenseRef.update({ proofUrl: url, proofStatus: 'ready', proofProgress: 100 }).catch(() => {});
+          db().ref(`graduation/${year}/audits`).push({
+            actor: state.user?.email || 'unknown',
+            action: 'expense:add',
+            refType: 'expense',
+            refId: expenseId,
+            after: { item, seller, sellerPhone, quantity, priceEach, total, proofUrl: url },
+            at: firebase.database.ServerValue.TIMESTAMP,
+          }).catch(() => {});
+        })
+        .catch((err) => {
+          expenseRef.update({ proofStatus: 'failed', proofError: err?.message || 'Upload failed' }).catch(() => {});
+          showToast(err?.message || 'Proof upload failed. Entry saved without proof.', 'error');
+        });
+
+      return expenseId;
+    });
   }
 
   function handleGallerySubmit(event) {
@@ -1375,12 +1397,12 @@
   }
 
   // Upload helper with progress + timeout for faster feedback on large files or stalled uploads.
-  function uploadWithProgress(storageRef, file, onProgress, timeoutMs = 20000) {
+  function uploadWithProgress(storageRef, file, onProgress, timeoutMs = 60000) {
     return new Promise((resolve, reject) => {
       const task = storageRef.put(file);
       const timer = setTimeout(() => {
         try { task.cancel(); } catch (_) { /* ignore */ }
-        reject(new Error('Upload taking too long. Please try again with a smaller file.'));
+        reject(new Error('Upload taking too long. Please retry on a stable connection or compress the image (max 25MB).'));
       }, timeoutMs);
 
       task.on('state_changed', (snapshot) => {

@@ -67,6 +67,16 @@
     );
   }
 
+  function getLocalSession() {
+    const workerId = localStorage.getItem('workerId');
+    const role = localStorage.getItem('role');
+    const fullNameUpper = localStorage.getItem('fullNameUpper');
+    if (workerId) {
+      return { workerId, role: role || 'worker', fullNameUpper };
+    }
+    return null;
+  }
+
   function pick(obj, keys) {
     for (const k of keys) {
       if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
@@ -120,6 +130,14 @@
         const data = await readOnce(`workers/${mapped}`);
         if (data) return normalizeWorker(data, mapped);
       }
+    }
+    return null;
+  }
+
+  async function getWorkerById(id) {
+    for (const p of [`workers/${id}`, `staff/${id}`]) {
+      const data = await readOnce(p);
+      if (data) return normalizeWorker(data, id);
     }
     return null;
   }
@@ -333,11 +351,14 @@
 
   async function refresh() {
     const user = auth.currentUser;
-    if (!user) {
+    const localSession = getLocalSession();
+
+    if (!user && !localSession) {
       location.href = '../index.html';
       return;
     }
-    const role = await getRole(user.uid);
+
+    const role = user ? await getRole(user.uid) : (localSession?.role || 'worker');
     const canGenerate = availabilityOpen(role);
 
     $('#selfBox').classList.add('hidden');
@@ -367,7 +388,7 @@
         }
       };
     } else {
-      const worker = await getWorkerByUid(user.uid);
+      const worker = user ? await getWorkerByUid(user.uid) : await getWorkerById(localSession?.workerId);
       if (!worker) {
         $('#selfPreview').innerHTML = '<div class="text-sm text-red-600">Worker record not found.</div>';
         return;

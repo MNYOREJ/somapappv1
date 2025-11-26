@@ -917,8 +917,14 @@
     const storagePath = `graduation/${year}/expenses/${expenseId}/${encodeURIComponent(proofFile.name)}`;
     const storageRef = storage().ref(storagePath);
 
-    return storageRef.put(proofFile)
-      .then(() => storageRef.getDownloadURL())
+    if (proofFile.size > 12 * 1024 * 1024) {
+      return Promise.reject(new Error('Proof file too large. Max 12MB.'));
+    }
+
+    return uploadWithProgress(storageRef, proofFile, (progress) => {
+      const btn = $('#expenseSubmit');
+      if (btn) btn.textContent = progress < 100 ? `Uploading ${progress}%...` : 'Processing...';
+    })
       .then((url) => expenseRef.set({
         item,
         seller,
@@ -1366,6 +1372,28 @@
         console.error(err);
         showToast(err?.message || 'Failed to switch academic year', 'error');
       });
+  }
+
+  // Upload helper with progress + timeout for faster feedback on large files or stalled uploads.
+  function uploadWithProgress(storageRef, file, onProgress, timeoutMs = 20000) {
+    return new Promise((resolve, reject) => {
+      const task = storageRef.put(file);
+      const timer = setTimeout(() => {
+        try { task.cancel(); } catch (_) { /* ignore */ }
+        reject(new Error('Upload taking too long. Please try again with a smaller file.'));
+      }, timeoutMs);
+
+      task.on('state_changed', (snapshot) => {
+        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+        if (onProgress) onProgress(pct);
+      }, (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }, () => {
+        clearTimeout(timer);
+        storageRef.getDownloadURL().then(resolve).catch(reject);
+      });
+    });
   }
 
   // ---------- ACTION BUTTON DELEGATION ----------

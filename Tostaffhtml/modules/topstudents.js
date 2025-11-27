@@ -7,7 +7,7 @@
 
   const SOMAP_ALLOWED_YEARS = Array.from({ length: 20 }, (_, i) => 2023 + i);
   const DEFAULT_YEAR = 2025;
-  const CLASS_ORDER = ['Baby Class', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
+  const CLASS_ORDER = ['Baby Class', 'Middle Class', 'Pre Unit Class', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
   const ALLOWED_ROLES = new Set(['admin', 'head', 'academic', 'teacher']);
   const state = {
     user: null,

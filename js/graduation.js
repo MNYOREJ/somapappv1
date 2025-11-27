@@ -315,41 +315,77 @@
   async function ensureStudents(year) {
     const ref = db().ref(`graduation/${year}/students`);
     const snapshot = await ref.once('value');
-    const existing = snapshot.val();
-    if (existing && Object.keys(existing).length) {
-      state.students = existing;
-      return existing;
-    }
+    const existing = snapshot.val() || {};
     const master = await fetchMasterStudents();
-    const payload = {};
+
+    const updates = {};
+    let addedCount = 0;
+
     master.forEach((student) => {
       const adm = sanitizeKey(student.admissionNumber || student.__key);
-      payload[adm] = {
+      if (!adm) return;
+
+      // Preserve any payments/notes already captured, but backfill missing profile data.
+      const current = existing[adm] || {
         admissionNo: student.admissionNumber,
-        name: student.fullName,
-        class: student.classLevel,
-        parentPhone: student.parentPhone,
-        parentName: student.parentName,
-        parentEmail: student.parentEmail,
         expectedFee: computeExpectedFee(student.classLevel),
         paid: 0,
         status: 'unpaid',
         lastPaymentAt: null,
-        isGraduand: student.isGraduand,
-        photoUrl: student.photoUrl || '',
         notes: '',
       };
+
+      let changed = !existing[adm];
+      const upsert = { ...current };
+      const ensure = (key, value, allowOverride = false) => {
+        if (value == null || value === '') return;
+        if (!upsert[key] || (allowOverride && upsert[key] !== value)) {
+          upsert[key] = value;
+          changed = true;
+        }
+      };
+
+      ensure('name', student.fullName, true);
+      ensure('class', student.classLevel, true);
+      ensure('parentPhone', student.parentPhone, true);
+      ensure('parentName', student.parentName, true);
+      ensure('parentEmail', student.parentEmail, true);
+      ensure('photoUrl', student.photoUrl || '', true);
+
+      if (!upsert.expectedFee) {
+        upsert.expectedFee = computeExpectedFee(upsert.class);
+        changed = true;
+      }
+
+      const graduandFlag = isGraduand(upsert.class);
+      if (upsert.isGraduand !== graduandFlag) {
+        upsert.isGraduand = graduandFlag;
+        changed = true;
+      }
+
+      if (changed) {
+        updates[adm] = upsert;
+      }
+      if (!existing[adm]) addedCount += 1;
     });
-    await ref.set(payload);
-    state.students = payload;
-    await db().ref(`graduation/${year}/audits`).push({
-      actor: state.user?.email || 'system',
-      action: 'seed:students',
-      refType: 'students',
-      at: firebase.database.ServerValue.TIMESTAMP,
-      after: { count: Object.keys(payload).length },
-    });
-    return payload;
+
+    if (Object.keys(updates).length) {
+      await ref.update(updates);
+    }
+
+    state.students = { ...existing, ...updates };
+
+    if (addedCount) {
+      await db().ref(`graduation/${year}/audits`).push({
+        actor: state.user?.email || 'system',
+        action: 'sync:students',
+        refType: 'students',
+        at: firebase.database.ServerValue.TIMESTAMP,
+        after: { added: addedCount, total: Object.keys(state.students).length },
+      });
+    }
+
+    return state.students;
   }
 
   async function fetchMasterStudents(force = false) {

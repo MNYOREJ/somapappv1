@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SoMAp • Top Students (Awards)</title>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+  <script src="../firebase.js"></script>
+
+  <!-- UI / Export libs -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    body{min-height:100vh;background:linear-gradient(180deg,#0f172a,#020617);color:#0f172a}
+    .shell{max-width:1150px;margin:0 auto;padding:24px;color:#fff}
+    .glass{background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.45);border-radius:18px;backdrop-filter:blur(16px);color:#111827}
+    .gold-text{background:linear-gradient(135deg,#fbbf24,#d97706);-webkit-background-clip:text;background-clip:text;color:transparent}
+    /* offscreen render container */
+    #offscreen{position:fixed;left:-9999px;top:-9999px}
+  </style>
+</head>
+<body data-page="topstudents">
+  <main class="shell space-y-6">
+    <!-- Header / Year -->
+    <header class="glass p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="uppercase tracking-[0.35em] text-xs text-slate-500">Graduation Week</p>
+          <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900">Other Best Students</h1>
+          <p class="text-sm text-slate-600">Per-year awards (Academics, Discipline, Sports, etc.). Generate beautiful certificates instantly.</p>
+        </div>
+        <div class="text-right">
+          <label class="text-xs font-semibold">Academic Year</label>
+          <select id="yearSelect" class="border rounded px-2 py-1 text-sm"></select>
+          <div class="text-[11px] text-slate-500">Working year: <b id="yearHint">--</b></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Category manager -->
+    <section class="glass p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-slate-900">Award Categories</h2>
+        <div class="flex gap-2">
+          <input id="newCategoryName" class="border rounded px-3 py-2" placeholder="Add new category e.g. 'Best in AI'"/>
+          <button id="btnAddCategory" class="px-3 py-2 rounded border">Add</button>
+        </div>
+      </div>
+      <div id="categoriesWrap" class="flex flex-wrap gap-2"></div>
+    </section>
+
+    <!-- Add award -->
+    <section class="glass p-6 space-y-3">
+      <h3 class="text-lg font-semibold text-slate-900">Create Award Entry</h3>
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div>
+          <label class="text-xs font-semibold">Category</label>
+          <select id="awardCategory" class="border rounded px-2 py-2 w-full"></select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold">Scope</label>
+          <select id="awardScope" class="border rounded px-2 py-2 w-full">
+            <option value="school">Whole School</option>
+            <option value="class">Specific Class</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold">Class (if scope=class)</label>
+          <select id="awardClass" class="border rounded px-2 py-2 w-full">
+            <option>Baby Class</option><option>Class 1</option><option>Class 2</option><option>Class 3</option>
+            <option>Class 4</option><option>Class 5</option><option>Class 6</option><option>Class 7</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold">Rank</label>
+          <select id="awardRank" class="border rounded px-2 py-2 w-full">
+            <option>1</option><option>2</option><option>3</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold">Search Student</label>
+          <input id="studentSearch" class="border rounded px-2 py-2 w-full" placeholder="Name / Admission / Phone"/>
+          <div id="studentPick" class="mt-1 text-xs text-slate-600"></div>
+        </div>
+      </div>
+      <div class="flex justify-end">
+        <button id="btnCreateAward" class="px-4 py-2 rounded bg-slate-900 text-white">Save Award + Generate Certificate</button>
+      </div>
+    </section>
+
+    <!-- Awards table -->
+    <section class="glass p-6">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-slate-900">Awards for <span id="yearTitle">—</span></h3>
+        <div class="flex gap-2">
+          <input id="filterText" class="border rounded px-3 py-2" placeholder="Filter by student/category/class"/>
+          <button id="btnBulkPdf" class="px-3 py-2 rounded border">Download All (PDF)</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto mt-3">
+        <table class="w-full">
+          <thead class="text-xs uppercase tracking-widest text-slate-500">
+            <tr>
+              <th class="p-2 text-left">Student</th>
+              <th class="p-2">Category</th>
+              <th class="p-2">Scope</th>
+              <th class="p-2">Class</th>
+              <th class="p-2">Rank</th>
+              <th class="p-2">Created By</th>
+              <th class="p-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="awardsTbody" class="text-sm"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Offscreen render target -->
+  <div id="offscreen"></div>
+
+  <!-- Certificate template (CSS-first, passport top-right, gold seal) -->
+  <template id="awardCertTemplate">
+    <div style="width:1120px;height:794px;padding:44px;background:#fbf7ef;border:10px solid #8b5e00;border-radius:26px;position:relative;font-family:'Georgia',serif;color:#0f172a;">
+      <div style="position:absolute;inset:28px;opacity:.06;background:url('../images/somap-logo.png.jpg') center/contain no-repeat;"></div>
+      <div style="position:absolute;top:28px;left:28px;width:100px;height:100px;border-radius:999px;border:5px solid #eab308;background:radial-gradient(circle at 30% 30%,#fde68a,#f59e0b 60%,#b45309 100%);box-shadow:0 10px 30px rgba(234,179,8,.35);"></div>
+      <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:space-between;">
+        <header style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <img id="logoImg" src="../images/somap-logo.png.jpg" alt="Logo" style="width:62px;height:62px;border-radius:12px;border:3px solid #8b5e00;object-fit:cover"/>
+            <div>
+              <div style="font-weight:900;letter-spacing:.24em">SOCRATES SCHOOL</div>
+              <div style="font-weight:800;letter-spacing:.12em;background:linear-gradient(135deg,#fbbf24,#d97706);-webkit-background-clip:text;background-clip:text;color:transparent;">AWARD OF EXCELLENCE</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="text-align:right;font-size:12px;color:#334155">
+              <div>PO Box 14256, Arusha</div>
+              <div>+255 686 828 732 · +255 689 649 822</div>
+            </div>
+            <img id="passport" crossOrigin="anonymous" src="" alt="Photo" style="width:118px;height:118px;border-radius:16px;border:4px solid #d97706;object-fit:cover;box-shadow:0 10px 20px rgba(0,0,0,.15)"/>
+          </div>
+        </header>
+
+        <main style="text-align:center;padding:10px 80px;">
+          <div style="font-size:18px;color:#334155">This certifies that</div>
+          <div id="studentName" style="font-size:52px;font-weight:800;margin-top:6px;text-transform:uppercase;letter-spacing:.04em">—</div>
+          <div style="margin-top:8px;font-size:18px">is awarded <b id="categoryText">—</b> <span id="scopeText"></span> <span id="classText"></span> for the year <b id="yearText">—</b>.</div>
+          <div style="margin-top:8px;font-size:14px;color:#475569">Rank: <b id="rankText">—</b> • Issued on <span id="issuedDate">—</span></div>
+        </main>
+
+        <footer style="display:flex;justify-content:space-between;align-items:flex-end;padding:0 60px 6px;">
+          <div style="text-align:center;">
+            <div style="width:200px;height:2px;background:#8b5e00;margin-bottom:8px;"></div>
+            <div style="font-weight:700">Head Teacher</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="width:200px;height:2px;background:#8b5e00;margin-bottom:8px;"></div>
+            <div style="font-weight:700">Academic Teacher</div>
+          </div>
+        </footer>
+      </div>
+    </div>
+  </template>
+
+  <script src="modules/topstudents.js"></script>
+</body>
+</html>

@@ -26,6 +26,7 @@
     meta: {},
     students: {},
     payments: {},
+    paymentTotals: {},
     expenses: {},
     certificates: {},
     galleries: {},
@@ -61,8 +62,15 @@
   function toStr(value) { return value == null ? '' : String(value); }
   function sanitizeKey(raw) { return toStr(raw).replace(/[.#$/[\]]/g, '_'); }
 
+  function toNumberSafe(value) {
+    if (value == null || value === '') return 0;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const parsed = Number(String(value).replace(/,/g, '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   function formatCurrency(amount) {
-    return `TSh ${Number(amount || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+    return `TSh ${toNumberSafe(amount).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
   }
 
   function showToast(message, type = 'success', duration = 4000) {
@@ -131,8 +139,8 @@
   // ---------- BUSINESS HELPERS ----------
   function computeExpectedFee(className, metaObj) {
     const meta = metaObj || state.meta || {};
-    const high = Number(meta.feePreunitAnd7 || 45000);
-    const low = Number(meta.feeOthers || 10000);
+    const high = toNumberSafe(meta.feePreunitAnd7 || 45000);
+    const low = toNumberSafe(meta.feeOthers || 10000);
     const cls = toStr(className).toLowerCase();
     if (!cls) return low;
     const graduandTokens = ['preunit', 'pre-unit', 'pre unit', 'preparatory', 'class 7', 'std 7', 'grade 7'];
@@ -506,10 +514,12 @@
       renderDashboardSummary();
       renderExpenseTotals();
     });
-    const needsPayments = document.querySelector('#paymentsBody') || document.querySelector('#paymentStudent') || document.querySelector('#paymentForm');
+    const hasExports = document.querySelector('[data-export]');
+    const needsPayments = document.querySelector('#paymentsBody') || document.querySelector('#paymentStudent') || document.querySelector('#paymentForm') || hasExports;
     if (needsPayments) {
       listen(`graduation/${year}/payments`, (payments) => {
         state.payments = payments;
+        state.paymentTotals = buildPaymentTotals(payments);
         renderPaymentsTable();
         renderDashboardSummary();
         renderExpenseTotals();
@@ -561,8 +571,8 @@
     const students = Object.values(state.students || {});
     const totalStudents = state.masterStudents ? state.masterStudents.length : students.length;
     const graduands = students.filter((student) => student.isGraduand);
-    const expected = students.reduce((sum, student) => sum + Number(student.expectedFee || 0), 0);
-    const collected = students.reduce((sum, student) => sum + Number(student.paid || 0), 0);
+    const expected = students.reduce((sum, student) => sum + getExpectedFee(student), 0);
+    const collected = students.reduce((sum, student) => sum + getPaidTotal(student), 0);
     const balance = Math.max(0, expected - collected);
 
     const statuses = { paid: 0, unpaid: 0, partial: 0, debt: 0 };
@@ -583,14 +593,37 @@
   }
 
   function computeStatus(student) {
-    const expected = Number(student.expectedFee || 0);
-    const paid = Number(student.paid || 0);
+    const expected = getExpectedFee(student);
+    const paid = getPaidTotal(student);
     const cutoff = new Date(state.meta?.debtCutoffISO || `${state.currentYear}-11-07`);
     const now = new Date();
     if (paid >= expected && expected > 0) return 'paid';
     if (now > cutoff && paid < expected) return 'debt';
     if (paid > 0 && paid < expected) return 'partial';
     return 'unpaid';
+  }
+
+  function getExpectedFee(student) {
+    const fallback = computeExpectedFee(student?.class, state.meta);
+    const expected = toNumberSafe(student?.expectedFee ?? fallback ?? 0);
+    return expected > 0 ? expected : toNumberSafe(fallback);
+  }
+
+  function buildPaymentTotals(payments) {
+    const totals = {};
+    Object.values(payments || {}).forEach((payment) => {
+      const adm = sanitizeKey(payment?.admissionNo);
+      if (!adm) return;
+      totals[adm] = toNumberSafe(totals[adm]) + toNumberSafe(payment?.amount || 0);
+    });
+    return totals;
+  }
+
+  function getPaidTotal(student) {
+    const adm = sanitizeKey(student?.admissionNo || student?.__key);
+    const stored = toNumberSafe(student?.paid || 0);
+    const fromPayments = adm ? toNumberSafe(state.paymentTotals?.[adm] || 0) : 0;
+    return Math.max(0, stored, fromPayments);
   }
 
   function renderStudentTable() {
@@ -621,6 +654,8 @@
 
     tbody.innerHTML = filtered.map((student) => {
       const status = computeStatus(student);
+      const expected = getExpectedFee(student);
+      const paid = getPaidTotal(student);
       const debtTag = status === 'debt' ? '<span class="debt-pill">DEBT</span>' : '';
       const badge = status === 'paid'
         ? 'status-badge paid'
@@ -629,7 +664,7 @@
           : status === 'debt'
             ? 'status-badge debt'
             : 'status-badge unpaid';
-      const balance = Math.max(0, Number(student.expectedFee || 0) - Number(student.paid || 0));
+      const balance = Math.max(0, expected - paid);
       return `
         <tr class="${status === 'debt' ? 'row-debt' : ''}">
           <td>
@@ -644,9 +679,9 @@
             </div>
           </td>
           <td>${toStr(student.class) || '--'}</td>
-          <td class="text-right">${formatCurrency(student.expectedFee)}</td>
-          <td class="text-right ${Number(student.paid || 0) >= Number(student.expectedFee || 0) ? 'text-emerald-600 font-semibold' : ''}">
-            ${formatCurrency(student.paid)}
+          <td class="text-right">${formatCurrency(expected)}</td>
+          <td class="text-right ${paid >= expected ? 'text-emerald-600 font-semibold' : ''}">
+            ${formatCurrency(paid)}
           </td>
           <td class="text-right">${formatCurrency(balance)}</td>
           <td><span class="${badge}">${status.toUpperCase()}</span> ${debtTag}</td>
@@ -738,9 +773,9 @@
     const expenses = Object.values(state.expenses || {});
     const total = expenses.reduce((sum, expense) => sum + Number(expense.total || (Number(expense.priceEach || 0) * Number(expense.quantity || 0))), 0);
     const count = expenses.length;
-    const collectedFromStudents = Object.values(state.students || {}).reduce((sum, student) => sum + Number(student.paid || 0), 0);
-    const collectedFromPayments = Object.values(state.payments || {}).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const collected = collectedFromStudents || collectedFromPayments || 0;
+    const collectedFromStudents = Object.values(state.students || {}).reduce((sum, student) => sum + getPaidTotal(student), 0);
+    const collectedFromPayments = Object.values(state.payments || {}).reduce((sum, payment) => sum + toNumberSafe(payment.amount || 0), 0);
+    const collected = Math.max(collectedFromStudents, collectedFromPayments, 0);
     const balance = collected - total;
 
     setText('#expensesTotal', formatCurrency(total));
@@ -871,9 +906,10 @@
     if (!student) {
       return Promise.reject(new Error('Student not found in graduation roster.'));
     }
-    const expected = Number(student.expectedFee || computeExpectedFee(student.class, state.meta));
-    const paidBefore = Number(student.paid || 0);
-    const newBalance = Math.max(0, expected - Math.min(expected, paidBefore + Number(amount || 0)));
+    const expected = getExpectedFee(student);
+    const paidBefore = getPaidTotal(student);
+    const amountNow = toNumberSafe(amount);
+    const newBalance = Math.max(0, expected - Math.min(expected, paidBefore + amountNow));
     const recordedBy = state.user?.email || 'unknown';
     const timestamp = Date.now();
     const parentContact = student.parentPhone || student.guardianPhone || student.contact || student.parentContact || '--';
@@ -886,7 +922,7 @@
       studentName: toStr(student.name) || admissionNo,
       className: toStr(student.class) || toStr(student.classLevel) || '',
       parentContact,
-      amountPaidNow: Number(amount),
+      amountPaidNow: amountNow,
       paymentMethod: method,
       paymentReferenceCode: reference || 'N/A',
       datePaid: timestamp,
@@ -902,7 +938,7 @@
         admission: admissionNo,
         payment: {
           admissionNo,
-          amount: Number(amount),
+          amount: amountNow,
           method,
           note,
           reference,
@@ -1218,14 +1254,16 @@
     if (type === 'students') {
       headers = ['Admission', 'Name', 'Class', 'Expected', 'Paid', 'Balance', 'Status', 'Parent Phone'];
       rows = Object.values(state.students || {}).map((student) => {
-        const balance = Math.max(0, Number(student.expectedFee || 0) - Number(student.paid || 0));
+        const expected = getExpectedFee(student);
+        const paid = getPaidTotal(student);
+        const balance = Math.max(0, expected - paid);
         return [
           toStr(student.admissionNo),
           toStr(student.name),
           toStr(student.class),
-          Number(student.expectedFee || 0),
-          Number(student.paid || 0),
-          Number(balance),
+          expected,
+          paid,
+          balance,
           computeStatus(student),
           toStr(student.parentPhone),
         ];
@@ -1245,16 +1283,21 @@
       rows = Object.values(state.students || {}).filter((student) => {
         const status = computeStatus(student);
         return status === 'unpaid' || status === 'partial' || status === 'debt';
-      }).map((student) => [
-        toStr(student.admissionNo),
-        toStr(student.name),
-        toStr(student.class),
-        Number(student.expectedFee || 0),
-        Number(student.paid || 0),
-        Number(Math.max(0, Number(student.expectedFee || 0) - Number(student.paid || 0))),
-        computeStatus(student),
-        toStr(student.parentPhone),
-      ]);
+      }).map((student) => {
+        const expected = getExpectedFee(student);
+        const paid = getPaidTotal(student);
+        const balance = Math.max(0, expected - paid);
+        return [
+          toStr(student.admissionNo),
+          toStr(student.name),
+          toStr(student.class),
+          expected,
+          paid,
+          balance,
+          computeStatus(student),
+          toStr(student.parentPhone),
+        ];
+      });
     } else if (type === 'expenses') {
       headers = ['Item', 'Seller', 'Phone', 'Qty', 'Price Each', 'Total', 'Recorded By', 'Timestamp', 'Proof'];
       rows = Object.values(state.expenses || {}).map((expense) => [
@@ -1312,15 +1355,20 @@
     let body = [];
     if (type === 'students') {
       headers = ['Admission', 'Name', 'Class', 'Expected', 'Paid', 'Balance', 'Status'];
-      body = Object.values(state.students || {}).map((student) => [
-        toStr(student.admissionNo),
-        toStr(student.name),
-        toStr(student.class),
-        formatCurrency(student.expectedFee),
-        formatCurrency(student.paid),
-        formatCurrency(Math.max(0, Number(student.expectedFee || 0) - Number(student.paid || 0))),
-        computeStatus(student).toUpperCase(),
-      ]);
+      body = Object.values(state.students || {}).map((student) => {
+        const expected = getExpectedFee(student);
+        const paid = getPaidTotal(student);
+        const balance = Math.max(0, expected - paid);
+        return [
+          toStr(student.admissionNo),
+          toStr(student.name),
+          toStr(student.class),
+          formatCurrency(expected),
+          formatCurrency(paid),
+          formatCurrency(balance),
+          computeStatus(student).toUpperCase(),
+        ];
+      });
     } else if (type === 'paid') {
       headers = ['Admission', 'Name', 'Amount', 'Method', 'Recorded By', 'When'];
       body = Object.values(state.payments || {}).map((payment) => [
@@ -1336,15 +1384,20 @@
       body = Object.values(state.students || {}).filter((student) => {
         const status = computeStatus(student);
         return status === 'unpaid' || status === 'partial' || status === 'debt';
-      }).map((student) => [
-        toStr(student.admissionNo),
-        toStr(student.name),
-        toStr(student.class),
-        formatCurrency(student.expectedFee),
-        formatCurrency(student.paid),
-        formatCurrency(Math.max(0, Number(student.expectedFee || 0) - Number(student.paid || 0))),
-        computeStatus(student).toUpperCase(),
-      ]);
+      }).map((student) => {
+        const expected = getExpectedFee(student);
+        const paid = getPaidTotal(student);
+        const balance = Math.max(0, expected - paid);
+        return [
+          toStr(student.admissionNo),
+          toStr(student.name),
+          toStr(student.class),
+          formatCurrency(expected),
+          formatCurrency(paid),
+          formatCurrency(balance),
+          computeStatus(student).toUpperCase(),
+        ];
+      });
     } else if (type === 'expenses') {
       headers = ['Item', 'Seller', 'Qty', 'Price Each', 'Total', 'Recorded', 'Proof'];
       body = Object.values(state.expenses || {}).map((expense) => [
@@ -1727,8 +1780,8 @@
     if (now <= cutoff) return;
     const updates = {};
     Object.entries(state.students || {}).forEach(([key, student]) => {
-      const expected = Number(student.expectedFee || 0);
-      const paid = Number(student.paid || 0);
+      const expected = getExpectedFee(student);
+      const paid = getPaidTotal(student);
       if (paid < expected && student.status !== 'debt') {
         updates[`graduation/${state.currentYear}/students/${key}/status`] = 'debt';
       }

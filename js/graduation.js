@@ -513,17 +513,19 @@
       renderStudentTable();
       renderDashboardSummary();
       renderExpenseTotals();
+      syncBalances();
     });
     const hasExports = document.querySelector('[data-export]');
     const needsPayments = document.querySelector('#paymentsBody') || document.querySelector('#paymentStudent') || document.querySelector('#paymentForm') || hasExports;
     if (needsPayments) {
-      listen(`graduation/${year}/payments`, (payments) => {
-        state.payments = payments;
-        state.paymentTotals = buildPaymentTotals(payments);
-        renderPaymentsTable();
-        renderDashboardSummary();
-        renderExpenseTotals();
-      });
+    listen(`graduation/${year}/payments`, (payments) => {
+      state.payments = payments;
+      state.paymentTotals = buildPaymentTotals(payments);
+      syncBalances();
+      renderPaymentsTable();
+      renderDashboardSummary();
+      renderExpenseTotals();
+    });
     }
     const needsExpenses = document.querySelector('#expensesBody') || document.querySelector('#expenseForm');
     if (needsExpenses) {
@@ -564,6 +566,32 @@
     renderAuditLog();
     renderCertificatesTable();
     renderGallery();
+  }
+
+  function syncBalances() {
+    if (!isAuthorized(state.user?.email)) return;
+    const updates = {};
+    const year = state.currentYear;
+    Object.entries(state.students || {}).forEach(([key, student]) => {
+      const paid = getPaidTotal(student);
+      const expected = getExpectedFee(student);
+      const balance = Math.max(0, expected - paid);
+      const status = computeStatus(student);
+
+      if (toNumberSafe(student.paid) !== paid) {
+        updates[`graduation/${year}/students/${key}/paid`] = paid;
+      }
+      if (toNumberSafe(student.balance) !== balance) {
+        updates[`graduation/${year}/students/${key}/balance`] = balance;
+      }
+      if (toStr(student.status) !== status) {
+        updates[`graduation/${year}/students/${key}/status`] = status;
+      }
+    });
+
+    if (Object.keys(updates).length) {
+      db().ref().update(updates).catch((err) => console.warn('Balance sync failed', err));
+    }
   }
 
   function renderDashboardSummary() {

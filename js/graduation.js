@@ -595,9 +595,11 @@
   function computeStatus(student) {
     const expected = getExpectedFee(student);
     const paid = getPaidTotal(student);
+    const explicitStatus = toStr(student.status).toLowerCase();
     const cutoff = new Date(state.meta?.debtCutoffISO || `${state.currentYear}-11-07`);
     const now = new Date();
     if (paid >= expected && expected > 0) return 'paid';
+    if (explicitStatus === 'paid') return 'paid'; // trust manual override when amounts are hidden to some viewers
     if (now > cutoff && paid < expected) return 'debt';
     if (paid > 0 && paid < expected) return 'partial';
     return 'unpaid';

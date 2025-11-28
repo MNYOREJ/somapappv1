@@ -605,6 +605,17 @@
     return 'unpaid';
   }
 
+  function getBalance(student) {
+    const expected = getExpectedFee(student);
+    const paid = getPaidTotal(student);
+    return Math.max(0, expected - paid);
+  }
+
+  function hasOutstanding(student) {
+    // guard against floating or nulls
+    return getBalance(student) > 0;
+  }
+
   function getExpectedFee(student) {
     const fallback = computeExpectedFee(student?.class, state.meta);
     const expected = toNumberSafe(student?.expectedFee ?? fallback ?? 0);
@@ -666,7 +677,7 @@
           : status === 'debt'
             ? 'status-badge debt'
             : 'status-badge unpaid';
-      const balance = Math.max(0, expected - paid);
+      const balance = getBalance(student);
       return `
         <tr class="${status === 'debt' ? 'row-debt' : ''}">
           <td>
@@ -1258,7 +1269,7 @@
       rows = Object.values(state.students || {}).map((student) => {
         const expected = getExpectedFee(student);
         const paid = getPaidTotal(student);
-        const balance = Math.max(0, expected - paid);
+        const balance = getBalance(student);
         return [
           toStr(student.admissionNo),
           toStr(student.name),
@@ -1283,12 +1294,11 @@
     } else if (type === 'unpaid') {
       headers = ['Admission', 'Name', 'Class', 'Expected', 'Paid', 'Balance', 'Status', 'Parent Phone'];
       rows = Object.values(state.students || {}).filter((student) => {
-        const status = computeStatus(student);
-        return status === 'unpaid' || status === 'partial' || status === 'debt';
+        return hasOutstanding(student);
       }).map((student) => {
         const expected = getExpectedFee(student);
         const paid = getPaidTotal(student);
-        const balance = Math.max(0, expected - paid);
+        const balance = getBalance(student);
         return [
           toStr(student.admissionNo),
           toStr(student.name),
@@ -1360,7 +1370,7 @@
       body = Object.values(state.students || {}).map((student) => {
         const expected = getExpectedFee(student);
         const paid = getPaidTotal(student);
-        const balance = Math.max(0, expected - paid);
+        const balance = getBalance(student);
         return [
           toStr(student.admissionNo),
           toStr(student.name),
@@ -1384,12 +1394,11 @@
     } else if (type === 'unpaid') {
       headers = ['Admission', 'Name', 'Class', 'Expected', 'Paid', 'Balance', 'Status'];
       body = Object.values(state.students || {}).filter((student) => {
-        const status = computeStatus(student);
-        return status === 'unpaid' || status === 'partial' || status === 'debt';
+        return hasOutstanding(student);
       }).map((student) => {
         const expected = getExpectedFee(student);
         const paid = getPaidTotal(student);
-        const balance = Math.max(0, expected - paid);
+        const balance = getBalance(student);
         return [
           toStr(student.admissionNo),
           toStr(student.name),
@@ -1782,9 +1791,7 @@
     if (now <= cutoff) return;
     const updates = {};
     Object.entries(state.students || {}).forEach(([key, student]) => {
-      const expected = getExpectedFee(student);
-      const paid = getPaidTotal(student);
-      if (paid < expected && student.status !== 'debt') {
+      if (hasOutstanding(student) && student.status !== 'debt') {
         updates[`graduation/${state.currentYear}/students/${key}/status`] = 'debt';
       }
     });

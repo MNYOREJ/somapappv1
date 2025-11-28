@@ -1322,8 +1322,16 @@
       ]);
     } else if (type === 'unpaid') {
       headers = ['Admission', 'Name', 'Class', 'Expected', 'Paid', 'Balance', 'Status', 'Parent Phone'];
-      rows = Object.values(state.students || {}).filter((student) => {
-        return hasOutstanding(student);
+      const allStudents = Object.values(state.students || {});
+      // Fix: If a student appears twice (once paid, once unpaid/debt), exclude the debt record.
+      const paidNames = new Set(allStudents.filter(s => !hasOutstanding(s)).map(s => toStr(s.name).trim().toLowerCase()));
+      
+      rows = allStudents.filter((student) => {
+        if (!hasOutstanding(student)) return false;
+        // If this student has debt, but the same name exists as fully paid/cleared, treat this as a duplicate ghost record
+        const name = toStr(student.name).trim().toLowerCase();
+        if (paidNames.has(name)) return false;
+        return true;
       }).map((student) => {
         const expected = getExpectedFee(student);
         const paid = getPaidTotal(student);
@@ -1422,8 +1430,16 @@
       ]);
     } else if (type === 'unpaid') {
       headers = ['Admission', 'Name', 'Class', 'Expected', 'Paid', 'Balance', 'Status'];
-      body = Object.values(state.students || {}).filter((student) => {
-        return hasOutstanding(student);
+      const allStudents = Object.values(state.students || {});
+      // Fix: If a student appears twice (once paid, once unpaid/debt), exclude the debt record.
+      const paidNames = new Set(allStudents.filter(s => !hasOutstanding(s)).map(s => toStr(s.name).trim().toLowerCase()));
+
+      body = allStudents.filter((student) => {
+        if (!hasOutstanding(student)) return false;
+        // If this student has debt, but the same name exists as fully paid/cleared, treat this as a duplicate ghost record
+        const name = toStr(student.name).trim().toLowerCase();
+        if (paidNames.has(name)) return false;
+        return true;
       }).map((student) => {
         const expected = getExpectedFee(student);
         const paid = getPaidTotal(student);

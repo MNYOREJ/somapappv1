@@ -625,7 +625,8 @@
   function buildPaymentTotals(payments) {
     const totals = {};
     Object.values(payments || {}).forEach((payment) => {
-      const adm = sanitizeKey(payment?.admissionNo);
+      const admRaw = payment?.admissionNo || payment?.admission || payment?.admNo || payment?.studentAdm;
+      const adm = sanitizeKey(admRaw);
       if (!adm) return;
       totals[adm] = toNumberSafe(totals[adm]) + toNumberSafe(payment?.amount || 0);
     });

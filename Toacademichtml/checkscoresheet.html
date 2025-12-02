@@ -367,8 +367,8 @@
 
       let insertIndex = Array.from(theadRow.children).findIndex(th => (th.textContent||'').trim() === 'Total');
       if(insertIndex < 0) insertIndex = theadRow.children.length;
-      state.subjectList.forEach(subject=>{
-        const thScore = document.createElement('th'); thScore.className = 'p-2 border'; thScore.textContent = subject;
+      state.subjectConfigs.forEach(({ label })=>{
+        const thScore = document.createElement('th'); thScore.className = 'p-2 border'; thScore.textContent = label;
         const thPstn = document.createElement('th'); thPstn.className = 'p-2 border'; thPstn.textContent = 'Pstn';
         theadRow.insertBefore(thScore, theadRow.children[insertIndex]);
         theadRow.insertBefore(thPstn, theadRow.children[insertIndex + 1]);
@@ -399,17 +399,17 @@
         tr.appendChild(tdFeeDue); tr.appendChild(tdPaid); tr.appendChild(tdBal);
 
         const subjectCells = {};
-        state.subjectList.forEach(subject=>{
-          const tdScore = document.createElement('td'); tdScore.className='p-1.5 border text-center';
-          const tdPstn = document.createElement('td'); tdPstn.className='p-1.5 border text-center';
+        state.subjectConfigs.forEach(({ key, label })=>{
+          const tdScore = document.createElement('td'); tdScore.className='p-1.5 border text-center'; tdScore.title = label;
+          const tdPstn = document.createElement('td'); tdPstn.className='p-1.5 border text-center'; tdPstn.title = ${label} Position;
 
-          const sc = (state.scores[s.adm]||{})[subject] || {};
-          tdScore.textContent = sc.score ?? '–';
-          tdPstn.textContent = '–'; // Filled in recomputeAll
+          const sc = (state.scores[s.adm]||{})[key] || {};
+          tdScore.textContent = sc.score ?? '-';
+          tdPstn.textContent = '-'; // Filled in recomputeAll
 
           tr.appendChild(tdScore); tr.appendChild(tdPstn);
 
-          subjectCells[subject] = { tdScore, tdPstn: tdPstn };
+          subjectCells[key] = { tdScore, tdPstn: tdPstn, label };
         });
 
         const tdTotal = document.createElement('td'); tdTotal.className='p-2 border text-center font-medium'; tdTotal.textContent='0';
@@ -459,13 +459,13 @@
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
         let sumScore=0, sumMax=0;
-        state.subjectList.forEach(subject=>{
-          const score = Number((state.scores[adm] && state.scores[adm][subject] ? state.scores[adm][subject].score : 0) || 0);
-          const max = Math.max(1, Number((state.scores[adm] && state.scores[adm][subject] ? state.scores[adm][subject].max : 100) || 100));
+        state.subjectConfigs.forEach(({ key, label })=>{
+          const score = Number((state.scores[adm] && state.scores[adm][key] ? state.scores[adm][key].score : 0) || 0);
+          const max = Math.max(1, Number((state.scores[adm] && state.scores[adm][key] ? state.scores[adm][key].max : 100) || 100));
           sumScore += score; sumMax += max;
           const pct = (score/max)*100;
-          perSubject[subject] = perSubject[subject] || [];
-          perSubject[subject].push({ adm, pct });
+          perSubject[key] = perSubject[key] || [];
+          perSubject[key].push({ adm, pct });
         });
         const avgPct = sumMax ? (sumScore/sumMax)*100 : 0;
         row.tdTotal.textContent = sumScore.toFixed(2);
@@ -481,14 +481,14 @@
         row.tdComment.textContent = comment;
       });
 
-      state.subjectList.forEach(subject=>{
-        const list = (perSubject[subject] || []).slice().sort((a,b)=> b.pct - a.pct);
+      state.subjectConfigs.forEach(({ key, label })=>{
+        const list = (perSubject[key] || []).slice().sort((a,b)=> b.pct - a.pct);
         let pos=0, last=null, idx=0;
         list.forEach(item=>{
           idx++;
           if(last === null || item.pct < last){ pos = idx; last = item.pct; }
           const row = state.rowsByAdm[item.adm];
-          row.subjectCells[subject].tdPstn.textContent = String(pos);
+          row.subjectCells[key].tdPstn.textContent = String(pos);
         });
       });
 
@@ -560,7 +560,7 @@
 
     function gatherRowsForExport(){
       const header = ['Adm','Student','Fee Due','Paid','Balance'];
-      state.subjectList.forEach(s=>{ header.push(`${s} Score`, `${s} Max`, `${s} Pstn`); });
+      state.subjectConfigs.forEach(({ label })=>{ header.push(`${label} Score`, `${label} Max`, `${label} Pstn`); });
       header.push('Total','Max','% Avg','Overall Pos','Grade','Present','Absent','Comment');
       const rows = [header];
       Object.keys(state.rowsByAdm).forEach(adm=>{
@@ -572,10 +572,10 @@
           r.tdPaid?.textContent || '',
           r.tdBal?.textContent || ''
         ];
-        state.subjectList.forEach(sub=>{
-          const sc = ((state.scores[adm]||{})[sub]||{}).score || 0;
-          const mx = ((state.scores[adm]||{})[sub]||{}).max || 100;
-          const pstn = r.subjectCells[sub]?.tdPstn?.textContent || '';
+        state.subjectConfigs.forEach(({ key })=>{
+          const sc = ((state.scores[adm]||{})[key]||{}).score || 0;
+          const mx = ((state.scores[adm]||{})[key]||{}).max || 100;
+          const pstn = r.subjectCells[key]?.tdPstn?.textContent || '';
           row.push(sc, mx, pstn);
         });
         row.push(
@@ -603,7 +603,16 @@
       const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
       const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
       doc.setFontSize(14); doc.text(title, 40, 40);
-      doc.autoTable({ startY:60, head:[rows[0]], body:rows.slice(1), styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[37,99,235]} });
+      doc.autoTable({
+        startY:60,
+        head:[rows[0]],
+        body:rows.slice(1),
+        theme:'grid',
+        styles:{fontSize:7,cellPadding:3, halign:'center'},
+        headStyles:{fillColor:[17, 24, 39], textColor:[255,255,255]},
+        alternateRowStyles:{fillColor:[245,247,250]},
+        columnStyles:{0:{halign:'left'},1:{halign:'left'}}
+      });
       doc.save(title.replace(/[^A-Za-z0-9_\\- ]/g,'_') + '.pdf');
     }
 

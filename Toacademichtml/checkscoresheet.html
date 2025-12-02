@@ -8,12 +8,14 @@
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- Firebase compat (v9 compat libs) — no jsPDF/exports needed for view-only -->
+  <!-- Firebase compat (v9 compat libs) -->
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-analytics-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
 
   <!-- Your Firebase config wrapper -->
   <script src="../firebase.js"></script>
@@ -82,6 +84,7 @@
       </div>
       <div class="md:col-span-5 flex gap-3 items-end">
         <button id="btnLoad" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">Load Scores</button>
+        <button id="btnExportPDF" class="px-4 py-2 bg-white border rounded text-sm">Export PDF</button>
         <div id="lblStatus" class="text-xs text-slate-500"></div>
       </div>
     </section>
@@ -180,6 +183,7 @@
     const yearInput = document.getElementById('yearInput');
     const examType = document.getElementById('examType');
     const btnLoad = document.getElementById('btnLoad');
+    const btnExportPDF = document.getElementById('btnExportPDF');
     const lblStatus = document.getElementById('lblStatus');
 
     /* ---------- ELEMENTS ---------- */
@@ -188,6 +192,14 @@
     const lblSubjects = document.getElementById('lblSubjects');
 
     /* ---------- Firebase DB helper ---------- */
+    function sanitizePathSegment(val){ return String(val || '').replace(/[.#$\[\]/]/g,'_'); }
+    function getScoresRef(db, { year, className, examKey, month }){
+      const y = sanitizePathSegment(year);
+      const c = sanitizePathSegment(className);
+      const e = sanitizePathSegment(examKey);
+      const m = sanitizePathSegment(month);
+      return db.ref(`/scores/${y}/${c}/${e}/${m}`);
+    }
     function getDB(){
       if(window && window.db) return window.db;
       if(!window.firebase) {
@@ -310,9 +322,9 @@
     async function fetchScores({year, className, examKey, month}){
       const db = getDB();
       if(!db) return {};
-      const refPath = `/scores/${year}/${className}/${examKey}/${month}`;
+      const ref = getScoresRef(db, { year, className, examKey, month });
       try{
-        const snap = await db.ref(refPath).get();
+        const snap = await ref.get();
         const out = {};
         if(snap && snap.exists && snap.exists()){
           const val = snap.val();
@@ -483,12 +495,18 @@
 
     /* ---------- Load sequence (main entry) ---------- */
     function initFilterControls(){
+      const ss = window.sessionStorage || {};
+      const assignedClass = ss.getItem('className') || '';
       if(classSelect){
         const opts = ['Baby','Middle','Preunit','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
-        classSelect.innerHTML = opts.map(o=>`<option value="${o}">${o}</option>`).join('');
+        if(assignedClass){
+          classSelect.innerHTML = `<option value="${assignedClass}">${assignedClass}</option>`;
+          classSelect.value = assignedClass;
+          classSelect.disabled = true;
+        } else {
+          classSelect.innerHTML = opts.map(o=>`<option value="${o}">${o}</option>`).join('');
+        }
       }
-      const ss = window.sessionStorage || {};
-      if(classSelect && ss.getItem('className')) classSelect.value = ss.getItem('className');
       if(streamInput && ss.getItem('stream')) streamInput.value = ss.getItem('stream');
       if(monthSelect && ss.getItem('month')) monthSelect.value = ss.getItem('month');
       if(yearInput){
@@ -528,12 +546,62 @@
       lblStatus.textContent = 'Loaded.';
     }
 
+    function gatherRowsForExport(){
+      const header = ['Adm','Student','Fee Due','Paid','Balance'];
+      state.subjectList.forEach(s=>{ header.push(`${s} Score`, `${s} Max`, `${s} Pstn`); });
+      header.push('Total','Max','% Avg','Overall Pos','Grade','Present','Absent','Comment');
+      const rows = [header];
+      Object.keys(state.rowsByAdm).forEach(adm=>{
+        const r = state.rowsByAdm[adm];
+        const row = [
+          adm,
+          r.meta.name,
+          r.tdFeeDue?.textContent || '',
+          r.tdPaid?.textContent || '',
+          r.tdBal?.textContent || ''
+        ];
+        state.subjectList.forEach(sub=>{
+          const sc = ((state.scores[adm]||{})[sub]||{}).score || 0;
+          const mx = ((state.scores[adm]||{})[sub]||{}).max || 100;
+          const pstn = r.subjectCells[sub]?.tdPstn?.textContent || '';
+          row.push(sc, mx, pstn);
+        });
+        row.push(
+          r.tdTotal.textContent || '',
+          r.tdMax.textContent || '',
+          r.tdAvg.textContent || '',
+          r.tdPstn.textContent || '',
+          r.tdGrade.textContent || '',
+          r.tdPresent.textContent || '',
+          r.tdAbsent.textContent || '',
+          r.tdComment.textContent || ''
+        );
+        rows.push(row);
+      });
+      return rows;
+    }
+
+    function exportPDF(){
+      const rows = gatherRowsForExport();
+      if(rows.length <= 1){
+        alert('No data to export.');
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
+      const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
+      doc.setFontSize(14); doc.text(title, 40, 40);
+      doc.autoTable({ startY:60, head:[rows[0]], body:rows.slice(1), styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[37,99,235]} });
+      doc.save(title.replace(/[^A-Za-z0-9_\\- ]/g,'_') + '.pdf');
+    }
+
     /* ---------- Event Listeners ---------- */
     window.addEventListener('load', () => {
       initFilterControls();
       loadAll();
     });
     if(btnLoad) btnLoad.addEventListener('click', loadAll);
+    if(btnExportPDF) btnExportPDF.addEventListener('click', exportPDF);
 
     /* ---------- Small helpers ---------- */
     function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }

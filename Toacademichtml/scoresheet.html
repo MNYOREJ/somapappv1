@@ -381,6 +381,11 @@
         };
         firebase.initializeApp(cfg);
       }
+      try {
+        if(firebase.auth && firebase.auth().currentUser == null){
+          firebase.auth().signInAnonymously().catch(()=>{});
+        }
+      } catch(e) {}
       return firebase.database();
     }
 
@@ -557,11 +562,16 @@
       const db = getDB();
       if(!db){ alert('Firebase not initialized'); return; }
 
-      const { year, className, examKey, month } = state;
-      if(!year || !className || !examKey || !month){
-        alert('Missing class, exam, month, or year. Please set them before saving.');
+      // Fallback defaults if any are missing
+      if(!state.year) state.year = new Date().getFullYear().toString();
+      if(!state.month) state.month = String(new Date().getMonth()+1).padStart(2,'0');
+      if(!state.examKey) state.examKey = 'monthly';
+      if(!state.className){
+        alert('Missing class; please reopen from dashboard to set the class.');
         return;
       }
+
+      const { year, className, examKey, month } = state;
 
       const baseRef = getScoresRef(db, { year, className, examKey, month });
       const payload = {};
@@ -582,7 +592,7 @@
         alert('Scores saved.');
       }catch(err){
         console.error('Save failed', err);
-        alert('Saving failed. Please check your connection and try again.');
+        alert(`Saving failed: ${err && err.message ? err.message : 'Unknown error'}`);
       }
     }
 

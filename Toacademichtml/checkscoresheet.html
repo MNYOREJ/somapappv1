@@ -135,10 +135,16 @@
   <script>
     /* ---------- CONFIG ---------- */
     const SUBJECTS_BY_CLASS = {
+      'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Baby': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Middle': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Pre-Unit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Preunit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
       'Preunit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
+      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 1': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
+      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 2': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
       'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
       'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
@@ -174,13 +180,14 @@
 
     /* ---------- STATE ---------- */
     function getSubjectConfigsForClass(className){
-      const list = SUBJECTS_BY_CLASS[className] || [];
+      const normalizedKey = Object.keys(SUBJECTS_BY_CLASS).find(k => k.toLowerCase() === String(className || '').trim().toLowerCase());
+      const list = SUBJECTS_BY_CLASS[normalizedKey || className] || [];
       return list.map(sub => ({ key: sanitizeSubjectKey(sub), label: sub }));
     }
 
     const state = {
       students: [], attendance: {}, fees: {}, scores: {}, subjectList: [], subjectConfigs: [],
-      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:''
+      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:'', assignedClass:''
     };
     const classSelect = document.getElementById('classSelect');
     const streamInput = document.getElementById('streamInput');
@@ -195,6 +202,39 @@
     const scoresBody = document.getElementById('scoresBody');
     const lblCount = document.getElementById('lblCount');
     const lblSubjects = document.getElementById('lblSubjects');
+
+    /* ---------- Class locking helpers (reuse academic.html rules) ---------- */
+    function parseClassFromEmail(email){
+      const emailPrefix = (email || '').split('@')[0].toLowerCase();
+      const classMap = {
+        'ssbabyclass': 'Baby Class',
+        'ssmiddleclass': 'Middle Class',
+        'sspreunit': 'Pre-Unit Class',
+        'ssclass1ab': 'Class 1 AB',
+        'ssclass1': 'Class 1',
+        'ssclass2ab': 'Class 2 AB',
+        'ssclass2': 'Class 2',
+        'ssclass3': 'Class 3',
+        'ssclass4': 'Class 4',
+        'ssclass5': 'Class 5',
+        'ssclass6': 'Class 6',
+        'ssclass7': 'Class 7'
+      };
+      for (const [key, cls] of Object.entries(classMap)){
+        if(emailPrefix.includes(key)) return cls;
+      }
+      return null;
+    }
+
+    function lockClassDropdown(assigned){
+      if(!classSelect) return;
+      if(assigned){
+        classSelect.innerHTML = `<option value="${assigned}">${assigned}</option>`;
+        classSelect.value = assigned;
+        classSelect.disabled = true;
+        sessionStorage.setItem('assignedClass', assigned);
+      }
+    }
 
     /* ---------- Firebase DB helper ---------- */
     function sanitizePathSegment(val){ return String(val || '').replace(/[.#$\[\]/]/g,'_'); }
@@ -352,6 +392,62 @@
       }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
     }
 
+    /* ---------- Auth + class resolution ---------- */
+    function resolveAssignedClass(profile, user){
+      return parseClassFromEmail(user?.email || '') ||
+        profile?.class ||
+        profile?.classLevel ||
+        sessionStorage.getItem('assignedClass') ||
+        '';
+    }
+
+    function enforceTeacherGuard(profile){
+      if(!profile || !profile.role) return true;
+      const role = String(profile.role).toLowerCase();
+      return role === 'teacher' || role === 'headteacher' || role === 'admin';
+    }
+
+    function startAuthWatcher(){
+      if(!firebase?.auth){
+        initFilterControls();
+        loadAll();
+        return;
+      }
+      firebase.auth().onAuthStateChanged(async (user)=>{
+        if(!user){
+          window.location.href = '../index.html';
+          return;
+        }
+        if(user.isAnonymous){
+          alert('Please sign in to access scoresheets.');
+          try { firebase.auth().signOut(); } catch(e){}
+          window.location.href = '../index.html';
+          return;
+        }
+        const safeEmail = user.email ? user.email.replace('.', '_') : '';
+        let profile = {};
+        try{
+          const db = getDB();
+          const snap = safeEmail ? await db.ref('users/' + safeEmail).once('value') : null;
+          profile = snap?.val() || {};
+        }catch(err){
+          console.warn('Could not load user profile', err?.message);
+        }
+        if(!enforceTeacherGuard(profile)){
+          alert('Only teachers can view class scoresheets.');
+          try { firebase.auth().signOut(); } catch(e){}
+          window.location.href = '../index.html';
+          return;
+        }
+        state.assignedClass = resolveAssignedClass(profile, user);
+        if(state.assignedClass){
+          lockClassDropdown(state.assignedClass);
+        }
+        initFilterControls();
+        loadAll();
+      });
+    }
+
     /* ---------- Build table (modified for read-only display) ---------- */
     function buildTable(){
       const scoresTable = document.getElementById('scoresTable');
@@ -401,7 +497,7 @@
         const subjectCells = {};
         state.subjectConfigs.forEach(({ key, label })=>{
           const tdScore = document.createElement('td'); tdScore.className='p-1.5 border text-center'; tdScore.title = label;
-          const tdPstn = document.createElement('td'); tdPstn.className='p-1.5 border text-center'; tdPstn.title = ${label} Position;
+          const tdPstn = document.createElement('td'); tdPstn.className='p-1.5 border text-center'; tdPstn.title = `${label} Position`;
 
           const sc = (state.scores[s.adm]||{})[key] || {};
           tdScore.textContent = sc.score ?? '-';
@@ -507,19 +603,23 @@
     /* ---------- Load sequence (main entry) ---------- */
     function initFilterControls(){
       const ss = window.sessionStorage || {};
-      const assignedClass = ss.getItem('assignedClass') || ss.getItem('className') || '';
+      const assigned = state.assignedClass || ss.getItem('assignedClass') || ss.getItem('className') || '';
       if(classSelect){
-        const opts = ['Baby','Middle','Preunit','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'];
-        if(assignedClass){
-          classSelect.innerHTML = `<option value="${assignedClass}">${assignedClass}</option>`;
-          classSelect.value = assignedClass;
-          classSelect.disabled = true;
+        const opts = Array.from(new Set(Object.keys(SUBJECTS_BY_CLASS)));
+        if(assigned){
+          lockClassDropdown(assigned);
         } else {
           classSelect.innerHTML = opts.map(o=>`<option value="${o}">${o}</option>`).join('');
+          classSelect.disabled = false;
         }
       }
-      if(streamInput && ss.getItem('stream')) streamInput.value = ss.getItem('stream');
-      if(monthSelect && ss.getItem('month')) monthSelect.value = ss.getItem('month');
+      if(streamInput){
+        const storedStream = ss.getItem('stream') || '';
+        if(storedStream) streamInput.value = storedStream;
+      }
+      if(monthSelect){
+        monthSelect.value = ss.getItem('month') || monthSelect.value || new Date().toISOString().slice(5,7);
+      }
       if(yearInput){
         yearInput.value = ss.getItem('year') || yearInput.value || new Date().getFullYear();
       }
@@ -528,7 +628,7 @@
 
     function readFilters(){
       const ss = window.sessionStorage || {};
-      state.className = classSelect?.value || ss.getItem('assignedClass') || ss.getItem('className') || '';
+      state.className = classSelect?.value || state.assignedClass || ss.getItem('assignedClass') || ss.getItem('className') || '';
       const rawStream = (streamInput?.value || ss.getItem('stream') || '');
       const classNumMatch = state.className.match(/\d+/);
       const classNum = classNumMatch ? classNumMatch[0] : '';
@@ -537,6 +637,9 @@
       state.year = yearInput?.value || ss.getItem('year') || '';
       state.examKey = examType?.value || ss.getItem('examKey') || 'monthly';
       state.schoolBranch = ss.getItem('schoolBranch') || '';
+      if(state.assignedClass && state.className !== state.assignedClass){
+        state.className = state.assignedClass;
+      }
       if(classSelect && !classSelect.value && state.className){
         classSelect.innerHTML = `<option value="${state.className}">${state.className}</option>`;
         classSelect.value = state.className;
@@ -546,9 +649,22 @@
 
     async function loadAll(){
       readFilters();
+      if(state.assignedClass && state.className !== state.assignedClass){
+        state.className = state.assignedClass;
+      }
       if(!state.className){ alert('Select class to view saved scores.'); return; }
-      if(!state.year){ alert('Enter year to view saved scores.'); return; }
-      if(!state.month){ alert('Select month to view saved scores.'); return; }
+      if(!state.year){ state.year = new Date().getFullYear().toString(); }
+      if(!state.month){ state.month = new Date().toISOString().slice(5,7); }
+      if(classSelect && !classSelect.value) lockClassDropdown(state.className);
+      try {
+        const ss = window.sessionStorage || {};
+        ss.setItem('className', state.className);
+        ss.setItem('assignedClass', state.className);
+        ss.setItem('stream', state.stream || '');
+        ss.setItem('year', state.year);
+        ss.setItem('month', state.month);
+        ss.setItem('examKey', state.examKey);
+      } catch(e) {}
 
       state.subjectConfigs = getSubjectConfigsForClass(state.className);
       state.subjectList = state.subjectConfigs.map(s => s.key);
@@ -572,7 +688,7 @@
 
       buildTable();
       recomputeAll();
-      lblStatus.textContent = 'Loaded.';
+      lblStatus.textContent = `${state.students.length} students • ${state.subjectConfigs.length} subjects loaded.`;
     }
 
     function gatherRowsForExport(){
@@ -619,24 +735,38 @@
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
       const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
-      doc.setFontSize(14); doc.text(title, 40, 40);
+      const subtitle = `Stream ${state.stream || '-'}  |  ${state.examKey || 'monthly'}  |  Month ${state.month || ''}`;
+
+      doc.setFillColor(79, 70, 229);
+      doc.rect(30, 28, 782, 42, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(16);
+      doc.text(title, 40, 55);
+      doc.setFontSize(11);
+      doc.text(subtitle, 40, 70);
+
       doc.autoTable({
-        startY:60,
+        startY:90,
         head:[rows[0]],
         body:rows.slice(1),
         theme:'grid',
-        styles:{fontSize:7,cellPadding:3, halign:'center'},
-        headStyles:{fillColor:[17, 24, 39], textColor:[255,255,255]},
-        alternateRowStyles:{fillColor:[245,247,250]},
-        columnStyles:{0:{halign:'left'},1:{halign:'left'}}
+        styles:{fontSize:7,cellPadding:3, halign:'center', textColor:[31,41,55]},
+        headStyles:{fillColor:[99, 102, 241], textColor:[255,255,255], fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[245,248,255]},
+        footStyles:{fillColor:[16,185,129], textColor:[255,255,255]},
+        columnStyles:{0:{halign:'left'},1:{halign:'left'}},
+        didDrawPage: (data)=>{
+          doc.setFontSize(9);
+          doc.setTextColor(148,163,184);
+          doc.text(`Generated ${new Date().toLocaleString()}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+        }
       });
       doc.save(title.replace(/[^A-Za-z0-9_\\- ]/g,'_') + '.pdf');
     }
 
     /* ---------- Event Listeners ---------- */
     window.addEventListener('load', () => {
-      initFilterControls();
-      loadAll();
+      startAuthWatcher();
     });
     if(btnLoad) btnLoad.addEventListener('click', loadAll);
     if(btnExportPDF) btnExportPDF.addEventListener('click', exportPDF);

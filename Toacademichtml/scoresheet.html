@@ -843,12 +843,37 @@
 
     function exportPDF(){
       const rows = gatherRowsForExport();
+      if(rows.length <= 1){
+        alert('No scores to export yet.');
+        return;
+      }
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
       const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
-      doc.setFontSize(14); doc.text(title, 40, 40);
-      doc.autoTable({ startY:60, head:[rows[0]], body:rows.slice(1), styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[37,99,235]} });
-      doc.save(title.replace(/[^A-Za-z0-9_\- ]/g,'_') + '.pdf');
+      const subtitle = `Stream ${state.stream || '-'}  |  ${state.examKey || 'monthly'}  |  Month ${state.month || ''}`;
+
+      doc.setFillColor(79, 70, 229);
+      doc.rect(30, 28, 782, 42, 'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(16); doc.text(title, 40, 55);
+      doc.setFontSize(11); doc.text(subtitle, 40, 70);
+
+      doc.autoTable({
+        startY:90,
+        head:[rows[0]],
+        body:rows.slice(1),
+        theme:'grid',
+        styles:{fontSize:7,cellPadding:3, halign:'center', textColor:[31,41,55]},
+        headStyles:{fillColor:[99,102,241], textColor:[255,255,255], fontStyle:'bold'},
+        alternateRowStyles:{fillColor:[245,248,255]},
+        columnStyles:{0:{halign:'left'},1:{halign:'left'}},
+        didDrawPage:(data)=>{
+          doc.setFontSize(9);
+          doc.setTextColor(148,163,184);
+          doc.text(`Generated ${new Date().toLocaleString()}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+        }
+      });
+      doc.save(title.replace(/[^A-Za-z0-9_\\- ]/g,'_') + '.pdf');
     }
 
     /* ---------- Persist summary (kept) ---------- */
@@ -915,6 +940,16 @@
       const classNum = classNumMatch ? classNumMatch[0] : '';
       const effectiveStream = inputStream.replace(/class/i, '').replace(classNum, '').trim().toUpperCase();
       state.stream = effectiveStream;
+
+      try {
+        const ss = window.sessionStorage || {};
+        ss.setItem('assignedClass', state.className);
+        ss.setItem('className', state.className);
+        ss.setItem('stream', state.stream || '');
+        ss.setItem('year', state.year || '');
+        ss.setItem('month', state.month || '');
+        ss.setItem('examKey', state.examKey || '');
+      } catch(e) {}
 
       console.log('Effective stream:', state.stream);
 

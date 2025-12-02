@@ -34,6 +34,64 @@
     /* Ensure the Generate button is always visible */
     #btnCheckScoresheet { display: inline-block !important; visibility: visible !important; opacity: 1 !important; min-width: 120px; }
     .flex.items-center.gap-2 { flex-wrap: nowrap !important; overflow: visible !important; }
+
+    /* Base table (desktop) */
+    .scoresheet-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .scoresheet-table th, .scoresheet-table td { border: 1px solid #e5e7eb; padding: 0.35rem 0.5rem; }
+
+    /* Mobile: card layout instead of wide side-scroll */
+    @media (max-width: 768px) {
+      .scoresheet-table,
+      .scoresheet-table thead,
+      .scoresheet-table tbody,
+      .scoresheet-table th,
+      .scoresheet-table td,
+      .scoresheet-table tr {
+        display: block;
+      }
+
+      .scoresheet-table thead { display: none; }
+
+      .scoresheet-table tr.scoresheet-row {
+        margin-bottom: 1rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 0.75rem 0.75rem 0.5rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+        background: #ffffff;
+      }
+
+      .scoresheet-table td {
+        border: none;
+        padding: 0.15rem 0;
+      }
+
+      .scoresheet-table td[data-label]::before {
+        content: attr(data-label) ": ";
+        font-weight: 600;
+        display: inline-block;
+        min-width: 7rem;
+      }
+
+      .scoresheet-table input[type="number"],
+      .scoresheet-table input[type="text"] {
+        width: 6rem;
+        max-width: 70%;
+      }
+
+      .scoresheet-table textarea {
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .scoresheet-sticky-header {
+        position: sticky;
+        top: 0;
+        background: #f9fafb;
+        z-index: 20;
+        padding: 0.5rem 0;
+      }
+    }
   </style>
 </head>
 <body class="bg-gray-50 text-slate-800" style="margin: 0; padding: 0; height: 100%; overflow: hidden;">
@@ -84,9 +142,9 @@
         </div>
 
         <div class="overflow-auto scroll-shadow" style="max-height:calc(100vh - 200px)">
-          <table id="scoresTable" class="w-full min-w-table text-sm">
+          <table id="scoresTable" class="scoresheet-table w-full min-w-table text-sm">
             <thead class="sticky-th">
-              <tr class="bg-slate-50">
+              <tr id="scoresheet-header-row" class="bg-slate-50">
                 <th class="p-2 border">#</th>
                 <th class="p-2 border">Adm</th>
                 <th class="p-2 border text-left">Student</th>
@@ -161,6 +219,45 @@
       'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
     };
 
+    // Returns default subjects as { key, label } objects for non-Class 5 cases
+    function getDefaultSubjectsForClass(className){
+      const normalizedKey = Object.keys(SUBJECTS_BY_CLASS).find(k => k.toLowerCase() === String(className || '').trim().toLowerCase());
+      const list = SUBJECTS_BY_CLASS[normalizedKey || className] || [];
+      return list.map(sub => ({ key: sub, label: sub }));
+    }
+
+    // Returns the list of subjects for a given class & year (Class 5 has year-based logic)
+    function getSubjectsForClassAndYear(className, year){
+      const y = parseInt(year, 10);
+      const normalized = String(className || '').trim().toLowerCase();
+      const isClass5 = normalized === 'class 5' || normalized === 'std 5' || normalized === '5' || normalized.startsWith('class 5');
+
+      if (isClass5) {
+        if (!isNaN(y) && y <= 2025) {
+          return [
+            { key: 'Math',      label: 'Math' },
+            { key: 'English',   label: 'English' },
+            { key: 'Kiswahili', label: 'Kiswahili' },
+            { key: 'Science',   label: 'Science' },
+            { key: 'SST',       label: 'SST' },
+            { key: 'CME',       label: 'CME' },
+            { key: 'VSkills',   label: 'VSkills' }
+          ];
+        }
+        return [
+          { key: 'Math',      label: 'Math' },
+          { key: 'English',   label: 'English' },
+          { key: 'Kiswahili', label: 'Kiswahili' },
+          { key: 'Science',   label: 'Science' },
+          { key: 'Geography', label: 'Geography' },
+          { key: 'Historia',  label: 'Historia' },
+          { key: 'DSA',       label: 'DSA' }
+        ];
+      }
+
+      return getDefaultSubjectsForClass(className);
+    }
+
     function letterGrade(pct) {
       const p = Number(pct);
       if (p >= 80.5) return 'A';
@@ -184,7 +281,7 @@
 
     /* ---------- STATE ---------- */
     const state = {
-      students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
+      students: [], attendance: {}, fees: {}, scores: {}, subjectList: [], subjectConfigs: [],
       rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:''
     };
 
@@ -405,11 +502,11 @@
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
         payload[adm] = payload[adm] || {};
-        state.subjectList.forEach(subject=>{
-          const cell = row.subjectCells[subject];
+        state.subjectConfigs.forEach(({ key })=>{
+          const cell = row.subjectCells[key];
           const score = Number(cell.scoreInput.value || 0);
           const max = Math.max(1, Number(cell.maxInput.value || 100));
-          payload[adm][subject] = { score, max };
+          payload[adm][key] = { score, max };
         });
       });
       await baseRef.set(payload);
@@ -419,26 +516,37 @@
 
     /* ---------- Build table ---------- */
     function buildTable(){
-      const scoresTable = document.getElementById('scoresTable');
-      const theadRow = scoresTable.querySelector('thead tr');
+      const theadRow = document.getElementById('scoresheet-header-row');
+      if (theadRow) {
+        let headerHtml = `
+          <th class="p-2 border">#</th>
+          <th class="p-2 border">Adm</th>
+          <th class="p-2 border text-left">Student</th>
+          <th class="p-2 border">Fee Due</th>
+          <th class="p-2 border">Paid</th>
+          <th class="p-2 border">Balance</th>
+        `;
 
-      // remove old injected subject headers first
-      while (theadRow.children.length > 6 && (theadRow.children[6].textContent||'').trim() !== 'Total'){
-        theadRow.removeChild(theadRow.children[6]);
+        state.subjectConfigs.forEach(sub => {
+          headerHtml += `
+            <th class="p-2 border">${sub.label}</th>
+            <th class="p-2 border">Max</th>
+            <th class="p-2 border">Pstn</th>
+          `;
+        });
+
+        headerHtml += `
+          <th class="p-2 border">Total</th>
+          <th class="p-2 border">Max</th>
+          <th class="p-2 border">% Avg</th>
+          <th class="p-2 border">Overall Pos</th>
+          <th class="p-2 border">Grade</th>
+          <th class="p-2 border">Present</th>
+          <th class="p-2 border">Absent</th>
+          <th class="p-2 border">Teacher Comment</th>
+        `;
+        theadRow.innerHTML = headerHtml;
       }
-
-      const tplHeader = document.getElementById('tplSubjectHeader');
-      let insertIndex = Array.from(theadRow.children).findIndex(th => (th.textContent||'').trim() === 'Total');
-      if(insertIndex < 0) insertIndex = theadRow.children.length;
-      state.subjectList.forEach(subject=>{
-        const subjTh = tplHeader.content.cloneNode(true);
-        const ths = subjTh.querySelectorAll('th');
-        ths[0].textContent = subject;
-        theadRow.insertBefore(ths[0], theadRow.children[insertIndex]);
-        theadRow.insertBefore(ths[1], theadRow.children[insertIndex+1]);
-        theadRow.insertBefore(ths[2], theadRow.children[insertIndex+2]);
-        insertIndex += 3;
-      });
 
       scoresBody.innerHTML = '';
       state.rowsByAdm = {};
@@ -448,7 +556,7 @@
         const tr = document.createElement('tr');
         tr.className = 'bg-yellow-50';
         const td = document.createElement('td');
-        td.colSpan = 6 + (state.subjectList.length * 3) + 8; // Total columns
+        td.colSpan = 6 + (state.subjectConfigs.length * 3) + 8; // Total columns
         td.className = 'p-8 text-center text-slate-500';
         td.innerHTML = `
           <div class="text-lg mb-2">⚠️ No students found</div>
@@ -468,33 +576,41 @@
 
       state.students.forEach((s, idx)=>{
         const tr = document.createElement('tr');
-        tr.className = idx % 2 ? 'bg-white' : 'bg-slate-50';
+        tr.className = `scoresheet-row ${idx % 2 ? 'bg-white' : 'bg-slate-50'}`;
 
-        const tdIndex = document.createElement('td'); tdIndex.className='p-2 border text-center'; tdIndex.textContent = String(idx+1);
+        const tdIndex = document.createElement('td'); tdIndex.className='p-2 border text-center'; tdIndex.textContent = String(idx+1); tdIndex.dataset.label = '#';
         tr.appendChild(tdIndex);
 
-        const tdAdm = document.createElement('td'); tdAdm.className='p-2 border text-center'; tdAdm.textContent = s.adm;
+        const tdAdm = document.createElement('td'); tdAdm.className='p-2 border text-center'; tdAdm.textContent = s.adm; tdAdm.dataset.label = 'Adm';
         tr.appendChild(tdAdm);
 
-        const tdName = document.createElement('td'); tdName.className='p-2 border';
+        const tdName = document.createElement('td'); tdName.className='p-2 border'; tdName.dataset.label = 'Student';
         tdName.innerHTML = `<div class="font-medium">${escapeHtml(s.name)}</div><div class="text-xs text-slate-500">${escapeHtml(s.class)} ${s.stream? '('+escapeHtml(s.stream)+')':''}</div>`;
         tr.appendChild(tdName);
 
         const feeObj = state.fees[s.adm] || { required: s.feeDue || 0, paid: s.feePaid || 0, balance: s.balance || 0 };
-        const tdFeeDue = document.createElement('td'); tdFeeDue.className='p-2 border text-center'; tdFeeDue.textContent = money(feeObj.required || 0);
-        const tdPaid = document.createElement('td'); tdPaid.className='p-2 border text-center'; tdPaid.textContent = money(feeObj.paid || 0);
-        const tdBal = document.createElement('td'); tdBal.className='p-2 border text-center'; tdBal.textContent = money(feeObj.balance || 0);
+        const tdFeeDue = document.createElement('td'); tdFeeDue.className='p-2 border text-center'; tdFeeDue.dataset.label = 'Fee Due'; tdFeeDue.textContent = money(feeObj.required || 0);
+        const tdPaid = document.createElement('td'); tdPaid.className='p-2 border text-center'; tdPaid.dataset.label = 'Paid'; tdPaid.textContent = money(feeObj.paid || 0);
+        const tdBal = document.createElement('td'); tdBal.className='p-2 border text-center'; tdBal.dataset.label = 'Balance'; tdBal.textContent = money(feeObj.balance || 0);
         tr.appendChild(tdFeeDue); tr.appendChild(tdPaid); tr.appendChild(tdBal);
 
         const subjectCells = {};
-        state.subjectList.forEach(subject=>{
+        state.subjectConfigs.forEach(({ key, label })=>{
           const frag = tplCell.content.cloneNode(true);
           const tds = frag.querySelectorAll('td');
           const scoreInp = tds[0].querySelector('input.score-input');
           const maxInp = tds[1].querySelector('input.max-input');
           const pstnSpan = tds[2].querySelector('.pstn-cell');
 
-          const sc = (state.scores[s.adm]||{})[subject] || {};
+          tds[0].dataset.label = `${label} Mark`;
+          tds[1].dataset.label = `${label} Max`;
+          tds[2].dataset.label = `${label} Pstn`;
+
+          scoreInp.setAttribute('data-subject', key);
+          maxInp.setAttribute('data-subject', key);
+          pstnSpan.setAttribute('data-subject', key);
+
+          const sc = (state.scores[s.adm]||{})[key] || {};
           scoreInp.value = sc.score ?? '';
           maxInp.value = sc.max ?? 100;
 
@@ -503,22 +619,22 @@
 
           tr.appendChild(tds[0]); tr.appendChild(tds[1]); tr.appendChild(tds[2]);
 
-          subjectCells[subject] = { scoreInput: scoreInp, maxInput: maxInp, pstnSpan };
+          subjectCells[key] = { scoreInput: scoreInp, maxInput: maxInp, pstnSpan };
         });
 
-        const tdTotal = document.createElement('td'); tdTotal.className='p-2 border text-center font-medium'; tdTotal.textContent='0';
-        const tdMax = document.createElement('td'); tdMax.className='p-2 border text-center'; tdMax.textContent='0';
-        const tdAvg = document.createElement('td'); tdAvg.className='p-2 border text-center'; tdAvg.textContent='0';
-        const tdPstn = document.createElement('td'); tdPstn.className='p-2 border text-center'; tdPstn.textContent='–';
-        const tdGrade = document.createElement('td'); tdGrade.className='p-2 border text-center'; tdGrade.textContent='–';
+        const tdTotal = document.createElement('td'); tdTotal.className='p-2 border text-center font-medium'; tdTotal.textContent='0'; tdTotal.dataset.label = 'Total';
+        const tdMax = document.createElement('td'); tdMax.className='p-2 border text-center'; tdMax.textContent='0'; tdMax.dataset.label = 'Max Total';
+        const tdAvg = document.createElement('td'); tdAvg.className='p-2 border text-center'; tdAvg.textContent='0'; tdAvg.dataset.label = '% Avg';
+        const tdPstn = document.createElement('td'); tdPstn.className='p-2 border text-center'; tdPstn.textContent='-'; tdPstn.dataset.label = 'Overall Pos';
+        const tdGrade = document.createElement('td'); tdGrade.className='p-2 border text-center'; tdGrade.textContent='-'; tdGrade.dataset.label = 'Grade';
         tr.appendChild(tdTotal); tr.appendChild(tdMax); tr.appendChild(tdAvg); tr.appendChild(tdPstn); tr.appendChild(tdGrade);
 
         const att = state.attendance[s.adm] || { present:0, absent:0, days:0 };
-        const tdPresent = document.createElement('td'); tdPresent.className='p-2 border text-center'; tdPresent.textContent = att.present;
-        const tdAbsent = document.createElement('td'); tdAbsent.className='p-2 border text-center'; tdAbsent.textContent = att.absent;
+        const tdPresent = document.createElement('td'); tdPresent.className='p-2 border text-center'; tdPresent.textContent = att.present; tdPresent.dataset.label = 'Present';
+        const tdAbsent = document.createElement('td'); tdAbsent.className='p-2 border text-center'; tdAbsent.textContent = att.absent; tdAbsent.dataset.label = 'Absent';
         tr.appendChild(tdPresent); tr.appendChild(tdAbsent);
 
-        const tdComment = document.createElement('td'); tdComment.className='p-2 border';
+        const tdComment = document.createElement('td'); tdComment.className='p-2 border'; tdComment.dataset.label = 'Teacher Comment';
         const avg = Number(tdAvg.textContent) || 0;
         const grade = letterGrade(avg);
         const comment = getTeacherComment(grade, s.name);
@@ -538,7 +654,7 @@
       });
 
       lblCount.textContent = String(state.students.length);
-      lblSubjects.textContent = String(state.subjectList.length);
+      lblSubjects.textContent = String(state.subjectConfigs.length);
       
       // Update status message
       if(state.students.length === 0) {
@@ -549,7 +665,7 @@
     }
 
     function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-    function money(n){ n = Number(n||0); return new Intl.NumberFormat('en-KE',{style:'currency',currency:'KES',maximumFractionDigits:0}).format(n); }
+    function money(n){ n = Number(n||0); return new Intl.NumberFormat('en-TZ',{style:'currency',currency:'TZS',maximumFractionDigits:0}).format(n); }
 
     /* ---------- Computation: totals/averages/positions/grades ---------- */
     function recomputeAll(){
@@ -557,14 +673,14 @@
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
         let sumScore=0, sumMax=0;
-        state.subjectList.forEach(subject=>{
-          const cell = row.subjectCells[subject];
+        state.subjectConfigs.forEach(({ key })=>{
+          const cell = row.subjectCells[key];
           const score = Number(cell.scoreInput.value || 0);
           const max = Math.max(1, Number(cell.maxInput.value || 100));
           sumScore += score; sumMax += max;
           const pct = (score/max)*100;
-          perSubject[subject] = perSubject[subject] || [];
-          perSubject[subject].push({ adm, pct });
+          perSubject[key] = perSubject[key] || [];
+          perSubject[key].push({ adm, pct });
         });
         const avgPct = sumMax ? (sumScore/sumMax)*100 : 0;
         row.tdTotal.textContent = sumScore.toFixed(2);
@@ -581,14 +697,14 @@
       });
 
       // Subject positions
-      state.subjectList.forEach(subject=>{
-        const list = (perSubject[subject] || []).slice().sort((a,b)=> b.pct - a.pct);
+      state.subjectConfigs.forEach(({ key })=>{
+        const list = (perSubject[key] || []).slice().sort((a,b)=> b.pct - a.pct);
         let pos=0, last=null, idx=0;
         list.forEach(item=>{
           idx++;
           if(last === null || item.pct < last){ pos = idx; last = item.pct; }
           const row = state.rowsByAdm[item.adm];
-          row.subjectCells[subject].pstnSpan.textContent = String(pos);
+          row.subjectCells[key].pstnSpan.textContent = String(pos);
         });
       });
 
@@ -613,8 +729,8 @@
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const r = state.rowsByAdm[adm];
         const arr = [adm, r.meta.name, (r.tdFeeDue?.textContent||''), (r.tdPaid?.textContent||''), (r.tdBal?.textContent||'')];
-        state.subjectList.forEach(sub=>{
-          const c = r.subjectCells[sub];
+        state.subjectConfigs.forEach(({ key })=>{
+          const c = r.subjectCells[key];
           arr.push(Number(c.scoreInput.value||0)); arr.push(Number(c.maxInput.value||100)); arr.push(c.pstnSpan.textContent||'');
         });
         arr.push(Number(r.tdTotal.textContent||0)); arr.push(Number(r.tdMax.textContent||0)); arr.push(Number(r.tdAvg.textContent||0));
@@ -625,7 +741,7 @@
       return rows;
     }
 
-    function expandSubjectTripletsHeader(){ const out=[]; state.subjectList.forEach(s=> out.push(`${s} Score`, `${s} Max`, `${s} Pstn`)); return out; }
+    function expandSubjectTripletsHeader(){ const out=[]; state.subjectConfigs.forEach(({ label })=> out.push(`${label} Score`, `${label} Max`, `${label} Pstn`)); return out; }
 
     function exportCSV(){
       const rows = gatherRowsForExport();
@@ -656,16 +772,16 @@
     async function persistComputedSummary(){
       const db = getDB();
       if(!db) return;
-      const summary = { updatedAt: Date.now(), className: state.className, stream: state.stream, year: state.year, month: state.month, examKey: state.examKey, subjectList: state.subjectList };
+      const summary = { updatedAt: Date.now(), className: state.className, stream: state.stream, year: state.year, month: state.month, examKey: state.examKey, subjectList: state.subjectConfigs.map(s => s.key) };
       summary.subjectAverages = {};
-      state.subjectList.forEach(sub=>{
+      state.subjectConfigs.forEach(({ key })=>{
         let sum=0, cnt=0;
         Object.keys(state.rowsByAdm).forEach(adm=>{
           const row = state.rowsByAdm[adm];
-          const c = row.subjectCells[sub]; const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value || 100));
+          const c = row.subjectCells[key]; const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value || 100));
           sum += (sc/mx)*100; cnt++;
         });
-        summary.subjectAverages[sub] = cnt ? sum/cnt : 0;
+        summary.subjectAverages[key] = cnt ? sum/cnt : 0;
       });
       const list = Object.values(state.rowsByAdm).map(r=>({ name: r.meta.name, adm: r.meta.adm, avg: r._avgPct || 0 })).sort((a,b)=> b.avg - a.avg);
       summary.top3 = list.slice(0,3); summary.bottom3 = list.slice(-3);
@@ -719,10 +835,11 @@
 
       console.log('Effective stream:', state.stream);
 
-      state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
-      console.log('Subject list for', state.className, ':', state.subjectList);
+      state.subjectConfigs = getSubjectsForClassAndYear(state.className, state.year);
+      state.subjectList = state.subjectConfigs.map(s => s.key);
+      console.log('Subject list for', state.className, ':', state.subjectConfigs.map(s => s.label));
 
-      if(state.subjectList.length === 0) {
+      if(state.subjectConfigs.length === 0) {
         console.warn('No subjects found for class:', state.className);
         console.log('Available classes:', Object.keys(SUBJECTS_BY_CLASS));
       }
@@ -755,6 +872,8 @@
             console.log('Found students with alternative class name:', alt, 'Count:', altStudents.length);
             state.students = altStudents;
             state.className = alt; // Update the class name to match
+            state.subjectConfigs = getSubjectsForClassAndYear(state.className, state.year);
+            state.subjectList = state.subjectConfigs.map(s => s.key);
             break;
           }
         }
@@ -832,3 +951,5 @@
   </script>
 </body>
 </html>
+
+

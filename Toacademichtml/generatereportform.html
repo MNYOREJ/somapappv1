@@ -86,11 +86,9 @@
     .badge { background: rgba(96,165,250,0.18); color: #1d4ed8; border-radius: 999px; padding: 0.25rem 0.55rem; font-size: 0.72rem; letter-spacing: 0.02em; }
     .preview-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
     .preview-table thead { background: rgba(15,23,42,0.08); }
-    .preview-table th, .preview-table td { padding: 0.45rem 0.35rem; border-bottom: 1px solid rgba(148,163,184,0.28); text-align: left; color: #0f172a; }
-    .preview-table th { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.04em; color: #0f172a; }
-    .preview-table tbody tr:nth-child(even) { background: rgba(226,232,240,0.35); }
-    .preview-table tbody tr:nth-child(odd) { background: rgba(255,255,255,0.72); }
-    #previewComment { color: #0f172a; }
+    .preview-table th, .preview-table td { padding: 0.45rem 0.35rem; border-bottom: 1px solid rgba(148,163,184,0.28); text-align: left; }
+    .preview-table th { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; }
+    .preview-table tbody tr:nth-child(even) { background: rgba(248,250,252,0.6); }
     .table-card { background: rgba(15,23,42,0.62); border-radius: 18px; border: 1px solid rgba(148,163,184,0.18); box-shadow: 0 16px 36px rgba(15,23,42,0.35); overflow: hidden; }
     .status-pill { border-radius: 999px; padding: 0.25rem 0.55rem; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
     .status-pill.good { background: rgba(16,185,129,0.20); color: #10b981; }
@@ -1147,33 +1145,21 @@
       if (key === 'monthly') {
         return getMonthlyScores(year, className, month, rawMonth);
       }
-      // Multi-month aggregation (annual / multi-term): average ONLY over exams the learner actually attempted
+      // Multi-month aggregation
       const months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
       if (!Array.isArray(months) || !months.length) return {};
+      // Sum raw score and max across months, per subject
       const perMonth = await Promise.all(months.map(m => getMonthlyScores(year, className, m, null)));
       const merged = {};
-      perMonth.forEach(monthMap => {
+      for (const monthMap of perMonth) {
         Object.entries(monthMap || {}).forEach(([adm, subs]) => {
           merged[adm] = merged[adm] || {};
           Object.entries(subs || {}).forEach(([subject, o]) => {
-            const score = Number(o?.score);
-            const maxPerAttempt = Math.min(100, Number(o?.max) || Number(o?.maxSum) || 100);
-            const attempted = !!o?.attempted;
-            const valid = attempted && Number.isFinite(score) && score >= 0 && Number.isFinite(maxPerAttempt) && maxPerAttempt > 0;
-            if (!valid) return; // skip months with missing/blank scores (exam not sat)
-            const cur = merged[adm][subject] || { score: 0, maxSum: 0, attempts: 0, attempted: false, max: 0 };
-            const nextAttempts = cur.attempts + 1;
-            const nextMaxSum = cur.maxSum + maxPerAttempt;
-            merged[adm][subject] = {
-              score: cur.score + score,
-              maxSum: nextMaxSum,
-              attempts: nextAttempts,
-              attempted: true,
-              max: nextMaxSum / nextAttempts // average max per attempt (display helper)
-            };
+            const cur = merged[adm][subject] || { score: 0, max: 0 };
+            merged[adm][subject] = { score: cur.score + Number(o.score||0), max: cur.max + Number(o.max||0) };
           });
         });
-      });
+      }
       return merged;
     }
 
@@ -1189,20 +1175,13 @@
           const hasScore = Object.prototype.hasOwnProperty.call(o, 'score') || Object.prototype.hasOwnProperty.call(o, 'Score');
           const hasMax = Object.prototype.hasOwnProperty.call(o, 'max') || Object.prototype.hasOwnProperty.call(o, 'Max');
           if (!hasScore && !hasMax) return;
-          const rawScore = hasScore ? (o.score ?? o.Score) : undefined;
-          const rawMax = hasMax ? (o.max ?? o.Max) : undefined;
-          const providedScore = rawScore !== '' && rawScore !== null && rawScore !== undefined && !Number.isNaN(Number(rawScore));
-          const providedMax = rawMax !== '' && rawMax !== null && rawMax !== undefined && !Number.isNaN(Number(rawMax));
-          const scoreVal = providedScore ? Number(rawScore) : 0;
-          let maxVal = providedMax ? Number(rawMax) : 100;
+          const scoreVal = hasScore ? Number(o.score ?? o.Score ?? 0) : 0;
+          let maxVal = hasMax ? Number(o.max ?? o.Max ?? 0) : 100;
           if (!Number.isFinite(maxVal) || maxVal <= 0) maxVal = 100;
-          const maxCapped = Math.min(100, maxVal);
           const canonicalSubject = SomapSub().canonSubject ? SomapSub().canonSubject(subject) : subject;
           const key = canonicalSubject || subject;
-          const attempts = providedScore ? 1 : 0;
-          const entry = { score: scoreVal, max: maxCapped, maxSum: providedScore ? maxCapped : 0, attempts, attempted: providedScore };
-          out[adm][key] = entry;
-          if (!out[adm][subject]) out[adm][subject] = entry;
+          out[adm][key] = { score: scoreVal, max: maxVal };
+          if (!out[adm][subject]) out[adm][subject] = { score: scoreVal, max: maxVal };
         });
       });
       return out;
@@ -1244,23 +1223,6 @@
     }
 
     /* -------------------------- COMPOSE -------------------------- */
-    function computePercent(pairs){
-      const fn = (typeof percent === 'function') ? percent : window.Grading?.percent;
-      if (fn) return fn(pairs);
-      let s = 0, m = 0;
-      (pairs || []).forEach(it => {
-        const rawScore = it?.score;
-        const rawMax = it?.max;
-        const sc = Number(rawScore);
-        const mx = Number(rawMax);
-        if (!Number.isFinite(mx) || mx <= 0) return;
-        const missing = rawScore === '' || rawScore === null || rawScore === undefined || Number.isNaN(sc);
-        if (missing || sc < 0) return;
-        s += sc; m += mx;
-      });
-      return m > 0 ? (s * 100) / m : 0;
-    }
-
     function computeStudents(attendance, fees, scores){
       const subjects = state.subjects && state.subjects.length ? state.subjects.slice() : inferSubjects(scores);
       state.subjects = subjects;
@@ -1271,8 +1233,7 @@
         const scoreEntry = scores[adm] || {};
         const subjectStats = buildSubjectStats(subjects, scoreEntry);
         const totalScore = subjectStats.totalScore, totalMax = subjectStats.totalMax;
-        const attempts = subjectStats.subjects.filter(r => r.included);
-        const avg = computePercent(attempts.map(r => ({ score: r.score, max: r.max })));
+        const avg = totalMax ? (totalScore/totalMax) * 100 : 0;
         const grade = deriveGrade(avg);
         const comment = autoComment(avg);
         students.push({
@@ -1303,36 +1264,23 @@
       const stats = { totalScore: 0, totalMax: 0, subjects: [], subjectMap: {} };
       subjects.forEach(subject => {
         const subEntry = scoreEntry?.[subject] || {};
-        const rawScore = subEntry.score;
-        const rawMaxSum = subEntry.maxSum ?? subEntry.max;
-        const attempts = Number(subEntry.attempts);
-        const hasAttempts = Number.isFinite(attempts);
-        const score = Number(rawScore);
-        const maxRaw = Number(rawMaxSum);
-        const attemptedFlag = subEntry.attempted === true;
-        const maxPerAttempt = hasAttempts && attempts > 0 ? (maxRaw / attempts) : maxRaw;
-        const maxCapped = Number.isFinite(maxPerAttempt) && maxPerAttempt > 0 ? Math.min(100, maxPerAttempt) : 0;
-        const valid = Number.isFinite(maxCapped) && maxCapped > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(score) && score >= 0;
-        const included = valid && (attemptedFlag || !hasAttempts || attempts > 0);
-        const totalMax = maxCapped * (hasAttempts && attempts > 0 ? attempts : 1);
-        const percentVal = computePercent([{ score, max: totalMax }]);
-        const record = { subject, score, max: maxCapped, percent: percentVal, included };
+        const score = Number(subEntry.score || 0);
+        const max = Number(subEntry.max || 0) || 100;
+        const percent = max ? (score / max) * 100 : 0;
+        const record = { subject, score, max, percent };
         stats.subjects.push(record);
         stats.subjectMap[subject] = record;
-        if(included){
-          stats.totalScore += score;
-          stats.totalMax += max;
-        }
+        stats.totalScore += score;
+        stats.totalMax += max;
       });
       return stats;
     }
 
     function deriveGrade(avg){
-      if (typeof gradeFromPercent === 'function') return gradeFromPercent(avg);
-      if (avg >= 80.5) return 'A';
-      if (avg >= 60.5) return 'B';
-      if (avg >= 40.5) return 'C';
-      if (avg >= 20.5) return 'D';
+      if (avg >= 80) return 'A';
+      if (avg >= 65) return 'B';
+      if (avg >= 50) return 'C';
+      if (avg >= 35) return 'D';
       return 'F';
     }
 
@@ -1360,31 +1308,25 @@
       });
       // Per subject
       subjects.forEach(subject => {
-        const arr = students.map(stu => {
-          const entry = stu.subjectStats.subjectMap[subject] || {};
-          const score = Number(entry.score);
-          const max = Number(entry.max);
-          const valid = !!entry.included;
-          const pct = computePercent([{ score, max }]);
-          return { stu, pct, valid };
-        }).filter(item => item.valid).sort((a,b) => b.pct - a.pct);
+        const arr = [...students].sort((a,b) => {
+          const as = a.subjectStats.subjectMap[subject]?.score || 0;
+          const bs = b.subjectStats.subjectMap[subject]?.score || 0;
+          return bs - as;
+        });
         let prev = null, prevPos = 0;
-        arr.forEach((item, idx) => {
-          const v = Number(item.pct.toFixed(2));
-          if (prev !== null && v === prev) item.stu.subjectPositions[subject] = prevPos;
-          else { item.stu.subjectPositions[subject] = idx+1; prevPos = item.stu.subjectPositions[subject]; prev = v; }
-          const target = item.stu.subjectStats.subjectMap[subject];
-          if (target){
-            target.position = item.stu.subjectPositions[subject];
-            target.teacher = getTeacherName(subject);
-          }
+        arr.forEach((stu, idx) => {
+          const v = Number(stu.subjectStats.subjectMap[subject]?.score || 0);
+          if (prev !== null && v === prev) stu.subjectPositions[subject] = prevPos;
+          else { stu.subjectPositions[subject] = idx+1; prevPos = stu.subjectPositions[subject]; prev = v; }
+          stu.subjectStats.subjectMap[subject].position = stu.subjectPositions[subject];
+          stu.subjectStats.subjectMap[subject].teacher = getTeacherName(subject);
         });
       });
       // Flatten subjects array with new props
       students.forEach(s => {
         s.subjectStats.subjects = state.subjects.map(subject => {
           const r = s.subjectStats.subjectMap[subject];
-          return { subject, score: r?.score, max: r?.max, percent: r?.percent, position: r?.position, teacher: r?.teacher, included: r?.included };
+          return { subject, score: r.score, max: r.max, percent: r.percent, position: r.position, teacher: r.teacher };
         });
       });
     }
@@ -1575,8 +1517,8 @@
       document.getElementById('previewSubjects').innerHTML = s.subjectStats.subjects.map((entry, idx) => `
         <tr>
           <td>${idx + 1}</td><td>${escapeHtml(entry.subject)}</td>
-          <td>${entry.included ? formatNumber(entry.score) : '-'}</td><td>${entry.included ? formatNumber(entry.max) : '-'}</td>
-          <td>${entry.included ? entry.percent.toFixed(1) + '%' : '-'}</td><td>${entry.position || '-'}</td>
+          <td>${formatNumber(entry.score)}</td><td>${formatNumber(entry.max)}</td>
+          <td>${entry.percent.toFixed(1)}%</td><td>${entry.position || '-'}</td>
           <td>${escapeHtml(entry.teacher || 'Teacher')}</td>
         </tr>`).join('');
 
@@ -1588,16 +1530,8 @@
       imgEl.src = transformed || PLACEHOLDER_PHOTO;
     }
 
-    function bestSubject(s){
-      const list = (s.subjectStats?.subjects || []).filter(x => x.included);
-      const x = [...list].sort((a,b) => b.percent - a.percent)[0];
-      return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-';
-    }
-    function lowestSubject(s){
-      const list = (s.subjectStats?.subjects || []).filter(x => x.included);
-      const x = [...list].sort((a,b) => a.percent - b.percent)[0];
-      return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-';
-    }
+    function bestSubject(s){ const x = [...s.subjectStats.subjects].sort((a,b) => b.percent - a.percent)[0]; return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-'; }
+    function lowestSubject(s){ const x = [...s.subjectStats.subjects].sort((a,b) => a.percent - b.percent)[0]; return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-'; }
 
     function formatCurrency(v){ return Number(v||0).toLocaleString('en-US'); }
     function formatNumber(v){ if (Number.isInteger(v)) return v; return Number(v||0).toFixed(1); }
@@ -1700,11 +1634,8 @@
         startY: contentStartY + 32,
         head: [["#","Subject","Score","Max","%","Pos","Teacher"]],
         body: s.subjectStats.subjects.map((entry, index) => [
-          index + 1, entry.subject,
-          entry.included ? formatNumber(entry.score) : '-',
-          entry.included ? formatNumber(entry.max) : '-',
-          entry.included ? entry.percent.toFixed(1) : '-',
-          entry.position || '-', entry.teacher || 'Teacher'
+          index + 1, entry.subject, formatNumber(entry.score), formatNumber(entry.max),
+          entry.percent.toFixed(1), entry.position || '-', entry.teacher || 'Teacher'
         ]),
         styles: { fontSize: 9, textColor: [15, 23, 42] },
         headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
@@ -1773,11 +1704,10 @@
         };
         state.subjects.forEach(sub => {
           const e = s.subjectStats.subjectMap[sub];
-          const included = e?.included;
-          base[`${sub} Score`] = included ? e.score : '';
-          base[`${sub} Max`] = included ? e.max : '';
-          base[`${sub} %`] = included ? Number(e.percent.toFixed(2)) : '';
-          base[`${sub} Pos`] = included ? (s.subjectPositions[sub] || '') : '';
+          base[`${sub} Score`] = e?.score || 0;
+          base[`${sub} Max`] = e?.max || 0;
+          base[`${sub} %`] = e ? Number(e.percent.toFixed(2)) : 0;
+          base[`${sub} Pos`] = s.subjectPositions[sub] || '';
           base[`${sub} Teacher`] = e?.teacher || 'Teacher';
         });
         base.Comment = s.comment;
@@ -1799,10 +1729,6 @@
       if (!s || !s.parentContact) return Swal.fire('No contact', 'Selected learner has no parent contact recorded.', 'info');
       navigator.clipboard.writeText(s.parentContact).then(() => Swal.fire('Copied', 'Parent contact copied.', 'success')).catch(() => Swal.fire('Failed', 'Could not copy.', 'error'));
     }
-  </script>
-  <script src="../js/modules/grading.js"></script>
-  <script>
-    const { percent, gradeFromPercent, letterAndPercent } = window.Grading;
   </script>
 </body>
 </html>

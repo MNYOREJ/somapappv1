@@ -19,6 +19,15 @@
 
   <!-- Your Firebase config wrapper -->
   <script src="../firebase.js"></script>
+  <script type="module">
+    import { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass } from '../js/modules/subjects.js';
+    import {
+      EXAM_TYPES, MONTHS, canonExamType, canonMonth,
+      percent, gradeFromPercent, loadExamSnapshot, loadRosterFromEnroll
+    } from '../js/modules/exams.js';
+    window.SomapSubjects = { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass };
+    window.SomapExamUtils = { EXAM_TYPES, MONTHS, canonExamType, canonMonth, percent, gradeFromPercent, loadExamSnapshot, loadRosterFromEnroll };
+  </script>
 
   <!-- Font Awesome for eye icon (best practice for view buttons) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
@@ -61,21 +70,21 @@
       </div>
       <div class="bg-white rounded-2xl p-3 shadow">
         <label class="text-xs text-slate-500">Exam</label>
-        <select id="examType" class="mt-1 w-full border rounded px-2 py-2 text-sm">
-          <option value="monthly">Monthly</option>
-          <option value="midterm1">Midterm 1</option>
-          <option value="endterm">End Term</option>
-          <option value="midterm2">Midterm 2</option>
-          <option value="annual">Annual</option>
+        <select id="examType" data-exam-type class="mt-1 w-full border rounded px-2 py-2 text-sm">
+          <option>Monthly</option>
+          <option>Midterm 1</option>
+          <option>Term 1</option>
+          <option>Midterm 2</option>
+          <option>Annual</option>
         </select>
       </div>
       <div class="bg-white rounded-2xl p-3 shadow">
         <label class="text-xs text-slate-500">Month</label>
-        <select id="monthSelect" class="mt-1 w-full border rounded px-2 py-2 text-sm">
-          <option value="01">January</option><option value="02">February</option><option value="03">March</option>
-          <option value="04">April</option><option value="05">May</option><option value="06">June</option>
-          <option value="07">July</option><option value="08">August</option><option value="09">September</option>
-          <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+        <select id="monthSelect" data-exam-month class="mt-1 w-full border rounded px-2 py-2 text-sm">
+          <option>January</option><option>February</option><option>March</option>
+          <option>April</option><option>May</option><option>June</option>
+          <option>July</option><option>August</option><option>September</option>
+          <option>October</option><option>November</option><option>December</option>
         </select>
       </div>
       <div class="bg-white rounded-2xl p-3 shadow">
@@ -134,30 +143,20 @@
 
   <script>
     /* ---------- CONFIG ---------- */
-    const SUBJECTS_BY_CLASS = {
-      'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Baby': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Middle': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Pre-Unit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Preunit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Preunit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 1': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 2': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
-      'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
-    };
+    const SomapSub = () => window.SomapSubjects || {};
+    const SomapExam = () => window.SomapExamUtils || {};
 
-    const EXAM_KEYS = {
-      'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
-    };
+    function getSubjectConfigsForClass(className){
+      const list = SomapSub().getSubjectsForClass ? SomapSub().getSubjectsForClass(className, state.year) : [];
+      return (Array.isArray(list) ? list : []).map(sub=>{
+        const label = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
+        return { key: sanitizeSubjectKey(label), label };
+      });
+    }
 
     function letterGrade(pct) {
+      const g = SomapExam().gradeFromPercent;
+      if (g) return g(pct);
       const p = Number(pct);
       if (p >= 80.5) return 'A';
       if (p >= 60.5) return 'B';
@@ -178,6 +177,20 @@
       }
     }
 
+    function safePercent(list){
+      const fn = SomapExam().percent;
+      if (fn) return fn(list);
+      let num=0, den=0;
+      list.forEach(it=>{
+        const s = Number(it?.score);
+        const m = Number(it?.max);
+        if (!Number.isFinite(m) || m <= 0) return;
+        if (!Number.isFinite(s) || s < 0) return;
+        num += s; den += m;
+      });
+      return den>0 ? (num*100)/den : 0;
+    }
+
     /* ---------- STATE ---------- */
     function getSubjectConfigsForClass(className){
       const normalizedKey = Object.keys(SUBJECTS_BY_CLASS).find(k => k.toLowerCase() === String(className || '').trim().toLowerCase());
@@ -187,7 +200,7 @@
 
     const state = {
       students: [], attendance: {}, fees: {}, scores: {}, subjectList: [], subjectConfigs: [],
-      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:'', assignedClass:''
+      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examType:'Monthly', schoolBranch:'', assignedClass:''
     };
     const classSelect = document.getElementById('classSelect');
     const streamInput = document.getElementById('streamInput');
@@ -239,13 +252,6 @@
     /* ---------- Firebase DB helper ---------- */
     function sanitizePathSegment(val){ return String(val || '').replace(/[.#$\[\]/]/g,'_'); }
     function sanitizeSubjectKey(val){ return String(val || '').replace(/[.#$\[\]/]/g,'_'); }
-    function getScoresRef(db, { year, className, examKey, month }){
-      const y = sanitizePathSegment(year);
-      const c = sanitizePathSegment(className);
-      const e = sanitizePathSegment(examKey);
-      const m = sanitizePathSegment(month);
-      return db.ref(`/scores/${y}/${c}/${e}/${m}`);
-    }
     function getDB(){
       if(window && window.db) return window.db;
       if(!window.firebase) {
@@ -370,26 +376,27 @@
       }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
     }
 
-    async function fetchScores({year, className, examKey, month}){
+    async function fetchRosterIds(year, className){
+      const db = getDB();
+      if(!db) return [];
+      const loader = SomapExam().loadRosterFromEnroll;
+      if(loader){
+        try{
+          const ids = await loader(db, year, className);
+          if(Array.isArray(ids) && ids.length) return ids;
+        }catch(err){ console.warn('fetchRosterIds', err?.message); }
+      }
+      return [];
+    }
+
+    async function fetchScores({year, className, examType, month}){
       const db = getDB();
       if(!db) return {};
-      const ref = getScoresRef(db, { year, className, examKey, month });
+      const loader = SomapExam().loadExamSnapshot;
+      if(!loader) return {};
       try{
-        const snap = await ref.get();
-        const out = {};
-        if(snap && snap.exists && snap.exists()){
-          const val = snap.val();
-          Object.keys(val).forEach(adm=>{
-            out[adm] = {};
-            const subjObj = val[adm] || {};
-            Object.keys(subjObj).forEach(sub=>{
-              const o = subjObj[sub] || {};
-              const safeSub = sanitizeSubjectKey(sub);
-              out[adm][safeSub] = { score: Number(o.score||0), max: Number(o.max||100) };
-            });
-          });
-        }
-        return out;
+        const snap = await loader(db, { year, className, examType, month });
+        return snap || {};
       }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
     }
 
@@ -555,25 +562,35 @@
       const perSubject = {};
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
-        let sumScore=0, sumMax=0;
+        const attempts = [];
         state.subjectConfigs.forEach(({ key, label })=>{
-          const score = Number((state.scores[adm] && state.scores[adm][key] ? state.scores[adm][key].score : 0) || 0);
-          const max = Math.max(1, Number((state.scores[adm] && state.scores[adm][key] ? state.scores[adm][key].max : 100) || 100));
-          sumScore += score; sumMax += max;
-          const pct = (score/max)*100;
-          perSubject[key] = perSubject[key] || [];
-          perSubject[key].push({ adm, pct });
+          const subjectScores = state.scores[adm] || {};
+          const entry = subjectScores[key] || subjectScores[label] || {};
+          const score = Number(entry.score);
+          const max = Number(entry.max);
+          const valid = Number.isFinite(max) && max > 0 && Number.isFinite(score) && score >= 0;
+          if (valid){
+            attempts.push({ score, max });
+            const pct = safePercent([{ score, max }]);
+            perSubject[key] = perSubject[key] || [];
+            perSubject[key].push({ adm, pct });
+            row.subjectCells[key].tdScore.textContent = score;
+          } else {
+            row.subjectCells[key].tdScore.textContent = '-';
+          }
         });
-        const avgPct = sumMax ? (sumScore/sumMax)*100 : 0;
-        row.tdTotal.textContent = sumScore.toFixed(2);
-        row.tdMax.textContent = Math.round(sumMax);
+        const totalScore = attempts.reduce((s,a)=> s + a.score, 0);
+        const totalMax = attempts.reduce((s,a)=> s + a.max, 0);
+        const avgPct = safePercent(attempts);
+        row.tdTotal.textContent = totalScore.toFixed(2);
+        row.tdMax.textContent = totalMax ? Math.round(totalMax) : '0';
         row.tdAvg.textContent = avgPct.toFixed(2);
-        row.tdGrade.textContent = letterGrade(avgPct);
+        const grade = letterGrade(avgPct);
+        row.tdGrade.textContent = grade;
         row._avgPct = avgPct;
-        row._sumScore = sumScore;
+        row._sumScore = totalScore;
 
         // Auto-update teacher comment based on grade
-        const grade = letterGrade(avgPct);
         const comment = getTeacherComment(grade, row.meta.name);
         row.tdComment.textContent = comment;
       });
@@ -596,7 +613,8 @@
       arr.sort((a,b)=>{
         if(b.avg !== a.avg) return b.avg - a.avg;
         if(b.total !== a.total) return b.total - a.total;
-        return b.attendance - a.attendance;
+        if(b.attendance !== a.attendance) return b.attendance - a.attendance;
+        return String(a.adm).localeCompare(String(b.adm));
       });
       arr.forEach((r,i)=> state.rowsByAdm[r.adm].tdPstn.textContent = String(i+1));
     }
@@ -606,7 +624,7 @@
       const ss = window.sessionStorage || {};
       const assigned = state.assignedClass || ss.getItem('assignedClass') || ss.getItem('className') || '';
       if(classSelect){
-        const opts = Array.from(new Set(Object.keys(SUBJECTS_BY_CLASS)));
+        const opts = Array.from(new Set(Object.keys(SomapSub().SUBJECTS_BY_CLASS || {})));
         if(assigned){
           lockClassDropdown(assigned);
         } else {
@@ -624,7 +642,16 @@
       if(yearInput){
         yearInput.value = ss.getItem('year') || yearInput.value || new Date().getFullYear();
       }
-      if(examType && ss.getItem('examKey')) examType.value = ss.getItem('examKey');
+      if(examType){
+        const storedType = ss.getItem('somap_exam_type') || ss.getItem('examType') || 'Monthly';
+        examType.value = storedType;
+        const canon = SomapExam().canonExamType ? SomapExam().canonExamType(storedType) : storedType;
+        if(monthSelect){ monthSelect.disabled = (canon !== 'Monthly'); }
+      }
+      if(monthSelect){
+        const storedMonth = ss.getItem('somap_exam_month') || monthSelect.value || 'October';
+        monthSelect.value = storedMonth;
+      }
     }
 
     function readFilters(){
@@ -634,9 +661,9 @@
       const classNumMatch = state.className.match(/\d+/);
       const classNum = classNumMatch ? classNumMatch[0] : '';
       state.stream = rawStream.replace(/class/i, '').replace(classNum, '').trim().toUpperCase();
-      state.month = monthSelect?.value || ss.getItem('month') || '';
+      state.month = monthSelect?.value || ss.getItem('somap_exam_month') || ss.getItem('month') || '';
       state.year = yearInput?.value || ss.getItem('year') || '';
-      state.examKey = examType?.value || ss.getItem('examKey') || 'monthly';
+      state.examType = examType?.value || ss.getItem('somap_exam_type') || ss.getItem('examType') || 'Monthly';
       state.schoolBranch = ss.getItem('schoolBranch') || '';
       if(state.assignedClass && state.className !== state.assignedClass){
         state.className = state.assignedClass;
@@ -655,7 +682,7 @@
       }
       if(!state.className){ alert('Select class to view saved scores.'); return; }
       if(!state.year){ state.year = new Date().getFullYear().toString(); }
-      if(!state.month){ state.month = new Date().toISOString().slice(5,7); }
+      if(!state.month){ state.month = 'October'; }
       if(classSelect && !classSelect.value) lockClassDropdown(state.className);
       try {
         const ss = window.sessionStorage || {};
@@ -664,17 +691,26 @@
         ss.setItem('stream', state.stream || '');
         ss.setItem('year', state.year);
         ss.setItem('month', state.month);
-        ss.setItem('examKey', state.examKey);
+        ss.setItem('somap_exam_type', state.examType);
+        ss.setItem('somap_exam_month', state.month);
+        ss.setItem('examType', state.examType);
       } catch(e) {}
 
       state.subjectConfigs = getSubjectConfigsForClass(state.className);
       state.subjectList = state.subjectConfigs.map(s => s.key);
 
       lblStatus.textContent = 'Loading saved scores...';
-      state.students = await fetchStudents(state.className, state.stream);
+      const rosterIds = await fetchRosterIds(state.year, state.className);
+      const fetchedStudents = await fetchStudents(state.className, state.stream);
+      const byAdm = {}; fetchedStudents.forEach(s => byAdm[s.adm] = s);
+      if(rosterIds.length){
+        state.students = rosterIds.map(id => byAdm[id] || { adm: String(id), name: `Adm ${id}`, class: state.className, stream: state.stream || '', feeDue:0, feePaid:0, balance:0 });
+      } else {
+        state.students = fetchedStudents;
+      }
       state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
       state.fees = await fetchFees(state.year, state.className) || {};
-      state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
+      state.scores = await fetchScores({ year: state.year, className: state.className, examType: state.examType, month: state.month }) || {};
 
       // Fallback: if no students fetched but scores exist, build rows from scores keys
       if(state.students.length === 0 && Object.keys(state.scores || {}).length){
@@ -735,8 +771,8 @@
       }
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
-      const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
-      const subtitle = `Stream ${state.stream || '-'}  |  ${state.examKey || 'monthly'}  |  Month ${state.month || ''}`;
+      const title = `Scoresheet ${state.className || ''} ${state.examType || ''} ${state.year || ''}/${state.month || ''}`;
+      const subtitle = `Stream ${state.stream || '-'}  |  ${state.examType || 'Monthly'}  |  Month ${state.month || ''}`;
 
       doc.setFillColor(79, 70, 229);
       doc.rect(30, 28, 782, 42, 'F');
@@ -771,6 +807,21 @@
     });
     if(btnLoad) btnLoad.addEventListener('click', loadAll);
     if(btnExportPDF) btnExportPDF.addEventListener('click', exportPDF);
+    if(examType){
+      examType.addEventListener('change', (e)=>{
+        const v = e.target.value;
+        const canon = SomapExam().canonExamType ? SomapExam().canonExamType(v) : v;
+        sessionStorage.setItem('somap_exam_type', v);
+        if(monthSelect){ monthSelect.disabled = (canon !== 'Monthly'); }
+        loadAll();
+      });
+    }
+    if(monthSelect){
+      monthSelect.addEventListener('change', (e)=>{
+        sessionStorage.setItem('somap_exam_month', e.target.value);
+        loadAll();
+      });
+    }
 
     /* ---------- Small helpers ---------- */
     function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }

@@ -29,6 +29,67 @@
     import { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass } from '../js/modules/subjects.js';
     window.SomapSubjects = { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass };
   </script>
+  <script type="module">
+    import {
+      EXAM_TYPES, MONTHS,
+      canonExamType, canonMonth, classKeyOf,
+      pathMonthly, DERIVED_RECIPES, buildDerivedFromMonthly,
+      readLegacyIfAny, percent, gradeFromPercent, rosterFromEnroll
+    } from '../js/modules/exams.js';
+    import { canonSubject } from '../js/modules/subjects.js';
+
+    async function saveMonthlyScores(db, { year, className, month, entries }){
+      const p = pathMonthly(year, className, month);
+      const updates = {};
+      for (const e of entries){
+        const sid = e.studentId;
+        const subj = canonSubject(e.subject);
+        const score = Number(e.score);
+        const max = Number(e.max);
+        if (!Number.isFinite(max) || max <= 0) continue;
+        if (!Number.isFinite(score) || score < 0) continue;
+        updates[`${p}/${sid}/${subj}`] = { score, max };
+      }
+      if (Object.keys(updates).length) await db.ref().update(updates);
+      return true;
+    }
+
+    async function loadExamSnapshot(db, { year, className, examType, month }){
+      const et = canonExamType(examType);
+      if (et === EXAM_TYPES.MONTHLY){
+        const p = pathMonthly(year, className, month);
+        const [snap, legacy] = await Promise.all([
+          db.ref(p).once('value'),
+          readLegacyIfAny(db, year, className, et, month)
+        ]);
+        const val = snap.val?.() || snap.val() || {};
+        return val && typeof val === 'object' ? val : (legacy || {});
+      }
+      const months = DERIVED_RECIPES[et] || [];
+      const snaps = await Promise.all(months.map(m =>
+        db.ref(pathMonthly(year, className, m)).once('value').then(s => s.val?.() || s.val())
+      ));
+      return buildDerivedFromMonthly(snaps);
+    }
+
+    async function loadRosterFromEnroll(db, year, className){
+      const ck = classKeyOf(className);
+      const snap = await db.ref(`enrollments/${year}`).once('value');
+      const all = snap.val?.() || snap.val() || {};
+      const ids = [];
+      Object.keys(all).forEach(id => {
+        const cls = String(all[id]?.className || all[id]?.classLevel || '').trim().toLowerCase().replace(/\s+/g,'-');
+        if (cls === ck) ids.push(id);
+      });
+      return ids;
+    }
+
+    window.SomapExamUtils = {
+      EXAM_TYPES, MONTHS, canonExamType, canonMonth, classKeyOf,
+      percent, gradeFromPercent,
+      loadExamSnapshot, saveMonthlyScores, loadRosterFromEnroll, rosterFromEnroll
+    };
+  </script>
 
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
@@ -178,7 +239,26 @@
             <p class="text-xs text-slate-500">Enter marks per subject • Auto averages • Positions • Grades</p>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-3 flex-wrap">
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-semibold">Exam Type</label>
+              <select data-exam-type class="border rounded px-2 py-1 text-sm">
+                <option>Monthly</option>
+                <option>Midterm 1</option>
+                <option>Term 1</option>
+                <option>Midterm 2</option>
+                <option>Annual</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-semibold">Month</label>
+              <select data-exam-month class="border rounded px-2 py-1 text-sm">
+                <option>January</option><option>February</option><option>March</option>
+                <option>April</option><option>May</option><option>June</option>
+                <option>July</option><option>August</option><option>September</option>
+                <option>October</option><option>November</option><option>December</option>
+              </select>
+            </div>
             <label class="text-xs text-slate-500 flex items-center gap-2">
               Max/100
               <input id="globalMaxInput" type="number" min="1" max="100" value="100" class="w-20 px-2 py-1 border rounded">
@@ -227,11 +307,8 @@
 
   <script>
     /* ---------- CONFIG ---------- */
-    const EXAM_KEYS = {
-      'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
-    };
-
     const SomapSub = () => window.SomapSubjects || {};
+    const SomapExam = () => window.SomapExamUtils || {};
 
     function makeSubjectKey(label){
       const canonical = SomapSub().canonSubject ? SomapSub().canonSubject(label) : label;
@@ -251,6 +328,9 @@
     }
 
     function letterGrade(pct) {
+      const g = SomapExam().gradeFromPercent || (()=>null);
+      const res = g(pct);
+      if (res) return res;
       const p = Number(pct);
       if (p >= 80.5) return 'A';
       if (p >= 60.5) return 'B';
@@ -271,10 +351,24 @@
       }
     }
 
+    function safePercent(list){
+      const fn = SomapExam().percent;
+      if (fn) return fn(list);
+      let num=0, den=0;
+      list.forEach(it => {
+        const s = Number(it?.score);
+        const m = Number(it?.max);
+        if (!Number.isFinite(m) || m <= 0) return;
+        if (!Number.isFinite(s) || s < 0) return;
+        num += s; den += m;
+      });
+      return den > 0 ? (num*100)/den : 0;
+    }
+
     /* ---------- STATE ---------- */
     const state = {
       students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
-      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examKey:'', schoolBranch:''
+      rowsByAdm: {}, className:'', stream:'', month:'', year:'', examType:'Monthly', schoolBranch:''
     };
     let currentClass = '';
     let currentYear = '';
@@ -285,6 +379,8 @@
     const lblCount = document.getElementById('lblCount');
     const lblSubjects = document.getElementById('lblSubjects');
     const lblStatus = document.getElementById('lblStatus');
+    const selExamType = document.querySelector('[data-exam-type]');
+    const selExamMonth = document.querySelector('[data-exam-month]');
 
     const btnRecalc = document.getElementById('btnRecalc');
     const btnSaveAll = document.getElementById('btnSaveAll');
@@ -446,52 +542,62 @@
       }catch(e){ console.warn('fetchFees', e && e.message); return {}; }
     }
 
-    async function fetchScores({year, className, examKey, month}){
+    async function fetchRosterIds(year, className){
+      const db = getDB();
+      if(!db) return [];
+      const loader = SomapExam().loadRosterFromEnroll;
+      if (loader){
+        try{
+          const ids = await loader(db, year, className);
+          if (Array.isArray(ids) && ids.length) return ids;
+        }catch(err){ console.warn('fetchRosterIds enrollments', err?.message); }
+      }
+      return [];
+    }
+
+    async function fetchScores({year, className, examType, month}){
       const db = getDB();
       if(!db) return {};
-      const refPath = `/scores/${year}/${className}/${examKey}/${month}`;
+      const loader = SomapExam().loadExamSnapshot;
+      if (!loader) return {};
       try{
-        const snap = await db.ref(refPath).get();
-        const out = {};
-        if(snap && snap.exists && snap.exists()){
-          const val = snap.val();
-          Object.keys(val).forEach(adm=>{
-            out[adm] = {};
-            const subjObj = val[adm] || {};
-            Object.keys(subjObj).forEach(sub=>{
-              const o = subjObj[sub] || {};
-              const canonicalLabel = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
-              const key = makeSubjectKey(canonicalLabel);
-              const entry = { score: Number(o.score||0), max: Number(o.max||100), label: canonicalLabel };
-              out[adm][key] = entry;
-              if (!out[adm][canonicalLabel]) out[adm][canonicalLabel] = entry;
-            });
-          });
-        }
-        return out;
-      }catch(e){ console.warn('fetchScores', e && e.message); return {}; }
+        const snap = await loader(db, { year, className, examType, month });
+        return snap || {};
+      }catch(e){
+        console.warn('fetchScores', e && e.message);
+        return {};
+      }
     }
 
     /* ---------- Save ---------- */
     async function saveAllScores(){
       const db = getDB();
       if(!db){ alert('Firebase not initialized'); return; }
-      const { year, className, examKey, month } = state;
-      const baseRef = db.ref(`/scores/${year}/${className}/${examKey}/${month}`);
-      const payload = {};
+      const { year, className, examType, month } = state;
+      const canonType = SomapExam().canonExamType ? SomapExam().canonExamType(examType) : examType;
+      const canonMonth = SomapExam().canonMonth ? SomapExam().canonMonth(month) : month;
+      if (canonType !== 'Monthly'){
+        alert('Derived exams (Midterm/Term/Annual) are automatic. Switch to Monthly to enter marks.');
+        return;
+      }
+      const saver = SomapExam().saveMonthlyScores;
+      if (!saver){
+        alert('Save helper missing.');
+        return;
+      }
+      const entries = [];
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
-        payload[adm] = payload[adm] || {};
         state.subjectList.forEach(subject=>{
           const cell = row.subjectCells[subject.key];
-          const score = Number(cell.scoreInput.value || 0);
-          const max = Math.max(1, Number(cell.maxInput.value || 100));
-          payload[adm][subject.key] = { score, max, label: subject.label };
+          const score = Number(cell.scoreInput.value);
+          const max = Number(cell.maxInput.value);
+          entries.push({ studentId: adm, subject: subject.label, score, max });
         });
       });
-      await baseRef.set(payload);
+      await saver(db, { year, className, month: canonMonth, entries });
       await persistComputedSummary().catch(()=>{});
-      alert('Scores saved.');
+      alert('Scores saved to archive.');
     }
 
     function renderScoresheetHeader(selectedClass, selectedYear){
@@ -660,26 +766,31 @@
       const perSubject = {};
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
-        let sumScore=0, sumMax=0;
+        const attempts = [];
         state.subjectList.forEach(subject=>{
           const cell = row.subjectCells[subject.key];
-          const score = Number(cell.scoreInput.value || 0);
-          const max = Math.max(1, Number(cell.maxInput.value || 100));
-          sumScore += score; sumMax += max;
-          const pct = (score/max)*100;
-          perSubject[subject.key] = perSubject[subject.key] || [];
-          perSubject[subject.key].push({ adm, pct });
+          const score = Number(cell.scoreInput.value);
+          const max = Number(cell.maxInput.value);
+          const valid = Number.isFinite(max) && max > 0 && Number.isFinite(score) && score >= 0;
+          if (valid){
+            attempts.push({ score, max });
+            const pct = safePercent([{ score, max }]);
+            perSubject[subject.key] = perSubject[subject.key] || [];
+            perSubject[subject.key].push({ adm, pct });
+          }
         });
-        const avgPct = sumMax ? (sumScore/sumMax)*100 : 0;
-        row.tdTotal.textContent = sumScore.toFixed(2);
-        row.tdMax.textContent = Math.round(sumMax);
+        const totalScore = attempts.reduce((s,a)=> s + a.score, 0);
+        const totalMax = attempts.reduce((s,a)=> s + a.max, 0);
+        const avgPct = safePercent(attempts);
+        row.tdTotal.textContent = totalScore.toFixed(2);
+        row.tdMax.textContent = totalMax ? Math.round(totalMax) : '0';
         row.tdAvg.textContent = avgPct.toFixed(2);
-        row.tdGrade.textContent = letterGrade(avgPct);
+        const grade = letterGrade(avgPct);
+        row.tdGrade.textContent = grade;
         row._avgPct = avgPct;
-        row._sumScore = sumScore;
+        row._sumScore = totalScore;
 
         // Auto-update teacher comment based on grade
-        const grade = letterGrade(avgPct);
         const comment = getTeacherComment(grade, row.meta.name);
         row.tdComment.querySelector('textarea').value = comment;
       });
@@ -704,7 +815,8 @@
       arr.sort((a,b)=>{
         if(b.avg !== a.avg) return b.avg - a.avg;
         if(b.total !== a.total) return b.total - a.total;
-        return b.attendance - a.attendance;
+        if(b.attendance !== a.attendance) return b.attendance - a.attendance;
+        return String(a.adm).localeCompare(String(b.adm));
       });
       arr.forEach((r,i)=> state.rowsByAdm[r.adm].tdPstn.textContent = String(i+1));
     }
@@ -735,7 +847,7 @@
       const rows = gatherRowsForExport();
       const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      saveAs(blob, `Scoresheet_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}-${state.month || 'mm'}.csv`);
+      saveAs(blob, `Scoresheet_${state.className || 'Class'}_${state.examType || 'exam'}_${state.year || 'year'}-${state.month || 'mm'}.csv`);
     }
 
     function exportXLSX(){
@@ -743,14 +855,14 @@
       const ws = XLSX.utils.aoa_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Scoresheet');
-      XLSX.writeFile(wb, `Scoresheet_${state.className || 'Class'}_${state.examKey || 'exam'}_${state.year || 'year'}-${state.month || 'mm'}.xlsx`);
+      XLSX.writeFile(wb, `Scoresheet_${state.className || 'Class'}_${state.examType || 'exam'}_${state.year || 'year'}-${state.month || 'mm'}.xlsx`);
     }
 
     function exportPDF(){
       const rows = gatherRowsForExport();
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation:'l', unit:'pt', format:'a4' });
-      const title = `Scoresheet ${state.className || ''} ${state.examKey || ''} ${state.year || ''}/${state.month || ''}`;
+      const title = `Scoresheet ${state.className || ''} ${state.examType || ''} ${state.year || ''}/${state.month || ''}`;
       doc.setFontSize(14); doc.text(title, 40, 40);
       doc.autoTable({ startY:60, head:[rows[0]], body:rows.slice(1), styles:{fontSize:7,cellPadding:3}, headStyles:{fillColor:[37,99,235]} });
       doc.save(title.replace(/[^A-Za-z0-9_\- ]/g,'_') + '.pdf');
@@ -760,13 +872,14 @@
     async function persistComputedSummary(){
       const db = getDB();
       if(!db) return;
+      const canonType = SomapExam().canonExamType ? SomapExam().canonExamType(state.examType) : state.examType;
       const summary = {
         updatedAt: Date.now(),
         className: state.className,
         stream: state.stream,
         year: state.year,
         month: state.month,
-        examKey: state.examKey,
+        examType: canonType,
         subjectList: state.subjectList.map(s => s.label),
         subjectKeys: state.subjectList.map(s => s.key)
       };
@@ -791,26 +904,44 @@
       });
       summary.attendance = { present: sumP, absent: sumA, days: sumD };
       summary.fees = { required: feeReq, paid: feePaid, balance: feeBal };
-      await db.ref(`/summaries/${state.year}/${state.className}/${state.examKey}/${state.month}`).set(summary);
+      await db.ref(`/summaries/${state.year}/${state.className}/${canonType}/${state.month}`).set(summary);
     }
 
     /* ---------- Load sequence (main entry) ---------- */
     async function loadAll(){
       console.log('=== Loading scoresheet data ===');
       
-      state.className = window.sessionStorage.getItem('className') || '';
-      let inputStream = window.sessionStorage.getItem('stream') || '';
-      state.month = window.sessionStorage.getItem('month') || '';
-      state.year = window.sessionStorage.getItem('year') || '';
-      state.examKey = window.sessionStorage.getItem('examKey') || 'monthly';
-      state.schoolBranch = window.sessionStorage.getItem('schoolBranch') || '';
+      const ss = window.sessionStorage || {};
+      state.className = ss.getItem('className') || '';
+      let inputStream = ss.getItem('stream') || '';
+      state.month = (selExamMonth?.value) || ss.getItem('somap_exam_month') || ss.getItem('month') || 'October';
+      state.year = ss.getItem('year') || '';
+      state.examType = (selExamType?.value) || ss.getItem('somap_exam_type') || ss.getItem('examType') || 'Monthly';
+      state.schoolBranch = ss.getItem('schoolBranch') || '';
+
+      if(selExamType){
+        selExamType.value = state.examType;
+      }
+      if(selExamMonth){
+        selExamMonth.value = state.month;
+      }
+      const canonType = SomapExam().canonExamType ? SomapExam().canonExamType(state.examType) : state.examType;
+      if(selExamMonth){
+        selExamMonth.disabled = (canonType !== 'Monthly');
+      }
+      try{
+        ss.setItem('somap_exam_type', state.examType);
+        ss.setItem('somap_exam_month', state.month);
+        ss.setItem('examType', canonType);
+        ss.setItem('examKey', canonType);
+      }catch(e){}
 
       console.log('Session data:', {
         className: state.className,
         stream: inputStream,
         month: state.month,
         year: state.year,
-        examKey: state.examKey,
+        examType: state.examType,
         schoolBranch: state.schoolBranch
       });
 
@@ -833,9 +964,23 @@
       console.log('Effective stream:', state.stream);
 
 
+      console.log('Fetching roster...');
+      const rosterIds = await fetchRosterIds(state.year, state.className);
+      console.log('Roster IDs:', rosterIds.length);
       console.log('Fetching students...');
-      state.students = await fetchStudents(state.className, state.stream);
-      console.log('Students fetched:', state.students.length);
+      const fetchedStudents = await fetchStudents(state.className, state.stream);
+      console.log('Students fetched:', fetchedStudents.length);
+      const byAdm = {};
+      fetchedStudents.forEach(s => byAdm[s.adm] = s);
+      if(rosterIds.length){
+        state.students = rosterIds.map((id, idx)=>{
+          const found = byAdm[id];
+          if(found) return found;
+          return { adm: String(id), name: `Adm ${id}`, class: state.className, stream: state.stream, feeDue: 0, feePaid: 0, balance: 0 };
+        });
+      } else {
+        state.students = fetchedStudents;
+      }
       
       if(state.students.length === 0) {
         console.warn('No students found! Trying alternative class name variations...');
@@ -890,7 +1035,7 @@
       console.log('Fees data:', Object.keys(state.fees).length, 'students');
       
       console.log('Fetching scores...');
-      state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
+      state.scores = await fetchScores({ year: state.year, className: state.className, examType: canonType, month: state.month }) || {};
       console.log('Scores data:', Object.keys(state.scores).length, 'students');
 
       console.log('Building table...');
@@ -908,6 +1053,21 @@
     btnExportPDF.addEventListener('click', exportPDF);
     btnPrint.addEventListener('click', ()=>window.print());
     btnSetAllMax.addEventListener('click', ()=>{ const v = Number(globalMaxInput.value||100); scoresBody.querySelectorAll('input.max-input').forEach(i=>i.value=v); recomputeAll(); });
+    if(selExamType){
+      selExamType.addEventListener('change', (e)=>{
+        const v = e.target.value;
+        const canon = SomapExam().canonExamType ? SomapExam().canonExamType(v) : v;
+        sessionStorage.setItem('somap_exam_type', v);
+        if(selExamMonth){ selExamMonth.disabled = (canon !== 'Monthly'); }
+        loadAll();
+      });
+    }
+    if(selExamMonth){
+      selExamMonth.addEventListener('change', (e)=>{
+        sessionStorage.setItem('somap_exam_month', e.target.value);
+        loadAll();
+      });
+    }
 
     // ✅ NEW: open standalone report-form dashboard instead of generating here
     btnGenerateReports.addEventListener('click', () => {
@@ -917,7 +1077,7 @@
         ss.setItem('stream', state.stream || ss.getItem('stream') || '');
         ss.setItem('year', state.year || ss.getItem('year') || new Date().getFullYear());
         ss.setItem('month', state.month || ss.getItem('month') || 'Sep');
-        ss.setItem('examKey', state.examKey || ss.getItem('examKey') || 'monthly');
+        ss.setItem('examKey', state.examType || ss.getItem('examKey') || 'Monthly');
         ss.setItem('schoolBranch', state.schoolBranch || ss.getItem('schoolBranch') || 'Socrates School');
       } catch(e) {}
       window.location.href = 'generatereportform.html';

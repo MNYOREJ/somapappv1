@@ -102,11 +102,16 @@
     .table-action { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.32rem 0.55rem; border-radius: 0.55rem; font-size: 0.72rem; font-weight: 600; }
     .table-action.primary { background: rgba(56,189,248,0.18); color: #38bdf8; }
     .table-action.alt { background: rgba(244,114,182,0.18); color: #f472b6; }
+    .report-fee-box{ max-width:420px; margin-left:0; }
+    .report-fee-grid{ display:grid; grid-template-columns: 1fr auto; gap:8px; }
     @media (max-width: 768px) {
       body { padding: 1.2rem 0.6rem 4rem; }
       .report-card-inner { padding: 1.0rem; }
       .report-card { margin: 0 auto; }
       .report-photo { margin-inline: auto; }
+    }
+    @media (min-width: 900px){
+      .report-fee-box{ margin-left: 12px; }
     }
   </style>
 </head>
@@ -291,11 +296,13 @@
               <strong id="previewAttendanceRaw">0 / 0</strong>
             </div>
           </div>
-          <div class="info-chip">
-            <span>Fee summary</span>
-            <strong id="previewFee">Total: TSh 0</strong>
-            <span class="mt-1">Paid / Balance</span>
-            <strong id="previewFeeBreakdown">TSh 0 / TSh 0</strong>
+          <div class="report-fee-box">
+            <div class="info-chip report-fee-grid">
+              <span>Fee summary</span>
+              <strong id="previewFee">Total: TSh 0</strong>
+              <span class="mt-1">Paid / Balance</span>
+              <strong id="previewFeeBreakdown">TSh 0 / TSh 0</strong>
+            </div>
           </div>
           <div class="chips-grid" id="previewHighlights"></div>
           <div class="overflow-x-auto">
@@ -387,7 +394,7 @@
     const LOGO_PATH = '../images/somap-logo.png.jpg';
     const PLACEHOLDER_PHOTO = 'https://via.placeholder.com/160x210.png?text=Passport';
 
-    const EXAM_KEYS = { 'Monthly':'monthly', 'Midterm 1':'midterm1', 'Midterm 2':'midterm2', 'End Term':'endterm', 'Annual':'annual' };
+    const EXAM_KEYS = { 'Monthly':'monthly', 'Midterm 1':'midterm1', 'Term 1':'term1', 'Midterm 2':'midterm2', 'Annual':'annual' };
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const MONTH_LABELS = { Jan:'January', Feb:'February', Mar:'March', Apr:'April', May:'May', Jun:'June', Jul:'July', Aug:'August', Sep:'September', Oct:'October', Nov:'November', Dec:'December' };
     const MONTH_NUMERIC = Object.fromEntries(MONTHS.map((m, idx) => [m, String(idx + 1).padStart(2, '0')]));
@@ -459,9 +466,9 @@
     const EXAM_MONTH_PLAN = {
       monthly:  (selectedMonth) => [selectedMonth],                            // dynamic
       midterm1: () => ['Jan','Feb','Mar'],
-      endterm:  () => ['Jan','Feb','Mar','Apr','May'],                         // Terminal / Term 1
+      term1:    () => ['Jan','Feb','Mar','Apr','May','Jun'],                   // Terminal / Term 1
       midterm2: () => ['Jul','Aug','Sep'],
-      annual:   () => ['Jan','Feb','Mar','Apr','May','Jul','Aug','Sep','Oct','Nov']
+      annual:   () => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
     };
     const ATTENDANCE_WEIGHTS = { Apr: 0.5, Sep: 0.5, Dec: 0.25 };
     const ATTEND_PRESENT_CODES = new Set(['P','PRESENT','PR','1','TRUE','YES','Y']);
@@ -979,7 +986,6 @@
         months = [{ mon: month, raw: rawMonth }];
       } else if (key === 'annual') {
         months = EXAM_MONTH_PLAN.annual().map(m => ({ mon: m, raw: null }));
-        months.push({ mon: 'Dec', raw: null });
       } else {
         const plan = EXAM_MONTH_PLAN[key] || (() => []);
         months = (plan(month) || []).map(m => ({ mon: m, raw: null }));
@@ -1141,26 +1147,23 @@
     }
 
     async function fetchScores({ year, className, examKey, month, rawMonth }) {
-      const key = (examKey || 'monthly').toLowerCase();
-      if (key === 'monthly') {
-        return getMonthlyScores(year, className, month, rawMonth);
+      const labelFromKey = (k) => {
+        const map = { monthly:'Monthly', midterm1:'Midterm 1', term1:'Term 1', midterm2:'Midterm 2', annual:'Annual' };
+        const lower = String(k || '').toLowerCase();
+        return map[lower] || k;
+      };
+      const examLabel = (window.SomapExamUtils?.canonExamType ? window.SomapExamUtils.canonExamType(labelFromKey(examKey)) : labelFromKey(examKey)) || 'Monthly';
+      const prettyMonth = MONTH_LABELS[rawMonth] || MONTH_LABELS[month] || rawMonth || month;
+      const monthLabel = (window.SomapExamUtils?.canonMonth ? window.SomapExamUtils.canonMonth(prettyMonth) : prettyMonth) || 'October';
+      const loader = window.SomapExamUtils?.loadExamSnapshot;
+      if(!loader) return {};
+      try{
+        const snap = await loader(db, { year, className, examType: examLabel, month: monthLabel });
+        return normalizeMonthlyScoreMap(snap || {});
+      }catch(e){
+        console.warn('fetchScores', e?.message);
+        return {};
       }
-      // Multi-month aggregation
-      const months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
-      if (!Array.isArray(months) || !months.length) return {};
-      // Sum raw score and max across months, per subject
-      const perMonth = await Promise.all(months.map(m => getMonthlyScores(year, className, m, null)));
-      const merged = {};
-      for (const monthMap of perMonth) {
-        Object.entries(monthMap || {}).forEach(([adm, subs]) => {
-          merged[adm] = merged[adm] || {};
-          Object.entries(subs || {}).forEach(([subject, o]) => {
-            const cur = merged[adm][subject] || { score: 0, max: 0 };
-            merged[adm][subject] = { score: cur.score + Number(o.score||0), max: cur.max + Number(o.max||0) };
-          });
-        });
-      }
-      return merged;
     }
 
     function normalizeMonthlyScoreMap(val){
@@ -1264,24 +1267,29 @@
       const stats = { totalScore: 0, totalMax: 0, subjects: [], subjectMap: {} };
       subjects.forEach(subject => {
         const subEntry = scoreEntry?.[subject] || {};
-        const score = Number(subEntry.score || 0);
-        const max = Number(subEntry.max || 0) || 100;
-        const percent = max ? (score / max) * 100 : 0;
-        const record = { subject, score, max, percent };
+        const score = Number(subEntry.score);
+        const max = Number(subEntry.max);
+        const valid = Number.isFinite(max) && max > 0 && Number.isFinite(score) && score >= 0;
+        const percent = valid ? (score / max) * 100 : null;
+        const record = { subject, score: valid ? score : '-', max: valid ? max : '-', percent };
         stats.subjects.push(record);
         stats.subjectMap[subject] = record;
-        stats.totalScore += score;
-        stats.totalMax += max;
+        if (valid){
+          stats.totalScore += score;
+          stats.totalMax += max;
+        }
       });
       return stats;
     }
 
     function deriveGrade(avg){
-      if (avg >= 80) return 'A';
-      if (avg >= 65) return 'B';
-      if (avg >= 50) return 'C';
-      if (avg >= 35) return 'D';
-      return 'F';
+      const g = (window.SomapExamUtils && window.SomapExamUtils.gradeFromPercent) ? window.SomapExamUtils.gradeFromPercent(avg) : null;
+      if (g) return g;
+      if (avg >= 80.5) return 'A';
+      if (avg >= 60.5) return 'B';
+      if (avg >= 40.5) return 'C';
+      if (avg >= 20.5) return 'D';
+      return 'F'; // 0-20.4
     }
 
     function autoComment(avg){
@@ -1299,7 +1307,10 @@
 
     function assignPositions(students, subjects){
       // Overall
-      const avgSorted = [...students].sort((a,b) => b.avg - a.avg);
+      const avgSorted = [...students].sort((a,b) => {
+        if (b.avg !== a.avg) return b.avg - a.avg;
+        return String(a.adm).localeCompare(String(b.adm));
+      });
       let lastScore=null, lastPos=0;
       avgSorted.forEach((s, idx) => {
         const rounded = Number(s.avg.toFixed(2));
@@ -1308,14 +1319,16 @@
       });
       // Per subject
       subjects.forEach(subject => {
-        const arr = [...students].sort((a,b) => {
-          const as = a.subjectStats.subjectMap[subject]?.score || 0;
-          const bs = b.subjectStats.subjectMap[subject]?.score || 0;
-          return bs - as;
-        });
+        const arr = [...students].filter(stu => stu.subjectStats.subjectMap[subject]?.percent !== null)
+          .sort((a,b) => {
+            const ap = Number(a.subjectStats.subjectMap[subject]?.percent || 0);
+            const bp = Number(b.subjectStats.subjectMap[subject]?.percent || 0);
+            if (bp !== ap) return bp - ap;
+            return String(a.adm).localeCompare(String(b.adm));
+          });
         let prev = null, prevPos = 0;
         arr.forEach((stu, idx) => {
-          const v = Number(stu.subjectStats.subjectMap[subject]?.score || 0);
+          const v = Number(stu.subjectStats.subjectMap[subject]?.percent || 0);
           if (prev !== null && v === prev) stu.subjectPositions[subject] = prevPos;
           else { stu.subjectPositions[subject] = idx+1; prevPos = stu.subjectPositions[subject]; prev = v; }
           stu.subjectStats.subjectMap[subject].position = stu.subjectPositions[subject];

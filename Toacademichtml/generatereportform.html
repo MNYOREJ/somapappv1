@@ -89,6 +89,10 @@
     .preview-table th, .preview-table td { padding: 0.45rem 0.35rem; border-bottom: 1px solid rgba(148,163,184,0.28); text-align: left; }
     .preview-table th { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.04em; color: #475569; }
     .preview-table tbody tr:nth-child(even) { background: rgba(248,250,252,0.6); }
+    .report-table thead th { color: #0f172a; font-weight: 700; }
+    .report-table tbody tr:nth-child(even){ background: rgba(15,23,42,0.04); }
+    .report-table td, .report-table th { color: #0f172a; }
+    .report-table .num { font-variant-numeric: tabular-nums; font-weight: 600; }
     .table-card { background: rgba(15,23,42,0.62); border-radius: 18px; border: 1px solid rgba(148,163,184,0.18); box-shadow: 0 16px 36px rgba(15,23,42,0.35); overflow: hidden; }
     .status-pill { border-radius: 999px; padding: 0.25rem 0.55rem; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
     .status-pill.good { background: rgba(16,185,129,0.20); color: #10b981; }
@@ -299,7 +303,7 @@
           </div>
           <div class="chips-grid" id="previewHighlights"></div>
           <div class="overflow-x-auto">
-            <table class="preview-table">
+            <table class="preview-table report-table">
               <thead>
                 <tr>
                   <th>#</th>
@@ -312,6 +316,15 @@
                 </tr>
               </thead>
               <tbody id="previewSubjects"></tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="2" class="font-semibold text-slate-700">Total</td>
+                  <td class="num" id="previewTotalScore">0.0</td>
+                  <td class="num" id="previewTotalMax">0</td>
+                  <td class="num" id="previewTotalPct">0%</td>
+                  <td colspan="2"></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           <div class="info-chip">
@@ -1233,7 +1246,7 @@
         const scoreEntry = scores[adm] || {};
         const subjectStats = buildSubjectStats(subjects, scoreEntry);
         const totalScore = subjectStats.totalScore, totalMax = subjectStats.totalMax;
-        const avg = totalMax ? (totalScore/totalMax) * 100 : 0;
+        const avg = percentFromPairs(subjectStats.subjects.map(({ score, max }) => ({ score, max })));
         const grade = deriveGrade(avg);
         const comment = autoComment(avg);
         students.push({
@@ -1276,11 +1289,27 @@
       return stats;
     }
 
+    function percentFromPairs(pairs){
+      const grader = window.Grading && typeof window.Grading.percent === 'function' ? window.Grading.percent : null;
+      if (grader) return grader(pairs);
+      let s = 0, m = 0;
+      (pairs || []).forEach(p => {
+        const sc = Number(p?.score);
+        const mx = Number(p?.max);
+        if (Number.isFinite(mx) && mx > 0 && Number.isFinite(sc) && sc >= 0){
+          s += sc; m += mx;
+        }
+      });
+      return m > 0 ? (s * 100) / m : 0;
+    }
+
     function deriveGrade(avg){
-      if (avg >= 80) return 'A';
-      if (avg >= 65) return 'B';
-      if (avg >= 50) return 'C';
-      if (avg >= 35) return 'D';
+      const grader = window.Grading && typeof window.Grading.gradeFromPercent === 'function' ? window.Grading.gradeFromPercent : null;
+      if (grader) return grader(avg);
+      if (avg >= 80.5) return 'A';
+      if (avg >= 60.5) return 'B';
+      if (avg >= 40.5) return 'C';
+      if (avg >= 20.5) return 'D';
       return 'F';
     }
 
@@ -1476,6 +1505,7 @@
         document.getElementById('previewHighlights').innerHTML = '';
         document.getElementById('previewSummaryList').innerHTML = '<li>No student selected.</li>';
         document.getElementById('previewSubjects').innerHTML = '';
+        resetPreviewTotals();
         document.getElementById('previewPhoto').src = PLACEHOLDER_PHOTO;
         return;
       }
@@ -1486,8 +1516,6 @@
       document.getElementById('previewReporting').textContent = formatDate(s.reportingDate);
       document.getElementById('previewParent').textContent = s.parentName || '-';
       document.getElementById('previewPhone').textContent = s.parentContact || '-';
-      document.getElementById('previewAverage').textContent = `${s.avg.toFixed(1)}%`;
-      document.getElementById('previewGrade').textContent = s.grade;
       document.getElementById('previewPosition').textContent = `#${s.overallPosition}`;
       document.getElementById('previewClassSize').textContent = cohortSize;
       document.getElementById('previewAttendance').textContent = `${s.attendancePercent.toFixed(1)}%`;
@@ -1514,13 +1542,11 @@
         <li>Best subject: ${bestSubject(s)}</li>
         <li>Needs support: ${lowestSubject(s)}</li>`;
 
-      document.getElementById('previewSubjects').innerHTML = s.subjectStats.subjects.map((entry, idx) => `
-        <tr>
-          <td>${idx + 1}</td><td>${escapeHtml(entry.subject)}</td>
-          <td>${formatNumber(entry.score)}</td><td>${formatNumber(entry.max)}</td>
-          <td>${entry.percent.toFixed(1)}%</td><td>${entry.position || '-'}</td>
-          <td>${escapeHtml(entry.teacher || 'Teacher')}</td>
-        </tr>`).join('');
+      renderPreviewSubjectsTable(s.subjectStats.subjects);
+      const overallPct = percentFromPairs(s.subjectStats.subjects.map(({ score, max }) => ({ score, max })));
+      const overallGrade = deriveGrade(overallPct);
+      document.getElementById('previewAverage').textContent = `${overallPct.toFixed(1)}%`;
+      document.getElementById('previewGrade').textContent = overallGrade;
 
       // Prefer Cloudinary secure URLs; add transformation to ensure JPEG and reasonable size
       const photoUrl = (s.photoUrl || s.passportPhotoUrl || '').trim();
@@ -1528,6 +1554,50 @@
       const imgEl = document.getElementById('previewPhoto');
       imgEl.crossOrigin = 'anonymous';
       imgEl.src = transformed || PLACEHOLDER_PHOTO;
+    }
+
+    function renderPreviewSubjectsTable(subjects){
+      const normalized = toNormalizedRows(subjects);
+      const tbody = document.getElementById('previewSubjects');
+      if (tbody){
+        tbody.innerHTML = normalized.map((entry, idx) => `
+          <tr>
+            <td>${idx + 1}</td><td>${escapeHtml(entry.subject)}</td>
+            <td class="num">${entry.dispScore.toFixed(1)}</td><td class="num">${formatNumber(entry.dispMax)}</td>
+            <td class="num">${entry.pct.toFixed(1)}%</td><td class="num">${entry.position || '-'}</td>
+            <td>${escapeHtml(entry.teacher || 'Teacher')}</td>
+          </tr>`).join('');
+      }
+      const totalDisp = normalized.reduce((sum, row) => sum + row.dispScore, 0);
+      const totalMaxDisp = normalized.length * 100;
+      const pctDisp = totalMaxDisp ? (totalDisp / totalMaxDisp) * 100 : 0;
+      const totalScoreEl = document.getElementById('previewTotalScore');
+      const totalMaxEl = document.getElementById('previewTotalMax');
+      const totalPctEl = document.getElementById('previewTotalPct');
+      if (totalScoreEl) totalScoreEl.textContent = totalDisp.toFixed(1);
+      if (totalMaxEl) totalMaxEl.textContent = totalMaxDisp;
+      if (totalPctEl) totalPctEl.textContent = `${pctDisp.toFixed(1)}%`;
+      return normalized;
+    }
+
+    function resetPreviewTotals(){
+      const totalScoreEl = document.getElementById('previewTotalScore');
+      const totalMaxEl = document.getElementById('previewTotalMax');
+      const totalPctEl = document.getElementById('previewTotalPct');
+      if (totalScoreEl) totalScoreEl.textContent = '0.0';
+      if (totalMaxEl) totalMaxEl.textContent = '0';
+      if (totalPctEl) totalPctEl.textContent = '0%';
+    }
+
+    function toNormalizedRows(subjects){
+      return (subjects || []).map(entry => {
+        const rawScore = Number(entry?.score) || 0;
+        const rawMax = Number(entry?.max) || 0;
+        const pct = rawMax > 0 ? (rawScore / rawMax) * 100 : 0;
+        const dispMax = 100;
+        const dispScore = pct;
+        return { ...entry, rawScore, rawMax, pct, dispScore, dispMax };
+      });
     }
 
     function bestSubject(s){ const x = [...s.subjectStats.subjects].sort((a,b) => b.percent - a.percent)[0]; return x ? `${x.subject} ${x.percent.toFixed(0)}%` : '-'; }
@@ -1623,8 +1693,11 @@
       doc.text(`Date of birth: ${formatDate(s.dob)}`, margin, contentStartY + 12);
       doc.text(`Reporting: ${formatDate(s.reportingDate)}`, margin, contentStartY + 18);
       doc.text(`Parent: ${s.parentName || '-'} (${s.parentContact || '-'})`, margin, contentStartY + 24);
-      doc.text(`Average: ${s.avg.toFixed(1)}%`, 120, contentStartY);
-      doc.text(`Grade: ${s.grade}`, 120, contentStartY + 6);
+      const normalizedSubjects = toNormalizedRows(s.subjectStats.subjects);
+      const overallPct = percentFromPairs(normalizedSubjects.map(({ rawScore, rawMax }) => ({ score: rawScore, max: rawMax })));
+      const overallGrade = deriveGrade(overallPct);
+      doc.text(`Average: ${overallPct.toFixed(1)}%`, 120, contentStartY);
+      doc.text(`Grade: ${overallGrade}`, 120, contentStartY + 6);
       const cohortSize = state.students.length || state.filtered.length || 0;
       doc.text(`Overall position: ${s.overallPosition} / ${cohortSize}`, 120, contentStartY + 12);
       doc.text(`Attendance: ${s.attendancePercent.toFixed(1)}% (${s.presents}/${s.attendanceDays})`, 120, contentStartY + 18);
@@ -1633,9 +1706,9 @@
       doc.autoTable({
         startY: contentStartY + 32,
         head: [["#","Subject","Score","Max","%","Pos","Teacher"]],
-        body: s.subjectStats.subjects.map((entry, index) => [
-          index + 1, entry.subject, formatNumber(entry.score), formatNumber(entry.max),
-          entry.percent.toFixed(1), entry.position || '-', entry.teacher || 'Teacher'
+        body: normalizedSubjects.map((entry, index) => [
+          index + 1, entry.subject, entry.dispScore.toFixed(1), formatNumber(entry.dispMax),
+          entry.pct.toFixed(1), entry.position || '-', entry.teacher || 'Teacher'
         ]),
         styles: { fontSize: 9, textColor: [15, 23, 42] },
         headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
@@ -1729,6 +1802,36 @@
       if (!s || !s.parentContact) return Swal.fire('No contact', 'Selected learner has no parent contact recorded.', 'info');
       navigator.clipboard.writeText(s.parentContact).then(() => Swal.fire('Copied', 'Parent contact copied.', 'success')).catch(() => Swal.fire('Failed', 'Could not copy.', 'error'));
     }
+  </script>
+  <!-- Prefer shared helper if present -->
+  <script src="../js/modules/grading.js"></script>
+  <script>
+  if (!window.Grading) {
+    // Fallback (inline) — exact bands
+    (function(){
+      function clamp01(x){ return Math.max(0, Math.min(100, Number(x)||0)); }
+      function percent(pairs){
+        let s=0,m=0;
+        for (const it of (pairs||[])){
+          const sc=Number(it?.score), mx=Number(it?.max);
+          if (!Number.isFinite(mx) || mx<=0) continue;
+          if (!Number.isFinite(sc) || sc<0) continue;
+          s+=sc; m+=mx;
+        }
+        return m>0 ? (s*100)/m : 0;
+      }
+      function gradeFromPercent(p){
+        const x = clamp01(p);
+        if (x >= 80.5) return 'A';
+        if (x >= 60.5) return 'B';
+        if (x >= 40.5) return 'C';
+        if (x >= 20.5) return 'D';
+        return 'F';
+      }
+      window.Grading = { percent, gradeFromPercent };
+    })();
+  }
+  const { percent, gradeFromPercent } = window.Grading;
   </script>
 </body>
 </html>

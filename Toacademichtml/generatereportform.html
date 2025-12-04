@@ -1145,21 +1145,25 @@
       if (key === 'monthly') {
         return getMonthlyScores(year, className, month, rawMonth);
       }
-      // Multi-month aggregation
+      // Multi-month aggregation (annual / multi-term): average ONLY over exams the learner actually attempted
       const months = (EXAM_MONTH_PLAN[key] || (() => []))(month);
       if (!Array.isArray(months) || !months.length) return {};
-      // Sum raw score and max across months, per subject
       const perMonth = await Promise.all(months.map(m => getMonthlyScores(year, className, m, null)));
       const merged = {};
-      for (const monthMap of perMonth) {
+      perMonth.forEach(monthMap => {
         Object.entries(monthMap || {}).forEach(([adm, subs]) => {
           merged[adm] = merged[adm] || {};
           Object.entries(subs || {}).forEach(([subject, o]) => {
-            const cur = merged[adm][subject] || { score: 0, max: 0 };
-            merged[adm][subject] = { score: cur.score + Number(o.score||0), max: cur.max + Number(o.max||0) };
+            const score = Number(o?.score);
+            const max = Number(o?.max);
+            const attempted = !!o?.attempted;
+            const valid = attempted && Number.isFinite(score) && score > 0 && Number.isFinite(max) && max > 0;
+            if (!valid) return; // skip months with missing/zero scores (exam not sat)
+            const cur = merged[adm][subject] || { score: 0, max: 0, attempts: 0 };
+            merged[adm][subject] = { score: cur.score + score, max: cur.max + max, attempts: cur.attempts + 1 };
           });
         });
-      }
+      });
       return merged;
     }
 
@@ -1175,13 +1179,18 @@
           const hasScore = Object.prototype.hasOwnProperty.call(o, 'score') || Object.prototype.hasOwnProperty.call(o, 'Score');
           const hasMax = Object.prototype.hasOwnProperty.call(o, 'max') || Object.prototype.hasOwnProperty.call(o, 'Max');
           if (!hasScore && !hasMax) return;
-          const scoreVal = hasScore ? Number(o.score ?? o.Score ?? 0) : 0;
-          let maxVal = hasMax ? Number(o.max ?? o.Max ?? 0) : 100;
+          const rawScore = hasScore ? (o.score ?? o.Score) : undefined;
+          const rawMax = hasMax ? (o.max ?? o.Max) : undefined;
+          const providedScore = rawScore !== '' && rawScore !== null && rawScore !== undefined && !Number.isNaN(Number(rawScore));
+          const providedMax = rawMax !== '' && rawMax !== null && rawMax !== undefined && !Number.isNaN(Number(rawMax));
+          const scoreVal = providedScore ? Number(rawScore) : 0;
+          let maxVal = providedMax ? Number(rawMax) : 100;
           if (!Number.isFinite(maxVal) || maxVal <= 0) maxVal = 100;
           const canonicalSubject = SomapSub().canonSubject ? SomapSub().canonSubject(subject) : subject;
           const key = canonicalSubject || subject;
-          out[adm][key] = { score: scoreVal, max: maxVal };
-          if (!out[adm][subject]) out[adm][subject] = { score: scoreVal, max: maxVal };
+          const entry = { score: scoreVal, max: maxVal, attempted: !!providedScore };
+          out[adm][key] = entry;
+          if (!out[adm][subject]) out[adm][subject] = entry;
         });
       });
       return out;
@@ -1284,14 +1293,17 @@
         const subEntry = scoreEntry?.[subject] || {};
         const rawScore = subEntry.score;
         const rawMax = subEntry.max;
+        const attempts = Number(subEntry.attempts);
+        const hasAttempts = Number.isFinite(attempts);
         const score = Number(rawScore);
         const max = Number(rawMax);
         const valid = Number.isFinite(max) && max > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(score) && score >= 0;
+        const included = valid && (!hasAttempts || attempts > 0);
         const percentVal = computePercent([{ score, max }]);
-        const record = { subject, score, max: Number.isFinite(max) ? max : 0, percent: percentVal, included: valid };
+        const record = { subject, score, max: Number.isFinite(max) ? max : 0, percent: percentVal, included };
         stats.subjects.push(record);
         stats.subjectMap[subject] = record;
-        if(valid){
+        if(included){
           stats.totalScore += score;
           stats.totalMax += max;
         }
@@ -1356,7 +1368,7 @@
       students.forEach(s => {
         s.subjectStats.subjects = state.subjects.map(subject => {
           const r = s.subjectStats.subjectMap[subject];
-          return { subject, score: r.score, max: r.max, percent: r.percent, position: r.position, teacher: r.teacher };
+          return { subject, score: r?.score, max: r?.max, percent: r?.percent, position: r?.position, teacher: r?.teacher, included: r?.included };
         });
       });
     }

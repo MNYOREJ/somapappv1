@@ -155,6 +155,7 @@
     }
 
     function letterGrade(pct) {
+      if (typeof gradeFromPercent === 'function') return gradeFromPercent(pct);
       const g = SomapExam().gradeFromPercent;
       if (g) return g(pct);
       const p = Number(pct);
@@ -178,14 +179,17 @@
     }
 
     function safePercent(list){
-      const fn = SomapExam().percent;
+      const fn = (typeof percent === 'function') ? percent : (window.Grading?.percent || SomapExam().percent);
       if (fn) return fn(list);
       let num=0, den=0;
       list.forEach(it=>{
-        const s = Number(it?.score);
-        const m = Number(it?.max);
+        const rawScore = it?.score;
+        const rawMax = it?.max;
+        const s = Number(rawScore);
+        const m = Number(rawMax);
         if (!Number.isFinite(m) || m <= 0) return;
-        if (!Number.isFinite(s) || s < 0) return;
+        const missing = rawScore === '' || rawScore === null || rawScore === undefined || Number.isNaN(s);
+        if (missing || s < 0) return;
         num += s; den += m;
       });
       return den>0 ? (num*100)/den : 0;
@@ -566,9 +570,12 @@
         state.subjectConfigs.forEach(({ key, label })=>{
           const subjectScores = state.scores[adm] || {};
           const entry = subjectScores[key] || subjectScores[label] || {};
-          const score = Number(entry.score);
-          const max = Number(entry.max);
-          const valid = Number.isFinite(max) && max > 0 && Number.isFinite(score) && score >= 0;
+          const rawScore = entry.score;
+          const rawMax = entry.max;
+          const score = Number(rawScore);
+          const max = Number(rawMax);
+          const valid = Number.isFinite(max) && max > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(score) && score >= 0;
+          row.subjectCells[key].tdPstn.textContent = '-';
           if (valid){
             attempts.push({ score, max });
             const pct = safePercent([{ score, max }]);
@@ -839,6 +846,10 @@
         btnFullScreen.classList.replace('bg-red-600', 'bg-green-600');
       }
     });
+  </script>
+  <script src="../js/modules/grading.js"></script>
+  <script>
+    const { percent, gradeFromPercent, letterAndPercent } = window.Grading;
   </script>
 </body>
 </html>

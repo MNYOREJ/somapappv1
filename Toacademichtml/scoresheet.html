@@ -251,6 +251,7 @@
     }
 
     function letterGrade(pct) {
+      if (window.Grading?.gradeFromPercent) return window.Grading.gradeFromPercent(pct);
       const p = Number(pct);
       if (p >= 80.5) return 'A';
       if (p >= 60.5) return 'B';
@@ -656,31 +657,46 @@
     function money(n){ n = Number(n||0); return new Intl.NumberFormat('en-KE',{style:'currency',currency:'KES',maximumFractionDigits:0}).format(n); }
 
     /* ---------- Computation: totals/averages/positions/grades ---------- */
+    function pairsFromInputs(subjectCells){
+      return Object.values(subjectCells || {}).map(c => ({
+        score: Number(c.scoreInput.value),
+        max: Number(c.maxInput.value)
+      }));
+    }
+
     function recomputeAll(){
       const perSubject = {};
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
-        let sumScore=0, sumMax=0;
+        const attempts = [];
         state.subjectList.forEach(subject=>{
           const cell = row.subjectCells[subject.key];
-          const score = Number(cell.scoreInput.value || 0);
-          const max = Math.max(1, Number(cell.maxInput.value || 100));
-          sumScore += score; sumMax += max;
-          const pct = (score/max)*100;
+          const rawScore = cell.scoreInput.value;
+          const rawMax = cell.maxInput.value;
+          const score = Number(rawScore);
+          const max = Number(rawMax);
+          cell.pstnSpan.textContent = '-';
+          const valid = Number.isFinite(max) && max > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(score) && score >= 0;
+          if(!valid) return;
+          attempts.push({ score, max });
+          const pct = percent([{ score, max }]);
           perSubject[subject.key] = perSubject[subject.key] || [];
           perSubject[subject.key].push({ adm, pct });
         });
-        const avgPct = sumMax ? (sumScore/sumMax)*100 : 0;
-        row.tdTotal.textContent = sumScore.toFixed(2);
-        row.tdMax.textContent = Math.round(sumMax);
-        row.tdAvg.textContent = avgPct.toFixed(2);
-        row.tdGrade.textContent = letterGrade(avgPct);
-        row._avgPct = avgPct;
-        row._sumScore = sumScore;
+
+        const totalScore = attempts.reduce((sum,a)=> sum + a.score, 0);
+        const totalMax = attempts.reduce((sum,a)=> sum + a.max, 0);
+        const overallPct = percent(attempts);
+        const overallGrade = letterGrade(overallPct);
+        row.tdTotal.textContent = totalScore.toFixed(2);
+        row.tdMax.textContent = totalMax ? Math.round(totalMax) : '0';
+        row.tdAvg.textContent = overallPct.toFixed(2);
+        row.tdGrade.textContent = overallGrade;
+        row._avgPct = overallPct;
+        row._sumScore = totalScore;
 
         // Auto-update teacher comment based on grade
-        const grade = letterGrade(avgPct);
-        const comment = getTeacherComment(grade, row.meta.name);
+        const comment = getTeacherComment(overallGrade, row.meta.name);
         row.tdComment.querySelector('textarea').value = comment;
       });
 
@@ -692,7 +708,9 @@
           idx++;
           if(last === null || item.pct < last){ pos = idx; last = item.pct; }
           const row = state.rowsByAdm[item.adm];
-          row.subjectCells[subject.key].pstnSpan.textContent = String(pos);
+          if(row?.subjectCells?.[subject.key]){
+            row.subjectCells[subject.key].pstnSpan.textContent = String(pos);
+          }
         });
       });
 
@@ -775,8 +793,15 @@
         let sum=0, cnt=0;
         Object.keys(state.rowsByAdm).forEach(adm=>{
           const row = state.rowsByAdm[adm];
-          const c = row.subjectCells[sub.key]; const sc = Number(c.scoreInput.value || 0); const mx = Math.max(1, Number(c.maxInput.value || 100));
-          sum += (sc/mx)*100; cnt++;
+          const c = row.subjectCells[sub.key];
+          const rawScore = c.scoreInput.value;
+          const rawMax = c.maxInput.value;
+          const sc = Number(rawScore);
+          const mx = Number(rawMax);
+          const valid = Number.isFinite(mx) && mx > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(sc) && sc >= 0;
+          if(!valid) return;
+          sum += percent([{ score: sc, max: mx }]);
+          cnt++;
         });
         summary.subjectAverages[sub.key] = cnt ? sum/cnt : 0;
       });
@@ -947,6 +972,10 @@
 
     /* ---------- Small helpers ---------- */
     function hexToRgb(hex){ const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return m?{r:parseInt(m[1],16),g:parseInt(m[2],16),b:parseInt(m[3],16)}:{r:37,g:99,b:235}; }
+  </script>
+  <script src="../js/modules/grading.js"></script>
+  <script>
+    const { percent, gradeFromPercent, letterAndPercent } = window.Grading;
   </script>
 </body>
 </html>

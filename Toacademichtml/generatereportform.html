@@ -1157,12 +1157,20 @@
           merged[adm] = merged[adm] || {};
           Object.entries(subs || {}).forEach(([subject, o]) => {
             const score = Number(o?.score);
-            const max = Math.min(100, Number(o?.max) || 100);
+            const maxPerAttempt = Math.min(100, Number(o?.max) || 100);
             const attempted = !!o?.attempted;
-            const valid = attempted && Number.isFinite(score) && score >= 0 && Number.isFinite(max) && max > 0;
+            const valid = attempted && Number.isFinite(score) && score >= 0 && Number.isFinite(maxPerAttempt) && maxPerAttempt > 0;
             if (!valid) return; // skip months with missing/blank scores (exam not sat)
-            const cur = merged[adm][subject] || { score: 0, maxSum: 0, attempts: 0, attempted: false };
-            merged[adm][subject] = { score: cur.score + score, maxSum: cur.maxSum + max, attempts: cur.attempts + 1, attempted: true };
+            const cur = merged[adm][subject] || { score: 0, maxSum: 0, attempts: 0, attempted: false, max: 0 };
+            const nextAttempts = cur.attempts + 1;
+            const nextMaxSum = cur.maxSum + maxPerAttempt;
+            merged[adm][subject] = {
+              score: cur.score + score,
+              maxSum: nextMaxSum,
+              attempts: nextAttempts,
+              attempted: true,
+              max: nextMaxSum / nextAttempts // average max per attempt (display helper)
+            };
           });
         });
       });
@@ -1294,18 +1302,18 @@
       subjects.forEach(subject => {
         const subEntry = scoreEntry?.[subject] || {};
         const rawScore = subEntry.score;
-        const rawMax = subEntry.maxSum ?? subEntry.max;
+        const rawMaxSum = subEntry.maxSum ?? subEntry.max;
         const attempts = Number(subEntry.attempts);
         const hasAttempts = Number.isFinite(attempts);
         const score = Number(rawScore);
-        const maxRaw = Number(rawMax);
+        const maxRaw = Number(rawMaxSum);
         const attemptedFlag = subEntry.attempted === true;
-        const maxPerAttempt = hasAttempts && attempts > 0 ? maxRaw / attempts : maxRaw;
+        const maxPerAttempt = hasAttempts && attempts > 0 ? (maxRaw / attempts) : maxRaw;
         const maxCapped = Number.isFinite(maxPerAttempt) && maxPerAttempt > 0 ? Math.min(100, maxPerAttempt) : 0;
         const valid = Number.isFinite(maxCapped) && maxCapped > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(score) && score >= 0;
         const included = valid && (attemptedFlag || !hasAttempts || attempts > 0);
-        const effectiveMaxTotal = maxCapped * (hasAttempts && attempts > 0 ? attempts : 1);
-        const percentVal = computePercent([{ score, max: effectiveMaxTotal }]);
+        const totalMax = maxCapped * (hasAttempts && attempts > 0 ? attempts : 1);
+        const percentVal = computePercent([{ score, max: totalMax }]);
         const record = { subject, score, max: maxCapped, percent: percentVal, included };
         stats.subjects.push(record);
         stats.subjectMap[subject] = record;

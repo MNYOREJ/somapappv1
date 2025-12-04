@@ -21,6 +21,10 @@
 
   <!-- Your Firebase config wrapper (exports window.db, window.storage) -->
   <script src="firebase.js"></script>
+  <script type="module">
+    import { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass } from './js/modules/subjects.js';
+    window.SomapSubjects = { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass };
+  </script>
 
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
@@ -180,20 +184,7 @@
 
   <script>
     /* ---------- CONFIG ---------- */
-    const SUBJECTS_BY_CLASS = {
-      'Baby Class': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
-      'Middle Class': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
-      'Pre-Unit Class': ['Arithmetic', 'Communication', 'Relation', 'CRN', 'Healthcare', 'Arts'],
-      'Class 1 AB': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'],
-      'Class 1': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'], // Added for variants
-      'Class 2 AB': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'],
-      'Class 2': ['Writing Skills', 'Arithmetic', 'Developing Sports & Arts', 'Health.AREC', 'Kusoma', 'Listening'], // Added for variants
-      'Class 3': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
-      'Class 4': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
-      'Class 5': ['Math', 'English', 'Kiswahili', 'Science', 'Geography', 'Arts', 'History', 'French'],
-      'Class 6': ['Math', 'English', 'Kiswahili', 'Science', 'Social Studies', 'Civics & Morals'],
-      'Class 7': ['Math', 'English', 'Kiswahili', 'Science', 'Social Studies', 'Civics & Morals']
-    };
+    const SomapSub = () => window.SomapSubjects || {};
 
     const EXAM_KEYS = {
       'Monthly': 'monthly',
@@ -202,6 +193,14 @@
       'Midterm 2': 'midterm2',
       'Annual': 'annual'
     };
+
+    function getSubjectList(className, year){
+      const api = SomapSub();
+      const cls = api.canonClass ? api.canonClass(className) : (className || '');
+      const subjects = api.getSubjectsForClass ? api.getSubjectsForClass(cls, year) : [];
+      const list = Array.isArray(subjects) ? subjects : [];
+      return list.map(label => api.canonSubject ? api.canonSubject(label) : label);
+    }
 
     function letterGrade(pct) {
       const p = Number(pct);
@@ -275,10 +274,8 @@
       const classMap = {
         'ssbabyclass': 'Baby Class',
         'ssmiddleclass': 'Middle Class',
-        'sspreunit': 'Pre-Unit Class',
-        'ssclass1ab': 'Class 1 AB',
+        'sspreunit': 'Pre-Unit',
         'ssclass1ab': 'Class 1',
-        'ssclass2ab': 'Class 2 AB',
         'ssclass2ab': 'Class 2',
         'ssclass3': 'Class 3',
         'ssclass4': 'Class 4',
@@ -288,7 +285,7 @@
       };
       for (const [key, className] of Object.entries(classMap)) {
         if (emailPrefix.includes(key)) {
-          return className;
+          return SomapSub().canonClass ? SomapSub().canonClass(className) : className;
         }
       }
       return null;
@@ -296,10 +293,11 @@
 
     /* ---------- Populate class dropdown (locked to assigned class) ---------- */
     function populateClasses(assignedClass) {
-      const opts = Object.keys(SUBJECTS_BY_CLASS);
-      if (assignedClass && opts.includes(assignedClass)) {
-        classSelect.innerHTML = `<option value="${assignedClass}">${assignedClass}</option>`;
-        classSelect.value = assignedClass;
+      const opts = Object.keys(SomapSub().SUBJECTS_BY_CLASS || {});
+      const assignedCanonical = SomapSub().canonClass ? SomapSub().canonClass(assignedClass) : assignedClass;
+      if (assignedCanonical && opts.includes(assignedCanonical)) {
+        classSelect.innerHTML = `<option value="${assignedCanonical}">${assignedCanonical}</option>`;
+        classSelect.value = assignedCanonical;
         classSelect.disabled = true;
       } else {
         classSelect.innerHTML = '<option value="">Select Class…</option>' + opts.map(c => `<option>${c}</option>`).join('');
@@ -334,12 +332,15 @@
                 }
               });
             }
+            const selectedCanon = SomapSub().canonClass ? SomapSub().canonClass(className) : className;
             const filtered = arr.filter(x => {
-              const normalizedClass = String(x.class || '').toUpperCase().replace(/[\s-]/g, '');
-              const normalizedSelect = className.toUpperCase().replace(/[\s-]/g, '');
-              const classMatches = !className || normalizedClass.includes(normalizedSelect);
+              const studentCanon = SomapSub().canonClass ? SomapSub().canonClass(x.class) : x.class;
+              const classMatches = !selectedCanon ||
+                (studentCanon && studentCanon.toLowerCase() === (selectedCanon || '').toLowerCase()) ||
+                (String(studentCanon || '').toLowerCase().includes(String(selectedCanon || '').toLowerCase())) ||
+                (String(selectedCanon || '').toLowerCase().includes(String(studentCanon || '').toLowerCase()));
               const normalizedStream = String(x.stream || '').toUpperCase().replace(/[\s-]/g, '');
-              const normalizedInputStream = stream.toUpperCase().replace(/[\s-]/g, '');
+              const normalizedInputStream = (stream || '').toUpperCase().replace(/[\s-]/g, '');
               const streamMatches = !stream || normalizedStream.includes(normalizedInputStream);
               return classMatches && streamMatches;
             });
@@ -355,7 +356,10 @@
 
     function normalizeStudentRecord(admKey, s) {
       const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
-      const sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
+      let sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
+      if (sClass && SomapSub().canonClass) {
+        sClass = SomapSub().canonClass(sClass);
+      }
       const sStream = s.stream || s.streamName || s.section || '';
       const feeDue = Number(s.totalFee || s.feePerYear || s.feeDue || s.required || s.debt || 0);
       let feePaid = Number(s.paid || s.feePaid || s.totalPaid || s.paidAmount || s.credit || 0);
@@ -419,12 +423,28 @@
             const subjObj = val[adm] || {};
             Object.keys(subjObj).forEach(sub => {
               const o = subjObj[sub] || {};
-              out[adm][sub] = { score: Number(o.score || 0), max: Number(o.max || 100) };
+              const canonicalLabel = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
+              const labelKey = canonicalLabel || sub;
+              const entry = { score: Number(o.score || 0), max: Number(o.max || 100) };
+              out[adm][labelKey] = entry;
+              if (!out[adm][sub]) out[adm][sub] = entry;
             });
           });
         }
         return out;
       } catch (e) { console.warn('fetchScores', e && e.message); return {}; }
+    }
+
+    function studentAveragePercent(student){
+      if (!state.subjectList || !state.subjectList.length) return 0;
+      const scores = state.scores[student.adm] || {};
+      const total = state.subjectList.reduce((sum, sub) => {
+        const entry = scores[sub] || {};
+        const sc = Number(entry.score || 0);
+        const mx = Math.max(1, Number(entry.max || 100));
+        return sum + (sc / mx) * 100;
+      }, 0);
+      return total / state.subjectList.length;
     }
 
     /* ---------- Load sequence (main entry) ---------- */
@@ -433,13 +453,14 @@
         alert('No assigned class detected. Please contact the administrator.');
         return;
       }
-      if (classSelect.value !== state.assignedClass) {
+      const selectedClassValue = SomapSub().canonClass ? SomapSub().canonClass(classSelect.value) : classSelect.value;
+      if (selectedClassValue !== state.assignedClass) {
         alert('NOT YOUR CLASS BUDDY! You are restricted to ' + state.assignedClass);
         classSelect.value = state.assignedClass;
         return;
       }
 
-      state.className = classSelect.value;
+      state.className = selectedClassValue;
       let inputStream = (streamInput.value || '').trim();
       state.month = monthSelect.value;
       state.year = (yearInput.value || '').trim();
@@ -454,7 +475,7 @@
       const effectiveStream = inputStream.replace(/class/i, '').replace(classNum, '').trim().toUpperCase();
       state.stream = effectiveStream;
 
-      state.subjectList = SUBJECTS_BY_CLASS[state.className] || [];
+      state.subjectList = getSubjectList(state.className, state.year);
 
       state.students = await fetchStudents(state.className, state.stream);
       state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
@@ -482,8 +503,9 @@
           return;
         }
         // Parse class from email or use Firebase user data
-        state.assignedClass = parseClassFromEmail(user.email) || ud.class || ud.classLevel || '';
-        if (!state.assignedClass || !Object.keys(SUBJECTS_BY_CLASS).includes(state.assignedClass)) {
+        const derivedClass = parseClassFromEmail(user.email) || ud.class || ud.classLevel || '';
+        state.assignedClass = SomapSub().canonClass ? SomapSub().canonClass(derivedClass) : derivedClass;
+        if (!state.assignedClass || !Object.keys(SomapSub().SUBJECTS_BY_CLASS || {}).includes(state.assignedClass)) {
           alert('Invalid or no class assigned. Contact administrator.');
           firebase.auth().signOut();
           window.location.href = 'index.html';
@@ -501,10 +523,10 @@
     function updateKPIs() {
       const list = Object.values(state.students).map(s => ({
         name: s.name,
-        avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, { score, max }) => sum + (score / max) * 100, 0) / state.subjectList.length : 0) || 0
+        avg: studentAveragePercent(s)
       }));
       if (list.length === 0) {
-        ['kpiTopStudent', 'kpiTopScore', 'kpiBottomStudent', 'kpiBottomScore', 'kpiClassMax', 'kpiClassGrade', 'kpiPresent', 'kpiAbsent', 'kpiFeeRequired', 'kpiFeePaid', 'kpiFeeBalance'].forEach(id => document.getElementById(id).textContent = '–');
+        ['kpiTopStudent', 'kpiTopScore', 'kpiBottomStudent', 'kpiBottomScore', 'kpiClassMax', 'kpiClassGrade', 'kpiPresent', 'kpiAbsent', 'kpiFeeRequired', 'kpiFeePaid', 'kpiFeeBalance'].forEach(id => document.getElementById(id).textContent = '-');
         return;
       }
       const sorted = list.slice().sort((a, b) => b.avg - a.avg);
@@ -559,7 +581,7 @@
 
       const topList = state.students.map(s => ({
         name: s.name,
-        avg: (state.scores[s.adm] ? Object.values(state.scores[s.adm]).reduce((sum, { score, max }) => sum + (score / max) * 100, 0) / state.subjectList.length : 0) || 0
+        avg: studentAveragePercent(s)
       })).sort((a, b) => b.avg - a.avg).slice(0, 10);
 
       try { if (subjectsChart) { subjectsChart.destroy(); subjectsChart = null; } } catch (e) {}
@@ -586,7 +608,8 @@
 
     /* ---------- Load on change ---------- */
     classSelect.addEventListener('change', () => {
-      if (classSelect.value !== state.assignedClass) {
+      const selected = SomapSub().canonClass ? SomapSub().canonClass(classSelect.value) : classSelect.value;
+      if (selected !== state.assignedClass) {
         alert('NOT YOUR CLASS BUDDY! You are restricted to ' + state.assignedClass);
         classSelect.value = state.assignedClass;
         return;

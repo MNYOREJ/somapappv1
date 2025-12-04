@@ -25,6 +25,10 @@
 
   <!-- Your Firebase config wrapper (exports window.db, window.storage) -->
   <script src="../firebase.js"></script>
+  <script type="module">
+    import { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass } from '../js/modules/subjects.js';
+    window.SomapSubjects = { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass };
+  </script>
 
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
@@ -223,69 +227,27 @@
 
   <script>
     /* ---------- CONFIG ---------- */
-    const SUBJECTS_BY_CLASS = {
-      'Baby Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Baby': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Middle Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Middle': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Preunit Class': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Preunit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Pre-Unit': ['Arithmetic','Communication','Relation','CRN','Healthcare','Arts'],
-      'Class 1': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 1 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 2': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 2 AB': ['Writing Skills','Arithmetic','Developing Sports & Arts','Health.AREC','Kusoma','Listening'],
-      'Class 3': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 4': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 5': ['Math','English','Kiswahili','Science','Geography','Arts','History','French'],
-      'Class 6': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals'],
-      'Class 7': ['Math','English','Kiswahili','Science','Social Studies','Civics & Morals']
-    };
-
     const EXAM_KEYS = {
       'Monthly': 'monthly','Midterm 1':'midterm1','End Term':'endterm','Midterm 2':'midterm2','Annual':'annual'
     };
 
+    const SomapSub = () => window.SomapSubjects || {};
+
     function makeSubjectKey(label){
-      return String(label || '').trim().replace(/[.#$/\[\]]/g, '_');
+      const canonical = SomapSub().canonSubject ? SomapSub().canonSubject(label) : label;
+      return String(canonical || '').trim().replace(/[.#$/\[\]]/g, '_');
     }
 
-    // Returns the list of subjects for a given class & year
+    // Returns the list of subjects for a given class & year (canonicalized)
     function getSubjectsForClassAndYear(className, year){
-      const y = parseInt(year, 10);
-      const normalized = String(className || '').trim().toLowerCase();
-      const isClass5 = normalized === 'class 5' || normalized === 'std 5' || normalized === '5' || normalized.startsWith('class 5') || normalized.startsWith('std 5');
-
-      if (isClass5) {
-        if (!isNaN(y) && y <= 2025) {
-          return [
-            { key: makeSubjectKey('Math'), label: 'Math' },
-            { key: makeSubjectKey('English'), label: 'English' },
-            { key: makeSubjectKey('Kiswahili'), label: 'Kiswahili' },
-            { key: makeSubjectKey('Science'), label: 'Science' },
-            { key: makeSubjectKey('SST'), label: 'SST' },
-            { key: makeSubjectKey('CME'), label: 'CME' },
-            { key: makeSubjectKey('VSkills'), label: 'VSkills' }
-          ];
-        }
-
-        return [
-          { key: makeSubjectKey('Math'), label: 'Math' },
-          { key: makeSubjectKey('English'), label: 'English' },
-          { key: makeSubjectKey('Kiswahili'), label: 'Kiswahili' },
-          { key: makeSubjectKey('Science'), label: 'Science' },
-          { key: makeSubjectKey('Geography'), label: 'Geography' },
-          { key: makeSubjectKey('Historia'), label: 'Historia' },
-          { key: makeSubjectKey('DSA'), label: 'DSA' }
-        ];
-      }
-
-      return getDefaultSubjectsForClass(className);
-    }
-
-    function getDefaultSubjectsForClass(className){
-      const list = SUBJECTS_BY_CLASS[className] || [];
-      return list.map(label => ({ key: makeSubjectKey(label), label }));
+      const api = SomapSub();
+      const cls = api.canonClass ? api.canonClass(className) : (className || '');
+      const subjects = api.getSubjectsForClass ? api.getSubjectsForClass(cls, year) : [];
+      const list = Array.isArray(subjects) ? subjects : [];
+      return list.map(label => {
+        const canonical = api.canonSubject ? api.canonSubject(label) : label;
+        return { key: makeSubjectKey(canonical), label: canonical };
+      });
     }
 
     function letterGrade(pct) {
@@ -397,10 +359,13 @@
             
             console.log('Total students found:', arr.length);
             
+            const selectedCanon = SomapSub().canonClass ? SomapSub().canonClass(className) : className;
             const filtered = arr.filter(x=>{
-              const normalizedClass = String(x.class || '').toUpperCase().replace(/[\s-]/g, '');
-              const normalizedSelect = className.toUpperCase().replace(/[\s-]/g, '');
-              const classMatches = !className || normalizedClass.includes(normalizedSelect) || normalizedSelect.includes(normalizedClass);
+              const studentCanon = SomapSub().canonClass ? SomapSub().canonClass(x.class) : x.class;
+              const classMatches = !selectedCanon ||
+                (studentCanon && studentCanon.toLowerCase() === (selectedCanon || '').toLowerCase()) ||
+                (String(studentCanon || '').toLowerCase().includes(String(selectedCanon || '').toLowerCase())) ||
+                (String(selectedCanon || '').toLowerCase().includes(String(studentCanon || '').toLowerCase()));
               
               const normalizedStream = String(x.stream || '').toUpperCase().replace(/[\s-]/g, '');
               const normalizedInputStream = (stream||'').toUpperCase().replace(/[\s-]/g, '');
@@ -428,31 +393,8 @@
     function normalizeStudentRecord(admKey, s){
       const name = [s.firstName, s.middleName, s.lastName].filter(Boolean).join(' ').trim() || s.name || s.fullName || ('Student ' + admKey);
       let sClass = s.class || s.currentClass || s.level || s.className || s.grade || s.classLevel || '';
-      
-      // Normalize class names to match our SUBJECTS_BY_CLASS keys
-      if(sClass) {
-        const normalizedClass = sClass.toUpperCase().replace(/[\s-]/g, '');
-        if(normalizedClass.includes('BABY') && !normalizedClass.includes('CLASS')) {
-          sClass = 'Baby Class';
-        } else if(normalizedClass.includes('MIDDLE') && !normalizedClass.includes('CLASS')) {
-          sClass = 'Middle Class';
-        } else if(normalizedClass.includes('PREUNIT') || normalizedClass.includes('PRE-UNIT')) {
-          sClass = 'Preunit Class';
-        } else if(normalizedClass.includes('CLASS1') || normalizedClass.includes('CLASS 1')) {
-          sClass = 'Class 1';
-        } else if(normalizedClass.includes('CLASS2') || normalizedClass.includes('CLASS 2')) {
-          sClass = 'Class 2';
-        } else if(normalizedClass.includes('CLASS3') || normalizedClass.includes('CLASS 3')) {
-          sClass = 'Class 3';
-        } else if(normalizedClass.includes('CLASS4') || normalizedClass.includes('CLASS 4')) {
-          sClass = 'Class 4';
-        } else if(normalizedClass.includes('CLASS5') || normalizedClass.includes('CLASS 5')) {
-          sClass = 'Class 5';
-        } else if(normalizedClass.includes('CLASS6') || normalizedClass.includes('CLASS 6')) {
-          sClass = 'Class 6';
-        } else if(normalizedClass.includes('CLASS7') || normalizedClass.includes('CLASS 7')) {
-          sClass = 'Class 7';
-        }
+      if(sClass && SomapSub().canonClass){
+        sClass = SomapSub().canonClass(sClass);
       }
       
       const sStream = s.stream || s.streamName || s.section || '';
@@ -518,7 +460,11 @@
             const subjObj = val[adm] || {};
             Object.keys(subjObj).forEach(sub=>{
               const o = subjObj[sub] || {};
-              out[adm][sub] = { score: Number(o.score||0), max: Number(o.max||100) };
+              const canonicalLabel = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
+              const key = makeSubjectKey(canonicalLabel);
+              const entry = { score: Number(o.score||0), max: Number(o.max||100), label: canonicalLabel };
+              out[adm][key] = entry;
+              if (!out[adm][canonicalLabel]) out[adm][canonicalLabel] = entry;
             });
           });
         }
@@ -540,7 +486,7 @@
           const cell = row.subjectCells[subject.key];
           const score = Number(cell.scoreInput.value || 0);
           const max = Math.max(1, Number(cell.maxInput.value || 100));
-          payload[adm][subject.key] = { score, max };
+          payload[adm][subject.key] = { score, max, label: subject.label };
         });
       });
       await baseRef.set(payload);
@@ -921,7 +867,7 @@
         
         if(state.students.length === 0) {
           console.error('Still no students found after trying alternatives');
-          const allClasses = Object.keys(SUBJECTS_BY_CLASS);
+          const allClasses = Object.keys(SomapSub().SUBJECTS_BY_CLASS || {});
           console.log('Available class names in SUBJECTS_BY_CLASS:', allClasses);
         }
       }
@@ -933,7 +879,7 @@
 
       if(state.subjectList.length === 0) {
         console.warn('No subjects found for class:', state.className);
-        console.log('Available classes:', Object.keys(SUBJECTS_BY_CLASS));
+        console.log('Available classes:', Object.keys(SomapSub().SUBJECTS_BY_CLASS || {}));
       }
       console.log('Fetching attendance...');
       state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};

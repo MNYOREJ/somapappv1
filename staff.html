@@ -2590,36 +2590,22 @@
         const attendanceComplete = totalStudents === 0 || (state.todays.recorded || 0) >= totalStudents;
         const missingTasks = missingResponsibilityIds();
         const responsibilitiesComplete = missingTasks.length === 0;
-        let overlayMessage = '';
-        let showOverlay = false;
 
-        if (!attendanceComplete && minutes >= ATTENDANCE_DEADLINE_MINUTES && minutes < 24 * 60) {
-          overlayMessage = 'YOU DID NOT FILL ATTENDANCE. SALARY DEDUCTION IN PROGRESS.';
-          showOverlay = true;
-          state.penalties.attendance = true;
-        } else {
-          state.penalties.attendance = false;
-        }
+        // Keep background penalties in state but remove the blocking overlay so staff can continue working.
+        state.penalties.attendance = false;
+        state.penalties.responsibilities = false;
+        clearPenaltyOverlay();
 
         const previousPenaltyActive = state.responsibilities.prevPenalty && state.responsibilities.prevPenalty.missedTasks && state.responsibilities.prevPenalty.missedTasks.length;
         const postCutoffWindow = !responsibilitiesComplete && minutes >= RESPONSIBILITY_CUTOFF_MINUTES;
         const earlyMorningWindow = previousPenaltyActive && minutes < RESPONSIBILITY_RESET_MINUTES;
-        const responsibilityWindow = postCutoffWindow || earlyMorningWindow;
-        if (!showOverlay && responsibilityWindow) {
-          overlayMessage = earlyMorningWindow
-            ? "YESTERDAY'S RESPONSIBILITIES WERE MISSED. 1% SALARY DEDUCTION IN PROGRESS."
-            : "YOU HAVE NOT FILLED YOUR RESPONSIBILITIES. 1% SALARY DEDUCTION IN PROGRESS.";
-          showOverlay = true;
-          state.penalties.responsibilities = true;
-        } else if (!responsibilityWindow) {
-          state.penalties.responsibilities = false;
+
+        if (!attendanceComplete && minutes >= ATTENDANCE_DEADLINE_MINUTES && minutes < 24 * 60) {
+          state.penalties.attendance = true;
         }
 
-        if (showOverlay) {
-          document.body.classList.add('attendance-overdue');
-          document.body.setAttribute('data-alert-msg', overlayMessage);
-        } else {
-          clearPenaltyOverlay();
+        if ((!responsibilitiesComplete && postCutoffWindow) || earlyMorningWindow) {
+          state.penalties.responsibilities = true;
         }
 
         if (postCutoffWindow && !responsibilitiesComplete && !state.responsibilities.meta.penaltyLogged) {

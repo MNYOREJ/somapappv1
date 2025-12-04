@@ -25,13 +25,6 @@
     import { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass } from './js/modules/subjects.js';
     window.SomapSubjects = { SUBJECTS_BY_CLASS, getSubjectsForClass, canonSubject, canonClass };
   </script>
-  <script type="module">
-    import {
-      EXAM_TYPES, MONTHS, canonExamType, canonMonth,
-      percent, gradeFromPercent, loadExamSnapshot, loadRosterFromEnroll
-    } from './js/modules/exams.js';
-    window.SomapExamUtils = { EXAM_TYPES, MONTHS, canonExamType, canonMonth, percent, gradeFromPercent, loadExamSnapshot, loadRosterFromEnroll };
-  </script>
 
   <style>
     .sticky-th th { position: sticky; top:0; background:#fff; z-index:2; }
@@ -87,10 +80,10 @@
 
       <div class="bg-white rounded-2xl p-4 shadow">
         <label class="text-xs text-slate-500">Exam Type</label>
-        <select id="examType" data-exam-type class="mt-1 w-full border rounded px-2 py-2 text-sm">
+        <select id="examType" class="mt-1 w-full border rounded px-2 py-2 text-sm">
           <option>Monthly</option>
           <option>Midterm 1</option>
-          <option>Term 1</option>
+          <option>End Term</option>
           <option>Midterm 2</option>
           <option>Annual</option>
         </select>
@@ -98,11 +91,11 @@
 
       <div class="bg-white rounded-2xl p-4 shadow">
         <label class="text-xs text-slate-500">Month</label>
-        <select id="monthSelect" data-exam-month class="mt-1 w-full border rounded px-2 py-2 text-sm">
-          <option>January</option><option>February</option><option>March</option>
-          <option>April</option><option>May</option><option>June</option>
-          <option>July</option><option>August</option><option>September</option>
-          <option>October</option><option>November</option><option>December</option>
+        <select id="monthSelect" class="mt-1 w-full border rounded px-2 py-2 text-sm">
+          <option value="01">January</option><option value="02">February</option><option value="03">March</option>
+          <option value="04">April</option><option value="05">May</option><option value="06">June</option>
+          <option value="07">July</option><option value="08">August</option><option value="09">September</option>
+          <option value="10">October</option><option value="11">November</option><option value="12">December</option>
         </select>
       </div>
 
@@ -192,7 +185,14 @@
   <script>
     /* ---------- CONFIG ---------- */
     const SomapSub = () => window.SomapSubjects || {};
-    const SomapExam = () => window.SomapExamUtils || {};
+
+    const EXAM_KEYS = {
+      'Monthly': 'monthly',
+      'Midterm 1': 'midterm1',
+      'End Term': 'endterm',
+      'Midterm 2': 'midterm2',
+      'Annual': 'annual'
+    };
 
     function getSubjectList(className, year){
       const api = SomapSub();
@@ -203,8 +203,6 @@
     }
 
     function letterGrade(pct) {
-      const g = SomapExam().gradeFromPercent;
-      if (g) return g(pct);
       const p = Number(pct);
       if (p >= 80.5) return 'A';
       if (p >= 60.5) return 'B';
@@ -213,24 +211,10 @@
       return 'F';
     }
 
-    function safePercent(list){
-      const fn = SomapExam().percent;
-      if (fn) return fn(list);
-      let num=0, den=0;
-      list.forEach(it=>{
-        const s = Number(it?.score);
-        const m = Number(it?.max);
-        if (!Number.isFinite(m) || m <= 0) return;
-        if (!Number.isFinite(s) || s < 0) return;
-        num += s; den += m;
-      });
-      return den>0 ? (num*100)/den : 0;
-    }
-
     /* ---------- STATE ---------- */
     const state = {
       students: [], attendance: {}, fees: {}, scores: {}, subjectList: [],
-      rowsByAdm: {}, className: '', stream: '', month: '', year: '', examType: 'Monthly', schoolBranch: '',
+      rowsByAdm: {}, className: '', stream: '', month: '', year: '', examKey: '', schoolBranch: '',
       assignedClass: ''
     };
 
@@ -425,43 +409,42 @@
       } catch (e) { console.warn('fetchFees', e && e.message); return {}; }
     }
 
-    async function fetchRosterIds(year, className){
-      const db = getDB();
-      if(!db) return [];
-      const loader = SomapExam().loadRosterFromEnroll;
-      if(loader){
-        try{
-          const ids = await loader(db, year, className);
-          if(Array.isArray(ids) && ids.length) return ids;
-        }catch(err){ console.warn('fetchRosterIds', err?.message); }
-      }
-      return [];
-    }
-
-    async function fetchScores({ year, className, examType, month }) {
+    async function fetchScores({ year, className, examKey, month }) {
       const db = getDB();
       if (!db) return {};
-      const loader = SomapExam().loadExamSnapshot;
-      if(!loader) return {};
+      const refPath = `/scores/${year}/${className}/${examKey}/${month}`;
       try {
-        const snap = await loader(db, { year, className, examType, month });
-        return snap || {};
+        const snap = await db.ref(refPath).get();
+        const out = {};
+        if (snap && snap.exists && snap.exists()) {
+          const val = snap.val();
+          Object.keys(val).forEach(adm => {
+            out[adm] = {};
+            const subjObj = val[adm] || {};
+            Object.keys(subjObj).forEach(sub => {
+              const o = subjObj[sub] || {};
+              const canonicalLabel = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
+              const labelKey = canonicalLabel || sub;
+              const entry = { score: Number(o.score || 0), max: Number(o.max || 100) };
+              out[adm][labelKey] = entry;
+              if (!out[adm][sub]) out[adm][sub] = entry;
+            });
+          });
+        }
+        return out;
       } catch (e) { console.warn('fetchScores', e && e.message); return {}; }
     }
 
     function studentAveragePercent(student){
       if (!state.subjectList || !state.subjectList.length) return 0;
       const scores = state.scores[student.adm] || {};
-      const pairs = [];
-      state.subjectList.forEach(sub => {
+      const total = state.subjectList.reduce((sum, sub) => {
         const entry = scores[sub] || {};
-        const sc = Number(entry.score);
-        const mx = Number(entry.max);
-        if (Number.isFinite(mx) && mx > 0 && Number.isFinite(sc) && sc >= 0) {
-          pairs.push({ score: sc, max: mx });
-        }
-      });
-      return safePercent(pairs);
+        const sc = Number(entry.score || 0);
+        const mx = Math.max(1, Number(entry.max || 100));
+        return sum + (sc / mx) * 100;
+      }, 0);
+      return total / state.subjectList.length;
     }
 
     /* ---------- Load sequence (main entry) ---------- */
@@ -477,23 +460,12 @@
         return;
       }
 
-      const ss = window.sessionStorage || {};
-      if(ss.getItem('somap_exam_type')) examType.value = ss.getItem('somap_exam_type');
-      if(ss.getItem('somap_exam_month')) monthSelect.value = ss.getItem('somap_exam_month');
-
       state.className = selectedClassValue;
       let inputStream = (streamInput.value || '').trim();
       state.month = monthSelect.value;
       state.year = (yearInput.value || '').trim();
-      state.examType = examType.value || 'Monthly';
+      state.examKey = EXAM_KEYS[examType.value] || 'monthly';
       state.schoolBranch = (schoolBranch.value || '').trim();
-      const canonType = SomapExam().canonExamType ? SomapExam().canonExamType(state.examType) : state.examType;
-      if(monthSelect){ monthSelect.disabled = (canonType !== 'Monthly'); }
-      try{
-        const ss = window.sessionStorage || {};
-        ss.setItem('somap_exam_type', state.examType);
-        ss.setItem('somap_exam_month', state.month);
-      }catch(e){}
 
       if (!state.className) { alert('Select a class'); return; }
       if (!state.year) { alert('Enter academic year'); return; }
@@ -505,17 +477,10 @@
 
       state.subjectList = getSubjectList(state.className, state.year);
 
-      const rosterIds = await fetchRosterIds(state.year, state.className);
-      const fetchedStudents = await fetchStudents(state.className, state.stream);
-      const byAdm = {}; fetchedStudents.forEach(s => byAdm[s.adm] = s);
-      if(rosterIds.length){
-        state.students = rosterIds.map(id => byAdm[id] || { adm: String(id), name: `Adm ${id}`, class: state.className, stream: state.stream || '', feeDue:0, feePaid:0, balance:0 });
-      } else {
-        state.students = fetchedStudents;
-      }
+      state.students = await fetchStudents(state.className, state.stream);
       state.attendance = await fetchAttendance(state.year, state.month, state.className) || {};
       state.fees = await fetchFees(state.year, state.className) || {};
-      state.scores = await fetchScores({ year: state.year, className: state.className, examType: canonType, month: state.month }) || {};
+      state.scores = await fetchScores({ year: state.year, className: state.className, examKey: state.examKey, month: state.month }) || {};
 
       updateKPIs();
       drawCharts();
@@ -604,17 +569,14 @@
       const MAX_LABELS = 50;
       const subjects = state.subjectList || [];
       const avgPerSubject = subjects.map(sub => {
-        const percents = [];
+        let sum = 0, cnt = 0;
         state.students.forEach(s => {
-          const entry = (state.scores[s.adm]?.[sub]) || {};
-          const sc = Number(entry.score);
-          const mx = Number(entry.max);
-          if (Number.isFinite(mx) && mx > 0 && Number.isFinite(sc) && sc >= 0){
-            percents.push(safePercent([{ score: sc, max: mx }]));
-          }
+          const sc = (state.scores[s.adm]?.[sub]?.score || 0);
+          const mx = Math.max(1, state.scores[s.adm]?.[sub]?.max || 100);
+          sum += (sc / mx) * 100;
+          cnt++;
         });
-        const sum = percents.reduce((a,b)=>a+b,0);
-        return percents.length ? sum / percents.length : 0;
+        return cnt ? sum / cnt : 0;
       });
 
       const topList = state.students.map(s => ({
@@ -655,18 +617,9 @@
       loadAll();
     });
     streamInput.addEventListener('change', loadAll);
-    monthSelect.addEventListener('change', (e)=>{
-      sessionStorage.setItem('somap_exam_month', e.target.value);
-      loadAll();
-    });
+    monthSelect.addEventListener('change', loadAll);
     yearInput.addEventListener('change', loadAll);
-    examType.addEventListener('change', (e)=>{
-      const v = e.target.value;
-      const canon = SomapExam().canonExamType ? SomapExam().canonExamType(v) : v;
-      sessionStorage.setItem('somap_exam_type', v);
-      if(monthSelect){ monthSelect.disabled = (canon !== 'Monthly'); }
-      loadAll();
-    });
+    examType.addEventListener('change', loadAll);
     schoolBranch.addEventListener('change', loadAll);
 
     /* ---------- Modal Control ---------- */
@@ -679,7 +632,7 @@
       sessionStorage.setItem('stream', state.stream);
       sessionStorage.setItem('month', state.month);
       sessionStorage.setItem('year', state.year);
-      sessionStorage.setItem('examKey', state.examType);
+      sessionStorage.setItem('examKey', state.examKey);
       sessionStorage.setItem('schoolBranch', state.schoolBranch);
       scoresheetModal.style.display = 'block';
       document.getElementById('scoresheetFrame').contentWindow.location.reload();

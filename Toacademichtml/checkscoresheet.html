@@ -146,6 +146,35 @@
     const SomapSub = () => window.SomapSubjects || {};
     const SomapExam = () => window.SomapExamUtils || {};
 
+    // Attempt/grade helpers (inline; do not import other files)
+    function isNumber(n){ return Number.isFinite(n) && !Number.isNaN(n); }
+    function attemptedItem(item){
+      const score = Number(item?.score);
+      const max   = Number(item?.max);
+      return isNumber(score) && isNumber(max) && max > 0 && score > 0;
+    }
+    function studentPercentFrom(subjects){
+      let s = 0, m = 0, count = 0;
+      for (const it of (subjects || [])){
+        const score = Number(it?.score);
+        const max   = Number(it?.max);
+        if (attemptedItem({score,max})){
+          s += score; m += max; count++;
+        }
+      }
+      if (m <= 0 || count === 0) return { pct: 0, total: 0, max: 0, attemptedCount: 0 };
+      return { pct: (s * 100) / m, total: s, max: m, attemptedCount: count };
+    }
+    // Unified grading
+    function gradeFromPercent(p){
+      const x = Math.max(0, Math.min(100, Number(p)||0));
+      if (x >= 80.5) return 'A';
+      if (x >= 60.5) return 'B';
+      if (x >= 40.5) return 'C';
+      if (x >= 20.5) return 'D';
+      return 'F';
+    }
+
     function getSubjectConfigsForClass(className){
       const list = SomapSub().getSubjectsForClass ? SomapSub().getSubjectsForClass(className, state.year) : [];
       return (Array.isArray(list) ? list : []).map(sub=>{
@@ -564,38 +593,35 @@
     /* ---------- Computation: totals/averages/positions/grades ---------- */
     function recomputeAll(){
       const perSubject = {};
+      Object.values(state.rowsByAdm).forEach(r => r.tdPstn.textContent = '-');
       Object.keys(state.rowsByAdm).forEach(adm=>{
         const row = state.rowsByAdm[adm];
-        const attempts = [];
-        state.subjectConfigs.forEach(({ key, label })=>{
+        const subjects = state.subjectConfigs.map(({ key, label })=>{
           const subjectScores = state.scores[adm] || {};
           const entry = subjectScores[key] || subjectScores[label] || {};
-          const rawScore = entry.score;
-          const rawMax = entry.max;
-          const score = Number(rawScore);
-          const max = Number(rawMax);
-          const valid = Number.isFinite(max) && max > 0 && rawScore !== '' && rawScore !== null && rawScore !== undefined && Number.isFinite(score) && score >= 0;
           row.subjectCells[key].tdPstn.textContent = '-';
-          if (valid){
-            attempts.push({ score, max });
-            const pct = safePercent([{ score, max }]);
+          const score = Number(entry.score);
+          const max = Number(entry.max);
+          const attempted = attemptedItem({ score, max });
+          if (attempted){
+            const pct = (score * 100) / max;
             perSubject[key] = perSubject[key] || [];
             perSubject[key].push({ adm, pct });
             row.subjectCells[key].tdScore.textContent = score;
           } else {
             row.subjectCells[key].tdScore.textContent = '-';
           }
+          return { score, max, key };
         });
-        const totalScore = attempts.reduce((s,a)=> s + a.score, 0);
-        const totalMax = attempts.reduce((s,a)=> s + a.max, 0);
-        const avgPct = safePercent(attempts);
-        row.tdTotal.textContent = totalScore.toFixed(2);
-        row.tdMax.textContent = totalMax ? Math.round(totalMax) : '0';
-        row.tdAvg.textContent = avgPct.toFixed(2);
-        const grade = letterGrade(avgPct);
+        const sum = studentPercentFrom(subjects);
+        row.tdTotal.textContent = sum.total.toFixed(2);
+        row.tdMax.textContent = sum.max ? Math.round(sum.max) : '0';
+        row.tdAvg.textContent = sum.pct.toFixed(2);
+        const grade = gradeFromPercent(sum.pct);
         row.tdGrade.textContent = grade;
-        row._avgPct = avgPct;
-        row._sumScore = totalScore;
+        row._avgPct = sum.pct;
+        row._sumScore = sum.total;
+        row._attemptCount = sum.attemptedCount;
 
         // Auto-update teacher comment based on grade
         const comment = getTeacherComment(grade, row.meta.name);
@@ -615,8 +641,8 @@
 
       const arr = Object.keys(state.rowsByAdm).map(adm=>{
         const r = state.rowsByAdm[adm];
-        return { adm, avg: r._avgPct || 0, total: r._sumScore || 0, attendance: Number(r.tdPresent.textContent || 0) };
-      });
+        return { adm, avg: r._avgPct || 0, total: r._sumScore || 0, attendance: Number(r.tdPresent.textContent || 0), attempts: r._attemptCount || 0 };
+      }).filter(r => r.attempts > 0);
       arr.sort((a,b)=>{
         if(b.avg !== a.avg) return b.avg - a.avg;
         if(b.total !== a.total) return b.total - a.total;
@@ -849,7 +875,7 @@
   </script>
   <script src="../js/modules/grading.js"></script>
   <script>
-    const { percent, gradeFromPercent, letterAndPercent } = window.Grading;
+    const { percent, gradeFromPercent: gradingGradeFromPercent, letterAndPercent } = window.Grading;
   </script>
 </body>
 </html>

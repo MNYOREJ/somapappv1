@@ -487,6 +487,35 @@
 
     const SomapSub = () => window.SomapSubjects || {};
 
+    // Attempt/grade helpers (inline; do not import other files)
+    function isNumber(n){ return Number.isFinite(n) && !Number.isNaN(n); }
+    function attemptedItem(item){
+      const score = Number(item?.score);
+      const max   = Number(item?.max);
+      return isNumber(score) && isNumber(max) && max > 0 && score > 0;
+    }
+    function studentPercentFrom(subjects){
+      let s = 0, m = 0, count = 0;
+      for (const it of (subjects || [])){
+        const score = Number(it?.score);
+        const max   = Number(it?.max);
+        if (attemptedItem({score,max})){
+          s += score; m += max; count++;
+        }
+      }
+      if (m <= 0 || count === 0) return { pct: 0, total: 0, max: 0, attemptedCount: 0 };
+      return { pct: (s * 100) / m, total: s, max: m, attemptedCount: count };
+    }
+    // Unified grading
+    function gradeFromPercent(p){
+      const x = Math.max(0, Math.min(100, Number(p)||0));
+      if (x >= 80.5) return 'A';
+      if (x >= 60.5) return 'B';
+      if (x >= 40.5) return 'C';
+      if (x >= 20.5) return 'D';
+      return 'F';
+    }
+
     function subjectListForClass(className, year){
       const api = SomapSub();
       const cls = api.canonClass ? api.canonClass(className) : (className || '');
@@ -1245,15 +1274,19 @@
         const att = attendance[adm] || { present:0, absent:0, days:0 };
         const scoreEntry = scores[adm] || {};
         const subjectStats = buildSubjectStats(subjects, scoreEntry);
-        const totalScore = subjectStats.totalScore, totalMax = subjectStats.totalMax;
-        const avg = percentFromPairs(subjectStats.subjects.map(({ score, max }) => ({ score, max })));
-        const grade = deriveGrade(avg);
+        const overall = studentPercentFrom(subjectStats.subjects);
+        subjectStats.totalScore = overall.total;
+        subjectStats.totalMax = overall.max;
+        subjectStats.attemptedCount = overall.attemptedCount;
+        const avg = overall.pct;
+        const grade = gradeFromPercent(avg);
         const comment = autoComment(avg);
         students.push({
           adm, ...data,
           totalFee: fee.required, paid: fee.paid, balance: fee.balance,
           presents: att.present, absents: att.absent, attendanceDays: att.days, attendancePercent: att.days ? (att.present/att.days)*100 : 0,
-          subjectStats, totalScore, totalMax, avg, grade, comment,
+          subjectStats, totalScore: overall.total, totalMax: overall.max, avg, grade, comment,
+          attemptedCount: overall.attemptedCount,
           subjectPositions: {}, overallPosition: 0,
           monthLabel: MONTH_LABELS[state.month] || state.month, examLabel: state.examType
         });
@@ -1278,13 +1311,16 @@
       subjects.forEach(subject => {
         const subEntry = scoreEntry?.[subject] || {};
         const score = Number(subEntry.score || 0);
-        const max = Number(subEntry.max || 0) || 100;
+        const rawMax = Number(subEntry.max);
+        const max = Number.isFinite(rawMax) ? rawMax : 100;
         const percent = max ? (score / max) * 100 : 0;
         const record = { subject, score, max, percent };
         stats.subjects.push(record);
         stats.subjectMap[subject] = record;
-        stats.totalScore += score;
-        stats.totalMax += max;
+        if (attemptedItem({ score, max })) {
+          stats.totalScore += score;
+          stats.totalMax += max;
+        }
       });
       return stats;
     }
@@ -1327,28 +1363,34 @@
       }
 
     function assignPositions(students, subjects){
-      // Overall
-      const avgSorted = [...students].sort((a,b) => b.avg - a.avg);
+      // Overall (only learners with attempts)
+      students.forEach(s => s.overallPosition = '-');
+      const avgSorted = students.filter(s => (s.attemptedCount || s.subjectStats?.attemptedCount || 0) > 0)
+        .sort((a,b) => b.avg - a.avg);
       let lastScore=null, lastPos=0;
       avgSorted.forEach((s, idx) => {
         const rounded = Number(s.avg.toFixed(2));
         if (rounded === lastScore) s.overallPosition = lastPos;
         else { s.overallPosition = idx+1; lastScore = rounded; lastPos = s.overallPosition; }
       });
-      // Per subject
+      // Per subject (attempted items only)
       subjects.forEach(subject => {
-        const arr = [...students].sort((a,b) => {
-          const as = a.subjectStats.subjectMap[subject]?.score || 0;
-          const bs = b.subjectStats.subjectMap[subject]?.score || 0;
-          return bs - as;
-        });
+        const arr = students.map(stu => {
+          const entry = stu.subjectStats.subjectMap[subject] || {};
+          const attempted = attemptedItem(entry);
+          const pct = attempted ? (entry.score * 100) / entry.max : -1;
+          return { stu, pct, attempted };
+        }).filter(x => x.attempted).sort((a,b) => b.pct - a.pct);
         let prev = null, prevPos = 0;
-        arr.forEach((stu, idx) => {
-          const v = Number(stu.subjectStats.subjectMap[subject]?.score || 0);
-          if (prev !== null && v === prev) stu.subjectPositions[subject] = prevPos;
-          else { stu.subjectPositions[subject] = idx+1; prevPos = stu.subjectPositions[subject]; prev = v; }
-          stu.subjectStats.subjectMap[subject].position = stu.subjectPositions[subject];
-          stu.subjectStats.subjectMap[subject].teacher = getTeacherName(subject);
+        arr.forEach((item, idx) => {
+          const { stu, pct } = item;
+          if (prev !== null && pct === prev) stu.subjectPositions[subject] = prevPos;
+          else { stu.subjectPositions[subject] = idx+1; prevPos = stu.subjectPositions[subject]; prev = pct; }
+          const rec = stu.subjectStats.subjectMap[subject];
+          if (rec){
+            rec.position = stu.subjectPositions[subject];
+            rec.teacher = getTeacherName(subject);
+          }
         });
       });
       // Flatten subjects array with new props
@@ -1432,7 +1474,8 @@
       const total = state.filtered.length;
       const male = state.filtered.filter(s => (s.gender||'').toLowerCase().startsWith('m')).length;
       const female = state.filtered.filter(s => (s.gender||'').toLowerCase().startsWith('f')).length;
-      const avg = total ? (state.filtered.reduce((sum, s) => sum + (s.avg || 0), 0) / total) : 0;
+      const contributors = state.filtered.filter(s => (s.attemptedCount || s.subjectStats?.attemptedCount || 0) > 0);
+      const avg = contributors.length ? (contributors.reduce((sum, s) => sum + (s.avg || 0), 0) / contributors.length) : 0;
       const balance = state.filtered.reduce((sum, s) => sum + (s.balance || 0), 0);
       const attendance = total ? (state.filtered.reduce((sum, s) => sum + (s.attendancePercent || 0), 0) / total) : 0;
       document.getElementById('metricStudents').textContent = total;
@@ -1516,7 +1559,8 @@
       document.getElementById('previewReporting').textContent = formatDate(s.reportingDate);
       document.getElementById('previewParent').textContent = s.parentName || '-';
       document.getElementById('previewPhone').textContent = s.parentContact || '-';
-      document.getElementById('previewPosition').textContent = `#${s.overallPosition}`;
+      const posLabel = (s.overallPosition && s.overallPosition !== '-') ? `#${s.overallPosition}` : '-';
+      document.getElementById('previewPosition').textContent = posLabel;
       document.getElementById('previewClassSize').textContent = cohortSize;
       document.getElementById('previewAttendance').textContent = `${s.attendancePercent.toFixed(1)}%`;
       document.getElementById('previewAttendanceRaw').textContent = `${s.presents} / ${s.attendanceDays}`;
@@ -1527,7 +1571,7 @@
       const highlights = document.getElementById('previewHighlights');
       highlights.innerHTML = '';
       [
-        { icon:'fa-trophy', label:`Class position ${s.overallPosition}` },
+        { icon:'fa-trophy', label:`Class position ${posLabel === '-' ? '-' : s.overallPosition}` },
         { icon:'fa-percent', label:`${s.avg.toFixed(1)}% overall` },
         { icon:'fa-money-bill', label:`Balance TSh ${formatCurrency(s.balance)}` },
         { icon:'fa-calendar-check', label:`${s.attendancePercent.toFixed(0)}% attendance` }
@@ -1542,9 +1586,9 @@
         <li>Best subject: ${bestSubject(s)}</li>
         <li>Needs support: ${lowestSubject(s)}</li>`;
 
-      renderPreviewSubjectsTable(s.subjectStats.subjects);
-      const overallPct = percentFromPairs(s.subjectStats.subjects.map(({ score, max }) => ({ score, max })));
-      const overallGrade = deriveGrade(overallPct);
+      const tableResult = renderPreviewSubjectsTable(s.subjectStats.subjects);
+      const overallPct = tableResult.overall.pct;
+      const overallGrade = gradeFromPercent(overallPct);
       document.getElementById('previewAverage').textContent = `${overallPct.toFixed(1)}%`;
       document.getElementById('previewGrade').textContent = overallGrade;
 
@@ -1558,6 +1602,7 @@
 
     function renderPreviewSubjectsTable(subjects){
       const normalized = toNormalizedRows(subjects);
+      const overall = studentPercentFrom(subjects);
       const tbody = document.getElementById('previewSubjects');
       if (tbody){
         tbody.innerHTML = normalized.map((entry, idx) => `
@@ -1568,16 +1613,13 @@
             <td>${escapeHtml(entry.teacher || 'Teacher')}</td>
           </tr>`).join('');
       }
-      const totalDisp = normalized.reduce((sum, row) => sum + row.dispScore, 0);
-      const totalMaxDisp = normalized.length * 100;
-      const pctDisp = totalMaxDisp ? (totalDisp / totalMaxDisp) * 100 : 0;
       const totalScoreEl = document.getElementById('previewTotalScore');
       const totalMaxEl = document.getElementById('previewTotalMax');
       const totalPctEl = document.getElementById('previewTotalPct');
-      if (totalScoreEl) totalScoreEl.textContent = totalDisp.toFixed(1);
-      if (totalMaxEl) totalMaxEl.textContent = totalMaxDisp;
-      if (totalPctEl) totalPctEl.textContent = `${pctDisp.toFixed(1)}%`;
-      return normalized;
+      if (totalScoreEl) totalScoreEl.textContent = overall.total.toFixed(1);
+      if (totalMaxEl) totalMaxEl.textContent = overall.max.toFixed(0);
+      if (totalPctEl) totalPctEl.textContent = `${overall.pct.toFixed(1)}%`;
+      return { normalized, overall };
     }
 
     function resetPreviewTotals(){
@@ -1694,12 +1736,13 @@
       doc.text(`Reporting: ${formatDate(s.reportingDate)}`, margin, contentStartY + 18);
       doc.text(`Parent: ${s.parentName || '-'} (${s.parentContact || '-'})`, margin, contentStartY + 24);
       const normalizedSubjects = toNormalizedRows(s.subjectStats.subjects);
-      const overallPct = percentFromPairs(normalizedSubjects.map(({ rawScore, rawMax }) => ({ score: rawScore, max: rawMax })));
-      const overallGrade = deriveGrade(overallPct);
-      doc.text(`Average: ${overallPct.toFixed(1)}%`, 120, contentStartY);
+      const overall = studentPercentFrom(s.subjectStats.subjects);
+      const overallGrade = gradeFromPercent(overall.pct);
+      doc.text(`Average: ${overall.pct.toFixed(1)}%`, 120, contentStartY);
       doc.text(`Grade: ${overallGrade}`, 120, contentStartY + 6);
       const cohortSize = state.students.length || state.filtered.length || 0;
-      doc.text(`Overall position: ${s.overallPosition} / ${cohortSize}`, 120, contentStartY + 12);
+      const posLabel = (s.overallPosition && s.overallPosition !== '-') ? s.overallPosition : '-';
+      doc.text(`Overall position: ${posLabel} / ${cohortSize}`, 120, contentStartY + 12);
       doc.text(`Attendance: ${s.attendancePercent.toFixed(1)}% (${s.presents}/${s.attendanceDays})`, 120, contentStartY + 18);
       doc.text(`Fees: Due TSh ${formatCurrency(s.totalFee)} | Paid TSh ${formatCurrency(s.paid)} | Balance TSh ${formatCurrency(s.balance)}`, 120, contentStartY + 24);
 
@@ -1807,7 +1850,7 @@
   <script src="../js/modules/grading.js"></script>
   <script>
   if (!window.Grading) {
-    // Fallback (inline) — exact bands
+    // Fallback (inline) - exact bands
     (function(){
       function clamp01(x){ return Math.max(0, Math.min(100, Number(x)||0)); }
       function percent(pairs){
@@ -1831,7 +1874,7 @@
       window.Grading = { percent, gradeFromPercent };
     })();
   }
-  const { percent, gradeFromPercent } = window.Grading;
+  const { percent, gradeFromPercent: gradingGradeFromPercent } = window.Grading;
   </script>
 </body>
 </html>

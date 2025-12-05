@@ -515,6 +515,80 @@
       if (x >= 20.5) return 'D';
       return 'F';
     }
+    function mean(arr){
+      const v = (arr || []).filter(n => isNumber(n) && n > 0);
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    }
+
+    const MONTH_KEYS = {
+      January:'Jan', February:'Feb', March:'Mar',
+      April:'Apr', May:'May', June:'Jun',
+      July:'Jul', August:'Aug', September:'Sep',
+      October:'Oct', November:'Nov', December:'Dec'
+    };
+    const ANNUAL_MONTH_SEQUENCE = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    function canonicalSubjectName(sub){
+      return SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
+    }
+
+    // Monthly attempted-only helpers (reuse existing monthly loader)
+    async function getMonthSubjects(studentId, monthName){
+      const className = state.classKey || state.className;
+      const canonicalMonth = resolveMonthKey(MONTH_KEYS[monthName] || monthName) || monthName;
+      const monthScores = await getMonthlyScores(state.year, className, canonicalMonth, monthName);
+      const subjectMap = monthScores?.[studentId] || {};
+      const seen = new Set();
+      const out = [];
+      Object.entries(subjectMap).forEach(([subject, o]) => {
+        const subj = canonicalSubjectName(subject || '');
+        if (!subj || seen.has(subj.toLowerCase())) return;
+        seen.add(subj.toLowerCase());
+        out.push({ subject: subj, score: Number(o.score || 0), max: Number(o.max || 0), teacher: o.teacher, position: o.position });
+      });
+      return out;
+    }
+
+    async function monthlyPercent(studentId, monthName, preloadedPercents){
+      if (preloadedPercents && preloadedPercents.hasOwnProperty(monthName) && isNumber(preloadedPercents[monthName])) {
+        return Number(preloadedPercents[monthName]);
+      }
+      const subjects = await getMonthSubjects(studentId, monthName);
+      if (!subjects || !subjects.length) return 0;
+      return studentPercentFrom(subjects).pct;
+    }
+
+    async function computeAnnualPercent(studentId, monthlyCache){
+      const getMon = async (name) => monthlyPercent(studentId, name, monthlyCache);
+      const jan = await getMon('January');
+      const feb = await getMon('February');
+      const mar = await getMon('March');
+      const mt1 = mean([jan, feb, mar]);
+
+      const apr = await getMon('April');
+      const may = await getMon('May');
+      const jun = await getMon('June');
+      const t1 = mean([mt1, apr, may, jun]);
+
+      const jul = await getMon('July');
+      const aug = await getMon('August');
+      const sep = await getMon('September');
+      const mt2 = mean([jul, aug, sep]);
+
+      const oct = await getMon('October');
+      const nov = await getMon('November');
+      const dec = await getMon('December');
+      const annual = mean([t1, mt2, oct, nov, dec]);
+
+      const used = [];
+      if (t1 > 0) used.push('Term 1');
+      if (mt2 > 0) used.push('Midterm 2');
+      if (oct > 0) used.push('October');
+      if (nov > 0) used.push('November');
+      if (dec > 0) used.push('December');
+
+      return { annualPct: annual, usedParts: used };
+    }
 
     function subjectListForClass(className, year){
       const api = SomapSub();
@@ -875,7 +949,7 @@
         state.className = SomapSub().canonClass ? SomapSub().canonClass(state.className) : state.className;
         state.subjects = subjectListForClass(state.className, state.year) || state.subjects || [];
         const dbClass = state.classKey || state.className;
-        const [students, attendance, fees, scores, detailsMap] = await Promise.all([
+        const [students, attendance, fees, scoresRaw, detailsMap] = await Promise.all([
           fetchStudents(dbClass, state.stream),
           fetchAttendance(state.year, state.month, dbClass, state.examKey, state.monthRaw),
           fetchFees(state.year, dbClass),
@@ -895,7 +969,16 @@
             photoUrl: extra.photoUrl || stu.photoUrl
           };
         });
-        computeStudents(attendance, fees, scores);
+        let scores = scoresRaw;
+        let annualOverallMap = {};
+        let annualUsedPartsMap = {};
+        if (state.examKey === 'annual') {
+          const annualView = await buildAnnualScores(state.year, dbClass);
+          scores = annualView.scoresByStudent;
+          annualOverallMap = annualView.overallMap || {};
+          annualUsedPartsMap = annualView.usedPartsMap || {};
+        }
+        computeStudents(attendance, fees, scores, annualOverallMap, annualUsedPartsMap);
         applyFilters();
       } catch (e) {
         console.error(e);
@@ -1264,8 +1347,57 @@
       return out;
     }
 
+    async function buildAnnualScores(year, className){
+      const students = Object.keys(state.rawStudents || {});
+      const scoresByStudent = {};
+      const overallMap = {};
+      const usedPartsMap = {};
+      const subjectsFromState = state.subjects && state.subjects.length ? state.subjects.slice() : [];
+      let fallbackSubjects = null;
+
+      for (const adm of students){
+        const monthlySubjects = {};
+        const monthlyPercents = {};
+        for (const monthName of ANNUAL_MONTH_SEQUENCE){
+          const subs = await getMonthSubjects(adm, monthName);
+          monthlySubjects[monthName] = subs;
+          monthlyPercents[monthName] = subs && subs.length ? studentPercentFrom(subs).pct : 0;
+        }
+        const { annualPct, usedParts } = await computeAnnualPercent(adm, monthlyPercents);
+        overallMap[adm] = annualPct;
+        usedPartsMap[adm] = usedParts;
+
+        const subjects = subjectsFromState.length ? subjectsFromState : inferSubjectsFromMonthData(monthlySubjects);
+        if (!subjectsFromState.length && !fallbackSubjects && subjects.length) fallbackSubjects = subjects;
+        scoresByStudent[adm] = {};
+        subjects.forEach(subject => {
+          const target = canonicalSubjectName(subject);
+          let s = 0, m = 0;
+          ANNUAL_MONTH_SEQUENCE.forEach(monthName => {
+            const list = monthlySubjects[monthName] || [];
+            const found = list.find(x => canonicalSubjectName(x.subject) === target);
+            if (!found) return;
+            const sc = Number(found.score);
+            const mx = Number(found.max);
+            if (attemptedItem({ score: sc, max: mx })) {
+              s += sc; m += mx;
+            }
+          });
+          const pct = m > 0 ? (s * 100) / m : 0;
+          const record = { score: pct, max: 100 };
+          scoresByStudent[adm][target] = record;
+          if (target !== subject) scoresByStudent[adm][subject] = record;
+        });
+      }
+
+      // If state subjects are empty, populate from the first inferred set
+      if (!subjectsFromState.length && fallbackSubjects && fallbackSubjects.length) state.subjects = fallbackSubjects;
+
+      return { scoresByStudent, overallMap, usedPartsMap };
+    }
+
     /* -------------------------- COMPOSE -------------------------- */
-    function computeStudents(attendance, fees, scores){
+    function computeStudents(attendance, fees, scores, annualOverallMap = {}, annualUsedPartsMap = {}){
       const subjects = state.subjects && state.subjects.length ? state.subjects.slice() : inferSubjects(scores);
       state.subjects = subjects;
       const students = [];
@@ -1278,7 +1410,8 @@
         subjectStats.totalScore = overall.total;
         subjectStats.totalMax = overall.max;
         subjectStats.attemptedCount = overall.attemptedCount;
-        const avg = overall.pct;
+        const annualOverride = (state.examKey === 'annual') && annualOverallMap.hasOwnProperty(adm) ? Number(annualOverallMap[adm]) : null;
+        const avg = annualOverride !== null ? annualOverride : overall.pct;
         const grade = gradeFromPercent(avg);
         const comment = autoComment(avg);
         students.push({
@@ -1287,7 +1420,7 @@
           presents: att.present, absents: att.absent, attendanceDays: att.days, attendancePercent: att.days ? (att.present/att.days)*100 : 0,
           subjectStats, totalScore: overall.total, totalMax: overall.max, avg, grade, comment,
           attemptedCount: overall.attemptedCount,
-          subjectPositions: {}, overallPosition: 0,
+          subjectPositions: {}, overallPosition: 0, annualPct: annualOverride !== null ? annualOverride : undefined, annualUsedParts: annualUsedPartsMap[adm] || [],
           monthLabel: MONTH_LABELS[state.month] || state.month, examLabel: state.examType
         });
       });
@@ -1304,6 +1437,17 @@
         });
       });
       return set.size ? Array.from(set) : ['English','Mathematics','Science'];
+    }
+
+    function inferSubjectsFromMonthData(monthData){
+      const set = new Set();
+      Object.values(monthData || {}).forEach(list => {
+        (list || []).forEach(entry => {
+          const subj = canonicalSubjectName(entry.subject || '');
+          if (subj) set.add(subj);
+        });
+      });
+      return Array.from(set);
     }
 
     function buildSubjectStats(subjects, scoreEntry){
@@ -1587,7 +1731,8 @@
         <li>Needs support: ${lowestSubject(s)}</li>`;
 
       const tableResult = renderPreviewSubjectsTable(s.subjectStats.subjects);
-      const overallPct = tableResult.overall.pct;
+      const annualOverride = (state.examKey === 'annual' && isNumber(s.annualPct)) ? s.annualPct : null;
+      const overallPct = annualOverride !== null ? annualOverride : tableResult.overall.pct;
       const overallGrade = gradeFromPercent(overallPct);
       document.getElementById('previewAverage').textContent = `${overallPct.toFixed(1)}%`;
       document.getElementById('previewGrade').textContent = overallGrade;
@@ -1737,8 +1882,10 @@
       doc.text(`Parent: ${s.parentName || '-'} (${s.parentContact || '-'})`, margin, contentStartY + 24);
       const normalizedSubjects = toNormalizedRows(s.subjectStats.subjects);
       const overall = studentPercentFrom(s.subjectStats.subjects);
-      const overallGrade = gradeFromPercent(overall.pct);
-      doc.text(`Average: ${overall.pct.toFixed(1)}%`, 120, contentStartY);
+      const annualOverride = (state.examKey === 'annual' && isNumber(s.annualPct)) ? s.annualPct : null;
+      const overallPct = annualOverride !== null ? annualOverride : overall.pct;
+      const overallGrade = gradeFromPercent(overallPct);
+      doc.text(`Average: ${overallPct.toFixed(1)}%`, 120, contentStartY);
       doc.text(`Grade: ${overallGrade}`, 120, contentStartY + 6);
       const cohortSize = state.students.length || state.filtered.length || 0;
       const posLabel = (s.overallPosition && s.overallPosition !== '-') ? s.overallPosition : '-';

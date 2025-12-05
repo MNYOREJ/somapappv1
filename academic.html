@@ -223,6 +223,49 @@
       'Annual': 'annual'
     };
 
+    const MONTH_KEYS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const MONTH_LABELS = {
+      '1':'Jan','01':'Jan',January:'Jan',
+      '2':'Feb','02':'Feb',February:'Feb',
+      '3':'Mar','03':'Mar',March:'Mar',
+      '4':'Apr','04':'Apr',April:'Apr',
+      '5':'May','05':'May',May:'May',
+      '6':'Jun','06':'Jun',June:'Jun',
+      '7':'Jul','07':'Jul',July:'Jul',
+      '8':'Aug','08':'Aug',August:'Aug',
+      '9':'Sep','09':'Sep',September:'Sep',
+      '10':'Oct',October:'Oct',
+      '11':'Nov',November:'Nov',
+      '12':'Dec',December:'Dec'
+    };
+
+    function monthVariants(mon){
+      const set = new Set();
+      const raw = String(mon || '').trim();
+      if (raw) set.add(raw);
+      const stripped = raw.replace(/^0+/, '') || raw;
+      if (stripped) set.add(stripped);
+      const canonical = MONTH_LABELS[raw] || MONTH_LABELS[stripped];
+      if (canonical){
+        set.add(canonical);
+        set.add(canonical.toLowerCase());
+        set.add(canonical.toUpperCase());
+        const idx = MONTH_KEYS.indexOf(canonical);
+        if (idx >= 0) set.add(String(idx + 1).padStart(2,'0'));
+        if (idx >= 0) set.add(String(idx + 1));
+        const full = {
+          Jan:'January', Feb:'February', Mar:'March', Apr:'April', May:'May', Jun:'June',
+          Jul:'July', Aug:'August', Sep:'September', Oct:'October', Nov:'November', Dec:'December'
+        }[canonical];
+        if (full){
+          set.add(full);
+          set.add(full.toLowerCase());
+          set.add(full.toUpperCase());
+        }
+      }
+      return Array.from(set).filter(Boolean);
+    }
+
     function getSubjectList(className, year){
       const api = SomapSub();
       const cls = api.canonClass ? api.canonClass(className) : (className || '');
@@ -459,27 +502,39 @@
     async function fetchScores({ year, className, examKey, month }) {
       const db = getDB();
       if (!db) return {};
-      const refPath = `/scores/${year}/${className}/${examKey}/${month}`;
-      try {
-        const snap = await db.ref(refPath).get();
-        const out = {};
-        if (snap && snap.exists && snap.exists()) {
-          const val = snap.val();
-          Object.keys(val).forEach(adm => {
-            out[adm] = {};
-            const subjObj = val[adm] || {};
-            Object.keys(subjObj).forEach(sub => {
-              const o = subjObj[sub] || {};
-              const canonicalLabel = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
-              const labelKey = canonicalLabel || sub;
-              const entry = { score: Number(o.score || 0), max: Number(o.max || 100) };
-              out[adm][labelKey] = entry;
-              if (!out[adm][sub]) out[adm][sub] = entry;
+      const base = `/scores/${year}/${className}`;
+      const variants = monthVariants(month);
+      const paths = [];
+      variants.forEach(v => {
+        paths.push(`${base}/${examKey}/${v}`);
+        paths.push(`${base}/${examKey.toLowerCase()}/${v}`);
+        paths.push(`${base}/${examKey.toUpperCase()}/${v}`);
+        paths.push(`${base}/${v}`); // fallback (some datasets skip examKey level)
+      });
+      const out = {};
+      for (const refPath of paths){
+        try {
+          const snap = await db.ref(refPath).get();
+          if (snap && snap.exists && snap.exists()) {
+            const val = snap.val();
+            Object.keys(val).forEach(adm => {
+              out[adm] = out[adm] || {};
+              const subjObj = val[adm] || {};
+              Object.keys(subjObj).forEach(sub => {
+                const o = subjObj[sub] || {};
+                const canonicalLabel = SomapSub().canonSubject ? SomapSub().canonSubject(sub) : sub;
+                const labelKey = canonicalLabel || sub;
+                const entry = { score: Number(o.score || 0), max: Number(o.max || 100) };
+                out[adm][labelKey] = entry;
+                if (!out[adm][sub]) out[adm][sub] = entry;
+              });
             });
-          });
-        }
-        return out;
-      } catch (e) { console.warn('fetchScores', e && e.message); return {}; }
+            if (Object.keys(out).length) break;
+          }
+        } catch (e) { /* continue to next */ }
+      }
+      if (!Object.keys(out).length) console.warn('fetchScores: no data found for', className, examKey, month, 'paths tried', paths);
+      return out;
     }
 
     function studentAveragePercent(student){
